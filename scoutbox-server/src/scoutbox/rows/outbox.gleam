@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "outbox"
@@ -109,7 +110,7 @@ pub fn transport_decoder() -> decode.Decoder(Transport) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.MailId,
     source: Source,
     created_at: Int,
     to_address: String,
@@ -125,7 +126,7 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.MailId,
     source: Source,
     created_at: Int,
     to_address: String,
@@ -140,7 +141,7 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.MailId,
   source source: Source,
   created_at created_at: Int,
   to_address to_address: String,
@@ -164,7 +165,7 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.mail_decoder())
   use source <- decode.field(2, source_decoder())
   use created_at <- decode.field(3, decode.int)
   use to_address <- decode.field(4, decode.string)
@@ -195,7 +196,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.mail_sql(row.id),
     sqlight.text(source_to_string(row.source)),
     sqlight.int(row.created_at),
     sqlight.text(row.to_address),

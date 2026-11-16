@@ -18,10 +18,10 @@ import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/staff
 import scoutbox/messaging/notifications
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/media
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/ver_claims.{type Status} as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_evidence as evidence_row
@@ -60,7 +60,7 @@ pub type Actor {
     kind: event_row.ActorKind,
     id: Option(String),
     name: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     request_id: Option(String),
   )
 }
@@ -86,7 +86,7 @@ fn fresh_request_id() -> String {
 pub fn staff_actor(access: OrgAccess, req: Request) -> Actor {
   Actor(
     kind: event_row.OrgUser,
-    id: Some(access.user.id),
+    id: Some(id.org_user_to_string(access.user.id)),
     name: Some(access.user.name),
     org_id: Some(access.org.id),
     request_id: Some(request_id(req)),
@@ -117,9 +117,9 @@ pub fn claim_actor_kind(kind: event_row.ActorKind) -> ActorKind {
 /// What an event says about its subject.
 pub type About {
   About(
-    claim_id: Option(String),
+    claim_id: Option(id.ClaimId),
     subject_id: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     detail: Option(String),
     reason: Option(String),
     attribution: Option(Attribution),
@@ -143,7 +143,7 @@ pub fn event(
   about: About,
   now: Int,
 ) -> Result(Nil, Fail(e)) {
-  use id <- result.try(ids.next(tx, "vevt"))
+  use id <- result.try(id.next_ver_event(tx))
   records.append_event(
     tx,
     id,
@@ -178,7 +178,7 @@ pub fn claim_about(claim: Claim) -> About {
 
 /// A new claim: `unverified`, current, nothing established yet. Callers set what they know.
 pub fn blank_claim(
-  id: String,
+  id: id.ClaimId,
   subject_kind: claim_row.SubjectKind,
   subject_id: String,
   claim_type: ClaimType,
@@ -199,11 +199,11 @@ pub fn blank_claim(
 /// The only claim creator: stores the claim and records `claim.created`.
 pub fn create_claim(
   tx: Tx,
-  make: fn(String) -> Claim,
+  make: fn(id.ClaimId) -> Claim,
   actor: Actor,
   now: Int,
 ) -> Result(Claim, Fail(e)) {
-  use id <- result.try(ids.next(tx, "vclm"))
+  use id <- result.try(id.next_claim(tx))
   use claim <- result.try(records.create_claim(tx, make(id)))
   use _ <- result.try(event(
     tx,
@@ -323,7 +323,7 @@ fn open_clash(
 /// Every status change: guarded in SQL from the status read here, recorded as an event.
 pub fn transition(
   tx: Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   to: Status,
   how: How,
   also: Also,
@@ -428,12 +428,12 @@ fn status_event(s: Status) -> event_row.Type {
 /// Records evidence (never on a public path; retrieval is an authorised route) and `evidence.added`.
 pub fn add_evidence(
   tx: Tx,
-  make: fn(String) -> Evidence,
-  claim_ids: List(String),
+  make: fn(id.EvidenceId) -> Evidence,
+  claim_ids: List(id.ClaimId),
   actor: Actor,
   now: Int,
 ) -> Result(Evidence, Fail(e)) {
-  use id <- result.try(ids.next(tx, "vevd"))
+  use id <- result.try(id.next_evidence(tx))
   use ev <- result.try(records.add_evidence(tx, make(id), claim_ids))
   use _ <- result.try(event(
     tx,
@@ -457,7 +457,7 @@ pub fn add_evidence(
 /// Evidence as it is first received: nothing scanned (no scanner exists; never pretend one ran), kept until the
 /// claim is resolved, for Trust & Safety only unless the caller says otherwise.
 pub fn blank_evidence(
-  id: String,
+  id: id.EvidenceId,
   type_: evidence_row.Type,
   source: String,
   supplied_by_kind: evidence_row.SuppliedByKind,
@@ -587,14 +587,14 @@ pub fn mint_token(
   email: Option(String),
   subject_kind: Option(token_row.SubjectKind),
   subject_id: Option(String),
-  org_id: Option(String),
+  org_id: Option(id.OrgId),
   ref_id: Option(String),
   ttl_ms: Int,
   now: Int,
 ) -> Result(String, Fail(e)) {
   let secret =
     bit_array.base64_url_encode(crypto.strong_random_bytes(24), False)
-  use id <- result.try(ids.next(tx, "vtk"))
+  use id <- result.try(id.next_ver_token(tx))
   use _ <- result.try(records.create_token(
     tx,
     token_row.Row(
@@ -647,8 +647,8 @@ pub fn peek_token(
 
 pub fn admins_level(
   read: Read,
-  org_id: String,
-  user_id: String,
+  org_id: id.OrgId,
+  user_id: id.OrgUserId,
 ) -> Result(Option(VerLevel), Fail(e)) {
   use admins <- result.map(records.admins_of(read, org_id))
   claims.ver_level_for(admins, org_id, user_id)
@@ -694,7 +694,7 @@ pub fn require_ver_refusal(at_least: VerLevel) -> Response {
 /// The active administrators of an organisation at `at_least` or above, as staff who are still there.
 pub fn reviewers_of(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   at_least: VerLevel,
 ) -> Result(List(staff.Staff), Fail(e)) {
   use admins <- result.try(records.active_admins_of(read, org_id))
@@ -715,9 +715,9 @@ pub fn reviewers_of(
 
 pub fn notify_reviewers(
   tx: Tx,
-  org_id: String,
+  org_id: id.OrgId,
   text: String,
-  ref_id: String,
+  ref_id: id.ClaimId,
   now: Int,
 ) -> Result(Nil, Fail(e)) {
   use reviewers <- result.try(reviewers_of(
@@ -729,10 +729,10 @@ pub fn notify_reviewers(
     notifications.notify(
       tx,
       to: audience.OrgUser,
-      id: u.id,
+      id: id.org_user_to_string(u.id),
       type_: "verification",
       text:,
-      ref_id: Some(ref_id),
+      ref_id: Some(id.claim_to_string(ref_id)),
       at: now,
     )
   })
@@ -740,18 +740,18 @@ pub fn notify_reviewers(
 
 pub fn verified_domains_of(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(List(String), Fail(e)) {
   records.domains_of(read, org_id)
   |> result.map(list.map(_, fn(d) { d.domain }))
 }
 
 /// Whether a root application for the organisation is still open.
-pub fn root_pending(read: Read, org_id: String) -> Result(Bool, Fail(e)) {
+pub fn root_pending(read: Read, org_id: id.OrgId) -> Result(Bool, Fail(e)) {
   store.one(
     read,
     "SELECT 1 FROM ver_root_requests WHERE (existing_org_id = ? OR result_org_id = ?) AND status IN ('requires_human_review','collecting_evidence') LIMIT 1",
-    [sqlight.text(org_id), sqlight.text(org_id)],
+    [id.org_sql(org_id), id.org_sql(org_id)],
     decode.success(Nil),
   )
   |> result.map(result.is_ok)
@@ -784,7 +784,7 @@ pub fn affiliation_types_of(org: Org) -> #(ClaimType, ClaimType) {
 fn orgs_for(
   read: Read,
   claims: List(Claim),
-) -> Result(dict.Dict(String, Org), Fail(e)) {
+) -> Result(dict.Dict(id.OrgId, Org), Fail(e)) {
   claims
   |> list.filter_map(fn(c) { option.to_result(c.organisation_id, Nil) })
   |> list.unique
@@ -801,15 +801,19 @@ fn orgs_for(
 /// periods stay visible.
 pub fn public_user(
   read: Read,
-  user_id: String,
+  user_id: id.OrgUserId,
   now: Int,
 ) -> Result(Json, Fail(e)) {
   use user <- result.try(staff.by_id(read, user_id))
-  use theirs <- result.try(records.claims_for(read, claim_row.User, user_id))
+  use theirs <- result.try(records.claims_for(
+    read,
+    claim_row.User,
+    id.org_user_to_string(user_id),
+  ))
   use by_id <- result.map(orgs_for(read, theirs))
   claims.public_profile(
     subject_kind: claim_row.User,
-    subject_id: user_id,
+    subject_id: id.org_user_to_string(user_id),
     claims: theirs,
     orgs: by_id,
     subject_removed: case user {
@@ -823,16 +827,20 @@ pub fn public_user(
 /// An organisation's public verification, with its lifecycle status.
 pub fn public_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   now: Int,
 ) -> Result(Json, Fail(e)) {
   use org <- result.try(orgs.by_id(read, org_id))
-  use theirs <- result.try(records.claims_for(read, claim_row.Org, org_id))
+  use theirs <- result.try(records.claims_for(
+    read,
+    claim_row.Org,
+    id.org_to_string(org_id),
+  ))
   use by_id <- result.try(orgs_for(read, theirs))
   use status <- result.map(org_status(read, org))
   claims.public_profile_fields(
     subject_kind: claim_row.Org,
-    subject_id: org_id,
+    subject_id: id.org_to_string(org_id),
     claims: theirs,
     orgs: by_id,
     subject_removed: False,
@@ -898,7 +906,7 @@ pub fn subject_claim_view(
   use evidence <- result.map(records.claim_evidence(read, claim.id))
   let eff = claims.effective_status(claim, org:, subject_removed: False, now:)
   json.object([
-    #("id", json.string(claim.id)),
+    #("id", id.claim_json(claim.id)),
     #("claimType", claim_type.to_json(claim.claim_type)),
     #("status", claim_row.status_to_json(claim.status)),
     #(
@@ -912,7 +920,7 @@ pub fn subject_claim_view(
     #(
       "organisation",
       json.nullable(org, fn(o) {
-        json.object([#("id", json.string(o.id)), #("name", json.string(o.name))])
+        json.object([#("id", id.org_json(o.id)), #("name", json.string(o.name))])
       }),
     ),
     #("role", json.nullable(claim.role, json.string)),
@@ -941,7 +949,7 @@ pub fn subject_claim_view(
       "evidence",
       json.array(evidence, fn(e) {
         json.object([
-          #("id", json.string(e.id)),
+          #("id", id.evidence_json(e.id)),
           #("type", evidence_row.type_to_json(e.type_)),
           #("receivedAt", json.int(e.received_at)),
           #("filename", json.nullable(e.filename, json.string)),

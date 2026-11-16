@@ -4,6 +4,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "support_ticket_replies"
@@ -23,12 +24,12 @@ pub fn qualified(alias: String) -> String {
 }
 
 pub type Row {
-  Row(ticket_id: String, ord: Int, at: Int, by_name: String, text: String)
+  Row(ticket_id: id.TicketId, ord: Int, at: Int, by_name: String, text: String)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  ticket_id ticket_id: String,
+  ticket_id ticket_id: id.TicketId,
   ord ord: Int,
   at at: Int,
   by_name by_name: String,
@@ -39,7 +40,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use ticket_id <- decode.field(0, decode.string)
+  use ticket_id <- decode.field(0, id.ticket_decoder())
   use ord <- decode.field(1, decode.int)
   use at <- decode.field(2, decode.int)
   use by_name <- decode.field(3, decode.string)
@@ -53,7 +54,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.ticket_id),
+    id.ticket_sql(row.ticket_id),
     sqlight.int(row.ord),
     sqlight.int(row.at),
     sqlight.text(row.by_name),

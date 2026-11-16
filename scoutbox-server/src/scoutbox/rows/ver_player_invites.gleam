@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_player_invites"
@@ -64,16 +65,16 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
-    by_user_id: String,
+    id: id.PlayerInviteId,
+    org_id: id.OrgId,
+    by_user_id: id.OrgUserId,
     by_name: Option(String),
     invitee_name: String,
     squad: String,
     status: Status,
-    player_id: Option(String),
-    target_player_id: Option(String),
-    guardian_approved_id: Option(String),
+    player_id: Option(id.PlayerId),
+    target_player_id: Option(id.PlayerId),
+    guardian_approved_id: Option(id.GuardianId),
     guardian_approved_at: Option(Int),
     created_at: Int,
     expires_at: Int,
@@ -83,9 +84,9 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
-  by_user_id by_user_id: String,
+  id id: id.PlayerInviteId,
+  org_id org_id: id.OrgId,
+  by_user_id by_user_id: id.OrgUserId,
   invitee_name invitee_name: String,
   squad squad: String,
   status status: Status,
@@ -112,16 +113,19 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
-  use by_user_id <- decode.field(2, decode.string)
+  use id <- decode.field(0, id.player_invite_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
+  use by_user_id <- decode.field(2, id.org_user_decoder())
   use by_name <- decode.field(3, decode.optional(decode.string))
   use invitee_name <- decode.field(4, decode.string)
   use squad <- decode.field(5, decode.string)
   use status <- decode.field(6, status_decoder())
-  use player_id <- decode.field(7, decode.optional(decode.string))
-  use target_player_id <- decode.field(8, decode.optional(decode.string))
-  use guardian_approved_id <- decode.field(9, decode.optional(decode.string))
+  use player_id <- decode.field(7, decode.optional(id.player_decoder()))
+  use target_player_id <- decode.field(8, decode.optional(id.player_decoder()))
+  use guardian_approved_id <- decode.field(
+    9,
+    decode.optional(id.guardian_decoder()),
+  )
   use guardian_approved_at <- decode.field(10, decode.optional(decode.int))
   use created_at <- decode.field(11, decode.int)
   use expires_at <- decode.field(12, decode.int)
@@ -150,16 +154,16 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
-    sqlight.text(row.by_user_id),
+    id.player_invite_sql(row.id),
+    id.org_sql(row.org_id),
+    id.org_user_sql(row.by_user_id),
     sqlight.nullable(sqlight.text, row.by_name),
     sqlight.text(row.invitee_name),
     sqlight.text(row.squad),
     sqlight.text(status_to_string(row.status)),
-    sqlight.nullable(sqlight.text, row.player_id),
-    sqlight.nullable(sqlight.text, row.target_player_id),
-    sqlight.nullable(sqlight.text, row.guardian_approved_id),
+    sqlight.nullable(id.player_sql, row.player_id),
+    sqlight.nullable(id.player_sql, row.target_player_id),
+    sqlight.nullable(id.guardian_sql, row.guardian_approved_id),
     sqlight.nullable(sqlight.int, row.guardian_approved_at),
     sqlight.int(row.created_at),
     sqlight.int(row.expires_at),

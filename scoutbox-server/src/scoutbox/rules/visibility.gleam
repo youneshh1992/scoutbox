@@ -14,6 +14,7 @@ import gleam/option.{type Option, Some}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/sql.{type Fragment}
+import scoutbox/rows/id
 import scoutbox/rows/orgs as org_row
 import scoutbox/rules/age
 import scoutbox/vocab/org_type
@@ -61,7 +62,7 @@ pub fn blocked_sql(org: Org) -> Fragment {
     sql.text(
       "EXISTS (SELECT 1 FROM blocks b WHERE b.player_id = p.id AND b.org_id = ",
     ),
-    sql.arg(sqlight.text(org.id)),
+    sql.arg(id.org_sql(org.id)),
     sql.text(")"),
   ])
 }

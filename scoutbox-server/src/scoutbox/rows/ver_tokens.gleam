@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_tokens"
@@ -112,13 +113,13 @@ pub fn subject_kind_decoder() -> decode.Decoder(SubjectKind) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.VerTokenId,
     token_hash: String,
     purpose: Purpose,
     email: Option(String),
     subject_kind: Option(SubjectKind),
     subject_id: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     ref_id: Option(String),
     created_at: Int,
     expires_at: Int,
@@ -129,7 +130,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.VerTokenId,
   token_hash token_hash: String,
   purpose purpose: Purpose,
   created_at created_at: Int,
@@ -153,13 +154,13 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.ver_token_decoder())
   use token_hash <- decode.field(1, decode.string)
   use purpose <- decode.field(2, purpose_decoder())
   use email <- decode.field(3, decode.optional(decode.string))
   use subject_kind <- decode.field(4, decode.optional(subject_kind_decoder()))
   use subject_id <- decode.field(5, decode.optional(decode.string))
-  use org_id <- decode.field(6, decode.optional(decode.string))
+  use org_id <- decode.field(6, decode.optional(id.org_decoder()))
   use ref_id <- decode.field(7, decode.optional(decode.string))
   use created_at <- decode.field(8, decode.int)
   use expires_at <- decode.field(9, decode.int)
@@ -187,7 +188,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.ver_token_sql(row.id),
     sqlight.text(row.token_hash),
     sqlight.text(purpose_to_string(row.purpose)),
     sqlight.nullable(sqlight.text, row.email),
@@ -196,7 +197,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       row.subject_kind,
     ),
     sqlight.nullable(sqlight.text, row.subject_id),
-    sqlight.nullable(sqlight.text, row.org_id),
+    sqlight.nullable(id.org_sql, row.org_id),
     sqlight.nullable(sqlight.text, row.ref_id),
     sqlight.int(row.created_at),
     sqlight.int(row.expires_at),

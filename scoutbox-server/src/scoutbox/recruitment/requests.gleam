@@ -9,9 +9,9 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/platform/ids
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/recruitment_requests as row
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party
@@ -22,26 +22,26 @@ pub type Request =
 
 pub type NewContact {
   NewContact(
-    player_id: String,
+    player_id: id.PlayerId,
     player_name: String,
-    org_id: String,
+    org_id: id.OrgId,
     org_name: String,
     org_type: org_type.OrgType,
     org_verified: Bool,
     org_safeguarding_certified: Bool,
     org_trusted_partner: Bool,
-    user_id: String,
+    user_id: id.OrgUserId,
     scout_name: String,
     scout_role: String,
     message: String,
     /// The guardian a minor's request goes to; `None` for an adult, who answers their own.
-    guardian_id: Option(String),
+    guardian_id: Option(id.GuardianId),
     at: Int,
   )
 }
 
 pub fn create_contact(tx: Tx, new: NewContact) -> Result(Request, Fail(e)) {
-  use id <- result.try(ids.next(tx, "req"))
+  use id <- result.try(id.next_request(tx))
   let routed_to = case new.guardian_id {
     Some(_) -> party.Guardian
     None -> party.Player
@@ -82,8 +82,8 @@ pub fn create_contact(tx: Tx, new: NewContact) -> Result(Request, Fail(e)) {
 /// A pending request of this type from the organisation to the player, if one is still awaiting an answer.
 pub fn pending_between(
   read: Read,
-  org_id: String,
-  player_id: String,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
   type_: row.Type,
 ) -> Result(Option(Request), Fail(e)) {
   store.one(
@@ -92,8 +92,8 @@ pub fn pending_between(
       <> row.columns
       <> " FROM recruitment_requests WHERE org_id = ? AND player_id = ? AND type = ? AND status = 'pending' AND subject_removed_at IS NULL ORDER BY rowid LIMIT 1",
     [
-      sqlight.text(org_id),
-      sqlight.text(player_id),
+      id.org_sql(org_id),
+      id.player_sql(player_id),
       sqlight.text(row.type_to_string(type_)),
     ],
     row.decoder(),
@@ -104,13 +104,13 @@ pub fn pending_between(
 /// A club reported for safeguarding has its pending requests to the player suspended.
 pub fn suspend_pending(
   tx: Tx,
-  org_id: String,
-  player_id: String,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
 ) -> Result(Nil, Fail(e)) {
   store.run(
     tx,
     "UPDATE recruitment_requests SET status = 'suspended' WHERE org_id = ? AND player_id = ? AND status = 'pending'",
-    [sqlight.text(org_id), sqlight.text(player_id)],
+    [id.org_sql(org_id), id.player_sql(player_id)],
   )
 }
 
@@ -149,7 +149,7 @@ fn page_where(
 /// A guardian's Inbox: the requests routed to the guardian about any of these players.
 pub fn page_for_guardian_of(
   read: Read,
-  player_ids: List(String),
+  player_ids: List(id.PlayerId),
   page: Page,
 ) -> Result(#(List(Request), Option(String)), Fail(e)) {
   case player_ids {
@@ -158,7 +158,11 @@ pub fn page_for_guardian_of(
       page_where(
         read,
         "player_id IN (SELECT value FROM json_each(?)) AND routed_to = 'guardian'",
-        [json.array(player_ids, json.string) |> json.to_string |> sqlight.text],
+        [
+          json.array(player_ids, id.player_json)
+          |> json.to_string
+          |> sqlight.text,
+        ],
         page,
       )
   }
@@ -167,21 +171,21 @@ pub fn page_for_guardian_of(
 /// A player's requests, oldest first (the data export).
 pub fn for_player(
   read: Read,
-  player_id: String,
+  player_id: id.PlayerId,
 ) -> Result(List(Request), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> row.columns
       <> " FROM recruitment_requests WHERE player_id = ? ORDER BY rowid",
-    [sqlight.text(player_id)],
+    [id.player_sql(player_id)],
     row.decoder(),
   )
 }
 
 pub fn count_for_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   status: Option(row.Status),
 ) -> Result(Int, Fail(e)) {
   let #(filter, args) = case status {
@@ -191,7 +195,7 @@ pub fn count_for_org(
   store.one(
     read,
     "SELECT COUNT(*) FROM recruitment_requests WHERE org_id = ?" <> filter,
-    [sqlight.text(org_id), ..args],
+    [id.org_sql(org_id), ..args],
     decode.at([0], decode.int),
   )
   |> result.map(result.unwrap(_, 0))
@@ -201,8 +205,8 @@ pub fn count_for_org(
 pub fn recipient_view(r: Request) -> Json {
   let opt = json.nullable(_, json.string)
   json.object([
-    #("id", json.string(r.id)),
-    #("playerId", json.string(r.player_id)),
+    #("id", id.request_json(r.id)),
+    #("playerId", id.player_json(r.player_id)),
     #("playerName", opt(r.player_name)),
     #("orgName", json.string(r.org_name)),
     #("orgType", opt(option.map(r.org_type, org_type.to_string))),
@@ -221,18 +225,18 @@ pub fn recipient_view(r: Request) -> Json {
     #("respondedAt", json.nullable(r.responded_at, json.int)),
     #("respondedBy", opt(option.map(r.responded_by, party.to_string))),
     #("routedTo", party.to_json(r.routed_to)),
-    #("guardianId", opt(r.guardian_id)),
-    #("contactChannel", opt(r.contact_channel_id)),
+    #("guardianId", json.nullable(r.guardian_id, id.guardian_json)),
+    #("contactChannel", json.nullable(r.contact_channel_id, id.channel_json)),
     #("subjectRemovedAt", json.nullable(r.subject_removed_at, json.int)),
     #("trialId", opt(r.trial_id)),
   ])
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Request), Fail(e)) {
+pub fn by_id(read: Read, id: id.RequestId) -> Result(Option(Request), Fail(e)) {
   store.one(
     read,
     "SELECT " <> row.columns <> " FROM recruitment_requests WHERE id = ?",
-    [sqlight.text(id)],
+    [id.request_sql(id)],
     row.decoder(),
   )
   |> result.map(option.from_result)
@@ -265,12 +269,12 @@ pub fn record_response(
 /// Links the thread an accepted request opened.
 pub fn attach_channel(
   tx: Tx,
-  id: String,
-  channel_id: String,
+  id: id.RequestId,
+  channel_id: id.ChannelId,
 ) -> Result(Nil, Fail(e)) {
   store.run(
     tx,
     "UPDATE recruitment_requests SET contact_channel_id = ? WHERE id = ?",
-    [sqlight.text(channel_id), sqlight.text(id)],
+    [id.channel_sql(channel_id), id.request_sql(id)],
   )
 }

@@ -19,11 +19,11 @@ import gleam/string
 import gleam/time/calendar
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/effect.{SendPush}
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/zones
 import scoutbox/rows/guardians as guardian_row
+import scoutbox/rows/id
 import scoutbox/rows/notifications as row
 import scoutbox/rows/players as player_row
 import scoutbox/rules/age
@@ -108,7 +108,7 @@ fn deliver(
       sqlight.text(body),
       sqlight.nullable(sqlight.text, ref_id),
     ],
-    decode.at([0], decode.string),
+    decode.at([0], id.notification_decoder()),
   ))
   case existing {
     Ok(id) -> {
@@ -116,7 +116,7 @@ fn deliver(
         store.run(
           tx,
           "UPDATE notifications SET occurred_at = ?, repeat_count = repeat_count + 1 WHERE id = ?",
-          [sqlight.int(at), sqlight.text(id)],
+          [sqlight.int(at), id.notification_sql(id)],
         ),
       )
       // A repeat is counted, never pushed again.
@@ -126,13 +126,13 @@ fn deliver(
           store.run(
             tx,
             "UPDATE notifications SET action_required = 1, action_deadline_at = ?, action_acked_at = NULL WHERE id = ?",
-            [sqlight.nullable(sqlight.int, deadline), sqlight.text(id)],
+            [sqlight.nullable(sqlight.int, deadline), id.notification_sql(id)],
           )
       }
     }
     Error(Nil) -> {
       use deferred <- result.try(push_deferred(read, kind, audience_id, at))
-      use id <- result.try(ids.next(tx, "ntf"))
+      use id <- result.try(id.next_notification(tx))
       use _ <- result.map(row.insert(
         tx,
         row.New(
@@ -288,11 +288,14 @@ fn minutes_of(hhmm: String) -> Int {
 
 // ------------------------------------------------------------------------------------------------- reads
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Notification), Fail(e)) {
+pub fn by_id(
+  read: Read,
+  id: id.NotificationId,
+) -> Result(Option(Notification), Fail(e)) {
   store.one(
     read,
     "SELECT " <> row.columns <> " FROM notifications WHERE id = ?",
-    [sqlight.text(id)],
+    [id.notification_sql(id)],
     row.decoder(),
   )
   |> result.map(option.from_result)
@@ -331,10 +334,14 @@ pub fn feed(
       "SELECT id, player_id, routed_to, guardian_id FROM recruitment_requests WHERE id IN (SELECT value FROM json_each(?))",
       [json.array(request_refs, json.string) |> json.to_string |> sqlight.text],
       {
+        // Keyed by the text of the polymorphic `ref_id` it is looked up by.
         use rid <- decode.field(0, decode.string)
-        use player_id <- decode.field(1, decode.string)
+        use player_id <- decode.field(1, id.player_decoder())
         use routed_to <- decode.field(2, party.decoder())
-        use guardian_id <- decode.field(3, decode.optional(decode.string))
+        use guardian_id <- decode.field(
+          3,
+          decode.optional(id.guardian_decoder()),
+        )
         decode.success(#(rid, #(player_id, routed_to, guardian_id)))
       },
     ),
@@ -345,11 +352,17 @@ pub fn feed(
       Some("req-" <> _ as ref) ->
         case dict.get(requests, ref), kind {
           Ok(#(player_id, routed_to, _)), audience.Player
-            if player_id == id && routed_to != party.Guardian
-          -> Some(inbox_target(ref))
-          Ok(#(_, _, Some(guardian_id))), audience.Guardian
-            if guardian_id == id
-          -> Some(inbox_target(ref))
+            if routed_to != party.Guardian
+          ->
+            case id.player_to_string(player_id) == id {
+              True -> Some(inbox_target(ref))
+              False -> None
+            }
+          Ok(#(_, _, Some(guardian_id))), audience.Guardian ->
+            case id.guardian_to_string(guardian_id) == id {
+              True -> Some(inbox_target(ref))
+              False -> None
+            }
           // Not ported yet: a staff member's request leads to its recruitment Room.
           _, _ -> None
         }
@@ -376,11 +389,11 @@ pub fn mark_read(tx: Tx, kind: Audience, id: String) -> Result(Nil, Fail(e)) {
 }
 
 /// Records the acknowledgment of an action notice; the first one stands.
-pub fn ack(tx: Tx, id: String, at: Int) -> Result(Nil, Fail(e)) {
+pub fn ack(tx: Tx, id: id.NotificationId, at: Int) -> Result(Nil, Fail(e)) {
   store.run(
     tx,
     "UPDATE notifications SET action_acked_at = ? WHERE id = ? AND action_required = 1 AND action_acked_at IS NULL",
-    [sqlight.int(at), sqlight.text(id)],
+    [sqlight.int(at), id.notification_sql(id)],
   )
 }
 
@@ -411,11 +424,15 @@ pub fn undispatched(
 }
 
 /// The delivery centre made this notice's dispatches.
-pub fn mark_dispatched(tx: Tx, id: String, at: Int) -> Result(Nil, Fail(e)) {
+pub fn mark_dispatched(
+  tx: Tx,
+  id: id.NotificationId,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
   store.run(
     tx,
     "UPDATE notifications SET dispatched_at = ? WHERE id = ? AND dispatched_at IS NULL",
-    [sqlight.int(at), sqlight.text(id)],
+    [sqlight.int(at), id.notification_sql(id)],
   )
 }
 
@@ -426,7 +443,7 @@ pub fn view(item: FeedItem) -> Json {
   json.object(
     list.flatten([
       [
-        #("id", json.string(n.id)),
+        #("id", id.notification_json(n.id)),
         #("ts", json.int(n.occurred_at)),
         #(
           "audience",

@@ -23,6 +23,7 @@ import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/store
 import scoutbox/recruitment/requests
+import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/age
 import scoutbox/safety/audit
@@ -212,7 +213,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                       http.json(
                         201,
                         json.object([
-                          #("playerId", json.string(p.row.id)),
+                          #("playerId", id.player_json(p.row.id)),
                           #("player", players.guardian_child_view(p, now)),
                         ]),
                       )
@@ -330,7 +331,7 @@ fn create(
       http.json(
         201,
         json.object([
-          #("playerId", json.string(p.row.id)),
+          #("playerId", id.player_json(p.row.id)),
           #("player", players.self_view(p)),
           #("token", json.string(token)),
         ]),
@@ -409,7 +410,11 @@ pub fn export(ctx: Ctx, p: PlayerAccess) -> Response {
   let found =
     store.read(ctx.store, fn(read) {
       use reqs <- result.try(requests.for_player(read, id))
-      use feed <- result.try(notifications.feed(read, audience.Player, id))
+      use feed <- result.try(notifications.feed(
+        read,
+        audience.Player,
+        id.player_to_string(id),
+      ))
       use events <- result.map(ledger.for_player(read, id))
       json.object([
         #("exportedAt", json.string(clock.iso(clock.now_ms()))),
@@ -444,7 +449,9 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
     sign_in.locked_out(),
   )
   let found = case player_id {
-    Some(id) -> store.read(ctx.store, players.by_id(_, id))
+    // From the request body.
+    Some(player_id) ->
+      store.read(ctx.store, players.by_id(_, id.player(player_id)))
     None -> Ok(None)
   }
   case found {
@@ -478,7 +485,7 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
               http.json(
                 200,
                 json.object([
-                  #("playerId", json.string(p.row.id)),
+                  #("playerId", id.player_json(p.row.id)),
                   #("name", json.string(p.row.name)),
                   #("token", json.string(token)),
                 ]),

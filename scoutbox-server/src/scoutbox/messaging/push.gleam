@@ -9,10 +9,10 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/push_log as row
 import scoutbox/vocab/audience.{type Audience}
 import scoutbox/vocab/party.{type Party}
@@ -29,7 +29,7 @@ pub fn send(
   body: String,
   at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use push_id <- result.try(ids.next(tx, "push"))
+  use push_id <- result.try(id.next_push(tx))
   row.insert(
     tx,
     row.new(
@@ -78,7 +78,7 @@ pub fn count(read: Read) -> Result(Int, Fail(e)) {
 
 pub fn view(p: row.Row) -> Json {
   json.object([
-    #("id", json.string(p.id)),
+    #("id", id.push_json(p.id)),
     #("ts", json.int(p.created_at)),
     #(
       "audience",
@@ -98,7 +98,7 @@ pub fn view(p: row.Row) -> Json {
 pub fn register(
   tx: Tx,
   kind: Party,
-  id: String,
+  ref_id: String,
   token: String,
   at: Int,
 ) -> Result(Bool, Fail(e)) {
@@ -120,14 +120,14 @@ pub fn register(
       "INSERT INTO push_tokens (ref_kind, ref_id, token, registered_at) VALUES (?, ?, ?, ?) ON CONFLICT(token) DO UPDATE SET ref_kind = excluded.ref_kind, ref_id = excluded.ref_id, registered_at = excluded.registered_at",
       [
         sqlight.text(party.to_string(kind)),
-        sqlight.text(id),
+        sqlight.text(ref_id),
         sqlight.text(token),
         sqlight.int(at),
       ],
     ),
   )
   case held {
-    Ok(#(k, i)) -> k != party.to_string(kind) || i != id
+    Ok(#(k, i)) -> k != party.to_string(kind) || i != ref_id
     Error(Nil) -> False
   }
 }

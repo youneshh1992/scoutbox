@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/actor_kind
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/identity_link
@@ -314,11 +315,11 @@ pub fn registry_result_decoder() -> decode.Decoder(RegistryResult) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.ClaimId,
     subject_kind: SubjectKind,
     subject_id: String,
     claim_type: claim_type.ClaimType,
-    organisation_id: Option(String),
+    organisation_id: Option(id.OrgId),
     role: Option(String),
     status: Status,
     valid_from: Option(Int),
@@ -357,7 +358,7 @@ pub type Row {
     registry_result: Option(RegistryResult),
     registry_checked_at: Option(Int),
     registry_reference: Option(String),
-    root_request_id: Option(String),
+    root_request_id: Option(id.RootRequestId),
     org_type: Option(ver_org_type.VerOrgType),
     website: Option(String),
     admin_level: Option(ver_level.VerLevel),
@@ -377,7 +378,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.ClaimId,
   subject_kind subject_kind: SubjectKind,
   subject_id subject_id: String,
   claim_type claim_type: claim_type.ClaimType,
@@ -450,11 +451,11 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.claim_decoder())
   use subject_kind <- decode.field(1, subject_kind_decoder())
   use subject_id <- decode.field(2, decode.string)
   use claim_type <- decode.field(3, claim_type.decoder())
-  use organisation_id <- decode.field(4, decode.optional(decode.string))
+  use organisation_id <- decode.field(4, decode.optional(id.org_decoder()))
   use role <- decode.field(5, decode.optional(decode.string))
   use status <- decode.field(6, status_decoder())
   use valid_from <- decode.field(7, decode.optional(decode.int))
@@ -514,7 +515,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   )
   use registry_checked_at <- decode.field(41, decode.optional(decode.int))
   use registry_reference <- decode.field(42, decode.optional(decode.string))
-  use root_request_id <- decode.field(43, decode.optional(decode.string))
+  use root_request_id <- decode.field(
+    43,
+    decode.optional(id.root_request_decoder()),
+  )
   use org_type <- decode.field(44, decode.optional(ver_org_type.decoder()))
   use website <- decode.field(45, decode.optional(decode.string))
   use admin_level <- decode.field(46, decode.optional(ver_level.decoder()))
@@ -600,11 +604,11 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.claim_sql(row.id),
     sqlight.text(subject_kind_to_string(row.subject_kind)),
     sqlight.text(row.subject_id),
     sqlight.text(claim_type.to_string(row.claim_type)),
-    sqlight.nullable(sqlight.text, row.organisation_id),
+    sqlight.nullable(id.org_sql, row.organisation_id),
     sqlight.nullable(sqlight.text, row.role),
     sqlight.text(status_to_string(row.status)),
     sqlight.nullable(sqlight.int, row.valid_from),
@@ -664,7 +668,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     ),
     sqlight.nullable(sqlight.int, row.registry_checked_at),
     sqlight.nullable(sqlight.text, row.registry_reference),
-    sqlight.nullable(sqlight.text, row.root_request_id),
+    sqlight.nullable(id.root_request_sql, row.root_request_id),
     sqlight.nullable(
       fn(v) { sqlight.text(ver_org_type.to_string(v)) },
       row.org_type,

@@ -11,6 +11,11 @@
 //// `scoutbox/vocab/`; a column whose CHECK lists exactly a shared vocabulary's values uses it. Every other
 //// vocabulary is an enum in its table's module.
 ////
+//// Ids are typed. A table declared with `Ided` has an opaque `<Name>Id` in `scoutbox/rows/id`, and every
+//// column holding one of its ids is typed with it: the table's own `id`, a column whose foreign key names that
+//// table, or a column `IdColumns` maps to it. A column named `id` or `*_id` that none of these place must be
+//// declared `Untyped`, with the reason, or the generator refuses it, so a new id column is always decided.
+////
 //// The output is plain text: `npm run codegen` writes it and runs `gleam format` over it.
 
 import gleam/dict.{type Dict}
@@ -29,6 +34,20 @@ pub type Shared {
   Shared(name: String, values: List(String))
 }
 
+/// A table whose ids are typed: `<name>Id` in `scoutbox/rows/id`, minted with `prefix` when it has one.
+pub type Ided {
+  Ided(table: String, name: String, prefix: option.Option(String))
+}
+
+/// How an id column with no foreign key to an `Ided` table is typed. `column` is `table.column`, or `column`
+/// for that name in every table.
+pub type IdColumn {
+  /// The column holds ids of `table`.
+  RefersTo(column: String, table: String)
+  /// The column stays `String`: polymorphic (its kind is in another column), or an id this server can't type.
+  Untyped(column: String, reason: String)
+}
+
 pub type Generated {
   Generated(module: String, source: String)
 }
@@ -42,6 +61,8 @@ type Kind {
   Local(type_name: String, values: List(String))
   /// A shared vocabulary's module.
   SharedKind(Shared)
+  /// An id of a table declared `Ided`.
+  IdKind(Ided)
 }
 
 type Column {
@@ -64,6 +85,8 @@ pub fn generate(
   schema: String,
   shared: List(Shared),
   tables wanted: List(String),
+  ided ided: List(Ided),
+  id_columns id_columns: List(IdColumn),
 ) -> List(Generated) {
   use conn <- sqlight.with_connection(":memory:")
   let assert Ok(_) = sqlight.exec(schema, conn)
@@ -84,7 +107,9 @@ pub fn generate(
   }
   let tables = list.filter(tables, fn(t) { list.contains(wanted, t.0) })
   let described =
-    list.map(tables, fn(t) { #(t.0, describe(conn, t.0, t.1, shared)) })
+    list.map(tables, fn(t) {
+      #(t.0, describe(conn, t.0, t.1, shared, ided, id_columns))
+    })
   let used =
     described
     |> list.flat_map(fn(t) { t.1 })
@@ -105,9 +130,12 @@ pub fn generate(
     Error(Nil) -> Nil
   }
   list.append(
-    list.map(shared, fn(s) {
-      Generated("scoutbox/vocab/" <> snake(s.name), render_shared(s))
-    }),
+    [
+      Generated("scoutbox/rows/id", render_ids(ided)),
+      ..list.map(shared, fn(s) {
+        Generated("scoutbox/vocab/" <> snake(s.name), render_shared(s))
+      })
+    ],
     list.map(described, fn(t) {
       Generated("scoutbox/rows/" <> t.0, render_table(t.0, t.1))
     }),
@@ -121,8 +149,22 @@ fn describe(
   table: String,
   sql: String,
   shared: List(Shared),
+  ided: List(Ided),
+  id_columns: List(IdColumn),
 ) -> List(Column) {
   let checks = in_checks(sql)
+  let assert Ok(foreign) =
+    sqlight.query(
+      // Only a key to the other table's `id` makes an id column (not one to a composite key).
+      "SELECT \"from\", \"table\" FROM pragma_foreign_key_list(?) WHERE coalesce(\"to\", 'id') = 'id'",
+      conn,
+      [sqlight.text(table)],
+      {
+        use from <- decode.field(0, decode.string)
+        use to <- decode.field(1, decode.string)
+        decode.success(#(from, to))
+      },
+    )
   let assert Ok(rows) =
     sqlight.query(
       "SELECT name, type, \"notnull\", pk, hidden, dflt_value FROM pragma_table_xinfo(?) ORDER BY cid",
@@ -157,7 +199,7 @@ fn describe(
           Ok(s) -> SharedKind(s)
           Error(Nil) -> Local(local_type_name(name), list.unique(values))
         }
-      _, "TEXT" -> Text
+      _, "TEXT" -> id_kind(table, name, foreign, ided, id_columns)
       _, "INTEGER" -> Integer
       _, "REAL" -> Real
       _, other ->
@@ -174,6 +216,53 @@ fn describe(
       default:,
     )
   })
+}
+
+/// The type of a TEXT column with no vocabulary: an id type when it holds an `Ided` table's ids, else `Text`.
+fn id_kind(
+  table: String,
+  column: String,
+  foreign: List(#(String, String)),
+  ided: List(Ided),
+  id_columns: List(IdColumn),
+) -> Kind {
+  let here = table <> "." <> column
+  let ided_for = fn(t: String, why: String) {
+    case list.find(ided, fn(i) { i.table == t }) {
+      Ok(i) -> IdKind(i)
+      Error(Nil) ->
+        panic as {
+          here
+          <> " holds ids of "
+          <> t
+          <> " ("
+          <> why
+          <> "): declare "
+          <> t
+          <> " as Ided, or the column as Untyped"
+        }
+    }
+  }
+  let declared =
+    list.find(id_columns, fn(d) { d.column == here })
+    |> result.lazy_or(fn() {
+      list.find(id_columns, fn(d) { d.column == column })
+    })
+  case declared, list.key_find(foreign, column) {
+    Ok(Untyped(..)), _ -> Text
+    Ok(RefersTo(_, to)), _ -> ided_for(to, "IdColumns")
+    Error(Nil), Ok(to) -> ided_for(to, "its foreign key")
+    Error(Nil), Error(Nil) ->
+      case column == "id", string.ends_with(column, "_id") {
+        True, _ -> ided_for(table, "its own id")
+        _, True ->
+          panic as {
+            here
+            <> " looks like an id but nothing types it: add a foreign key, or declare it in IdColumns (RefersTo or Untyped)"
+          }
+        False, False -> Text
+      }
+  }
 }
 
 fn local_type_name(column: String) -> String {
@@ -272,6 +361,85 @@ fn column_definitions(sql: String) -> List(String) {
 }
 
 // ----------------------------------------------------------------------------------------- rendering
+
+/// `scoutbox/rows/id`: an opaque type per `Ided` table, with its conversions and, given a prefix, its minting.
+fn render_ids(ided: List(Ided)) -> String {
+  let ided = list.sort(ided, fn(a, b) { string.compare(a.name, b.name) })
+  string.concat([
+    header,
+    "//// Each table's ids, as their own types: an id of one table can't be passed where another's is wanted.\n",
+    "//// An id comes from a row's decoder, from minting (`next_…`), or from `<name>(text)` for one that arrives from\n",
+    "//// outside (a path, a body, a test's literal); nothing checks that such an id exists.\n\n",
+    "import gleam/dynamic/decode\nimport gleam/json.{type Json}\nimport gleam/result\n",
+    "import scoutbox/platform/ids\nimport scoutbox/platform/store.{type Fail, type Tx}\nimport sqlight\n\n",
+    lines(ided, fn(i) {
+      let t = i.name <> "Id"
+      let f = snake(i.name)
+      string.concat([
+        "/// An id of `",
+        i.table,
+        "`.\n",
+        "pub opaque type ",
+        t,
+        " {\n  ",
+        t,
+        "(String)\n}\n\n",
+        "/// An id from outside: a request's path or body, a test's literal.\n",
+        "pub fn ",
+        f,
+        "(text: String) -> ",
+        t,
+        " {\n  ",
+        t,
+        "(text)\n}\n\n",
+        "pub fn ",
+        f,
+        "_to_string(id: ",
+        t,
+        ") -> String {\n  let ",
+        t,
+        "(text) = id\n  text\n}\n\n",
+        "pub fn ",
+        f,
+        "_sql(id: ",
+        t,
+        ") -> sqlight.Value {\n  sqlight.text(",
+        f,
+        "_to_string(id))\n}\n\n",
+        "pub fn ",
+        f,
+        "_json(id: ",
+        t,
+        ") -> Json {\n  json.string(",
+        f,
+        "_to_string(id))\n}\n\n",
+        "pub fn ",
+        f,
+        "_decoder() -> decode.Decoder(",
+        t,
+        ") {\n  decode.map(decode.string, ",
+        t,
+        ")\n}\n\n",
+        case i.prefix {
+          None -> ""
+          Some(prefix) ->
+            string.concat([
+              "/// A new id, minted inside the unit that uses it.\n",
+              "pub fn next_",
+              f,
+              "(tx: Tx) -> Result(",
+              t,
+              ", Fail(e)) {\n  ids.next(tx, ",
+              quote(prefix),
+              ") |> result.map(",
+              t,
+              ")\n}\n\n",
+            ])
+        },
+      ])
+    }),
+  ])
+}
 
 fn render_shared(s: Shared) -> String {
   let type_name = s.name
@@ -389,7 +557,14 @@ fn render_table(table: String, columns: List(Column)) -> String {
         True, False, True -> ["gleam/option.{type Option, Some}"]
         True, True, True -> ["gleam/option.{type Option, None, Some}"]
       },
-      ["gleam/string", "scoutbox/platform/store.{type Fail, type Tx}"],
+      ["gleam/string"],
+      case list.any(columns, fn(c) { is_id(c.kind) }) {
+        True -> [
+          "scoutbox/platform/store.{type Fail, type Tx}",
+          "scoutbox/rows/id",
+        ]
+        False -> ["scoutbox/platform/store.{type Fail, type Tx}"]
+      },
       list.map(shared_modules, fn(m) { "scoutbox/vocab/" <> m }),
       ["sqlight"],
     ])
@@ -558,6 +733,7 @@ fn gleam_type(c: Column) -> String {
     Boolean -> "Bool"
     Local(type_name, _) -> type_name
     SharedKind(s) -> snake(s.name) <> "." <> s.name
+    IdKind(i) -> "id." <> i.name <> "Id"
   }
   case c.nullable {
     True -> "Option(" <> base <> ")"
@@ -573,6 +749,7 @@ fn decoder_of(c: Column) -> String {
     Boolean -> "sqlight.decode_bool()"
     Local(type_name, _) -> snake(type_name) <> "_decoder()"
     SharedKind(s) -> snake(s.name) <> ".decoder()"
+    IdKind(i) -> "id." <> snake(i.name) <> "_decoder()"
   }
   case c.nullable {
     True -> "decode.optional(" <> base <> ")"
@@ -588,6 +765,7 @@ fn value_of(c: Column) -> String {
     _ -> None
   }
   let encoder = case c.kind, to_text {
+    IdKind(i), _ -> "id." <> snake(i.name) <> "_sql"
     _, Some(f) -> "fn(v) { sqlight.text(" <> f <> "(v)) }"
     Text, None -> "sqlight.text"
     Integer, None -> "sqlight.int"
@@ -598,6 +776,13 @@ fn value_of(c: Column) -> String {
     True, _ -> "sqlight.nullable(" <> encoder <> ", " <> value <> ")"
     False, Some(f) -> "sqlight.text(" <> f <> "(" <> value <> "))"
     False, None -> encoder <> "(" <> value <> ")"
+  }
+}
+
+fn is_id(kind: Kind) -> Bool {
+  case kind {
+    IdKind(_) -> True
+    _ -> False
   }
 }
 

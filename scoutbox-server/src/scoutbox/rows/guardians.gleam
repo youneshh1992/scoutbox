@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "guardians"
@@ -26,7 +27,7 @@ pub fn qualified(alias: String) -> String {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.GuardianId,
     name: String,
     email: String,
     password_hash: Option(String),
@@ -36,7 +37,7 @@ pub type Row {
     idv_reference: Option(String),
     disclaimer_accepted: Bool,
     disclaimer_accepted_at: Option(Int),
-    co_guardian_of: Option(String),
+    co_guardian_of: Option(id.GuardianId),
     prefs_quiet_start: Option(String),
     prefs_quiet_end: Option(String),
     prefs_school_hours_mute: Option(Bool),
@@ -46,7 +47,11 @@ pub type Row {
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
-pub fn new(id id: String, name name: String, email email: String) -> Row {
+pub fn new(
+  id id: id.GuardianId,
+  name name: String,
+  email email: String,
+) -> Row {
   Row(
     id:,
     name:,
@@ -69,7 +74,7 @@ pub fn new(id id: String, name name: String, email email: String) -> Row {
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.guardian_decoder())
   use name <- decode.field(1, decode.string)
   use email <- decode.field(2, decode.string)
   use password_hash <- decode.field(3, decode.optional(decode.string))
@@ -79,7 +84,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use idv_reference <- decode.field(7, decode.optional(decode.string))
   use disclaimer_accepted <- decode.field(8, sqlight.decode_bool())
   use disclaimer_accepted_at <- decode.field(9, decode.optional(decode.int))
-  use co_guardian_of <- decode.field(10, decode.optional(decode.string))
+  use co_guardian_of <- decode.field(10, decode.optional(id.guardian_decoder()))
   use prefs_quiet_start <- decode.field(11, decode.optional(decode.string))
   use prefs_quiet_end <- decode.field(12, decode.optional(decode.string))
   use prefs_school_hours_mute <- decode.field(
@@ -114,7 +119,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.guardian_sql(row.id),
     sqlight.text(row.name),
     sqlight.text(row.email),
     sqlight.nullable(sqlight.text, row.password_hash),
@@ -124,7 +129,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.idv_reference),
     sqlight.bool(row.disclaimer_accepted),
     sqlight.nullable(sqlight.int, row.disclaimer_accepted_at),
-    sqlight.nullable(sqlight.text, row.co_guardian_of),
+    sqlight.nullable(id.guardian_sql, row.co_guardian_of),
     sqlight.nullable(sqlight.text, row.prefs_quiet_start),
     sqlight.nullable(sqlight.text, row.prefs_quiet_end),
     sqlight.nullable(sqlight.bool, row.prefs_school_hours_mute),

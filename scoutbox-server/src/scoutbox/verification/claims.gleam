@@ -19,6 +19,7 @@ import gleam/string
 import gleam/time/calendar
 import gleam/time/timestamp
 import scoutbox/platform/input
+import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims.{type Status}
@@ -693,8 +694,8 @@ fn rank(level: VerLevel) -> Int {
 /// The highest active verification level `user_id` holds at `org_id`.
 pub fn ver_level_for(
   admins: List(ver_admins.Row),
-  org_id: String,
-  user_id: String,
+  org_id: id.OrgId,
+  user_id: id.OrgUserId,
 ) -> Option(VerLevel) {
   admins
   |> list.filter(fn(a) {
@@ -714,8 +715,8 @@ pub fn ver_level_for(
 
 pub fn has_ver_level(
   admins: List(ver_admins.Row),
-  org_id: String,
-  user_id: String,
+  org_id: id.OrgId,
+  user_id: id.OrgUserId,
   at_least: VerLevel,
 ) -> Bool {
   case ver_level_for(admins, org_id, user_id) {
@@ -909,7 +910,7 @@ pub fn public_profile(
   subject_kind subject_kind: ver_claims.SubjectKind,
   subject_id subject_id: String,
   claims claims: List(Claim),
-  orgs orgs: Dict(String, orgs.Row),
+  orgs orgs: Dict(id.OrgId, orgs.Row),
   subject_removed subject_removed: Bool,
   now now: Int,
 ) -> Json {
@@ -928,7 +929,7 @@ pub fn public_profile_fields(
   subject_kind subject_kind: ver_claims.SubjectKind,
   subject_id subject_id: String,
   claims claims: List(Claim),
-  orgs orgs: Dict(String, orgs.Row),
+  orgs orgs: Dict(id.OrgId, orgs.Row),
   subject_removed subject_removed: Bool,
   now now: Int,
 ) -> List(#(String, Json)) {
@@ -978,7 +979,7 @@ pub fn public_profile_fields(
                 "organisation",
                 json.nullable(org, fn(o) {
                   json.object([
-                    #("id", json.string(o.id)),
+                    #("id", id.org_json(o.id)),
                     #("name", json.string(o.name)),
                   ])
                 }),

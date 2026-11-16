@@ -11,6 +11,7 @@ import gleam/result
 import gleam/string
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/org_verified_domains as domain_row
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claim_codes as code_row
@@ -68,7 +69,7 @@ fn replace(
   table: String,
   columns: String,
   values: List(sqlight.Value),
-  id: String,
+  key: sqlight.Value,
   guard: String,
   guard_args: List(sqlight.Value),
 ) -> Result(Bool, Fail(e)) {
@@ -84,7 +85,7 @@ fn replace(
       <> ") WHERE id = ?"
       <> guard
       <> " RETURNING 1",
-    list.flatten([values, [sqlight.text(id)], guard_args]),
+    list.flatten([values, [key], guard_args]),
     decode.success(Nil),
   )
   |> result.map(fn(rows) { rows != [] })
@@ -92,11 +93,11 @@ fn replace(
 
 // ------------------------------------------------------------------------------------------------ claims
 
-pub fn claim(read: Read, id: String) -> Result(Option(Claim), Fail(e)) {
+pub fn claim(read: Read, id: id.ClaimId) -> Result(Option(Claim), Fail(e)) {
   store.one(
     read,
     "SELECT " <> claim_row.columns <> " FROM ver_claims WHERE id = ?",
-    [sqlight.text(id)],
+    [id.claim_sql(id)],
     claim_row.decoder(),
   )
   |> result.map(option.from_result)
@@ -124,14 +125,14 @@ pub fn claims_for(
 /// An organisation's claims about its staff, in the order they were made.
 pub fn staff_claims(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(List(Claim), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> claim_row.columns
       <> " FROM ver_claims WHERE organisation_id = ? AND subject_kind = 'user' ORDER BY rowid",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     claim_row.decoder(),
   )
 }
@@ -183,12 +184,15 @@ pub fn claims_by_authority(
   )
 }
 
-pub fn has_open_identity(read: Read, user_id: String) -> Result(Bool, Fail(e)) {
+pub fn has_open_identity(
+  read: Read,
+  user_id: id.OrgUserId,
+) -> Result(Bool, Fail(e)) {
   store.one(
     read,
     "SELECT 1 FROM ver_claims WHERE subject_kind = 'user' AND subject_id = ? AND claim_type = 'PERSON_IDENTITY'
        AND status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified')",
-    [sqlight.text(user_id)],
+    [id.org_user_sql(user_id)],
     decode.success(Nil),
   )
   |> result.map(result.is_ok)
@@ -215,7 +219,7 @@ pub fn move_claim(
     "ver_claims",
     claim_row.columns,
     claim_row.values(claim),
-    claim.id,
+    id.claim_sql(claim.id),
     " AND status = ?",
     [sqlight.text(claim_row.status_to_string(from))],
   )
@@ -244,14 +248,14 @@ fn list_value(l: CodeList) -> code_row.ListValue {
 /// A claim's review reasons or risk flags, in the order they were added.
 pub fn codes(
   read: Read,
-  claim_id: String,
+  claim_id: id.ClaimId,
   l: CodeList,
 ) -> Result(List(VerCode), Fail(e)) {
   store.query(
     read,
     "SELECT code FROM ver_claim_codes WHERE claim_id = ? AND list = ? ORDER BY position",
     [
-      sqlight.text(claim_id),
+      id.claim_sql(claim_id),
       sqlight.text(code_row.list_value_to_string(list_value(l))),
     ],
     decode.at([0], ver_code.decoder()),
@@ -261,7 +265,7 @@ pub fn codes(
 /// Adds the codes the claim doesn't have yet, after its others.
 pub fn add_codes(
   tx: Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   l: CodeList,
   new: List(VerCode),
 ) -> Result(Nil, Fail(e)) {
@@ -292,7 +296,7 @@ pub fn add_codes(
 /// Replaces the claim's codes.
 pub fn set_codes(
   tx: Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   l: CodeList,
   new: List(VerCode),
 ) -> Result(Nil, Fail(e)) {
@@ -301,7 +305,7 @@ pub fn set_codes(
       tx,
       "DELETE FROM ver_claim_codes WHERE claim_id = ? AND list = ?",
       [
-        sqlight.text(claim_id),
+        id.claim_sql(claim_id),
         sqlight.text(code_row.list_value_to_string(list_value(l))),
       ],
     ),
@@ -312,12 +316,12 @@ pub fn set_codes(
 /// The evidence linked to a claim, in the order it was linked.
 pub fn evidence_ids(
   read: Read,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Result(List(String), Fail(e)) {
   store.query(
     read,
     "SELECT evidence_id FROM ver_claim_evidence WHERE claim_id = ? ORDER BY position",
-    [sqlight.text(claim_id)],
+    [id.claim_sql(claim_id)],
     decode.at([0], decode.string),
   )
 }
@@ -330,12 +334,12 @@ pub type Event {
     actor_kind: event_row.ActorKind,
     actor_id: Option(String),
     actor_name: Option(String),
-    actor_org_id: Option(String),
+    actor_org_id: Option(id.OrgId),
     request_id: Option(String),
     attribution: Option(attribution.Attribution),
-    claim_id: Option(String),
+    claim_id: Option(id.ClaimId),
     subject_id: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     detail: Option(String),
     reason: Option(String),
   )
@@ -358,7 +362,7 @@ pub const system_event =
 
 pub fn append_event(
   tx: Tx,
-  id: String,
+  id: id.VerEventId,
   at: Int,
   type_: event_row.Type,
   e: Event,
@@ -419,14 +423,14 @@ pub fn detail(
 
 pub fn events_for_claim(
   read: Read,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Result(List(event_row.Row), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> event_row.columns
       <> " FROM ver_events WHERE claim_id = ? ORDER BY rowid",
-    [sqlight.text(claim_id)],
+    [id.claim_sql(claim_id)],
     event_row.decoder(),
   )
 }
@@ -437,7 +441,7 @@ pub fn events_for_claim(
 pub fn add_evidence(
   tx: Tx,
   evidence: Evidence,
-  claim_ids: List(String),
+  claim_ids: List(id.ClaimId),
 ) -> Result(Evidence, Fail(e)) {
   use stored <- result.try(inserted(
     tx,
@@ -476,7 +480,7 @@ pub fn evidence(read: Read, id: String) -> Result(Option(Evidence), Fail(e)) {
 /// The evidence linked to a claim, in the order it was linked.
 pub fn claim_evidence(
   read: Read,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Result(List(Evidence), Fail(e)) {
   store.query(
     read,
@@ -484,12 +488,12 @@ pub fn claim_evidence(
       <> evidence_row.qualified("e")
       <> " FROM ver_claim_evidence l JOIN ver_evidence e ON e.id = l.evidence_id
        WHERE l.claim_id = ? ORDER BY l.position",
-    [sqlight.text(claim_id)],
+    [id.claim_sql(claim_id)],
     evidence_row.decoder(),
   )
 }
 
-/// Whether anyone but `except_supplier` supplied a file with this digest.
+/// Whether anyone but `except_supplier` supplied a file with this digest. `supplied_by_id` is polymorphic text.
 pub fn digest_seen(
   read: Read,
   sha: String,
@@ -528,17 +532,18 @@ pub fn token_by_hash(
 }
 
 /// Spends a token. False when it was already spent.
-pub fn use_token(tx: Tx, id: String, at: Int) -> Result(Bool, Fail(e)) {
+pub fn use_token(tx: Tx, id: id.VerTokenId, at: Int) -> Result(Bool, Fail(e)) {
   store.write(
     tx,
     "UPDATE ver_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL RETURNING 1",
-    [sqlight.int(at), sqlight.text(id)],
+    [sqlight.int(at), id.ver_token_sql(id)],
     decode.success(Nil),
   )
   |> result.map(fn(rows) { rows != [] })
 }
 
-/// A wrong code counts against every open token of the subject for that purpose.
+/// A wrong code counts against every open token of the subject for that purpose. A token's `subject_id` is
+/// polymorphic text.
 pub fn record_failed_attempts(
   tx: Tx,
   subject_id: String,
@@ -583,31 +588,31 @@ pub fn create_admin(tx: Tx, admin: Admin) -> Result(Admin, Fail(e)) {
   )
 }
 
-pub fn admin(read: Read, id: String) -> Result(Option(Admin), Fail(e)) {
+pub fn admin(read: Read, id: id.VerAdminId) -> Result(Option(Admin), Fail(e)) {
   store.one(
     read,
     "SELECT " <> admin_row.columns <> " FROM ver_admins WHERE id = ?",
-    [sqlight.text(id)],
+    [id.ver_admin_sql(id)],
     admin_row.decoder(),
   )
   |> result.map(option.from_result)
 }
 
 /// An organisation's grants, active or not, in the order they were made.
-pub fn admins_of(read: Read, org_id: String) -> Result(List(Admin), Fail(e)) {
+pub fn admins_of(read: Read, org_id: id.OrgId) -> Result(List(Admin), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> admin_row.columns
       <> " FROM ver_admins WHERE org_id = ? ORDER BY rowid",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     admin_row.decoder(),
   )
 }
 
 pub fn active_admins_of(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(List(Admin), Fail(e)) {
   admins_of(read, org_id)
   |> result.map(list.filter(_, fn(a) { a.status == admin_row.Active }))
@@ -616,14 +621,14 @@ pub fn active_admins_of(
 /// Revokes an active grant. False when it was not active.
 pub fn revoke_admin(
   tx: Tx,
-  id: String,
+  admin_id: id.VerAdminId,
   at: Int,
-  by: String,
+  by: id.OrgUserId,
 ) -> Result(Bool, Fail(e)) {
   store.write(
     tx,
     "UPDATE ver_admins SET status = 'revoked', revoked_at = ?, revoked_by = ? WHERE id = ? AND status = 'active' RETURNING 1",
-    [sqlight.int(at), sqlight.text(by), sqlight.text(id)],
+    [sqlight.int(at), id.org_user_sql(by), id.ver_admin_sql(admin_id)],
     decode.success(Nil),
   )
   |> result.map(fn(rows) { rows != [] })
@@ -634,14 +639,14 @@ pub fn revoke_admin(
 /// An organisation's verified domains, in the order they were added.
 pub fn domains_of(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(List(domain_row.Row), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> domain_row.columns
       <> " FROM org_verified_domains WHERE org_id = ? ORDER BY rowid",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     domain_row.decoder(),
   )
 }
@@ -652,8 +657,9 @@ pub type DomainMethod {
   DomainByReview
 }
 
+/// `added_by` is a staff member's id, or what added the domain (`root_request`).
 pub fn verified_domain(
-  org_id: String,
+  org_id: id.OrgId,
   domain: String,
   method: DomainMethod,
   at: Int,
@@ -680,17 +686,17 @@ pub fn add_domain(tx: Tx, d: domain_row.Row) -> Result(Nil, Fail(e)) {
 pub fn domain_verified_elsewhere(
   read: Read,
   domain: String,
-  except_org: Option(String),
-) -> Result(Option(String), Fail(e)) {
+  except_org: Option(id.OrgId),
+) -> Result(Option(id.OrgId), Fail(e)) {
   store.one(
     read,
     "SELECT org_id FROM org_verified_domains WHERE domain = ? AND (? IS NULL OR org_id <> ?) ORDER BY rowid LIMIT 1",
     [
       sqlight.text(domain),
-      sqlight.nullable(sqlight.text, except_org),
-      sqlight.nullable(sqlight.text, except_org),
+      sqlight.nullable(id.org_sql, except_org),
+      sqlight.nullable(id.org_sql, except_org),
     ],
-    decode.at([0], decode.string),
+    decode.at([0], id.org_decoder()),
   )
   |> result.map(option.from_result)
 }
@@ -717,11 +723,14 @@ pub fn dispute(read: Read, id: String) -> Result(Option(Dispute), Fail(e)) {
   |> result.map(option.from_result)
 }
 
-pub fn has_open_dispute(read: Read, claim_id: String) -> Result(Bool, Fail(e)) {
+pub fn has_open_dispute(
+  read: Read,
+  claim_id: id.ClaimId,
+) -> Result(Bool, Fail(e)) {
   store.one(
     read,
     "SELECT 1 FROM ver_disputes WHERE claim_id = ? AND status = 'open'",
-    [sqlight.text(claim_id)],
+    [id.claim_sql(claim_id)],
     decode.success(Nil),
   )
   |> result.map(result.is_ok)
@@ -747,7 +756,7 @@ pub fn update_dispute(
     "ver_disputes",
     dispute_row.columns,
     dispute_row.values(d),
-    d.id,
+    id.dispute_sql(d.id),
     " AND status = ?",
     [sqlight.text(dispute_row.status_to_string(from))],
   )
@@ -773,14 +782,14 @@ pub fn claims_where(
 
 pub fn disputes_for_claim(
   read: Read,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Result(List(Dispute), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> dispute_row.columns
       <> " FROM ver_disputes WHERE claim_id = ? ORDER BY rowid",
-    [sqlight.text(claim_id)],
+    [id.claim_sql(claim_id)],
     dispute_row.decoder(),
   )
 }

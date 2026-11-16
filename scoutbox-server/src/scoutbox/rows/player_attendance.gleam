@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "player_attendance"
@@ -26,8 +27,8 @@ pub fn qualified(alias: String) -> String {
 
 pub type Row {
   Row(
-    id: String,
-    player_id: String,
+    id: id.AttendanceId,
+    player_id: id.PlayerId,
     position: Int,
     fixture: String,
     venue: Option(String),
@@ -43,8 +44,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  player_id player_id: String,
+  id id: id.AttendanceId,
+  player_id player_id: id.PlayerId,
   position position: Int,
   fixture fixture: String,
   match_date match_date: String,
@@ -67,8 +68,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use player_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.attendance_decoder())
+  use player_id <- decode.field(1, id.player_decoder())
   use position <- decode.field(2, decode.int)
   use fixture <- decode.field(3, decode.string)
   use venue <- decode.field(4, decode.optional(decode.string))
@@ -104,8 +105,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.player_id),
+    id.attendance_sql(row.id),
+    id.player_sql(row.player_id),
     sqlight.int(row.position),
     sqlight.text(row.fixture),
     sqlight.nullable(sqlight.text, row.venue),

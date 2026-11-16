@@ -4,6 +4,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/party
 import sqlight
 
@@ -26,9 +27,9 @@ pub fn qualified(alias: String) -> String {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
-    player_id: String,
-    org_id: String,
+    id: id.BlockId,
+    player_id: id.PlayerId,
+    org_id: id.OrgId,
     by_kind: party.Party,
     reason: String,
     created_at: Int,
@@ -38,9 +39,9 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
-    player_id: String,
-    org_id: String,
+    id: id.BlockId,
+    player_id: id.PlayerId,
+    org_id: id.OrgId,
     by_kind: party.Party,
     reason: String,
     created_at: Int,
@@ -49,9 +50,9 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  player_id player_id: String,
-  org_id org_id: String,
+  id id: id.BlockId,
+  player_id player_id: id.PlayerId,
+  org_id org_id: id.OrgId,
   by_kind by_kind: party.Party,
   reason reason: String,
   created_at created_at: Int,
@@ -62,9 +63,9 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
-  use player_id <- decode.field(2, decode.string)
-  use org_id <- decode.field(3, decode.string)
+  use id <- decode.field(1, id.block_decoder())
+  use player_id <- decode.field(2, id.player_decoder())
+  use org_id <- decode.field(3, id.org_decoder())
   use by_kind <- decode.field(4, party.decoder())
   use reason <- decode.field(5, decode.string)
   use created_at <- decode.field(6, decode.int)
@@ -85,9 +86,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.player_id),
-    sqlight.text(row.org_id),
+    id.block_sql(row.id),
+    id.player_sql(row.player_id),
+    id.org_sql(row.org_id),
     sqlight.text(party.to_string(row.by_kind)),
     sqlight.text(row.reason),
     sqlight.int(row.created_at),

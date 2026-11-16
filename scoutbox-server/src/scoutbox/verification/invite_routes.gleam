@@ -17,10 +17,10 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/id
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_player_invites as row
 import scoutbox/rows/ver_tokens as token_row
@@ -43,18 +43,21 @@ pub type Invite =
 
 pub fn record(i: Invite) -> Json {
   json.object([
-    #("id", json.string(i.id)),
-    #("orgId", json.string(i.org_id)),
-    #("byUserId", json.string(i.by_user_id)),
+    #("id", id.player_invite_json(i.id)),
+    #("orgId", id.org_json(i.org_id)),
+    #("byUserId", id.org_user_json(i.by_user_id)),
     #("byName", json.nullable(i.by_name, json.string)),
     #("name", json.string(i.invitee_name)),
     #("squad", json.string(i.squad)),
     #("status", row.status_to_json(i.status)),
-    #("playerId", json.nullable(i.player_id, json.string)),
-    #("targetPlayerId", json.nullable(i.target_player_id, json.string)),
+    #("playerId", json.nullable(i.player_id, id.player_json)),
+    #("targetPlayerId", json.nullable(i.target_player_id, id.player_json)),
     #("guardianApproved", case i.guardian_approved_id, i.guardian_approved_at {
       Some(id), Some(at) ->
-        json.object([#("guardianId", json.string(id)), #("at", json.int(at))])
+        json.object([
+          #("guardianId", id.guardian_json(id)),
+          #("at", json.int(at)),
+        ])
       _, _ -> json.null()
     }),
     #("createdAt", json.int(i.created_at)),
@@ -84,13 +87,13 @@ fn invites_where(
 pub fn reachable(
   read: Read,
   org: orgs.Org,
-  player_id: String,
+  player_id: id.PlayerId,
   now: Int,
 ) -> Result(Bool, Fail(e)) {
   let q =
     sql.concat([
       sql.text("SELECT 1 FROM players p WHERE p.deleted_at IS NULL AND p.id = "),
-      sql.arg(sqlight.text(player_id)),
+      sql.arg(id.player_sql(player_id)),
       sql.text(" AND "),
       visibility.visible_sql(org, now),
       sql.text(" AND NOT "),
@@ -133,7 +136,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   })
   use today <- result.try(
     invites_where(read, "org_id = ? AND created_at > ?", [
-      sqlight.text(access.org.id),
+      id.org_sql(access.org.id),
       sqlight.int(now - day_ms),
     ]),
   )
@@ -168,8 +171,9 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
           )
           // Targeting uses the standing visibility rules, so an invitation is not a discovery bypass.
           use target <- result.try(case body.player_id {
-            Some(id) if id != "" -> {
-              use found <- result.try(players.by_id(read, id))
+            Some(player_id) if player_id != "" -> {
+              // From the request body.
+              use found <- result.try(players.by_id(read, id.player(player_id)))
               case found {
                 None -> stop(http.error(404, "PLAYER_NOT_FOUND"))
                 Some(p) -> {
@@ -189,7 +193,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             }
             _ -> Ok(None)
           })
-          use id <- result.try(ids.next(tx, "vpin"))
+          use id <- result.try(id.next_player_invite(tx))
           let invite =
             row.Row(
               id:,
@@ -213,9 +217,9 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             token_row.PlayerInvite,
             email,
             option.map(target, fn(_) { token_row.Player }),
-            option.map(target, fn(p) { p.row.id }),
+            option.map(target, fn(p) { id.player_to_string(p.row.id) }),
             Some(access.org.id),
-            Some(id),
+            Some(id.player_invite_to_string(id)),
             validity_ms,
             now,
           ))
@@ -267,7 +271,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 pub fn list_invites(ctx: Ctx, access: OrgAccess) -> Response {
   use read <- core.look(ctx)
   use items <- result.map(
-    invites_where(read, "org_id = ?", [sqlight.text(access.org.id)]),
+    invites_where(read, "org_id = ?", [id.org_sql(access.org.id)]),
   )
   http.json(200, json.object([#("items", json.array(items, record))]))
 }
@@ -298,7 +302,7 @@ pub fn guardian_accept(ctx: Ctx, req: Request, g: Guardian) -> Response {
   let shape = {
     use code <- input.field("code", input.nullish(input.text(64)))
     use child_id <- input.field("childId", input.required(input.id()))
-    input.done(#(code, child_id))
+    input.done(#(code, id.player(child_id)))
   }
   use #(code, child_id) <- http.body(req, shape, [])
   case list.contains(g.child_ids, child_id) {
@@ -351,7 +355,8 @@ fn accept(
           use org <- result.try(orgs.by_id(read, inv.org_id))
           case org {
             Some(o) if !o.suspended -> {
-              let recipient = Some(player.row.id)
+              // A token's `subject_id` is polymorphic text.
+              let recipient = Some(id.player_to_string(player.row.id))
               case token.subject_id {
                 // An identity-bound invitation: only the named player, or that child through their guardian.
                 Some(_) if token.subject_id != recipient -> {
@@ -362,9 +367,11 @@ fn accept(
                     core.About(
                       ..core.nothing,
                       org_id: Some(inv.org_id),
-                      subject_id: Some(player.row.id),
+                      subject_id: Some(id.player_to_string(player.row.id)),
                       reason: Some("invite recipient mismatch (identity-bound)"),
-                      detail: records.detail([], [#("invite", Some(inv.id))]),
+                      detail: records.detail([], [
+                        #("invite", Some(id.player_invite_to_string(inv.id))),
+                      ]),
                     ),
                     now,
                   ))
@@ -438,11 +445,11 @@ fn address_check(
         tx,
         "UPDATE ver_player_invites SET status = 'accepted', player_id = ?, accepted_at = ?, guardian_approved_id = ?, guardian_approved_at = ? WHERE id = ? AND status = 'pending' AND player_id IS NULL RETURNING 1",
         [
-          sqlight.text(player.row.id),
+          id.player_sql(player.row.id),
           sqlight.int(now),
-          sqlight.nullable(sqlight.text, accepted.guardian_approved_id),
+          sqlight.nullable(id.guardian_sql, accepted.guardian_approved_id),
           sqlight.nullable(sqlight.int, accepted.guardian_approved_at),
-          sqlight.text(inv.id),
+          id.player_invite_sql(inv.id),
         ],
         decode.success(Nil),
       ))
@@ -454,9 +461,9 @@ fn address_check(
         core.About(
           ..core.nothing,
           org_id: Some(inv.org_id),
-          subject_id: Some(player.row.id),
+          subject_id: Some(id.player_to_string(player.row.id)),
           detail: records.detail([], [
-            #("invite", Some(inv.id)),
+            #("invite", Some(id.player_invite_to_string(inv.id))),
             #(
               "guardianApproved",
               Some(case guardian {
@@ -471,7 +478,7 @@ fn address_check(
       use _ <- result.try(notifications.notify(
         tx,
         to: audience.OrgUser,
-        id: inv.by_user_id,
+        id: id.org_user_to_string(inv.by_user_id),
         type_: "verification",
         text: player.row.name
           <> " accepted your squad invitation"
@@ -480,7 +487,7 @@ fn address_check(
           None -> ""
         }
           <> ".",
-        ref_id: Some(inv.id),
+        ref_id: Some(id.player_invite_to_string(inv.id)),
         at: now,
       ))
       reply(http.json(

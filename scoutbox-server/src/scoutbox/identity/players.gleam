@@ -16,9 +16,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/identity/orgs.{type Org}
-import scoutbox/platform/ids
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/player_activity_log as activity_row
 import scoutbox/rows/player_attendance as attendance_row
 import scoutbox/rows/player_badges as badge_row
@@ -61,8 +61,9 @@ pub type Player {
 
 // ------------------------------------------------------------------------------------------------ reads
 
-fn ids_json(ids: List(String)) -> sqlight.Value {
-  json.array(ids, json.string) |> json.to_string |> sqlight.text
+/// Ids as a JSON array, for `json_each(?)`.
+fn ids_json(ids: List(a), to_json: fn(a) -> json.Json) -> sqlight.Value {
+  json.array(ids, to_json) |> json.to_string |> sqlight.text
 }
 
 /// Rows of a list table for these players, grouped by player, each group in position order.
@@ -71,9 +72,9 @@ fn lists_of(
   table: String,
   columns: String,
   decoder: decode.Decoder(a),
-  player_of: fn(a) -> String,
-  ids: List(String),
-) -> Result(dict.Dict(String, List(a)), Fail(e)) {
+  player_of: fn(a) -> id.PlayerId,
+  ids: List(id.PlayerId),
+) -> Result(dict.Dict(id.PlayerId, List(a)), Fail(e)) {
   use rows <- result.map(store.query(
     read,
     "SELECT "
@@ -81,14 +82,14 @@ fn lists_of(
       <> " FROM "
       <> table
       <> " WHERE player_id IN (SELECT value FROM json_each(?)) ORDER BY player_id, position",
-    [ids_json(ids)],
+    [ids_json(ids, id.player_json)],
     decoder,
   ))
   list.group(rows, player_of) |> dict.map_values(fn(_, rs) { list.reverse(rs) })
 }
 
-fn of(groups: dict.Dict(String, List(a)), id: String) -> List(a) {
-  dict.get(groups, id) |> result.unwrap([])
+fn of(groups: dict.Dict(k, List(a)), key: k) -> List(a) {
+  dict.get(groups, key) |> result.unwrap([])
 }
 
 /// The records for these rows, in the rows' order.
@@ -111,7 +112,7 @@ pub fn with_lists(
       "SELECT "
         <> tag_row.qualified("t")
         <> " FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position",
-      [ids_json(ids)],
+      [ids_json(ids, id.player_json)],
       tag_row.decoder(),
     )
     |> result.map(fn(rows) {
@@ -225,11 +226,11 @@ fn select(where: String) -> String {
 }
 
 /// A live player (a deleted account's retained row is not one).
-pub fn by_id(read: Read, id: String) -> Result(Option(Player), Fail(e)) {
+pub fn by_id(read: Read, id: id.PlayerId) -> Result(Option(Player), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     select("WHERE p.id = ? AND p.deleted_at IS NULL"),
-    [sqlight.text(id)],
+    [id.player_sql(id)],
     row.decoder(),
   ))
   use players <- result.map(with_lists(read, rows))
@@ -237,13 +238,16 @@ pub fn by_id(read: Read, id: String) -> Result(Option(Player), Fail(e)) {
 }
 
 /// Live players by id, in the order given; unknown and deleted ids are skipped.
-pub fn by_ids(read: Read, ids: List(String)) -> Result(List(Player), Fail(e)) {
+pub fn by_ids(
+  read: Read,
+  ids: List(id.PlayerId),
+) -> Result(List(Player), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     select(
       "JOIN json_each(?) j ON j.value = p.id WHERE p.deleted_at IS NULL ORDER BY j.key",
     ),
-    [ids_json(ids)],
+    [ids_json(ids, id.player_json)],
     row.decoder(),
   ))
   with_lists(read, rows)
@@ -252,7 +256,7 @@ pub fn by_ids(read: Read, ids: List(String)) -> Result(List(Player), Fail(e)) {
 /// A live player as `org` may see them: the record, and what the visibility rule and the blocks say.
 pub fn for_org(
   read: Read,
-  id: String,
+  id: id.PlayerId,
   org: Org,
   now: Int,
 ) -> Result(Option(#(Player, Access)), Fail(e)) {
@@ -263,7 +267,7 @@ pub fn for_org(
 /// Live players by id, in the order given, each with what the visibility rule and the blocks say for `org`.
 pub fn for_org_many(
   read: Read,
-  ids: List(String),
+  ids: List(id.PlayerId),
   org: Org,
   now: Int,
 ) -> Result(List(#(Player, Access)), Fail(e)) {
@@ -272,7 +276,7 @@ pub fn for_org_many(
       sql.text("SELECT " <> row.qualified("p") <> ", "),
       visibility.access_sql(org, now),
       sql.text(" FROM players p JOIN json_each("),
-      sql.arg(ids_json(ids)),
+      sql.arg(ids_json(ids, id.player_json)),
       sql.text(
         ") j ON j.value = p.id WHERE p.deleted_at IS NULL ORDER BY j.key",
       ),
@@ -426,14 +430,14 @@ pub type NewPlayer {
     weight_kg: Option(Int),
     location: Option(#(Float, Float)),
     password_hash: Option(String),
-    guardian_id: Option(String),
+    guardian_id: Option(id.GuardianId),
     created_at: Int,
   )
 }
 
 /// Creates a player (its id minted here) with the profile signal its facts give.
 pub fn create(tx: Tx, new: NewPlayer) -> Result(Player, Fail(e)) {
-  use id <- result.try(ids.next(tx, "pl"))
+  use id <- result.try(id.next_player(tx))
   let base =
     row.Row(
       ..row.new(
@@ -470,7 +474,7 @@ pub fn create(tx: Tx, new: NewPlayer) -> Result(Player, Fail(e)) {
       store.run(
         tx,
         "INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, 'primary')",
-        [sqlight.text(guardian_id), sqlight.text(id)],
+        [id.guardian_sql(guardian_id), id.player_sql(id)],
       )
     None -> Ok(Nil)
   })
@@ -482,7 +486,7 @@ pub fn create(tx: Tx, new: NewPlayer) -> Result(Player, Fail(e)) {
 /// Appends a timeline entry at the end of the list.
 pub fn add_timeline_entry(
   tx: Tx,
-  player_id: String,
+  player_id: id.PlayerId,
   year: String,
   event: String,
 ) -> Result(Nil, Fail(e)) {
@@ -490,10 +494,10 @@ pub fn add_timeline_entry(
     tx,
     "INSERT INTO player_timeline (player_id, position, year, event) SELECT ?, COALESCE(MAX(position) + 1, 0), ?, ? FROM player_timeline WHERE player_id = ?",
     [
-      sqlight.text(player_id),
+      id.player_sql(player_id),
       sqlight.text(year),
       sqlight.text(event),
-      sqlight.text(player_id),
+      id.player_sql(player_id),
     ],
   )
 }
@@ -542,13 +546,16 @@ fn media_json(m: Media) -> Json {
   let c = m.clip
   json.object(
     list.flatten([
-      [#("id", json.string(c.id)), #("title", json.string(c.title))],
+      [#("id", id.media_json(c.id)), #("title", json.string(c.title))],
       present("kind", c.kind, json.string),
       present("uploadedAt", c.uploaded_at, json.string),
       [
         #("url", opt_string(c.url)),
         #("views", json.int(c.views)),
-        #("verifiedClip", opt_string(c.verified_clip_attendance_id)),
+        #(
+          "verifiedClip",
+          json.nullable(c.verified_clip_attendance_id, id.attendance_json),
+        ),
         #("captions", opt_string(c.captions)),
       ],
       present("sizeBytes", c.size_bytes, json.int),
@@ -572,7 +579,7 @@ fn media_json(m: Media) -> Json {
 fn attendance_json(a: attendance_row.Row) -> Json {
   json.object(
     list.flatten([
-      [#("id", json.string(a.id)), #("fixture", json.string(a.fixture))],
+      [#("id", id.attendance_json(a.id)), #("fixture", json.string(a.fixture))],
       present("venue", a.venue, json.string),
       [#("date", json.string(a.match_date))],
       present("deviceConfirmed", a.device_confirmed, json.bool),
@@ -597,7 +604,7 @@ fn attendance_json(a: attendance_row.Row) -> Json {
 fn org_attendance_json(a: attendance_row.Row) -> Json {
   json.object(
     list.flatten([
-      [#("id", json.string(a.id)), #("fixture", json.string(a.fixture))],
+      [#("id", id.attendance_json(a.id)), #("fixture", json.string(a.fixture))],
       present("venue", a.venue, json.string),
       [
         #("date", json.string(a.match_date)),
@@ -633,7 +640,7 @@ fn medical_record_json(m: medical_row.Row) -> Json {
   json.object(
     list.flatten([
       [
-        #("id", json.string(m.id)),
+        #("id", id.medical_record_json(m.id)),
         #("type", json.string(m.type_)),
         #("title", json.string(m.title)),
       ],
@@ -649,7 +656,10 @@ fn medical_record_json(m: medical_row.Row) -> Json {
 fn drill_result_json(d: drill_result_row.Row) -> Json {
   json.object(
     list.flatten([
-      [#("id", json.string(d.id)), #("drillId", json.string(d.drill_id))],
+      [
+        #("id", id.drill_result_json(d.id)),
+        #("drillId", json.string(d.drill_id)),
+      ],
       present("drillName", d.drill_name, json.string),
       [#("metric", json.string(d.metric))],
       present("unit", d.unit, json.string),
@@ -739,7 +749,7 @@ fn location_json(r: row.Row) -> Json {
 pub fn self_fields(p: Player) -> List(#(String, Json)) {
   let r = p.row
   [
-    #("id", json.string(r.id)),
+    #("id", id.player_json(r.id)),
     #("name", json.string(r.name)),
     #("dob", json.string(r.birth_date)),
     #("country", json.string(r.country)),
@@ -759,7 +769,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     #("level", playing_level.to_json(r.level)),
     #("footballCategory", opt_string(r.football_category)),
     #("identityVerified", json.bool(r.identity_verified)),
-    #("guardianId", opt_string(r.guardian_id)),
+    #("guardianId", json.nullable(r.guardian_id, id.guardian_json)),
     #("createdAt", opt_int(r.created_at)),
     #("location", location_json(r)),
     #("stats", stats_json(stats(r))),
@@ -842,7 +852,7 @@ pub fn org_fields(
   let signal = profile_signal(p)
   list.flatten([
     [
-      #("id", json.string(r.id)),
+      #("id", id.player_json(r.id)),
       #("name", json.string(r.name)),
       #("position", opt_string(option.map(r.position, positions.to_string))),
       #("foot", opt_string(option.map(r.foot, row.foot_to_string))),
@@ -930,7 +940,7 @@ pub fn org_fields(
 /// Sets columns of a live player, then keeps `profile_signal` in step with the facts it is worked out from.
 fn update(
   tx: Tx,
-  id: String,
+  id: id.PlayerId,
   sets: List(#(String, sqlight.Value)),
 ) -> Result(Player, Fail(e)) {
   use _ <- result.try(case sets {
@@ -941,13 +951,13 @@ fn update(
         "UPDATE players SET "
           <> list.map(sets, fn(s) { s.0 <> " = ?" }) |> string.join(", ")
           <> " WHERE id = ? AND deleted_at IS NULL",
-        list.append(list.map(sets, fn(s) { s.1 }), [sqlight.text(id)]),
+        list.append(list.map(sets, fn(s) { s.1 }), [id.player_sql(id)]),
       )
   })
   refreshed(tx, id)
 }
 
-fn refreshed(tx: Tx, id: String) -> Result(Player, Fail(e)) {
+fn refreshed(tx: Tx, id: id.PlayerId) -> Result(Player, Fail(e)) {
   use found <- result.try(by_id(store.reading(tx), id))
   let assert Some(p) = found as "an act names a live player"
   case profile_signal(p) == p.row.profile_signal {
@@ -957,7 +967,7 @@ fn refreshed(tx: Tx, id: String) -> Result(Player, Fail(e)) {
       use _ <- result.map(
         store.run(tx, "UPDATE players SET profile_signal = ? WHERE id = ?", [
           sqlight.int(signal),
-          sqlight.text(id),
+          id.player_sql(id),
         ]),
       )
       Player(..p, row: row.Row(..p.row, profile_signal: signal))
@@ -967,7 +977,7 @@ fn refreshed(tx: Tx, id: String) -> Result(Player, Fail(e)) {
 
 pub fn set_availability(
   tx: Tx,
-  id: String,
+  id: id.PlayerId,
   availability: Option(row.Availability),
   contract_status: Option(row.ContractStatus),
 ) -> Result(Player, Fail(e)) {
@@ -993,7 +1003,7 @@ pub type Switch {
 
 pub fn set_switch(
   tx: Tx,
-  id: String,
+  id: id.PlayerId,
   switch: Switch,
   on: Bool,
 ) -> Result(Player, Fail(e)) {
@@ -1007,7 +1017,11 @@ pub fn set_switch(
 
 /// Figures for the current season: the given ones set, and appearances, goals and assists that were never
 /// recorded start at 0.
-pub fn record_stats(tx: Tx, id: String, s: Stats) -> Result(Player, Fail(e)) {
+pub fn record_stats(
+  tx: Tx,
+  id: id.PlayerId,
+  s: Stats,
+) -> Result(Player, Fail(e)) {
   let int = fn(column, v) { option.map(v, fn(n) { #(column, sqlight.int(n)) }) }
   let real = fn(column, v) {
     option.map(v, fn(f) { #(column, sqlight.float(f)) })
@@ -1036,7 +1050,7 @@ pub fn record_stats(tx: Tx, id: String, s: Stats) -> Result(Player, Fail(e)) {
       store.run(
         tx,
         "UPDATE players SET " <> string.join(zeroed, ", ") <> " WHERE id = ?",
-        [sqlight.text(id)],
+        [id.player_sql(id)],
       )
   })
   update(tx, id, given)
@@ -1045,12 +1059,12 @@ pub fn record_stats(tx: Tx, id: String, s: Stats) -> Result(Player, Fail(e)) {
 /// Replaces the badges, in order; a legal duplicate is kept.
 pub fn set_badges(
   tx: Tx,
-  id: String,
+  id: id.PlayerId,
   badges: List(String),
 ) -> Result(Player, Fail(e)) {
   use _ <- result.try(
     store.run(tx, "DELETE FROM player_badges WHERE player_id = ?", [
-      sqlight.text(id),
+      id.player_sql(id),
     ]),
   )
   use _ <- result.try(
@@ -1074,7 +1088,7 @@ pub type Prefs {
   )
 }
 
-pub fn set_prefs(tx: Tx, id: String, p: Prefs) -> Result(Player, Fail(e)) {
+pub fn set_prefs(tx: Tx, id: id.PlayerId, p: Prefs) -> Result(Player, Fail(e)) {
   update(tx, id, [
     #("prefs_quiet_start", sqlight.nullable(sqlight.text, p.quiet_start)),
     #("prefs_quiet_end", sqlight.nullable(sqlight.text, p.quiet_end)),
@@ -1096,10 +1110,10 @@ pub fn prefs(p: Player) -> Prefs {
 }
 
 /// Records football activity at `at`: it feeds the streak and the weekly goal.
-pub fn log_activity(tx: Tx, id: String, at: Int) -> Result(Nil, Fail(e)) {
+pub fn log_activity(tx: Tx, id: id.PlayerId, at: Int) -> Result(Nil, Fail(e)) {
   store.run(
     tx,
     "INSERT INTO player_activity_log (player_id, position, occurred_at) SELECT ?, COALESCE(MAX(position) + 1, 0), ? FROM player_activity_log WHERE player_id = ?",
-    [sqlight.text(id), sqlight.int(at), sqlight.text(id)],
+    [id.player_sql(id), sqlight.int(at), id.player_sql(id)],
   )
 }

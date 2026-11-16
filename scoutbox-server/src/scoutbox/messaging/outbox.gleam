@@ -7,9 +7,9 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
-import scoutbox/platform/ids
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/outbox as row
 import sqlight
 
@@ -25,7 +25,7 @@ pub fn append(
   text text: String,
   at at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use id <- result.try(ids.next(tx, "mail"))
+  use id <- result.try(id.next_mail(tx))
   row.insert(
     tx,
     row.New(
@@ -51,7 +51,7 @@ pub fn append_delivery(
   provider_message_id provider_message_id: String,
   at at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use id <- result.try(ids.next(tx, "mail"))
+  use id <- result.try(id.next_mail(tx))
   row.insert(
     tx,
     row.New(
@@ -96,7 +96,7 @@ pub fn view(m: Mail) -> Json {
     row.Mailer -> mail_view(m)
     row.Delivery ->
       json.object([
-        #("id", json.string(m.id)),
+        #("id", id.mail_json(m.id)),
         #("at", json.int(m.created_at)),
         #("channel", json.string("email")),
         #("to", json.string(m.to_address)),
@@ -112,7 +112,7 @@ pub fn view(m: Mail) -> Json {
 
 fn mail_view(m: Mail) -> Json {
   json.object([
-    #("id", json.string(m.id)),
+    #("id", id.mail_json(m.id)),
     #("ts", json.int(m.created_at)),
     #("to", json.string(m.to_address)),
     #("subject", json.string(option.unwrap(m.subject, ""))),

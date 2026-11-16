@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_root_transfers"
@@ -64,23 +65,23 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
-    to_user_id: String,
-    proposed_by: String,
+    id: id.RootTransferId,
+    org_id: id.OrgId,
+    to_user_id: id.OrgUserId,
+    proposed_by: id.OrgUserId,
     status: Status,
     created_at: Int,
-    approved_by: Option(String),
+    approved_by: Option(id.OrgUserId),
     approved_at: Option(Int),
   )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
-  to_user_id to_user_id: String,
-  proposed_by proposed_by: String,
+  id id: id.RootTransferId,
+  org_id org_id: id.OrgId,
+  to_user_id to_user_id: id.OrgUserId,
+  proposed_by proposed_by: id.OrgUserId,
   status status: Status,
   created_at created_at: Int,
 ) -> Row {
@@ -98,13 +99,13 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
-  use to_user_id <- decode.field(2, decode.string)
-  use proposed_by <- decode.field(3, decode.string)
+  use id <- decode.field(0, id.root_transfer_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
+  use to_user_id <- decode.field(2, id.org_user_decoder())
+  use proposed_by <- decode.field(3, id.org_user_decoder())
   use status <- decode.field(4, status_decoder())
   use created_at <- decode.field(5, decode.int)
-  use approved_by <- decode.field(6, decode.optional(decode.string))
+  use approved_by <- decode.field(6, decode.optional(id.org_user_decoder()))
   use approved_at <- decode.field(7, decode.optional(decode.int))
   decode.success(Row(
     id:,
@@ -124,13 +125,13 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
-    sqlight.text(row.to_user_id),
-    sqlight.text(row.proposed_by),
+    id.root_transfer_sql(row.id),
+    id.org_sql(row.org_id),
+    id.org_user_sql(row.to_user_id),
+    id.org_user_sql(row.proposed_by),
     sqlight.text(status_to_string(row.status)),
     sqlight.int(row.created_at),
-    sqlight.nullable(sqlight.text, row.approved_by),
+    sqlight.nullable(id.org_user_sql, row.approved_by),
     sqlight.nullable(sqlight.int, row.approved_at),
   ]
 }

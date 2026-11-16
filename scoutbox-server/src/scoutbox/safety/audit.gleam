@@ -9,10 +9,10 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/platform/ids
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/blocks as block_row
+import scoutbox/rows/id
 import scoutbox/rows/moderation_flags as flag_row
 import scoutbox/rows/moderation_log as moderation_row
 import scoutbox/rows/ops_events as ops_row
@@ -75,13 +75,13 @@ fn count(
 
 pub fn add_block(
   tx: Tx,
-  player_id player_id: String,
-  org_id org_id: String,
+  player_id player_id: id.PlayerId,
+  org_id org_id: id.OrgId,
   by by: Party,
   reason reason: String,
   at at: Int,
 ) -> Result(Block, Fail(e)) {
-  use id <- result.try(ids.next(tx, "blk"))
+  use id <- result.try(id.next_block(tx))
   use rows <- result.map(store.write(
     tx,
     block_row.insert_sql <> " RETURNING " <> block_row.columns,
@@ -129,12 +129,12 @@ pub fn block_page(
 /// True when the player (or their guardian) blocked the organisation.
 pub fn is_blocked(
   read: Read,
-  player_id: String,
-  org_id: String,
+  player_id: id.PlayerId,
+  org_id: id.OrgId,
 ) -> Result(Bool, Fail(e)) {
   count(read, "SELECT COUNT(*) FROM blocks WHERE player_id = ? AND org_id = ?", [
-    sqlight.text(player_id),
-    sqlight.text(org_id),
+    id.player_sql(player_id),
+    id.org_sql(org_id),
   ])
   |> result.map(fn(n) { n > 0 })
 }
@@ -145,9 +145,9 @@ pub fn block_count(read: Read) -> Result(Int, Fail(e)) {
 
 pub fn block_view(b: Block) -> Json {
   json.object([
-    #("id", json.string(b.id)),
-    #("playerId", json.string(b.player_id)),
-    #("orgId", json.string(b.org_id)),
+    #("id", id.block_json(b.id)),
+    #("playerId", id.player_json(b.player_id)),
+    #("orgId", id.org_json(b.org_id)),
     #("by", party.to_json(b.by_kind)),
     #("reason", json.string(b.reason)),
     #("ts", json.int(b.created_at)),
@@ -166,16 +166,16 @@ pub fn file_report(
   tx: Tx,
   by by: report_row.ByKind,
   by_id by_id: String,
-  by_org_id by_org_id: Option(String),
+  by_org_id by_org_id: Option(id.OrgId),
   target_kind target_kind: report_row.TargetKind,
-  target_org_id target_org_id: Option(String),
+  target_org_id target_org_id: Option(id.OrgId),
   target_scout_name target_scout_name: Option(String),
-  target_player_id target_player_id: Option(String),
+  target_player_id target_player_id: Option(id.PlayerId),
   reason reason: String,
   urgent urgent: Bool,
   at at: Int,
 ) -> Result(Report, Fail(e)) {
-  use id <- result.try(ids.next(tx, "rep"))
+  use id <- result.try(id.next_report(tx))
   use rows <- result.map(store.write(
     tx,
     report_row.insert_sql <> " RETURNING " <> report_row.columns,
@@ -258,12 +258,12 @@ pub fn reports_by(
 /// Is an urgent report against the organisation still waiting for review?
 pub fn open_urgent_against(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(Bool, Fail(e)) {
   store.one(
     read,
     "SELECT 1 FROM reports WHERE target_org_id = ? AND urgent = 1 AND status = 'pending_review' LIMIT 1",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     decode.success(Nil),
   )
   |> result.map(fn(found) { found == Ok(Nil) })
@@ -327,15 +327,15 @@ pub fn triage_page(
 pub fn report_view(r: Report) -> Json {
   let opt = json.nullable(_, json.string)
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.report_json(r.id)),
     #("ts", json.int(r.created_at)),
     #("by", report_row.by_kind_to_json(r.by_kind)),
     #("byId", json.string(r.by_id)),
-    #("byOrgId", opt(r.by_org_id)),
+    #("byOrgId", json.nullable(r.by_org_id, id.org_json)),
     #("targetKind", report_row.target_kind_to_json(r.target_kind)),
-    #("targetOrgId", opt(r.target_org_id)),
+    #("targetOrgId", json.nullable(r.target_org_id, id.org_json)),
     #("targetScoutName", opt(r.target_scout_name)),
-    #("targetPlayerId", opt(r.target_player_id)),
+    #("targetPlayerId", json.nullable(r.target_player_id, id.player_json)),
     #("reason", json.string(r.reason)),
     #("urgent", json.bool(r.urgent)),
     #("status", report_row.status_to_json(r.status)),
@@ -350,11 +350,11 @@ pub fn report_view(r: Report) -> Json {
 pub type Context {
   Context(
     kind: String,
-    player_id: Option(String),
-    org_id: Option(String),
-    user_id: Option(String),
-    channel_id: Option(String),
-    request_id: Option(String),
+    player_id: Option(id.PlayerId),
+    org_id: Option(id.OrgId),
+    user_id: Option(id.OrgUserId),
+    channel_id: Option(id.ChannelId),
+    request_id: Option(id.RequestId),
   )
 }
 
@@ -368,8 +368,8 @@ pub fn record_moderation(
   hit: moderation.Hit,
   excerpt: String,
   at: Int,
-) -> Result(String, Fail(e)) {
-  use id <- result.try(ids.next(tx, "mod"))
+) -> Result(id.ModerationEntryId, Fail(e)) {
+  use id <- result.try(id.next_moderation_entry(tx))
   use _ <- result.try(moderation_row.insert(
     tx,
     moderation_row.New(
@@ -419,7 +419,7 @@ pub fn moderation_page(
       <> flag_row.columns
       <> " FROM moderation_flags WHERE moderation_id IN (SELECT value FROM json_each(?)) ORDER BY moderation_id, ord",
     [
-      json.array(rows, fn(r) { json.string(r.id) })
+      json.array(rows, fn(r) { id.moderation_entry_json(r.id) })
       |> json.to_string
       |> sqlight.text,
     ],
@@ -457,26 +457,32 @@ pub fn moderation_count(
 
 pub fn moderation_view(m: ModerationEntry) -> Json {
   let r = m.row
-  let present = fn(name, v) {
+  let present = fn(name, v: Option(Json)) {
     case v {
-      Some(v) -> [#(name, json.string(v))]
+      Some(v) -> [#(name, v)]
       None -> []
     }
   }
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.moderation_entry_json(r.id)),
     #("ts", json.int(r.created_at)),
     #(
       "context",
       json.object(
         list.flatten([
           [#("kind", json.string(r.context_kind))],
-          present("playerId", r.context_player_id),
-          present("orgId", r.context_org_id),
-          present("userId", r.context_user_id),
-          present("channelId", r.context_channel_id),
-          present("requestId", r.context_request_id),
-          present("trialId", r.context_trial_id),
+          present("playerId", option.map(r.context_player_id, id.player_json)),
+          present("orgId", option.map(r.context_org_id, id.org_json)),
+          present("userId", option.map(r.context_user_id, id.org_user_json)),
+          present(
+            "channelId",
+            option.map(r.context_channel_id, id.channel_json),
+          ),
+          present(
+            "requestId",
+            option.map(r.context_request_id, id.request_json),
+          ),
+          present("trialId", option.map(r.context_trial_id, json.string)),
         ]),
       ),
     ),
@@ -490,14 +496,14 @@ pub fn moderation_view(m: ModerationEntry) -> Json {
 
 pub fn add_note(
   tx: Tx,
-  org_id org_id: String,
-  player_id player_id: String,
-  user_id user_id: String,
+  org_id org_id: id.OrgId,
+  player_id player_id: id.PlayerId,
+  user_id user_id: id.OrgUserId,
   scout_name scout_name: String,
   text text: String,
   at at: Int,
 ) -> Result(Note, Fail(e)) {
-  use id <- result.try(ids.next(tx, "note"))
+  use id <- result.try(id.next_org_note(tx))
   use rows <- result.map(store.write(
     tx,
     note_row.insert_sql <> " RETURNING " <> note_row.columns,
@@ -519,25 +525,25 @@ pub fn add_note(
 /// One club's notes on one player, newest first.
 pub fn notes_for(
   read: Read,
-  org_id: String,
-  player_id: String,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
 ) -> Result(List(Note), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> note_row.columns
       <> " FROM org_notes WHERE org_id = ? AND player_id = ? ORDER BY seq DESC",
-    [sqlight.text(org_id), sqlight.text(player_id)],
+    [id.org_sql(org_id), id.player_sql(player_id)],
     note_row.decoder(),
   )
 }
 
 pub fn note_view(n: Note) -> Json {
   json.object([
-    #("id", json.string(n.id)),
-    #("orgId", json.string(n.org_id)),
-    #("playerId", json.string(n.player_id)),
-    #("userId", json.string(n.user_id)),
+    #("id", id.org_note_json(n.id)),
+    #("orgId", id.org_json(n.org_id)),
+    #("playerId", id.player_json(n.player_id)),
+    #("userId", id.org_user_json(n.user_id)),
     #("scoutName", json.string(n.scout_name)),
     #("text", json.string(n.text)),
     #("ts", json.int(n.created_at)),

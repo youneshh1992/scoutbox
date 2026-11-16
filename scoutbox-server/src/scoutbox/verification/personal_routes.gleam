@@ -20,6 +20,7 @@ import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/platform/temporal
+import scoutbox/rows/id
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_disputes as dispute_row
 import scoutbox/rows/ver_events as event_row
@@ -37,10 +38,10 @@ import wisp.{type Request, type Response}
 const day_ms = 86_400_000
 
 fn mine(access: OrgAccess, claim: Option(Claim)) -> Option(Claim) {
+  // A claim's `subject_id` is polymorphic text.
+  let me = id.org_user_to_string(access.user.id)
   case claim {
-    Some(c)
-      if c.subject_id == access.user.id && c.subject_kind == claim_row.User
-    -> claim
+    Some(c) if c.subject_id == me && c.subject_kind == claim_row.User -> claim
     _ -> None
   }
 }
@@ -49,7 +50,7 @@ fn claim_not_found() -> Response {
   http.error(404, "CLAIM_NOT_FOUND")
 }
 
-fn view(tx: Tx, claim_id: String, now: Int) -> Result(json.Json, Fail(e)) {
+fn view(tx: Tx, claim_id: id.ClaimId, now: Int) -> Result(json.Json, Fail(e)) {
   let read = store.reading(tx)
   use found <- result.try(records.claim(read, claim_id))
   let assert Some(claim) = found as "a claim this act holds exists"
@@ -59,7 +60,7 @@ fn view(tx: Tx, claim_id: String, now: Int) -> Result(json.Json, Fail(e)) {
 /// A status change made by the staff member.
 fn apply_status(
   tx: Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   to: claim_row.Status,
   actor: Actor,
   reason: Option(String),
@@ -85,7 +86,7 @@ pub fn me(ctx: Ctx, access: OrgAccess) -> Response {
   use theirs <- result.try(records.claims_for(
     read,
     claim_row.User,
-    access.user.id,
+    id.org_user_to_string(access.user.id),
   ))
   use views <- result.try(
     list.try_map(theirs, core.subject_claim_view(read, _, now)),
@@ -202,7 +203,7 @@ pub fn identity(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         ..core.blank_claim(
           id,
           claim_row.User,
-          access.user.id,
+          id.org_user_to_string(access.user.id),
           claim_type.PersonIdentity,
           now,
         ),
@@ -241,7 +242,7 @@ pub fn evidence(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Response {
   let now = clock.now_ms()
   let found = store.read(ctx.store, fn(read) { records.claim(read, claim_id) })
@@ -319,7 +320,12 @@ fn add_evidence(
       let read = store.reading(tx)
       // A risk signal, not a verdict.
       use dup <- result.try(case file {
-        Some(f) -> records.digest_seen(read, f.sha256, Some(access.user.id))
+        Some(f) ->
+          records.digest_seen(
+            read,
+            f.sha256,
+            Some(id.org_user_to_string(access.user.id)),
+          )
         None -> Ok(False)
       })
       use ev <- result.try(core.add_evidence(
@@ -334,7 +340,7 @@ fn add_evidence(
                 evidence_row.OrgUser,
                 now,
               ),
-              supplied_by_id: Some(access.user.id),
+              supplied_by_id: Some(id.org_user_to_string(access.user.id)),
               org_id: Some(access.org.id),
               note: Some(option.unwrap(note, "")),
               visibility: case claim.claim_type {
@@ -390,7 +396,7 @@ pub fn submit(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Response {
   // The body is never read: a forged `status` in it changes nothing.
   let now = clock.now_ms()
@@ -476,7 +482,7 @@ fn to_pending(
 /// organisation administrator's confirmation.
 pub fn route_claim(
   tx: Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   actor: Actor,
   asker: Option(String),
   now: Int,
@@ -655,7 +661,7 @@ pub fn affiliation(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
       use theirs <- result.try(records.claims_for(
         store.reading(tx),
         claim_row.User,
-        access.user.id,
+        id.org_user_to_string(access.user.id),
       ))
       let existing =
         list.any(theirs, fn(c) {
@@ -677,7 +683,13 @@ pub fn affiliation(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
       use pair_id <- result.try(ids.next(tx, "vpair"))
       let base = fn(id, t) {
         claim_row.Row(
-          ..core.blank_claim(id, claim_row.User, access.user.id, t, now),
+          ..core.blank_claim(
+            id,
+            claim_row.User,
+            id.org_user_to_string(access.user.id),
+            t,
+            now,
+          ),
           organisation_id: Some(access.org.id),
           status: claim_row.CollectingEvidence,
           pair_id: Some(pair_id),
@@ -753,7 +765,7 @@ pub fn work_email(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             token_row.WorkEmail,
             Some(email),
             Some(token_row.OrgUser),
-            Some(access.user.id),
+            Some(id.org_user_to_string(access.user.id)),
             Some(access.org.id),
             None,
             core.work_email_ttl_ms,
@@ -765,7 +777,7 @@ pub fn work_email(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             core.staff_actor(access, req),
             core.About(
               ..core.nothing,
-              subject_id: Some(access.user.id),
+              subject_id: Some(id.org_user_to_string(access.user.id)),
               org_id: Some(access.org.id),
               detail: records.detail([], [#("domain", Some(domain))]),
             ),
@@ -815,7 +827,8 @@ pub fn confirm_work_email(
   use #(code, email) <- http.body(req, shape, email_codes)
   let now = clock.now_ms()
   let actor = core.staff_actor(access, req)
-  let me = Some(access.user.id)
+  // A token's `subject_id` is polymorphic text.
+  let me = Some(id.org_user_to_string(access.user.id))
   use tx <- act(ctx)
   let read = store.reading(tx)
   use peek <- result.try(core.peek_token(
@@ -823,7 +836,7 @@ pub fn confirm_work_email(
     token_row.WorkEmail,
     code,
     email,
-    Some(access.user.id),
+    Some(id.org_user_to_string(access.user.id)),
     now,
   ))
   case peek {
@@ -831,7 +844,7 @@ pub fn confirm_work_email(
       // A risk signal, kept although the request is refused.
       use _ <- result.try(records.record_failed_attempts(
         tx,
-        access.user.id,
+        id.org_user_to_string(access.user.id),
         token_row.WorkEmail,
       ))
       use _ <- result.try(core.count(tx, "emailChallengeFailures"))
@@ -854,7 +867,7 @@ pub fn confirm_work_email(
       use theirs <- result.try(records.claims_for(
         read,
         claim_row.User,
-        access.user.id,
+        id.org_user_to_string(access.user.id),
       ))
       let open =
         list.filter(theirs, fn(c) {
@@ -883,7 +896,7 @@ pub fn confirm_work_email(
                   evidence_row.OrgUser,
                   now,
                 ),
-                supplied_by_id: Some(access.user.id),
+                supplied_by_id: Some(id.org_user_to_string(access.user.id)),
                 org_id: Some(access.org.id),
                 visibility: evidence_row.OrganisationInternal,
                 domain: Some(domain),
@@ -914,7 +927,7 @@ pub fn confirm_work_email(
                 actor,
                 core.About(
                   ..core.claim_about(c),
-                  subject_id: Some(access.user.id),
+                  subject_id: Some(id.org_user_to_string(access.user.id)),
                   org_id: Some(access.org.id),
                   detail: records.detail([], [
                     #("domain", Some(domain)),
@@ -963,7 +976,7 @@ pub fn dispute(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Response {
   let now = clock.now_ms()
   let found = store.read(ctx.store, records.claim(_, claim_id))
@@ -986,7 +999,7 @@ pub fn dispute(
                   tx,
                   claim,
                   dispute_row.OrgUser,
-                  access.user.id,
+                  id.org_user_to_string(access.user.id),
                   Some(access.user.name),
                   reason,
                   core.staff_actor(access, req),
@@ -1013,7 +1026,7 @@ pub fn open_dispute(
   use <- bool.lazy_guard(open, fn() {
     stop(http.error(409, "DISPUTE_ALREADY_OPEN"))
   })
-  use id <- result.try(ids.next(tx, "vdsp"))
+  use id <- result.try(id.next_dispute(tx))
   use d <- result.try(records.create_dispute(
     tx,
     dispute_row.Row(
@@ -1084,8 +1097,8 @@ pub fn dispute_json(d: records.Dispute) -> json.Json {
 
 pub fn dispute_fields(d: records.Dispute) -> List(#(String, json.Json)) {
   [
-    #("id", json.string(d.id)),
-    #("claimId", json.string(d.claim_id)),
+    #("id", id.dispute_json(d.id)),
+    #("claimId", id.claim_json(d.claim_id)),
     #("byKind", dispute_row.by_kind_to_json(d.by_kind)),
     #("byId", json.string(d.by_id)),
     #("byName", json.nullable(d.by_name, json.string)),
@@ -1112,14 +1125,14 @@ fn attribution_text(a) -> String {
 // ------------------------------------------------------------------------------------------- public
 
 /// `GET /org/verification/public/user/:id`.
-pub fn public_user(ctx: Ctx, user_id: String) -> Response {
+pub fn public_user(ctx: Ctx, user_id: id.OrgUserId) -> Response {
   use read <- core.look(ctx)
   use profile <- result.map(core.public_user(read, user_id, clock.now_ms()))
   http.json(200, profile)
 }
 
 /// `GET /org/verification/public/org/:id`, and the player's and guardian's `/verification/org/:id`.
-pub fn public_org(ctx: Ctx, org_id: String) -> Response {
+pub fn public_org(ctx: Ctx, org_id: id.OrgId) -> Response {
   use read <- core.look(ctx)
   use profile <- result.map(core.public_org(read, org_id, clock.now_ms()))
   http.json(200, profile)
@@ -1134,6 +1147,8 @@ pub fn public_users(ctx: Ctx, req: Request) -> Response {
   use ids <- http.query(req, shape, [])
   let now = clock.now_ms()
   use read <- core.look(ctx)
+  // From the query.
+  let ids = list.map(ids, id.org_user)
   use profiles <- result.map(list.try_map(ids, core.public_user(read, _, now)))
   http.json(
     200,

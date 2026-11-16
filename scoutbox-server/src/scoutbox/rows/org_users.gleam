@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "org_users"
@@ -61,8 +62,8 @@ pub fn provenance_decoder() -> decode.Decoder(Provenance) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
+    id: id.OrgUserId,
+    org_id: id.OrgId,
     name: String,
     name_key: String,
     role: String,
@@ -70,7 +71,7 @@ pub type Row {
     sso_subject: Option(String),
     created_at: Int,
     removed_at: Option(Int),
-    removed_by_id: Option(String),
+    removed_by_id: Option(id.OrgUserId),
     provenance: Option(Provenance),
     mfa_secret: Option(String),
     mfa_enabled_at: Option(Int),
@@ -82,8 +83,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
+  id id: id.OrgUserId,
+  org_id org_id: id.OrgId,
   name name: String,
   name_key name_key: String,
   role role: String,
@@ -111,8 +112,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.org_user_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
   use name <- decode.field(2, decode.string)
   use name_key <- decode.field(3, decode.string)
   use role <- decode.field(4, decode.string)
@@ -120,7 +121,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use sso_subject <- decode.field(6, decode.optional(decode.string))
   use created_at <- decode.field(7, decode.int)
   use removed_at <- decode.field(8, decode.optional(decode.int))
-  use removed_by_id <- decode.field(9, decode.optional(decode.string))
+  use removed_by_id <- decode.field(9, decode.optional(id.org_user_decoder()))
   use provenance <- decode.field(10, decode.optional(provenance_decoder()))
   use mfa_secret <- decode.field(11, decode.optional(decode.string))
   use mfa_enabled_at <- decode.field(12, decode.optional(decode.int))
@@ -153,8 +154,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
+    id.org_user_sql(row.id),
+    id.org_sql(row.org_id),
     sqlight.text(row.name),
     sqlight.text(row.name_key),
     sqlight.text(row.role),
@@ -162,7 +163,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.sso_subject),
     sqlight.int(row.created_at),
     sqlight.nullable(sqlight.int, row.removed_at),
-    sqlight.nullable(sqlight.text, row.removed_by_id),
+    sqlight.nullable(id.org_user_sql, row.removed_by_id),
     sqlight.nullable(
       fn(v) { sqlight.text(provenance_to_string(v)) },
       row.provenance,

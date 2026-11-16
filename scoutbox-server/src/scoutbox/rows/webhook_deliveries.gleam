@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/webhook_event
 import sqlight
 
@@ -120,9 +121,9 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    endpoint_id: String,
-    org_id: String,
+    id: id.WebhookDeliveryId,
+    endpoint_id: id.WebhookEndpointId,
+    org_id: id.OrgId,
     event_id: String,
     type_: webhook_event.WebhookEvent,
     subject_id: String,
@@ -137,9 +138,9 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  endpoint_id endpoint_id: String,
-  org_id org_id: String,
+  id id: id.WebhookDeliveryId,
+  endpoint_id endpoint_id: id.WebhookEndpointId,
+  org_id org_id: id.OrgId,
   event_id event_id: String,
   type_ type_: webhook_event.WebhookEvent,
   subject_id subject_id: String,
@@ -165,9 +166,9 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use endpoint_id <- decode.field(1, decode.string)
-  use org_id <- decode.field(2, decode.string)
+  use id <- decode.field(0, id.webhook_delivery_decoder())
+  use endpoint_id <- decode.field(1, id.webhook_endpoint_decoder())
+  use org_id <- decode.field(2, id.org_decoder())
   use event_id <- decode.field(3, decode.string)
   use type_ <- decode.field(4, webhook_event.decoder())
   use subject_id <- decode.field(5, decode.string)
@@ -199,9 +200,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.endpoint_id),
-    sqlight.text(row.org_id),
+    id.webhook_delivery_sql(row.id),
+    id.webhook_endpoint_sql(row.endpoint_id),
+    id.org_sql(row.org_id),
     sqlight.text(row.event_id),
     sqlight.text(webhook_event.to_string(row.type_)),
     sqlight.text(row.subject_id),

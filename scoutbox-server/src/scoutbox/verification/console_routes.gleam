@@ -20,6 +20,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
@@ -32,7 +33,6 @@ import scoutbox/vocab/claim_type
 import scoutbox/vocab/ver_code
 import scoutbox/vocab/ver_level
 import scoutbox/vocab/verification_method
-import sqlight
 import wisp.{type Request, type Response}
 
 const day_ms = 86_400_000
@@ -53,7 +53,7 @@ pub fn dashboard(ctx: Ctx, access: OrgAccess) -> Response {
   use disputed <- result.try(store.one(
     read,
     "SELECT COUNT(*) FROM ver_disputes d JOIN ver_claims c ON c.id = d.claim_id WHERE d.status = 'open' AND c.organisation_id = ? AND c.subject_kind = 'user'",
-    [sqlight.text(access.org.id)],
+    [id.org_sql(access.org.id)],
     decode.at([0], decode.int),
   ))
   use domains <- result.try(records.domains_of(read, access.org.id))
@@ -113,9 +113,10 @@ fn removed_users(
   theirs
   |> list.map(fn(c) { c.subject_id })
   |> list.unique
-  |> list.try_map(fn(id) {
-    use u <- result.map(staff.by_id(read, id))
-    #(id, case u {
+  |> list.try_map(fn(subject) {
+    // `subject_id` is polymorphic text; these are users' claims.
+    use u <- result.map(staff.by_id(read, id.org_user(subject)))
+    #(subject, case u {
       Some(u) -> u.removed_at != None
       None -> True
     })
@@ -137,7 +138,8 @@ fn guard(
 }
 
 fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
-  use user <- result.try(staff.by_id(read, claim.subject_id))
+  // `subject_id` is polymorphic text; a request's claim is about a user.
+  use user <- result.try(staff.by_id(read, id.org_user(claim.subject_id)))
   use theirs <- result.try(records.claims_for(
     read,
     claim_row.User,
@@ -147,14 +149,14 @@ fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
   let identity =
     list.find(theirs, fn(c) { c.claim_type == claim_type.PersonIdentity })
   json.object([
-    #("claimId", json.string(claim.id)),
+    #("claimId", id.claim_json(claim.id)),
     #("claimType", claim_type.to_json(claim.claim_type)),
     #("pairId", json.nullable(claim.pair_id, json.string)),
     #(
       "person",
       json.object(case user {
         Some(u) -> [
-          #("id", json.string(u.id)),
+          #("id", id.org_user_json(u.id)),
           #("name", json.string(u.name)),
           #("email", json.nullable(u.email, json.string)),
           #("accountCreatedAt", json.int(u.created_at)),
@@ -196,7 +198,7 @@ fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
         fn(c) {
           json.object([
             #("claimType", claim_type.to_json(c.claim_type)),
-            #("organisationId", json.nullable(c.organisation_id, json.string)),
+            #("organisationId", json.nullable(c.organisation_id, id.org_json)),
             #("role", json.nullable(c.role, json.string)),
             #("current", json.bool(c.current)),
           ])
@@ -265,7 +267,7 @@ pub fn decide(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Response {
   let now = clock.now_ms()
   let actor = core.staff_actor(access, req)
@@ -344,7 +346,7 @@ fn self_check(
   now: Int,
   next: fn() -> core.Done,
 ) -> core.Done {
-  case claim.subject_id == access.user.id {
+  case claim.subject_id == id.org_user_to_string(access.user.id) {
     False -> next()
     True -> {
       use _ <- result.try(core.event(
@@ -396,7 +398,7 @@ fn deciding(
       id: claim.subject_id,
       type_: "verification",
       text:,
-      ref_id: Some(claim.id),
+      ref_id: Some(id.claim_to_string(claim.id)),
       at: now,
     ))
     // Not ported yet: the ledger's detail columns (the claim and the action), which this server's ledger table
@@ -439,7 +441,7 @@ fn deciding(
                 claim_row.Row(
                   ..moved,
                   authority_kind: Some(claim_row.OrgAdmin),
-                  authority_id: Some(access.user.id),
+                  authority_id: Some(id.org_user_to_string(access.user.id)),
                 )
               _ -> moved
             }
@@ -665,7 +667,8 @@ pub fn staff_register(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
     })
   use items <- result.map(
     list.try_map(rows, fn(c) {
-      use u <- result.map(staff.by_id(read, c.subject_id))
+      // `subject_id` is polymorphic text; these are users' claims.
+      use u <- result.map(staff.by_id(read, id.org_user(c.subject_id)))
       let eff =
         claims.effective_status(
           c,
@@ -674,12 +677,12 @@ pub fn staff_register(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
           now:,
         )
       json.object([
-        #("claimId", json.string(c.id)),
+        #("claimId", id.claim_json(c.id)),
         #(
           "person",
           json.object(case u {
             Some(u) -> [
-              #("id", json.string(u.id)),
+              #("id", id.org_user_json(u.id)),
               #("name", json.string(u.name)),
             ]
             None -> []
@@ -724,7 +727,7 @@ pub fn departed(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  user_id: String,
+  user_id: id.OrgUserId,
 ) -> Response {
   let now = clock.now_ms()
   let actor = core.staff_actor(access, req)
@@ -755,7 +758,9 @@ pub fn departed(
   use theirs <- result.try(records.staff_claims(read, access.org.id))
   let current =
     list.filter(theirs, fn(c) {
-      c.subject_id == user_id && c.status == claim_row.Verified && c.current
+      c.subject_id == id.org_user_to_string(user_id)
+      && c.status == claim_row.Verified
+      && c.current
     })
   case current {
     [] -> stop(http.error(404, "NO_CURRENT_VERIFIED_CLAIMS"))
@@ -810,7 +815,7 @@ pub fn departed(
                 core.About(
                   ..core.nothing,
                   org_id: Some(access.org.id),
-                  subject_id: Some(a.user_id),
+                  subject_id: Some(id.org_user_to_string(a.user_id)),
                   reason: Some("departed"),
                 ),
                 now,
@@ -820,11 +825,11 @@ pub fn departed(
           use _ <- result.try(notifications.notify(
             tx,
             to: audience.OrgUser,
-            id: user_id,
+            id: id.org_user_to_string(user_id),
             type_: "verification",
             text: access.org.name
               <> " recorded you as departed. Your verified history stays on your profile; if this is wrong you can dispute it from Verification.",
-            ref_id: Some(first.id),
+            ref_id: Some(id.claim_to_string(first.id)),
             at: now,
           ))
           reply(http.json(

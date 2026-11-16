@@ -11,8 +11,8 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/rows/ops_events as ops_row
 import scoutbox/safety/ledger
 import wisp.{type Response}
@@ -27,7 +27,7 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         store.reading(tx),
         org.org.id,
       ))
-      use id <- result.try(ids.next(tx, "ops"))
+      use id <- result.try(id.next_ops_event(tx))
       use _ <- result.map(ops_row.insert(
         tx,
         ops_row.New(
@@ -38,7 +38,7 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
       ))
       json.object([
         #("contract", json.string("audit-export.2026-09.v1")),
-        #("orgId", json.string(org.org.id)),
+        #("orgId", id.org_json(org.org.id)),
         #("exportedAt", json.int(now)),
         #("exportedBy", json.string(org.user.name)),
         #("ledger", json.array(entries, ledger.view)),

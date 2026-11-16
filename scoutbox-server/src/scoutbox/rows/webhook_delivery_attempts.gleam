@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "webhook_delivery_attempts"
@@ -25,7 +26,7 @@ pub fn qualified(alias: String) -> String {
 
 pub type Row {
   Row(
-    delivery_id: String,
+    delivery_id: id.WebhookDeliveryId,
     attempt_no: Int,
     attempted_at: Int,
     http_status: Option(Int),
@@ -35,7 +36,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  delivery_id delivery_id: String,
+  delivery_id delivery_id: id.WebhookDeliveryId,
   attempt_no attempt_no: Int,
   attempted_at attempted_at: Int,
 ) -> Row {
@@ -44,7 +45,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use delivery_id <- decode.field(0, decode.string)
+  use delivery_id <- decode.field(0, id.webhook_delivery_decoder())
   use attempt_no <- decode.field(1, decode.int)
   use attempted_at <- decode.field(2, decode.int)
   use http_status <- decode.field(3, decode.optional(decode.int))
@@ -64,7 +65,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.delivery_id),
+    id.webhook_delivery_sql(row.delivery_id),
     sqlight.int(row.attempt_no),
     sqlight.int(row.attempted_at),
     sqlight.nullable(sqlight.int, row.http_status),

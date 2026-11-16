@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/audience
 import scoutbox/vocab/notification_category
 import sqlight
@@ -29,11 +30,11 @@ pub fn qualified(alias: String) -> String {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.NotificationId,
     occurred_at: Int,
     audience_kind: audience.Audience,
     audience_id: String,
-    staff_id: Option(String),
+    staff_id: Option(id.OrgUserId),
     type_: String,
     text: String,
     ref_id: Option(String),
@@ -51,7 +52,7 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.NotificationId,
     occurred_at: Int,
     audience_kind: audience.Audience,
     audience_id: String,
@@ -71,7 +72,7 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.NotificationId,
   occurred_at occurred_at: Int,
   audience_kind audience_kind: audience.Audience,
   audience_id audience_id: String,
@@ -100,11 +101,11 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.notification_decoder())
   use occurred_at <- decode.field(2, decode.int)
   use audience_kind <- decode.field(3, audience.decoder())
   use audience_id <- decode.field(4, decode.string)
-  use staff_id <- decode.field(5, decode.optional(decode.string))
+  use staff_id <- decode.field(5, decode.optional(id.org_user_decoder()))
   use type_ <- decode.field(6, decode.string)
   use text <- decode.field(7, decode.string)
   use ref_id <- decode.field(8, decode.optional(decode.string))
@@ -146,7 +147,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.notification_sql(row.id),
     sqlight.int(row.occurred_at),
     sqlight.text(audience.to_string(row.audience_kind)),
     sqlight.text(row.audience_id),

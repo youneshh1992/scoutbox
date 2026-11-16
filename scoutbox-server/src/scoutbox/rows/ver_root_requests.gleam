@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/attribution
 import scoutbox/vocab/check_outcome
 import scoutbox/vocab/identity_link
@@ -251,7 +252,7 @@ pub fn check_evidence_completeness_decoder() -> decode.Decoder(
 
 pub type Row {
   Row(
-    id: String,
+    id: id.RootRequestId,
     status: Status,
     org_name: String,
     org_type: ver_org_type.VerOrgType,
@@ -275,7 +276,7 @@ pub type Row {
     check_domain_already_verified_elsewhere: check_outcome.CheckOutcome,
     check_evidence_completeness: CheckEvidenceCompleteness,
     email_proved: Bool,
-    existing_org_id: Option(String),
+    existing_org_id: Option(id.OrgId),
     applicant_secret_hash: String,
     created_at: Int,
     decided_at: Option(Int),
@@ -283,15 +284,15 @@ pub type Row {
     decided_by_id: Option(String),
     decision_attribution: Option(attribution.Attribution),
     decision_reason: Option(String),
-    result_org_id: Option(String),
-    result_user_id: Option(String),
+    result_org_id: Option(id.OrgId),
+    result_user_id: Option(id.OrgUserId),
     identity_link: Option(identity_link.IdentityLink),
   )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.RootRequestId,
   status status: Status,
   org_name org_name: String,
   org_type org_type: ver_org_type.VerOrgType,
@@ -356,7 +357,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.root_request_decoder())
   use status <- decode.field(1, status_decoder())
   use org_name <- decode.field(2, decode.string)
   use org_type <- decode.field(3, ver_org_type.decoder())
@@ -392,7 +393,7 @@ pub fn decoder() -> decode.Decoder(Row) {
     check_evidence_completeness_decoder(),
   )
   use email_proved <- decode.field(23, sqlight.decode_bool())
-  use existing_org_id <- decode.field(24, decode.optional(decode.string))
+  use existing_org_id <- decode.field(24, decode.optional(id.org_decoder()))
   use applicant_secret_hash <- decode.field(25, decode.string)
   use created_at <- decode.field(26, decode.int)
   use decided_at <- decode.field(27, decode.optional(decode.int))
@@ -403,8 +404,8 @@ pub fn decoder() -> decode.Decoder(Row) {
     decode.optional(attribution.decoder()),
   )
   use decision_reason <- decode.field(31, decode.optional(decode.string))
-  use result_org_id <- decode.field(32, decode.optional(decode.string))
-  use result_user_id <- decode.field(33, decode.optional(decode.string))
+  use result_org_id <- decode.field(32, decode.optional(id.org_decoder()))
+  use result_user_id <- decode.field(33, decode.optional(id.org_user_decoder()))
   use identity_link <- decode.field(
     34,
     decode.optional(identity_link.decoder()),
@@ -454,7 +455,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.root_request_sql(row.id),
     sqlight.text(status_to_string(row.status)),
     sqlight.text(row.org_name),
     sqlight.text(ver_org_type.to_string(row.org_type)),
@@ -484,7 +485,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       row.check_evidence_completeness,
     )),
     sqlight.bool(row.email_proved),
-    sqlight.nullable(sqlight.text, row.existing_org_id),
+    sqlight.nullable(id.org_sql, row.existing_org_id),
     sqlight.text(row.applicant_secret_hash),
     sqlight.int(row.created_at),
     sqlight.nullable(sqlight.int, row.decided_at),
@@ -495,8 +496,8 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       row.decision_attribution,
     ),
     sqlight.nullable(sqlight.text, row.decision_reason),
-    sqlight.nullable(sqlight.text, row.result_org_id),
-    sqlight.nullable(sqlight.text, row.result_user_id),
+    sqlight.nullable(id.org_sql, row.result_org_id),
+    sqlight.nullable(id.org_user_sql, row.result_user_id),
     sqlight.nullable(
       fn(v) { sqlight.text(identity_link.to_string(v)) },
       row.identity_link,

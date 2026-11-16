@@ -10,6 +10,7 @@ import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/safety/ledger
 import wisp.{type Response}
@@ -25,7 +26,7 @@ pub fn list(ctx: Ctx, access: OrgAccess) -> Response {
         200,
         json.array(members, fn(u) {
           json.object([
-            #("id", json.string(u.id)),
+            #("id", id.org_user_json(u.id)),
             #("name", json.string(u.name)),
             #("role", json.string(u.role)),
             #("lead", json.bool(access.is_lead(u))),
@@ -38,7 +39,7 @@ pub fn list(ctx: Ctx, access: OrgAccess) -> Response {
 
 /// `POST /org/staff/:userId/remove`: access ends at once (sessions revoked in the same commit), but the account
 /// stays so decisions and history remain attributed to the named person.
-pub fn remove(ctx: Ctx, access: OrgAccess, user_id: String) -> Response {
+pub fn remove(ctx: Ctx, access: OrgAccess, user_id: id.OrgUserId) -> Response {
   use <- access.require_lead(access)
   case user_id == access.user.id {
     True -> http.error(400, "CANNOT_REMOVE_SELF")
@@ -83,7 +84,7 @@ pub fn remove(ctx: Ctx, access: OrgAccess, user_id: String) -> Response {
               #(
                 "removed",
                 json.object([
-                  #("id", json.string(removed.id)),
+                  #("id", id.org_user_json(removed.id)),
                   #("name", json.string(removed.name)),
                   #("removedAt", json.nullable(removed.removed_at, json.int)),
                 ]),

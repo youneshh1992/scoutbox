@@ -9,6 +9,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/platform/table.{type Table}
+import scoutbox/rows/id
 
 type Window {
   Window(count: Int, started: Int)
@@ -90,8 +91,8 @@ pub fn login_failed(limits: Limits, identifier: String, now: Int) -> Nil {
   })
 }
 
-pub fn mfa_locked(limits: Limits, user_id: String, now: Int) -> Bool {
-  table.update(limits.mfa, user_id, fn(entry) {
+pub fn mfa_locked(limits: Limits, user_id: id.OrgUserId, now: Int) -> Bool {
+  table.update(limits.mfa, id.org_user_to_string(user_id), fn(entry) {
     #(entry, case entry {
       Some(c) -> c.locked_until > now
       None -> False
@@ -99,8 +100,8 @@ pub fn mfa_locked(limits: Limits, user_id: String, now: Int) -> Bool {
   })
 }
 
-pub fn mfa_failed(limits: Limits, user_id: String, now: Int) -> Nil {
-  table.update(limits.mfa, user_id, fn(entry) {
+pub fn mfa_failed(limits: Limits, user_id: id.OrgUserId, now: Int) -> Nil {
+  table.update(limits.mfa, id.org_user_to_string(user_id), fn(entry) {
     let c = option.unwrap(entry, Codes(0, 0))
     let fails = c.fails + 1
     let c = case fails >= 5 {
@@ -111,6 +112,8 @@ pub fn mfa_failed(limits: Limits, user_id: String, now: Int) -> Nil {
   })
 }
 
-pub fn mfa_clear(limits: Limits, user_id: String) -> Nil {
-  table.update(limits.mfa, user_id, fn(_) { #(None, Nil) })
+pub fn mfa_clear(limits: Limits, user_id: id.OrgUserId) -> Nil {
+  table.update(limits.mfa, id.org_user_to_string(user_id), fn(_) {
+    #(None, Nil)
+  })
 }

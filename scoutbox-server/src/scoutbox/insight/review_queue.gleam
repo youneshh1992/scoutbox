@@ -15,6 +15,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/id
 import sqlight
 import wisp.{type Response}
 
@@ -42,8 +43,8 @@ fn kind_text(kind: Kind) -> String {
 /// answered, as the TypeScript server's response hook does: a failure here never fails the view.
 pub fn record_exposure(
   ctx: Ctx,
-  org_id: String,
-  player_id: String,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
   kind: Kind,
 ) -> Nil {
   let at = clock.now_ms()
@@ -53,8 +54,8 @@ pub fn record_exposure(
         store.reading(tx),
         "SELECT 1 FROM exposure_events WHERE org_id = ? AND player_id = ? AND kind = ? AND day_index = ?",
         [
-          sqlight.text(org_id),
-          sqlight.text(player_id),
+          id.org_sql(org_id),
+          id.player_sql(player_id),
           sqlight.text(kind_text(kind)),
           sqlight.int(at / day_ms),
         ],
@@ -70,8 +71,8 @@ pub fn record_exposure(
               "INSERT INTO exposure_events (id, org_id, player_id, kind, day_index, at) VALUES (?, ?, ?, ?, ?, ?)",
               [
                 sqlight.text(id),
-                sqlight.text(org_id),
-                sqlight.text(player_id),
+                id.org_sql(org_id),
+                id.player_sql(player_id),
                 sqlight.text(kind_text(kind)),
                 sqlight.int(at / day_ms),
                 sqlight.int(at),
@@ -118,12 +119,12 @@ fn read_queue(
        AND player_id NOT IN (SELECT player_id FROM assessments WHERE org_id = ? AND state <> 'draft')
      GROUP BY player_id ORDER BY first_day, player_id",
       [
-        sqlight.text(org.id),
+        id.org_sql(org.id),
         sqlight.int(today - window_days),
-        sqlight.text(org.id),
+        id.org_sql(org.id),
       ],
       {
-        use player_id <- decode.field(0, decode.string)
+        use player_id <- decode.field(0, id.player_decoder())
         use first_day <- decode.field(1, decode.int)
         decode.success(#(player_id, first_day))
       },
@@ -133,9 +134,9 @@ fn read_queue(
     store.query(
       read,
       "SELECT player_id, due_at FROM review_later WHERE org_id = ? AND due_at > ?",
-      [sqlight.text(org.id), sqlight.int(now)],
+      [id.org_sql(org.id), sqlight.int(now)],
       {
-        use player_id <- decode.field(0, decode.string)
+        use player_id <- decode.field(0, id.player_decoder())
         use due_at <- decode.field(1, decode.int)
         decode.success(#(player_id, due_at))
       },
@@ -188,13 +189,13 @@ fn stale_evaluations(
        AND player_id NOT IN (SELECT player_id FROM assessments WHERE org_id = ? AND state <> 'draft' AND created_at >= ?)
      GROUP BY player_id ORDER BY MIN(rowid)",
       [
-        sqlight.text(a.org.id),
+        id.org_sql(a.org.id),
         sqlight.int(cut),
-        sqlight.text(a.org.id),
+        id.org_sql(a.org.id),
         sqlight.int(cut),
       ],
       {
-        use player_id <- decode.field(0, decode.string)
+        use player_id <- decode.field(0, id.player_decoder())
         use last <- decode.field(1, decode.int)
         decode.success(#(player_id, last))
       },
@@ -219,9 +220,9 @@ fn stale_evaluations(
   })
 }
 
-fn stale_item(player_id: String, name: Option(String), at: Int) -> Json {
+fn stale_item(player_id: id.PlayerId, name: Option(String), at: Int) -> Json {
   json.object([
-    #("playerId", json.string(player_id)),
+    #("playerId", id.player_json(player_id)),
     #("playerName", json.nullable(name, json.string)),
     #("lastAssessedAt", json.int(at)),
     #("note", json.string("last assessed over 180 days ago")),

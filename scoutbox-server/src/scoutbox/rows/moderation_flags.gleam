@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "moderation_flags"
@@ -96,12 +97,12 @@ pub fn flag_decoder() -> decode.Decoder(Flag) {
 }
 
 pub type Row {
-  Row(moderation_id: String, ord: Int, flag: Flag)
+  Row(moderation_id: id.ModerationEntryId, ord: Int, flag: Flag)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  moderation_id moderation_id: String,
+  moderation_id moderation_id: id.ModerationEntryId,
   ord ord: Int,
   flag flag: Flag,
 ) -> Row {
@@ -110,7 +111,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use moderation_id <- decode.field(0, decode.string)
+  use moderation_id <- decode.field(0, id.moderation_entry_decoder())
   use ord <- decode.field(1, decode.int)
   use flag <- decode.field(2, flag_decoder())
   decode.success(Row(moderation_id:, ord:, flag:))
@@ -122,7 +123,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.moderation_id),
+    id.moderation_entry_sql(row.moderation_id),
     sqlight.int(row.ord),
     sqlight.text(flag_to_string(row.flag)),
   ]

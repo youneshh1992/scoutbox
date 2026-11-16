@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party
 import sqlight
@@ -114,16 +115,16 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    player_id: String,
+    id: id.RequestId,
+    player_id: id.PlayerId,
     player_name: Option(String),
-    org_id: String,
+    org_id: id.OrgId,
     org_name: String,
     org_type: Option(org_type.OrgType),
     org_verified: Bool,
     org_safeguarding_certified: Bool,
     org_trusted_partner: Option(Bool),
-    user_id: String,
+    user_id: id.OrgUserId,
     scout_name: Option(String),
     scout_role: Option(String),
     type_: Type,
@@ -141,13 +142,13 @@ pub type Row {
     responded_at: Option(Int),
     responded_by: Option(party.Party),
     routed_to: party.Party,
-    guardian_id: Option(String),
-    contact_channel_id: Option(String),
+    guardian_id: Option(id.GuardianId),
+    contact_channel_id: Option(id.ChannelId),
     case_id: Option(String),
     trial_id: Option(String),
     recipient_type: Option(party.Party),
-    recipient_player_id: Option(String),
-    recipient_guardian_id: Option(String),
+    recipient_player_id: Option(id.PlayerId),
+    recipient_guardian_id: Option(id.GuardianId),
     recipient_minor: Option(Bool),
     invite_key: Option(String),
     invite_fp: Option(String),
@@ -157,13 +158,13 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  player_id player_id: String,
-  org_id org_id: String,
+  id id: id.RequestId,
+  player_id player_id: id.PlayerId,
+  org_id org_id: id.OrgId,
   org_name org_name: String,
   org_verified org_verified: Bool,
   org_safeguarding_certified org_safeguarding_certified: Bool,
-  user_id user_id: String,
+  user_id user_id: id.OrgUserId,
   type_ type_: Type,
   status status: Status,
   created_at created_at: Int,
@@ -213,10 +214,10 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use player_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.request_decoder())
+  use player_id <- decode.field(1, id.player_decoder())
   use player_name <- decode.field(2, decode.optional(decode.string))
-  use org_id <- decode.field(3, decode.string)
+  use org_id <- decode.field(3, id.org_decoder())
   use org_name <- decode.field(4, decode.string)
   use org_type <- decode.field(5, decode.optional(org_type.decoder()))
   use org_verified <- decode.field(6, sqlight.decode_bool())
@@ -225,7 +226,7 @@ pub fn decoder() -> decode.Decoder(Row) {
     8,
     decode.optional(sqlight.decode_bool()),
   )
-  use user_id <- decode.field(9, decode.string)
+  use user_id <- decode.field(9, id.org_user_decoder())
   use scout_name <- decode.field(10, decode.optional(decode.string))
   use scout_role <- decode.field(11, decode.optional(decode.string))
   use type_ <- decode.field(12, type_decoder())
@@ -249,13 +250,22 @@ pub fn decoder() -> decode.Decoder(Row) {
   use responded_at <- decode.field(24, decode.optional(decode.int))
   use responded_by <- decode.field(25, decode.optional(party.decoder()))
   use routed_to <- decode.field(26, party.decoder())
-  use guardian_id <- decode.field(27, decode.optional(decode.string))
-  use contact_channel_id <- decode.field(28, decode.optional(decode.string))
+  use guardian_id <- decode.field(27, decode.optional(id.guardian_decoder()))
+  use contact_channel_id <- decode.field(
+    28,
+    decode.optional(id.channel_decoder()),
+  )
   use case_id <- decode.field(29, decode.optional(decode.string))
   use trial_id <- decode.field(30, decode.optional(decode.string))
   use recipient_type <- decode.field(31, decode.optional(party.decoder()))
-  use recipient_player_id <- decode.field(32, decode.optional(decode.string))
-  use recipient_guardian_id <- decode.field(33, decode.optional(decode.string))
+  use recipient_player_id <- decode.field(
+    32,
+    decode.optional(id.player_decoder()),
+  )
+  use recipient_guardian_id <- decode.field(
+    33,
+    decode.optional(id.guardian_decoder()),
+  )
   use recipient_minor <- decode.field(
     34,
     decode.optional(sqlight.decode_bool()),
@@ -311,10 +321,10 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.player_id),
+    id.request_sql(row.id),
+    id.player_sql(row.player_id),
     sqlight.nullable(sqlight.text, row.player_name),
-    sqlight.text(row.org_id),
+    id.org_sql(row.org_id),
     sqlight.text(row.org_name),
     sqlight.nullable(
       fn(v) { sqlight.text(org_type.to_string(v)) },
@@ -323,7 +333,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.bool(row.org_verified),
     sqlight.bool(row.org_safeguarding_certified),
     sqlight.nullable(sqlight.bool, row.org_trusted_partner),
-    sqlight.text(row.user_id),
+    id.org_user_sql(row.user_id),
     sqlight.nullable(sqlight.text, row.scout_name),
     sqlight.nullable(sqlight.text, row.scout_role),
     sqlight.text(type_to_string(row.type_)),
@@ -344,16 +354,16 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       row.responded_by,
     ),
     sqlight.text(party.to_string(row.routed_to)),
-    sqlight.nullable(sqlight.text, row.guardian_id),
-    sqlight.nullable(sqlight.text, row.contact_channel_id),
+    sqlight.nullable(id.guardian_sql, row.guardian_id),
+    sqlight.nullable(id.channel_sql, row.contact_channel_id),
     sqlight.nullable(sqlight.text, row.case_id),
     sqlight.nullable(sqlight.text, row.trial_id),
     sqlight.nullable(
       fn(v) { sqlight.text(party.to_string(v)) },
       row.recipient_type,
     ),
-    sqlight.nullable(sqlight.text, row.recipient_player_id),
-    sqlight.nullable(sqlight.text, row.recipient_guardian_id),
+    sqlight.nullable(id.player_sql, row.recipient_player_id),
+    sqlight.nullable(id.guardian_sql, row.recipient_guardian_id),
     sqlight.nullable(sqlight.bool, row.recipient_minor),
     sqlight.nullable(sqlight.text, row.invite_key),
     sqlight.nullable(sqlight.text, row.invite_fp),

@@ -39,6 +39,7 @@ import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/request_routes
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/safety/admin
@@ -109,7 +110,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
         ["staff", user_id, "remove"] ->
-          only(req, Post, fn() { staff_routes.remove(ctx, org, user_id) })
+          only(req, Post, fn() {
+            staff_routes.remove(ctx, org, id.org_user(user_id))
+          })
         ["invites"] ->
           only(req, Post, fn() { invite_routes.create(ctx, req, org) })
         ["mfa", "setup"] ->
@@ -121,19 +124,23 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["delivery", "prefs"] ->
           only(req, Put, fn() { delivery_prefs.put(ctx, req, org) })
         ["players", id] ->
-          only(req, Get, fn() { discovery.profile(ctx, org, id) })
+          only(req, Get, fn() { discovery.profile(ctx, org, id.player(id)) })
         ["players", id, "notes"] ->
-          only(req, Post, fn() { discovery.add_note(ctx, req, org, id) })
+          only(req, Post, fn() {
+            discovery.add_note(ctx, req, org, id.player(id))
+          })
         ["players", id, "save"] ->
           only(req, Post, fn() {
-            discovery.mark(ctx, req, org, id, ledger_row.Save)
+            discovery.mark(ctx, req, org, id.player(id), ledger_row.Save)
           })
         ["players", id, "shortlist"] ->
           only(req, Post, fn() {
-            discovery.mark(ctx, req, org, id, ledger_row.Shortlist)
+            discovery.mark(ctx, req, org, id.player(id), ledger_row.Shortlist)
           })
         ["players", id, "request"] ->
-          only(req, Post, fn() { request_routes.request(ctx, req, org, id) })
+          only(req, Post, fn() {
+            request_routes.request(ctx, req, org, id.player(id))
+          })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
@@ -154,21 +161,45 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { report_routes.org_reports(ctx, org) })
         ["notifications"] ->
           only(req, Get, fn() {
-            feed_routes.feed(ctx, audience.OrgUser, org.user.id)
+            feed_routes.feed(
+              ctx,
+              audience.OrgUser,
+              id.org_user_to_string(org.user.id),
+            )
           })
         ["notifications", "read"] ->
           only(req, Post, fn() {
-            feed_routes.read(ctx, req, audience.OrgUser, org.user.id)
+            feed_routes.read(
+              ctx,
+              req,
+              audience.OrgUser,
+              id.org_user_to_string(org.user.id),
+            )
           })
         ["notifications", id, "ack"] ->
           only(req, Post, fn() {
-            delivery.ack(ctx, audience.OrgUser, org.user.id, id)
+            delivery.ack(
+              ctx,
+              audience.OrgUser,
+              id.org_user_to_string(org.user.id),
+              id.notification(id),
+            )
           })
         ["notification-preferences"] ->
           case req.method {
-            Get -> notification_prefs.show(ctx, audience.OrgUser, org.user.id)
+            Get ->
+              notification_prefs.show(
+                ctx,
+                audience.OrgUser,
+                id.org_user_to_string(org.user.id),
+              )
             Put ->
-              notification_prefs.update(ctx, req, audience.OrgUser, org.user.id)
+              notification_prefs.update(
+                ctx,
+                req,
+                audience.OrgUser,
+                id.org_user_to_string(org.user.id),
+              )
             _ -> not_found()
           }
         ["delivery"] ->
@@ -179,11 +210,17 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["channels", "counts"] ->
           only(req, Get, fn() { threads.org_counts(ctx, org) })
         ["channels", id, "messages"] ->
-          only(req, Post, fn() { threads.org_send(ctx, req, org, id) })
+          only(req, Post, fn() {
+            threads.org_send(ctx, req, org, id.channel(id))
+          })
         ["channels", id, "read"] ->
-          only(req, Post, fn() { threads.org_read(ctx, req, org, id) })
+          only(req, Post, fn() {
+            threads.org_read(ctx, req, org, id.channel(id))
+          })
         ["channels", id, "typing"] ->
-          only(req, Post, fn() { threads.org_typing(ctx, req, org, id) })
+          only(req, Post, fn() {
+            threads.org_typing(ctx, req, org, id.channel(id))
+          })
         _ -> not_found()
       }
     }
@@ -200,7 +237,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { player_routes.add_timeline(ctx, req, player) })
         ["export"] -> only(req, Get, fn() { player_routes.export(ctx, player) })
         ["verification", "org", id] ->
-          only(req, Get, fn() { personal.public_org(ctx, id) })
+          only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
           only(req, Post, fn() { invites.player_accept(ctx, req, player) })
         ["references"] -> only(req, Get, fn() { references.mine(ctx, player) })
@@ -218,15 +255,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["prefs"] -> only(req, Post, fn() { record.prefs(ctx, req, player) })
         ["notifications"] ->
           only(req, Get, fn() {
-            feed_routes.feed(ctx, audience.Player, player.player.row.id)
+            feed_routes.feed(
+              ctx,
+              audience.Player,
+              id.player_to_string(player.player.row.id),
+            )
           })
         ["notifications", "read"] ->
           only(req, Post, fn() {
-            feed_routes.read(ctx, req, audience.Player, player.player.row.id)
+            feed_routes.read(
+              ctx,
+              req,
+              audience.Player,
+              id.player_to_string(player.player.row.id),
+            )
           })
         ["notifications", id, "ack"] ->
           only(req, Post, fn() {
-            delivery.ack(ctx, audience.Player, player.player.row.id, id)
+            delivery.ack(
+              ctx,
+              audience.Player,
+              id.player_to_string(player.player.row.id),
+              id.notification(id),
+            )
           })
         ["notification-preferences"] ->
           case req.method {
@@ -234,14 +285,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               notification_prefs.show(
                 ctx,
                 audience.Player,
-                player.player.row.id,
+                id.player_to_string(player.player.row.id),
               )
             Put ->
               notification_prefs.update(
                 ctx,
                 req,
                 audience.Player,
-                player.player.row.id,
+                id.player_to_string(player.player.row.id),
               )
             _ -> not_found()
           }
@@ -253,7 +304,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               transitions.PlayerOwner(player),
-              id,
+              id.transition_case(id),
             )
           })
         ["transitions", id, "revoke-recipient"] ->
@@ -262,20 +313,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               transitions.PlayerOwner(player),
-              id,
+              id.transition_case(id),
             )
           })
         ["channels"] ->
           only(req, Get, fn() { threads.player_list(ctx, player) })
         ["channels", id, "messages"] ->
-          only(req, Post, fn() { threads.player_send(ctx, req, player, id) })
+          only(req, Post, fn() {
+            threads.player_send(ctx, req, player, id.channel(id))
+          })
         ["channels", id, "read"] ->
-          only(req, Post, fn() { threads.player_read(ctx, req, player, id) })
+          only(req, Post, fn() {
+            threads.player_read(ctx, req, player, id.channel(id))
+          })
         ["channels", id, "typing"] ->
-          only(req, Post, fn() { threads.player_typing(ctx, req, player, id) })
+          only(req, Post, fn() {
+            threads.player_typing(ctx, req, player, id.channel(id))
+          })
         ["requests", id, "respond"] ->
           only(req, Post, fn() {
-            request_routes.player_respond(ctx, req, player, id)
+            request_routes.player_respond(ctx, req, player, id.request(id))
           })
         _ -> not_found()
       }
@@ -284,11 +341,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
         ["verification", "org", id] ->
-          only(req, Get, fn() { personal.public_org(ctx, id) })
+          only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
           only(req, Post, fn() { invites.guardian_accept(ctx, req, guardian) })
         ["children", id, "references"] ->
-          only(req, Get, fn() { references.child(ctx, guardian, id) })
+          only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
         ["children"] ->
           case req.method {
@@ -298,11 +355,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           }
         ["children", id, "availability"] ->
           only(req, Post, fn() {
-            record.child_availability(ctx, req, guardian, id)
+            record.child_availability(ctx, req, guardian, id.player(id))
           })
         ["children", id, "medical", "share"] ->
           only(req, Post, fn() {
-            record.child_medical_share(ctx, req, guardian, id)
+            record.child_medical_share(ctx, req, guardian, id.player(id))
           })
         ["coguardian"] ->
           only(req, Post, fn() {
@@ -326,32 +383,50 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["notifications"] ->
           only(req, Get, fn() {
-            feed_routes.feed(ctx, audience.Guardian, guardian.row.id)
+            feed_routes.feed(
+              ctx,
+              audience.Guardian,
+              id.guardian_to_string(guardian.row.id),
+            )
           })
         ["notifications", "read"] ->
           only(req, Post, fn() {
-            feed_routes.read(ctx, req, audience.Guardian, guardian.row.id)
+            feed_routes.read(
+              ctx,
+              req,
+              audience.Guardian,
+              id.guardian_to_string(guardian.row.id),
+            )
           })
         ["notifications", id, "ack"] ->
           only(req, Post, fn() {
-            delivery.ack(ctx, audience.Guardian, guardian.row.id, id)
+            delivery.ack(
+              ctx,
+              audience.Guardian,
+              id.guardian_to_string(guardian.row.id),
+              id.notification(id),
+            )
           })
         ["notification-preferences"] ->
           case req.method {
             Get ->
-              notification_prefs.show(ctx, audience.Guardian, guardian.row.id)
+              notification_prefs.show(
+                ctx,
+                audience.Guardian,
+                id.guardian_to_string(guardian.row.id),
+              )
             Put ->
               notification_prefs.update(
                 ctx,
                 req,
                 audience.Guardian,
-                guardian.row.id,
+                id.guardian_to_string(guardian.row.id),
               )
             _ -> not_found()
           }
         ["children", id, "transitions"] ->
           only(req, Post, fn() {
-            transitions.guardian_open(ctx, req, guardian, id)
+            transitions.guardian_open(ctx, req, guardian, id.player(id))
           })
         ["children-transitions", id, "recipients"] ->
           only(req, Post, fn() {
@@ -359,7 +434,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               transitions.GuardianOwner(guardian),
-              id,
+              id.transition_case(id),
             )
           })
         ["children-transitions", id, "revoke-recipient"] ->
@@ -368,22 +443,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               transitions.GuardianOwner(guardian),
-              id,
+              id.transition_case(id),
             )
           })
         ["channels"] ->
           only(req, Get, fn() { threads.guardian_list(ctx, guardian) })
         ["channels", id, "messages"] ->
-          only(req, Post, fn() { threads.guardian_send(ctx, req, guardian, id) })
+          only(req, Post, fn() {
+            threads.guardian_send(ctx, req, guardian, id.channel(id))
+          })
         ["channels", id, "read"] ->
-          only(req, Post, fn() { threads.guardian_read(ctx, req, guardian, id) })
+          only(req, Post, fn() {
+            threads.guardian_read(ctx, req, guardian, id.channel(id))
+          })
         ["channels", id, "typing"] ->
           only(req, Post, fn() {
-            threads.guardian_typing(ctx, req, guardian, id)
+            threads.guardian_typing(ctx, req, guardian, id.channel(id))
           })
         ["requests", id, "respond"] ->
           only(req, Post, fn() {
-            request_routes.guardian_respond(ctx, req, guardian, id)
+            request_routes.guardian_respond(ctx, req, guardian, id.request(id))
           })
         _ -> not_found()
       }
@@ -396,7 +475,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
         ["support", id, "reply"] ->
-          only(req, Post, fn() { support.reply(ctx, req, id) })
+          only(req, Post, fn() { support.reply(ctx, req, id.ticket(id)) })
         ["delivery"] -> only(req, Get, fn() { delivery.admin_view(ctx) })
         ["delivery", "sweep"] ->
           only(req, Post, fn() { delivery.admin_sweep(ctx, req) })
@@ -415,11 +494,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["guardians"] ->
           only(req, Get, fn() { guardian_routes.admin_list(ctx, req) })
         ["guardians", id, "idv"] ->
-          only(req, Post, fn() { guardian_routes.review_id(ctx, req, id) })
+          only(req, Post, fn() {
+            guardian_routes.review_id(ctx, req, id.guardian(id))
+          })
         ["clubs", id, "credentials"] ->
-          only(req, Post, fn() { console.credentials(ctx, req, id) })
+          only(req, Post, fn() { console.credentials(ctx, req, id.org(id)) })
         ["clubs", id, "verification"] ->
-          only(req, Post, fn() { console.verification(ctx, req, id) })
+          only(req, Post, fn() { console.verification(ctx, req, id.org(id)) })
         _ -> not_found()
       }
     }
@@ -431,29 +512,30 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
 fn verification_admin(ctx: Ctx, req: Request, path: List(String)) -> Response {
   case path {
     ["orgs", id, "appoint-root"] ->
-      only(req, Post, fn() { review.appoint_root(ctx, req, id) })
+      only(req, Post, fn() { review.appoint_root(ctx, req, id.org(id)) })
     ["orgs", id, "revoke"] ->
-      only(req, Post, fn() { review.revoke_org(ctx, req, id) })
+      only(req, Post, fn() { review.revoke_org(ctx, req, id.org(id)) })
     ["queue"] -> only(req, Get, fn() { review.queue(ctx, req) })
-    ["cases", id] -> only(req, Get, fn() { review.case_view(ctx, id) })
+    ["cases", id] ->
+      only(req, Get, fn() { review.case_view(ctx, id.claim(id)) })
     ["evidence", id] ->
       only(req, Get, fn() { review.admin_evidence(ctx, req, id) })
     ["claims", id, "approve"] ->
-      only(req, Post, fn() { review.approve(ctx, req, id) })
+      only(req, Post, fn() { review.approve(ctx, req, id.claim(id)) })
     ["claims", id, "reject"] ->
-      only(req, Post, fn() { review.reject(ctx, req, id) })
+      only(req, Post, fn() { review.reject(ctx, req, id.claim(id)) })
     ["claims", id, "request-info"] ->
-      only(req, Post, fn() { review.request_info(ctx, req, id) })
+      only(req, Post, fn() { review.request_info(ctx, req, id.claim(id)) })
     ["claims", id, "suspend"] ->
       only(req, Post, fn() {
-        review.suspend_or_revoke(ctx, req, id, claim_row.Suspended)
+        review.suspend_or_revoke(ctx, req, id.claim(id), claim_row.Suspended)
       })
     ["claims", id, "revoke"] ->
       only(req, Post, fn() {
-        review.suspend_or_revoke(ctx, req, id, claim_row.Revoked)
+        review.suspend_or_revoke(ctx, req, id.claim(id), claim_row.Revoked)
       })
     ["claims", id, "reinstate"] ->
-      only(req, Post, fn() { review.reinstate(ctx, req, id) })
+      only(req, Post, fn() { review.reinstate(ctx, req, id.claim(id)) })
     ["root-requests", id, "approve"] ->
       only(req, Post, fn() { applications.approve(ctx, req, id) })
     ["root-requests", id, "reject"] ->
@@ -483,11 +565,11 @@ fn verification_org(
     ["me"] -> only(req, Get, fn() { personal.me(ctx, org) })
     ["identity"] -> only(req, Post, fn() { personal.identity(ctx, req, org) })
     ["claims", id, "evidence"] ->
-      only(req, Post, fn() { personal.evidence(ctx, req, org, id) })
+      only(req, Post, fn() { personal.evidence(ctx, req, org, id.claim(id)) })
     ["claims", id, "submit"] ->
-      only(req, Post, fn() { personal.submit(ctx, req, org, id) })
+      only(req, Post, fn() { personal.submit(ctx, req, org, id.claim(id)) })
     ["claims", id, "dispute"] ->
-      only(req, Post, fn() { personal.dispute(ctx, req, org, id) })
+      only(req, Post, fn() { personal.dispute(ctx, req, org, id.claim(id)) })
     ["affiliation"] ->
       only(req, Post, fn() { personal.affiliation(ctx, req, org) })
     ["work-email"] ->
@@ -495,9 +577,9 @@ fn verification_org(
     ["work-email", "confirm"] ->
       only(req, Post, fn() { personal.confirm_work_email(ctx, req, org) })
     ["public", "user", id] ->
-      only(req, Get, fn() { personal.public_user(ctx, id) })
+      only(req, Get, fn() { personal.public_user(ctx, id.org_user(id)) })
     ["public", "org", id] ->
-      only(req, Get, fn() { personal.public_org(ctx, id) })
+      only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
     ["public", "users"] ->
       only(req, Get, fn() { personal.public_users(ctx, req) })
     ["dashboard"] ->
@@ -505,11 +587,15 @@ fn verification_org(
     ["requests"] ->
       only(req, Get, fn() { verification_console.requests(ctx, org) })
     ["requests", id, "decide"] ->
-      only(req, Post, fn() { verification_console.decide(ctx, req, org, id) })
+      only(req, Post, fn() {
+        verification_console.decide(ctx, req, org, id.claim(id))
+      })
     ["staff"] ->
       only(req, Get, fn() { verification_console.staff_register(ctx, req, org) })
     ["staff", id, "departed"] ->
-      only(req, Post, fn() { verification_console.departed(ctx, req, org, id) })
+      only(req, Post, fn() {
+        verification_console.departed(ctx, req, org, id.org_user(id))
+      })
     ["references"] ->
       case req.method {
         Get -> references.list_for_org(ctx, org)
@@ -530,7 +616,9 @@ fn verification_org(
       only(req, Get, fn() { review.licence_providers(ctx) })
     ["licence"] -> only(req, Post, fn() { review.new_licence(ctx, req, org) })
     ["licence", id, "submit"] ->
-      only(req, Post, fn() { review.submit_licence(ctx, req, org, id) })
+      only(req, Post, fn() {
+        review.submit_licence(ctx, req, org, id.claim(id))
+      })
     ["evidence", id] ->
       only(req, Get, fn() { review.org_evidence(ctx, req, org, id) })
     ["domains"] ->
@@ -548,9 +636,11 @@ fn verification_org(
         _ -> not_found()
       }
     ["admins", id, "revoke"] ->
-      only(req, Post, fn() { org_admin.revoke(ctx, req, org, id) })
+      only(req, Post, fn() { org_admin.revoke(ctx, req, org, id.ver_admin(id)) })
     ["root-transfers", id, "approve"] ->
-      only(req, Post, fn() { org_admin.approve_transfer(ctx, req, org, id) })
+      only(req, Post, fn() {
+        org_admin.approve_transfer(ctx, req, org, id.root_transfer(id))
+      })
     ["conflicts"] ->
       case req.method {
         Get -> org_admin.list_conflicts(ctx, org)

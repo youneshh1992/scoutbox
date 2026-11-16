@@ -12,8 +12,10 @@
 import {
   bool,
   bytes,
+  call,
   code,
   dict,
+  ident,
   int,
   list,
   option,
@@ -49,13 +51,13 @@ const actor = (prefix) => (v, ctx) => [
 const claim = record({
   module: 'scoutbox/rows/ver_claims',
   constructor: 'Row',
-  base: ref(BASE, 'claim'),
+  base: call(BASE, 'claim'),
   fields: {
-    id: ['id', string],
+    id: ['id', ident('claim')],
     subjectType: ['subject_kind', subjectKind],
     subjectId: ['subject_id', string],
     claimType: ['claim_type', claimType],
-    organisationId: ['organisation_id', option(string)],
+    organisationId: ['organisation_id', option(ident('org'))],
     role: ['role', option(string)],
     status: ['status', status],
     validFrom: ['valid_from', option(int)],
@@ -86,9 +88,9 @@ const claim = record({
 const org = record({
   module: 'scoutbox/rows/orgs',
   constructor: 'Row',
-  base: ref(BASE, 'org'),
+  base: call(BASE, 'org'),
   fields: {
-    id: ['id', string],
+    id: ['id', ident('org')],
     name: ['name', string],
     verified: ['verified', bool],
     suspended: ['suspended', bool],
@@ -99,10 +101,10 @@ const org = record({
 const admin = record({
   module: 'scoutbox/rows/ver_admins',
   constructor: 'Row',
-  base: ref(BASE, 'admin'),
+  base: call(BASE, 'admin'),
   fields: {
-    orgId: ['org_id', string],
-    userId: ['user_id', string],
+    orgId: ['org_id', ident('org')],
+    userId: ['user_id', ident('org_user')],
     level: ['level', verLevel],
     status: ['status', vocab('scoutbox/rows/ver_admins', 'status_pairs')],
   },
@@ -248,7 +250,7 @@ export const MAP = {
   [`${SHARED}#evidenceFileProblem`]: plain('evidence_file_problem', [file], option(code(CLAIMS, 'file_problem_code'))),
   [`${SHARED}#sniffFileSignature`]: plain('sniff_file_signature', [bytes], option(mime)),
   [`${SHARED}#evidenceCompleteness`]: plain('evidence_completeness', [claimType, list(evidenceType)], completeness),
-  [`${SHARED}#verLevelFor`]: plain('ver_level_for', [list(admin), string, string], option(verLevel)),
+  [`${SHARED}#verLevelFor`]: plain('ver_level_for', [list(admin), ident('org'), ident('org_user')], option(verLevel)),
   [`${SHARED}#orgVerificationStatus`]: {
     module: CLAIMS,
     test: (c, ctx) =>
@@ -264,7 +266,7 @@ export const MAP = {
     now: true,
     test: (c, ctx) => {
       const { subjectType, subjectId, claims, orgsById = { $map: [] }, subjectRemoved = false, now = ctx.now } = c.args[0];
-      const call = `${ctx.use(CLAIMS)}.public_profile(subject_kind: ${subjectKind(subjectType, ctx)}, subject_id: ${string(subjectId)}, claims: ${list(claim)(claims, ctx)}, orgs: ${dict(string, org)(orgsById, ctx)}, subject_removed: ${bool(subjectRemoved)}, now: ${int(now)})`;
+      const call = `${ctx.use(CLAIMS)}.public_profile(subject_kind: ${subjectKind(subjectType, ctx)}, subject_id: ${string(subjectId)}, claims: ${list(claim)(claims, ctx)}, orgs: ${dict(ident('org'), org)(orgsById, ctx)}, subject_removed: ${bool(subjectRemoved)}, now: ${int(now)})`;
       return eq(`${ctx.use('gleam/json')}.to_string(${call})`, string(JSON.stringify(c.result)));
     },
   },

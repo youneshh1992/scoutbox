@@ -6,6 +6,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import scoutbox/rows/id
 import scoutbox/rows/moderation_flags
 import scoutbox/rows/moderation_log
 import scoutbox/rows/orgs as org_row
@@ -87,7 +88,7 @@ fn cases() -> #(List(VisibilityCase), List(ModerationCase)) {
 fn org(name: String) -> org_row.Row {
   let base =
     org_row.new(
-      id: "org-" <> name,
+      id: id.org("org-" <> name),
       name:,
       type_: org_type.Club,
       plan: org_row.PlanPro,

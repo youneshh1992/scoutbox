@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/playing_level
 import scoutbox/vocab/position
 import sqlight
@@ -176,7 +177,7 @@ pub fn contract_status_decoder() -> decode.Decoder(ContractStatus) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.PlayerId,
     name: String,
     birth_date: String,
     country: String,
@@ -196,7 +197,7 @@ pub type Row {
     level: playing_level.PlayingLevel,
     football_category: Option(String),
     identity_verified: Bool,
-    guardian_id: Option(String),
+    guardian_id: Option(id.GuardianId),
     lat: Option(Float),
     lng: Option(Float),
     stats_appearances: Option(Int),
@@ -223,7 +224,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.PlayerId,
   name name: String,
   birth_date birth_date: String,
   country country: String,
@@ -277,7 +278,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.player_decoder())
   use name <- decode.field(1, decode.string)
   use birth_date <- decode.field(2, decode.string)
   use country <- decode.field(3, decode.string)
@@ -297,7 +298,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use level <- decode.field(17, playing_level.decoder())
   use football_category <- decode.field(18, decode.optional(decode.string))
   use identity_verified <- decode.field(19, sqlight.decode_bool())
-  use guardian_id <- decode.field(20, decode.optional(decode.string))
+  use guardian_id <- decode.field(20, decode.optional(id.guardian_decoder()))
   use lat <- decode.field(21, decode.optional(decode.float))
   use lng <- decode.field(22, decode.optional(decode.float))
   use stats_appearances <- decode.field(23, decode.optional(decode.int))
@@ -377,7 +378,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.player_sql(row.id),
     sqlight.text(row.name),
     sqlight.text(row.birth_date),
     sqlight.text(row.country),
@@ -400,7 +401,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(playing_level.to_string(row.level)),
     sqlight.nullable(sqlight.text, row.football_category),
     sqlight.bool(row.identity_verified),
-    sqlight.nullable(sqlight.text, row.guardian_id),
+    sqlight.nullable(id.guardian_sql, row.guardian_id),
     sqlight.nullable(sqlight.float, row.lat),
     sqlight.nullable(sqlight.float, row.lng),
     sqlight.nullable(sqlight.int, row.stats_appearances),

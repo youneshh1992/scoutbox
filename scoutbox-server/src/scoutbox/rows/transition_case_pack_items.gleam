@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "transition_case_pack_items"
@@ -69,7 +70,7 @@ pub fn item_kind_decoder() -> decode.Decoder(ItemKind) {
 
 pub type Row {
   Row(
-    transition_case_id: String,
+    transition_case_id: id.TransitionCaseId,
     item_kind: ItemKind,
     ord: Int,
     item_id: String,
@@ -78,7 +79,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  transition_case_id transition_case_id: String,
+  transition_case_id transition_case_id: id.TransitionCaseId,
   item_kind item_kind: ItemKind,
   ord ord: Int,
   item_id item_id: String,
@@ -88,7 +89,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use transition_case_id <- decode.field(0, decode.string)
+  use transition_case_id <- decode.field(0, id.transition_case_decoder())
   use item_kind <- decode.field(1, item_kind_decoder())
   use ord <- decode.field(2, decode.int)
   use item_id <- decode.field(3, decode.string)
@@ -101,7 +102,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.transition_case_id),
+    id.transition_case_sql(row.transition_case_id),
     sqlight.text(item_kind_to_string(row.item_kind)),
     sqlight.int(row.ord),
     sqlight.text(row.item_id),

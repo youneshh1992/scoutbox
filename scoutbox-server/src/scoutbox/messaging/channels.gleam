@@ -10,12 +10,12 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/requests.{type Request}
 import scoutbox/rows/channels as row
+import scoutbox/rows/id
 import scoutbox/rows/message_attachments as attachment_row
 import scoutbox/rows/messages as message_row
 import scoutbox/vocab/audience.{type Audience}
@@ -59,7 +59,7 @@ fn thread_name(name: String) -> String {
 
 /// Opens the thread of an accepted request, inside the answer's unit.
 pub fn open(tx: Tx, request: Request, at: Int) -> Result(row.Row, Fail(e)) {
-  use id <- result.try(ids.next(tx, "chan"))
+  use id <- result.try(id.next_channel(tx))
   use _ <- result.try(row.insert(
     tx,
     row.New(
@@ -89,8 +89,9 @@ fn select(where: String) -> String {
   "SELECT " <> row.columns <> " FROM channels " <> where
 }
 
-fn ids_json(ids: List(String)) -> sqlight.Value {
-  json.array(ids, json.string) |> json.to_string |> sqlight.text
+/// Ids as a JSON array, for `json_each(?)`.
+fn ids_json(ids: List(a), to_json: fn(a) -> json.Json) -> sqlight.Value {
+  json.array(ids, to_json) |> json.to_string |> sqlight.text
 }
 
 /// Thread rows with their messages and attachments, read in one batch each.
@@ -104,7 +105,7 @@ fn with_messages(
     "SELECT "
       <> message_row.columns
       <> " FROM messages WHERE channel_id IN (SELECT value FROM json_each(?)) ORDER BY channel_id, position",
-    [ids_json(channel_ids)],
+    [ids_json(channel_ids, id.channel_json)],
     message_row.decoder(),
   ))
   use attachments <- result.map(store.query(
@@ -112,7 +113,7 @@ fn with_messages(
     "SELECT "
       <> attachment_row.columns
       <> " FROM message_attachments WHERE message_id IN (SELECT value FROM json_each(?))",
-    [ids_json(list.map(messages, fn(m) { m.id }))],
+    [ids_json(list.map(messages, fn(m) { m.id }), id.message_json)],
     attachment_row.decoder(),
   ))
   let attachment_of =
@@ -130,11 +131,11 @@ fn with_messages(
   })
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Thread), Fail(e)) {
+pub fn by_id(read: Read, id: id.ChannelId) -> Result(Option(Thread), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     select("WHERE id = ?"),
-    [sqlight.text(id)],
+    [id.channel_sql(id)],
     row.decoder(),
   ))
   use threads <- result.map(with_messages(read, rows))
@@ -144,12 +145,12 @@ pub fn by_id(read: Read, id: String) -> Result(Option(Thread), Fail(e)) {
 /// An adult player's own threads, oldest first.
 pub fn for_player(
   read: Read,
-  player_id: String,
+  player_id: id.PlayerId,
 ) -> Result(List(Thread), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     select("WHERE player_id = ? AND counterparty = 'player' ORDER BY seq"),
-    [sqlight.text(player_id)],
+    [id.player_sql(player_id)],
     row.decoder(),
   ))
   with_messages(read, rows)
@@ -158,12 +159,12 @@ pub fn for_player(
 /// A guardian's threads, oldest first.
 pub fn for_guardian(
   read: Read,
-  guardian_id: String,
+  guardian_id: id.GuardianId,
 ) -> Result(List(Thread), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     select("WHERE guardian_id = ? ORDER BY seq"),
-    [sqlight.text(guardian_id)],
+    [id.guardian_sql(guardian_id)],
     row.decoder(),
   ))
   with_messages(read, rows)
@@ -205,7 +206,7 @@ fn active_page(
 /// One organisation's threads; `player_id` limits them to one player's (a Room's inbox panel).
 pub fn page_for_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   player_id: Option(String),
   page: Page,
 ) -> Result(#(List(Thread), Option(String)), Fail(e)) {
@@ -214,10 +215,10 @@ pub fn page_for_org(
       active_page(
         read,
         "org_id = ? AND player_id = ?",
-        [sqlight.text(org_id), sqlight.text(p)],
+        [id.org_sql(org_id), sqlight.text(p)],
         page,
       )
-    None -> active_page(read, "org_id = ?", [sqlight.text(org_id)], page)
+    None -> active_page(read, "org_id = ?", [id.org_sql(org_id)], page)
   }
 }
 
@@ -242,12 +243,12 @@ pub fn count(read: Read) -> Result(Int, Fail(e)) {
 /// The organisation's threads, and the messages from players and guardians since it last opened each thread.
 pub fn counts_for_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(#(Int, Int), Fail(e)) {
   store.one(
     read,
     "SELECT (SELECT COUNT(*) FROM channels WHERE org_id = ?1), (SELECT COUNT(*) FROM messages m JOIN channels c ON c.id = m.channel_id WHERE c.org_id = ?1 AND m.sender_kind <> 'org_user' AND m.created_at > COALESCE(c.read_by_org_at, 0))",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     {
       use threads <- decode.field(0, decode.int)
       use unread <- decode.field(1, decode.int)
@@ -260,7 +261,7 @@ pub fn counts_for_org(
 /// The message this sender already sent with this retry id in this thread.
 pub fn by_client_msg_id(
   read: Read,
-  channel_id: String,
+  channel_id: id.ChannelId,
   sender: Sender,
   client_msg_id: String,
 ) -> Result(Option(Message), Fail(e)) {
@@ -274,12 +275,12 @@ pub fn by_client_msg_id(
       <> id_column
       <> " = ?",
     [
-      sqlight.text(channel_id),
+      id.channel_sql(channel_id),
       sqlight.text(client_msg_id),
       sqlight.text(audience.to_string(sender.kind)),
       sqlight.text(sender.id),
     ],
-    decode.at([0], decode.string),
+    decode.at([0], id.message_decoder()),
   ))
   case found {
     Error(Nil) -> Ok(None)
@@ -287,11 +288,14 @@ pub fn by_client_msg_id(
   }
 }
 
-fn message_by_id(read: Read, id: String) -> Result(Option(Message), Fail(e)) {
+fn message_by_id(
+  read: Read,
+  id: id.MessageId,
+) -> Result(Option(Message), Fail(e)) {
   use rows <- result.try(store.query(
     read,
     "SELECT " <> message_row.columns <> " FROM messages WHERE id = ?",
-    [sqlight.text(id)],
+    [id.message_sql(id)],
     message_row.decoder(),
   ))
   case rows {
@@ -302,7 +306,7 @@ fn message_by_id(read: Read, id: String) -> Result(Option(Message), Fail(e)) {
         "SELECT "
           <> attachment_row.columns
           <> " FROM message_attachments WHERE message_id = ?",
-        [sqlight.text(m.id)],
+        [id.message_sql(m.id)],
         attachment_row.decoder(),
       ))
       Some(Message(m, option.from_result(a)))
@@ -313,7 +317,7 @@ fn message_by_id(read: Read, id: String) -> Result(Option(Message), Fail(e)) {
 /// A clip from the player's media, attached to a message.
 pub type Clip {
   Clip(
-    media_id: String,
+    media_id: id.MediaId,
     title: Option(String),
     url: Option(String),
     verified: Bool,
@@ -323,7 +327,7 @@ pub type Clip {
 /// A message at the end of the thread; the thread's activity time moves to it.
 pub fn append(
   tx: Tx,
-  channel_id: String,
+  channel_id: id.ChannelId,
   sender: Sender,
   text: String,
   clip: Option(Clip),
@@ -331,12 +335,12 @@ pub fn append(
   at: Int,
 ) -> Result(Message, Fail(e)) {
   let read = store.reading(tx)
-  use id <- result.try(ids.next(tx, "msg"))
+  use id <- result.try(id.next_message(tx))
   use position <- result.try(
     store.one(
       read,
       "SELECT COALESCE(MAX(position) + 1, 0) FROM messages WHERE channel_id = ?",
-      [sqlight.text(channel_id)],
+      [id.channel_sql(channel_id)],
       decode.at([0], decode.int),
     )
     |> result.map(result.unwrap(_, 0)),
@@ -353,8 +357,9 @@ pub fn append(
         sender_kind: sender.kind,
         text:,
       ),
+      // The sender's kind says whose id it is.
       sender_user_id: case staff {
-        True -> Some(sender.id)
+        True -> Some(id.org_user(sender.id))
         False -> None
       },
       sender_person_id: case staff {
@@ -383,7 +388,7 @@ pub fn append(
     store.run(
       tx,
       "UPDATE channels SET last_activity_at = MAX(last_activity_at, ?) WHERE id = ?",
-      [sqlight.int(at), sqlight.text(channel_id)],
+      [sqlight.int(at), id.channel_sql(channel_id)],
     ),
   )
   use found <- result.map(message_by_id(read, id))
@@ -394,20 +399,20 @@ pub fn append(
 /// The staff who have written in a thread, in the order they first did.
 pub fn staff_senders(
   read: Read,
-  channel_id: String,
-) -> Result(List(String), Fail(e)) {
+  channel_id: id.ChannelId,
+) -> Result(List(id.OrgUserId), Fail(e)) {
   store.query(
     read,
     "SELECT sender_user_id FROM messages WHERE channel_id = ? AND sender_user_id IS NOT NULL GROUP BY sender_user_id ORDER BY MIN(position)",
-    [sqlight.text(channel_id)],
-    decode.at([0], decode.string),
+    [id.channel_sql(channel_id)],
+    decode.at([0], id.org_user_decoder()),
   )
 }
 
 /// Stamps a read receipt; returns the stored receipts `#(org, counterparty)`.
 pub fn mark_read(
   tx: Tx,
-  channel_id: String,
+  channel_id: id.ChannelId,
   side: Side,
   at: Int,
 ) -> Result(#(Option(Int), Option(Int)), Fail(e)) {
@@ -421,7 +426,7 @@ pub fn mark_read(
       "UPDATE channels SET "
         <> column
         <> " = ? WHERE id = ? RETURNING read_by_org_at, read_by_counterparty_at",
-      [sqlight.int(at), sqlight.text(channel_id)],
+      [sqlight.int(at), id.channel_sql(channel_id)],
       {
         use org <- decode.field(0, decode.optional(decode.int))
         use counterparty <- decode.field(1, decode.optional(decode.int))
@@ -453,14 +458,14 @@ pub fn receipts_json(org: Option(Int), counterparty: Option(Int)) -> Json {
 pub fn message_view(m: Message) -> Json {
   let r = m.row
   let sender_id = case r.sender_user_id, r.sender_person_id {
-    Some(id), _ -> id
-    None, Some(id) -> id
+    Some(user), _ -> id.org_user_to_string(user)
+    None, Some(person) -> person
     None, None -> panic as "a message row has one sender id (its CHECK)"
   }
   json.object(
     list.flatten([
       [
-        #("id", json.string(r.id)),
+        #("id", id.message_json(r.id)),
         #("ts", json.int(r.created_at)),
         #(
           "sender",
@@ -490,7 +495,7 @@ fn attachment_view(a: attachment_row.Row) -> Json {
     attachment_row.Clip ->
       json.object([
         #("kind", json.string("clip")),
-        #("mediaId", opt(a.media_id)),
+        #("mediaId", json.nullable(a.media_id, id.media_json)),
         #("title", opt(a.title)),
         #("url", opt(a.url)),
         #("verifiedClip", json.bool(a.verified_clip == Some(True))),
@@ -511,14 +516,14 @@ pub fn view_fields(t: Thread, viewer: Viewer) -> List(#(String, Json)) {
   let opt = json.nullable(_, json.string)
   list.flatten([
     [
-      #("id", json.string(c.id)),
-      #("requestId", json.string(c.request_id)),
-      #("playerId", json.string(c.player_id)),
+      #("id", id.channel_json(c.id)),
+      #("requestId", id.request_json(c.request_id)),
+      #("playerId", id.player_json(c.player_id)),
       #("playerName", opt(c.player_name)),
     ],
     case viewer {
       ForCounterparty -> []
-      ForOrg | ForAdmin -> [#("orgId", json.string(c.org_id))]
+      ForOrg | ForAdmin -> [#("orgId", id.org_json(c.org_id))]
     },
     [
       #("orgName", json.string(c.org_name)),

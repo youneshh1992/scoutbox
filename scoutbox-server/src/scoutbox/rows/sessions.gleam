@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "sessions"
@@ -113,7 +114,7 @@ pub type Row {
     sid: String,
     kind: Kind,
     ref_id: String,
-    org_user_id: Option(String),
+    org_user_id: Option(id.OrgUserId),
     via: Option(Via),
     created_at: Int,
     expires_at: Int,
@@ -147,7 +148,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use sid <- decode.field(1, decode.string)
   use kind <- decode.field(2, kind_decoder())
   use ref_id <- decode.field(3, decode.string)
-  use org_user_id <- decode.field(4, decode.optional(decode.string))
+  use org_user_id <- decode.field(4, decode.optional(id.org_user_decoder()))
   use via <- decode.field(5, decode.optional(via_decoder()))
   use created_at <- decode.field(6, decode.int)
   use expires_at <- decode.field(7, decode.int)
@@ -173,7 +174,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(row.sid),
     sqlight.text(kind_to_string(row.kind)),
     sqlight.text(row.ref_id),
-    sqlight.nullable(sqlight.text, row.org_user_id),
+    sqlight.nullable(id.org_user_sql, row.org_user_id),
     sqlight.nullable(fn(v) { sqlight.text(via_to_string(v)) }, row.via),
     sqlight.int(row.created_at),
     sqlight.int(row.expires_at),

@@ -117,6 +117,12 @@ export const record =
     return `${ctor}(..${base(ctx)}, ${parts.join(', ')})`;
   };
 
+/** A typed id (`scoutbox/rows/id`): `id.<name>("…")`. */
+export const ident = (name) => (v, ctx) => `${ctx.use('scoutbox/rows/id')}.${name}(${string(v, ctx)})`;
+
+/** A record from a function of a module: `name()` in `module`, imported (a record holding an opaque id can't be a constant). */
+export const call = (module, name) => (ctx) => `${ctx.use(module)}.${name}()`;
+
 /** A value from a module: `name` in `module`, imported. */
 export const ref = (module, name) => (ctx) => `${ctx.use(module)}.${name}`;
 

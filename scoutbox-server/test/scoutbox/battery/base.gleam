@@ -3,6 +3,7 @@
 //// None, False, zero or a placeholder, whichever the TypeScript rule reads an absent field as.
 
 import gleam/option.{None}
+import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
@@ -11,9 +12,9 @@ import scoutbox/vocab/org_type
 import scoutbox/vocab/ver_level
 
 /// A current, unverified claim about a user, with nothing else known.
-pub const claim =
+pub fn claim() -> ver_claims.Row {
   ver_claims.Row(
-    id: "c",
+    id: id.claim("c"),
     subject_kind: ver_claims.User,
     subject_id: "u",
     claim_type: claim_type.ClubRole,
@@ -72,11 +73,12 @@ pub const claim =
     assigned_to: None,
     expiry_warned_at: None,
   )
+}
 
 /// An unverified, unsuspended club.
-pub const org =
+pub fn org() -> orgs.Row {
   orgs.Row(
-    id: "o",
+    id: id.org("o"),
     name: "Org",
     type_: org_type.Club,
     level: None,
@@ -99,13 +101,14 @@ pub const org =
     verification_revoked_at: None,
     created_at: 0,
   )
+}
 
 /// An active viewer grant.
-pub const admin =
+pub fn admin() -> ver_admins.Row {
   ver_admins.Row(
-    id: "a",
-    org_id: "o",
-    user_id: "u",
+    id: id.ver_admin("a"),
+    org_id: id.org("o"),
+    user_id: id.org_user("u"),
     level: ver_level.VerificationViewer,
     status: ver_admins.Active,
     invited_by: "system",
@@ -114,3 +117,4 @@ pub const admin =
     revoked_at: None,
     revoked_by: None,
   )
+}

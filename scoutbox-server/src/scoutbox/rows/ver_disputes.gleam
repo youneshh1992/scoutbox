@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/attribution
 import sqlight
 
@@ -99,8 +100,8 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    claim_id: String,
+    id: id.DisputeId,
+    claim_id: id.ClaimId,
     by_kind: ByKind,
     by_id: String,
     by_name: Option(String),
@@ -117,8 +118,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  claim_id claim_id: String,
+  id id: id.DisputeId,
+  claim_id claim_id: id.ClaimId,
   by_kind by_kind: ByKind,
   by_id by_id: String,
   reason reason: String,
@@ -144,8 +145,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use claim_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.dispute_decoder())
+  use claim_id <- decode.field(1, id.claim_decoder())
   use by_kind <- decode.field(2, by_kind_decoder())
   use by_id <- decode.field(3, decode.string)
   use by_name <- decode.field(4, decode.optional(decode.string))
@@ -183,8 +184,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.claim_id),
+    id.dispute_sql(row.id),
+    id.claim_sql(row.claim_id),
     sqlight.text(by_kind_to_string(row.by_kind)),
     sqlight.text(row.by_id),
     sqlight.nullable(sqlight.text, row.by_name),

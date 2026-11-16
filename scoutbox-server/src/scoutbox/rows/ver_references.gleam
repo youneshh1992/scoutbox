@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/verification_method
 import sqlight
@@ -109,17 +110,17 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.ReferenceId,
     version: Int,
-    supersedes_id: Option(String),
-    player_id: String,
+    supersedes_id: Option(id.ReferenceId),
+    player_id: id.PlayerId,
     player_name: Option(String),
-    coach_user_id: String,
+    coach_user_id: id.OrgUserId,
     coach_name: Option(String),
-    org_id: String,
+    org_id: id.OrgId,
     org_name: Option(String),
     role_at_time: Option(String),
-    provenance_claim_id: String,
+    provenance_claim_id: id.ClaimId,
     provenance_claim_type: claim_type.ClaimType,
     provenance_status: ProvenanceStatus,
     provenance_method: Option(verification_method.VerificationMethod),
@@ -141,12 +142,12 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.ReferenceId,
   version version: Int,
-  player_id player_id: String,
-  coach_user_id coach_user_id: String,
-  org_id org_id: String,
-  provenance_claim_id provenance_claim_id: String,
+  player_id player_id: id.PlayerId,
+  coach_user_id coach_user_id: id.OrgUserId,
+  org_id org_id: id.OrgId,
+  provenance_claim_id provenance_claim_id: id.ClaimId,
   provenance_claim_type provenance_claim_type: claim_type.ClaimType,
   provenance_status provenance_status: ProvenanceStatus,
   provenance_snapshot_at provenance_snapshot_at: Int,
@@ -191,17 +192,17 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.reference_decoder())
   use version <- decode.field(1, decode.int)
-  use supersedes_id <- decode.field(2, decode.optional(decode.string))
-  use player_id <- decode.field(3, decode.string)
+  use supersedes_id <- decode.field(2, decode.optional(id.reference_decoder()))
+  use player_id <- decode.field(3, id.player_decoder())
   use player_name <- decode.field(4, decode.optional(decode.string))
-  use coach_user_id <- decode.field(5, decode.string)
+  use coach_user_id <- decode.field(5, id.org_user_decoder())
   use coach_name <- decode.field(6, decode.optional(decode.string))
-  use org_id <- decode.field(7, decode.string)
+  use org_id <- decode.field(7, id.org_decoder())
   use org_name <- decode.field(8, decode.optional(decode.string))
   use role_at_time <- decode.field(9, decode.optional(decode.string))
-  use provenance_claim_id <- decode.field(10, decode.string)
+  use provenance_claim_id <- decode.field(10, id.claim_decoder())
   use provenance_claim_type <- decode.field(11, claim_type.decoder())
   use provenance_status <- decode.field(12, provenance_status_decoder())
   use provenance_method <- decode.field(
@@ -258,17 +259,17 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.reference_sql(row.id),
     sqlight.int(row.version),
-    sqlight.nullable(sqlight.text, row.supersedes_id),
-    sqlight.text(row.player_id),
+    sqlight.nullable(id.reference_sql, row.supersedes_id),
+    id.player_sql(row.player_id),
     sqlight.nullable(sqlight.text, row.player_name),
-    sqlight.text(row.coach_user_id),
+    id.org_user_sql(row.coach_user_id),
     sqlight.nullable(sqlight.text, row.coach_name),
-    sqlight.text(row.org_id),
+    id.org_sql(row.org_id),
     sqlight.nullable(sqlight.text, row.org_name),
     sqlight.nullable(sqlight.text, row.role_at_time),
-    sqlight.text(row.provenance_claim_id),
+    id.claim_sql(row.provenance_claim_id),
     sqlight.text(claim_type.to_string(row.provenance_claim_type)),
     sqlight.text(provenance_status_to_string(row.provenance_status)),
     sqlight.nullable(

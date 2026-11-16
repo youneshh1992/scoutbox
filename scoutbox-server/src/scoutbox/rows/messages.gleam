@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/audience
 import sqlight
 
@@ -28,12 +29,12 @@ pub fn qualified(alias: String) -> String {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
-    channel_id: String,
+    id: id.MessageId,
+    channel_id: id.ChannelId,
     position: Int,
     created_at: Int,
     sender_kind: audience.Audience,
-    sender_user_id: Option(String),
+    sender_user_id: Option(id.OrgUserId),
     sender_person_id: Option(String),
     sender_name: Option(String),
     text: String,
@@ -44,12 +45,12 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
-    channel_id: String,
+    id: id.MessageId,
+    channel_id: id.ChannelId,
     position: Int,
     created_at: Int,
     sender_kind: audience.Audience,
-    sender_user_id: Option(String),
+    sender_user_id: Option(id.OrgUserId),
     sender_person_id: Option(String),
     sender_name: Option(String),
     text: String,
@@ -59,8 +60,8 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  channel_id channel_id: String,
+  id id: id.MessageId,
+  channel_id channel_id: id.ChannelId,
   position position: Int,
   created_at created_at: Int,
   sender_kind sender_kind: audience.Audience,
@@ -83,12 +84,12 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
-  use channel_id <- decode.field(2, decode.string)
+  use id <- decode.field(1, id.message_decoder())
+  use channel_id <- decode.field(2, id.channel_decoder())
   use position <- decode.field(3, decode.int)
   use created_at <- decode.field(4, decode.int)
   use sender_kind <- decode.field(5, audience.decoder())
-  use sender_user_id <- decode.field(6, decode.optional(decode.string))
+  use sender_user_id <- decode.field(6, decode.optional(id.org_user_decoder()))
   use sender_person_id <- decode.field(7, decode.optional(decode.string))
   use sender_name <- decode.field(8, decode.optional(decode.string))
   use text <- decode.field(9, decode.string)
@@ -114,12 +115,12 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.channel_id),
+    id.message_sql(row.id),
+    id.channel_sql(row.channel_id),
     sqlight.int(row.position),
     sqlight.int(row.created_at),
     sqlight.text(audience.to_string(row.sender_kind)),
-    sqlight.nullable(sqlight.text, row.sender_user_id),
+    sqlight.nullable(id.org_user_sql, row.sender_user_id),
     sqlight.nullable(sqlight.text, row.sender_person_id),
     sqlight.nullable(sqlight.text, row.sender_name),
     sqlight.text(row.text),

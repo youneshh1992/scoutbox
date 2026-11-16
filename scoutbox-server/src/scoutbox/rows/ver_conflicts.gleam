@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_conflicts"
@@ -79,9 +80,9 @@ pub fn kind_decoder() -> decode.Decoder(Kind) {
 
 pub type Row {
   Row(
-    id: String,
-    user_id: String,
-    org_id: String,
+    id: id.ConflictId,
+    user_id: id.OrgUserId,
+    org_id: id.OrgId,
     kind: Kind,
     subject: String,
     note: String,
@@ -92,9 +93,9 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  user_id user_id: String,
-  org_id org_id: String,
+  id id: id.ConflictId,
+  user_id user_id: id.OrgUserId,
+  org_id org_id: id.OrgId,
   kind kind: Kind,
   subject subject: String,
   note note: String,
@@ -114,9 +115,9 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use user_id <- decode.field(1, decode.string)
-  use org_id <- decode.field(2, decode.string)
+  use id <- decode.field(0, id.conflict_decoder())
+  use user_id <- decode.field(1, id.org_user_decoder())
+  use org_id <- decode.field(2, id.org_decoder())
   use kind <- decode.field(3, kind_decoder())
   use subject <- decode.field(4, decode.string)
   use note <- decode.field(5, decode.string)
@@ -140,9 +141,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.user_id),
-    sqlight.text(row.org_id),
+    id.conflict_sql(row.id),
+    id.org_user_sql(row.user_id),
+    id.org_sql(row.org_id),
     sqlight.text(kind_to_string(row.kind)),
     sqlight.text(row.subject),
     sqlight.text(row.note),

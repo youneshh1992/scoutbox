@@ -13,22 +13,21 @@ import scoutbox/identity/staff
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/id
 import scoutbox/rows/support_ticket_refs as ref_row
 import scoutbox/rows/support_ticket_replies as reply_row
 import scoutbox/rows/support_tickets as row
 import scoutbox/vocab/audience
-import sqlight
 import wisp.{type Request, type Response}
 
 pub type Ticket {
   Ticket(row: row.Row, refs: List(ref_row.Row), replies: List(reply_row.Row))
 }
 
-fn by_id(read: Read, id: String) -> Result(Option(Ticket), Fail(e)) {
-  let args = [sqlight.text(id)]
+fn by_id(read: Read, id: id.TicketId) -> Result(Option(Ticket), Fail(e)) {
+  let args = [id.ticket_sql(id)]
   use found <- result.try(store.one(
     read,
     "SELECT " <> row.columns <> " FROM support_tickets WHERE id = ?",
@@ -62,9 +61,9 @@ fn by_id(read: Read, id: String) -> Result(Option(Ticket), Fail(e)) {
 fn view(t: Ticket) -> Json {
   let r = t.row
   json.object([
-    #("id", json.string(r.id)),
-    #("orgId", json.string(r.org_id)),
-    #("byUserId", json.string(r.by_user_id)),
+    #("id", id.ticket_json(r.id)),
+    #("orgId", id.org_json(r.org_id)),
+    #("byUserId", id.org_user_json(r.by_user_id)),
     #("byName", json.nullable(r.by_name, json.string)),
     #("subject", json.string(r.subject)),
     #("body", json.string(r.body)),
@@ -126,7 +125,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       let now = clock.now_ms()
       let made =
         store.unit(ctx.store, fn(tx) {
-          use id <- result.try(ids.next(tx, "tkt"))
+          use id <- result.try(id.next_ticket(tx))
           use _ <- result.try(row.insert(
             tx,
             row.Row(
@@ -177,7 +176,7 @@ type Reply {
 }
 
 /// `POST /admin/support/:id/reply`: Trust & Safety answers, and the staff member who filed the ticket hears.
-pub fn reply(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn reply(ctx: Ctx, req: Request, id: id.TicketId) -> Response {
   case store.read(ctx.store, by_id(_, id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(404, "TICKET_NOT_FOUND")
@@ -210,7 +209,7 @@ pub fn reply(ctx: Ctx, req: Request, id: String) -> Response {
                   store.run(
                     tx,
                     "UPDATE support_tickets SET status = 'closed' WHERE id = ?",
-                    [sqlight.text(t.row.id)],
+                    [id.ticket_sql(t.row.id)],
                   )
                 _ -> Ok(Nil)
               })
@@ -220,10 +219,10 @@ pub fn reply(ctx: Ctx, req: Request, id: String) -> Response {
                   notifications.notify(
                     tx,
                     to: audience.OrgUser,
-                    id: u.id,
+                    id: id.org_user_to_string(u.id),
                     type_: "support",
                     text: "Support replied on “" <> t.row.subject <> "”.",
-                    ref_id: Some(t.row.id),
+                    ref_id: Some(id.ticket_to_string(t.row.id)),
                     at: now,
                   )
                 None -> Ok(Nil)

@@ -19,9 +19,9 @@ import scoutbox/integrations/webhooks
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/transition_case_history as history_row
 import scoutbox/rows/transition_case_pack_items as item_row
 import scoutbox/rows/transition_case_recipients as recipient_row
@@ -59,8 +59,8 @@ fn clip(name: String) -> String {
 
 // ------------------------------------------------------------------------------------------------- storage
 
-fn by_id(read: Read, id: String) -> Result(Option(Case), Fail(e)) {
-  let args = [sqlight.text(id)]
+fn by_id(read: Read, id: id.TransitionCaseId) -> Result(Option(Case), Fail(e)) {
+  let args = [id.transition_case_sql(id)]
   use found <- result.try(store.one(
     read,
     "SELECT " <> row.columns <> " FROM transition_cases WHERE id = ?",
@@ -101,14 +101,14 @@ fn by_id(read: Read, id: String) -> Result(Option(Case), Fail(e)) {
 
 fn record(
   tx: Tx,
-  case_id: String,
+  case_id: id.TransitionCaseId,
   actor: Actor,
   action: history_row.Action,
   items: Option(Int),
-  org_id: Option(String),
+  org_id: Option(id.OrgId),
   at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use id <- result.try(ids.next(tx, "aud"))
+  use id <- result.try(id.next_transition_event(tx))
   history_row.insert(
     tx,
     history_row.Row(
@@ -131,12 +131,15 @@ fn record(
 }
 
 /// The first current staff member of an organisation: who hears about its grants.
-fn first_staff(read: Read, org_id: String) -> Result(Option(String), Fail(e)) {
+fn first_staff(
+  read: Read,
+  org_id: id.OrgId,
+) -> Result(Option(id.OrgUserId), Fail(e)) {
   store.one(
     read,
     "SELECT id FROM org_users WHERE org_id = ? AND removed_at IS NULL ORDER BY rowid LIMIT 1",
-    [sqlight.text(org_id)],
-    decode.at([0], decode.string),
+    [id.org_sql(org_id)],
+    decode.at([0], id.org_user_decoder()),
   )
   |> result.map(option.from_result)
 }
@@ -146,7 +149,7 @@ fn first_staff(read: Read, org_id: String) -> Result(Option(String), Fail(e)) {
 fn recipient_view(r: recipient_row.Row) -> Json {
   let opt = json.nullable(_, json.int)
   json.object([
-    #("orgId", json.string(r.org_id)),
+    #("orgId", id.org_json(r.org_id)),
     #("orgName", json.nullable(r.org_name, json.string)),
     #("grantedAt", json.int(r.granted_at)),
     #("expiresAt", json.int(r.expires_at)),
@@ -170,8 +173,8 @@ fn case_view(c: Case) -> Json {
     |> json.array(json.string)
   }
   json.object([
-    #("id", json.string(t.id)),
-    #("playerId", json.string(t.player_id)),
+    #("id", id.transition_case_json(t.id)),
+    #("playerId", id.player_json(t.player_id)),
     #("playerName", opt(t.player_name)),
     #("startedBy", started),
     #("caseOwner", started),
@@ -190,7 +193,7 @@ fn case_view(c: Case) -> Json {
     #("placement", case t.placement_org_id, t.placement_at {
       Some(org_id), Some(at) ->
         json.object([
-          #("orgId", json.string(org_id)),
+          #("orgId", id.org_json(org_id)),
           #("orgName", opt(t.placement_org_name)),
           #("at", json.int(at)),
           #("note", opt(t.placement_note)),
@@ -210,7 +213,7 @@ fn case_view(c: Case) -> Json {
       "history",
       json.array(c.history, fn(h) {
         json.object([
-          #("id", json.string(h.id)),
+          #("id", id.transition_event_json(h.id)),
           #("at", json.int(h.at)),
           #("byKind", history_row.by_kind_to_json(h.by_kind)),
           #("byId", json.string(h.by_id)),
@@ -218,7 +221,7 @@ fn case_view(c: Case) -> Json {
           #("action", history_row.action_to_json(h.action)),
           #("detail", case h.detail_items, h.detail_org_id {
             Some(n), _ -> json.object([#("items", json.int(n))])
-            None, Some(org_id) -> json.object([#("orgId", json.string(org_id))])
+            None, Some(org_id) -> json.object([#("orgId", id.org_json(org_id))])
             None, None -> json.null()
           }),
         ])
@@ -231,7 +234,7 @@ fn case_view(c: Case) -> Json {
 
 type Selection {
   Selection(
-    media_ids: List(String),
+    media_ids: List(id.MediaId),
     evidence_ids: List(String),
     feedback_ids: List(String),
   )
@@ -252,7 +255,7 @@ fn new_case_shape() -> input.Shape(NewCase) {
     use evidence_ids <- input.field("evidenceIds", ids())
     use feedback_ids <- input.field("feedbackIds", ids())
     input.done(Selection(
-      media_ids: option.unwrap(media_ids, []),
+      media_ids: option.unwrap(media_ids, []) |> list.map(id.media),
       evidence_ids: option.unwrap(evidence_ids, []),
       feedback_ids: option.unwrap(feedback_ids, []),
     ))
@@ -296,14 +299,14 @@ fn build_pack(
 fn owned(
   read: Read,
   sql: String,
-  player_id: String,
+  player_id: id.PlayerId,
   wanted: List(String),
 ) -> Result(List(String), Fail(e)) {
   use found <- result.map(store.query(
     read,
     sql,
     [
-      sqlight.text(player_id),
+      id.player_sql(player_id),
       json.array(wanted, json.string) |> json.to_string |> sqlight.text,
     ],
     decode.at([0], decode.string),
@@ -331,7 +334,7 @@ fn open(ctx: Ctx, req: Request, player: Player, actor: Actor) -> Response {
       let now = clock.now_ms()
       let opened =
         store.unit(ctx.store, fn(tx) {
-          use id <- result.try(ids.next(tx, "trn"))
+          use id <- result.try(id.next_transition_case(tx))
           use _ <- result.try(row.insert(
             tx,
             row.Row(
@@ -351,7 +354,10 @@ fn open(ctx: Ctx, req: Request, player: Player, actor: Actor) -> Response {
           ))
           let items =
             list.flatten([
-              list.map(pack.media_ids, fn(i) { #(item_row.Media, i) }),
+              // `item_id` is polymorphic text: `kind` says what it is.
+              list.map(pack.media_ids, fn(i) {
+                #(item_row.Media, id.media_to_string(i))
+              }),
               list.map(pack.evidence_ids, fn(i) { #(item_row.Evidence, i) }),
               list.map(pack.feedback_ids, fn(i) { #(item_row.Feedback, i) }),
             ])
@@ -415,7 +421,11 @@ pub fn player_open(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         ctx,
         req,
         p.player,
-        Actor(party.Player, p.player.row.id, p.player.row.name),
+        Actor(
+          party.Player,
+          id.player_to_string(p.player.row.id),
+          p.player.row.name,
+        ),
       )
   }
 }
@@ -425,7 +435,7 @@ pub fn guardian_open(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  child_id: String,
+  child_id: id.PlayerId,
 ) -> Response {
   case list.contains(g.child_ids, child_id) {
     False -> http.error(403, "NOT_YOUR_CHILD")
@@ -434,7 +444,12 @@ pub fn guardian_open(
         Error(failure) -> http.internal(failure)
         Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
         Ok(Some(child)) ->
-          open(ctx, req, child, Actor(party.Guardian, g.row.id, g.row.name))
+          open(
+            ctx,
+            req,
+            child,
+            Actor(party.Guardian, id.guardian_to_string(g.row.id), g.row.name),
+          )
       }
   }
 }
@@ -449,12 +464,23 @@ pub type Owner {
 
 fn actor_of(owner: Owner) -> Actor {
   case owner {
-    PlayerOwner(p) -> Actor(party.Player, p.player.row.id, p.player.row.name)
-    GuardianOwner(g) -> Actor(party.Guardian, g.row.id, g.row.name)
+    PlayerOwner(p) ->
+      Actor(
+        party.Player,
+        id.player_to_string(p.player.row.id),
+        p.player.row.name,
+      )
+    GuardianOwner(g) ->
+      Actor(party.Guardian, id.guardian_to_string(g.row.id), g.row.name)
   }
 }
 
-fn owned_case(ctx: Ctx, owner: Owner, id: String, next: fn(Case) -> Response) {
+fn owned_case(
+  ctx: Ctx,
+  owner: Owner,
+  id: id.TransitionCaseId,
+  next: fn(Case) -> Response,
+) {
   case store.read(ctx.store, by_id(_, id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(404, "TRANSITION_NOT_FOUND")
@@ -472,7 +498,7 @@ fn owned_case(ctx: Ctx, owner: Owner, id: String, next: fn(Case) -> Response) {
 }
 
 type Grant {
-  Grant(org_id: String, days: Option(Int))
+  Grant(org_id: id.OrgId, days: Option(Int))
 }
 
 /// `POST /…/:id/recipients`: one club, for a number of days within the case's period.
@@ -480,7 +506,7 @@ pub fn add_recipient(
   ctx: Ctx,
   req: Request,
   owner: Owner,
-  id: String,
+  id: id.TransitionCaseId,
 ) -> Response {
   use c <- owned_case(ctx, owner, id)
   let now = clock.now_ms()
@@ -501,7 +527,7 @@ pub fn add_recipient(
           "days",
           input.nullish(input.whole_number(1, 90)),
         )
-        input.done(Grant(org_id:, days:))
+        input.done(Grant(org_id: id.org(org_id), days:))
       }
       use body <- http.body(req, shape, [])
       grant(ctx, c, actor_of(owner), body, now)
@@ -575,7 +601,11 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
             store.one(
               read,
               "SELECT COUNT(*) FROM transition_case_recipients WHERE transition_case_id = ? AND org_id = ? AND revoked_at IS NULL AND expires_at > ?",
-              [sqlight.text(c.row.id), sqlight.text(org.id), sqlight.int(now)],
+              [
+                id.transition_case_sql(c.row.id),
+                id.org_sql(org.id),
+                sqlight.int(now),
+              ],
               decode.at([0], decode.int),
             )
             |> result.map(result.unwrap(_, 0)),
@@ -587,7 +617,7 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                 store.one(
                   read,
                   "SELECT COALESCE(MAX(ord) + 1, 0) FROM transition_case_recipients WHERE transition_case_id = ?",
-                  [sqlight.text(c.row.id)],
+                  [id.transition_case_sql(c.row.id)],
                   decode.at([0], decode.int),
                 )
                 |> result.map(result.unwrap(_, 0)),
@@ -607,7 +637,7 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                 tx,
                 Some(org.id),
                 webhook_event.TransitionGranted,
-                c.row.id,
+                id.transition_case_to_string(c.row.id),
                 now,
               ))
               use staff <- result.try(first_staff(read, org.id))
@@ -616,12 +646,12 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                   notifications.notify(
                     tx,
                     to: audience.OrgUser,
-                    id: uid,
+                    id: id.org_user_to_string(uid),
                     type_: "transition",
                     text: "📦 A player has shared a transition evidence pack with "
                       <> org.name
                       <> ". Open Transitions to review it.",
-                    ref_id: Some(c.row.id),
+                    ref_id: Some(id.transition_case_to_string(c.row.id)),
                     at: now,
                   )
                 None -> Ok(Nil)
@@ -653,12 +683,12 @@ pub fn revoke_recipient(
   ctx: Ctx,
   req: Request,
   owner: Owner,
-  id: String,
+  id: id.TransitionCaseId,
 ) -> Response {
   use c <- owned_case(ctx, owner, id)
   let shape = {
     use org_id <- input.field("orgId", input.required(input.id()))
-    input.done(org_id)
+    input.done(id.org(org_id))
   }
   use org_id <- http.body(req, shape, [])
   case
@@ -673,7 +703,11 @@ pub fn revoke_recipient(
             store.run(
               tx,
               "UPDATE transition_case_recipients SET revoked_at = ? WHERE transition_case_id = ? AND ord = ? AND revoked_at IS NULL",
-              [sqlight.int(now), sqlight.text(c.row.id), sqlight.int(r.ord)],
+              [
+                sqlight.int(now),
+                id.transition_case_sql(c.row.id),
+                sqlight.int(r.ord),
+              ],
             ),
           )
           use _ <- result.try(record(
@@ -689,7 +723,7 @@ pub fn revoke_recipient(
             tx,
             Some(r.org_id),
             webhook_event.TransitionRevoked,
-            c.row.id,
+            id.transition_case_to_string(c.row.id),
             now,
           ))
           use staff <- result.try(first_staff(store.reading(tx), r.org_id))
@@ -698,12 +732,12 @@ pub fn revoke_recipient(
               notifications.notify_action(
                 tx,
                 to: audience.OrgUser,
-                id: uid,
+                id: id.org_user_to_string(uid),
                 type_: "transition",
                 text: "A transition evidence pack shared with "
                   <> option.unwrap(r.org_name, "null")
                   <> " was withdrawn. Platform access has ended; anything your staff already downloaded is outside the platform and cannot be remotely erased — please delete local copies.",
-                ref_id: Some(c.row.id),
+                ref_id: Some(id.transition_case_to_string(c.row.id)),
                 deadline: Some(now + 7 * day),
                 at: now,
               )

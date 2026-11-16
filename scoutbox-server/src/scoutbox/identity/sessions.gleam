@@ -8,6 +8,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/sessions as row
 import sqlight
 
@@ -15,9 +16,10 @@ pub const ttl_ms = 2_592_000_000
 
 /// Who a session signs in. Only staff sessions are minted by the routes this server runs so far.
 pub type Holder {
-  Player(id: String)
-  Guardian(id: String)
-  OrgStaff(org_id: String, user_id: String)
+  Player(id: id.PlayerId)
+  Guardian(id: id.GuardianId)
+  OrgStaff(org_id: id.OrgId, user_id: id.OrgUserId)
+  /// A Trust & Safety reviewer, who has no table here.
   Reviewer(id: String)
 }
 
@@ -25,11 +27,12 @@ pub type Session {
   Session(sid: String, holder: Holder, created_at: Int, expires_at: Int)
 }
 
+/// `ref_id` is polymorphic: `kind` says whose id it is.
 fn session(r: row.Row) -> Result(Session, Nil) {
   let holder = case r.kind, r.org_user_id {
-    row.Org, Some(user_id) -> Ok(OrgStaff(r.ref_id, user_id))
-    row.Player, None -> Ok(Player(r.ref_id))
-    row.Guardian, None -> Ok(Guardian(r.ref_id))
+    row.Org, Some(user_id) -> Ok(OrgStaff(id.org(r.ref_id), user_id))
+    row.Player, None -> Ok(Player(id.player(r.ref_id)))
+    row.Guardian, None -> Ok(Guardian(id.guardian(r.ref_id)))
     row.TsReviewer, None -> Ok(Reviewer(r.ref_id))
     _, _ -> Error(Nil)
   }
@@ -46,10 +49,14 @@ fn session(r: row.Row) -> Result(Session, Nil) {
 pub fn create(tx: Tx, holder: Holder, now: Int) -> Result(String, Fail(e)) {
   let token = secrets.random_hex(24)
   let #(kind, ref_id, user_id) = case holder {
-    Player(id) -> #(row.Player, id, None)
-    Guardian(id) -> #(row.Guardian, id, None)
-    OrgStaff(org_id, user_id) -> #(row.Org, org_id, Some(user_id))
-    Reviewer(id) -> #(row.TsReviewer, id, None)
+    Player(p) -> #(row.Player, id.player_to_string(p), None)
+    Guardian(g) -> #(row.Guardian, id.guardian_to_string(g), None)
+    OrgStaff(org_id, user_id) -> #(
+      row.Org,
+      id.org_to_string(org_id),
+      Some(user_id),
+    )
+    Reviewer(reviewer) -> #(row.TsReviewer, reviewer, None)
   }
   use _ <- result.try(
     store.run(
@@ -93,8 +100,8 @@ pub fn by_token(
 }
 
 /// Ends every session of a staff member.
-pub fn revoke_org_user(tx: Tx, user_id: String) -> Result(Nil, Fail(e)) {
+pub fn revoke_org_user(tx: Tx, user_id: id.OrgUserId) -> Result(Nil, Fail(e)) {
   store.run(tx, "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ?", [
-    sqlight.text(user_id),
+    id.org_user_sql(user_id),
   ])
 }

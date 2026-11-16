@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "moderation_log"
@@ -65,14 +66,14 @@ pub fn severity_decoder() -> decode.Decoder(Severity) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.ModerationEntryId,
     created_at: Int,
     context_kind: String,
-    context_player_id: Option(String),
-    context_org_id: Option(String),
-    context_user_id: Option(String),
-    context_channel_id: Option(String),
-    context_request_id: Option(String),
+    context_player_id: Option(id.PlayerId),
+    context_org_id: Option(id.OrgId),
+    context_user_id: Option(id.OrgUserId),
+    context_channel_id: Option(id.ChannelId),
+    context_request_id: Option(id.RequestId),
     context_trial_id: Option(String),
     severity: Severity,
     excerpt: String,
@@ -82,14 +83,14 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.ModerationEntryId,
     created_at: Int,
     context_kind: String,
-    context_player_id: Option(String),
-    context_org_id: Option(String),
-    context_user_id: Option(String),
-    context_channel_id: Option(String),
-    context_request_id: Option(String),
+    context_player_id: Option(id.PlayerId),
+    context_org_id: Option(id.OrgId),
+    context_user_id: Option(id.OrgUserId),
+    context_channel_id: Option(id.ChannelId),
+    context_request_id: Option(id.RequestId),
     context_trial_id: Option(String),
     severity: Severity,
     excerpt: String,
@@ -98,7 +99,7 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.ModerationEntryId,
   created_at created_at: Int,
   context_kind context_kind: String,
   severity severity: Severity,
@@ -122,14 +123,20 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.moderation_entry_decoder())
   use created_at <- decode.field(2, decode.int)
   use context_kind <- decode.field(3, decode.string)
-  use context_player_id <- decode.field(4, decode.optional(decode.string))
-  use context_org_id <- decode.field(5, decode.optional(decode.string))
-  use context_user_id <- decode.field(6, decode.optional(decode.string))
-  use context_channel_id <- decode.field(7, decode.optional(decode.string))
-  use context_request_id <- decode.field(8, decode.optional(decode.string))
+  use context_player_id <- decode.field(4, decode.optional(id.player_decoder()))
+  use context_org_id <- decode.field(5, decode.optional(id.org_decoder()))
+  use context_user_id <- decode.field(6, decode.optional(id.org_user_decoder()))
+  use context_channel_id <- decode.field(
+    7,
+    decode.optional(id.channel_decoder()),
+  )
+  use context_request_id <- decode.field(
+    8,
+    decode.optional(id.request_decoder()),
+  )
   use context_trial_id <- decode.field(9, decode.optional(decode.string))
   use severity <- decode.field(10, severity_decoder())
   use excerpt <- decode.field(11, decode.string)
@@ -155,14 +162,14 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.moderation_entry_sql(row.id),
     sqlight.int(row.created_at),
     sqlight.text(row.context_kind),
-    sqlight.nullable(sqlight.text, row.context_player_id),
-    sqlight.nullable(sqlight.text, row.context_org_id),
-    sqlight.nullable(sqlight.text, row.context_user_id),
-    sqlight.nullable(sqlight.text, row.context_channel_id),
-    sqlight.nullable(sqlight.text, row.context_request_id),
+    sqlight.nullable(id.player_sql, row.context_player_id),
+    sqlight.nullable(id.org_sql, row.context_org_id),
+    sqlight.nullable(id.org_user_sql, row.context_user_id),
+    sqlight.nullable(id.channel_sql, row.context_channel_id),
+    sqlight.nullable(id.request_sql, row.context_request_id),
     sqlight.nullable(sqlight.text, row.context_trial_id),
     sqlight.text(severity_to_string(row.severity)),
     sqlight.text(row.excerpt),

@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/org_type
 import sqlight
 
@@ -124,7 +125,7 @@ pub fn plan_decoder() -> decode.Decoder(Plan) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.OrgId,
     name: String,
     type_: org_type.OrgType,
     level: Option(Level),
@@ -151,7 +152,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.OrgId,
   name name: String,
   type_ type_: org_type.OrgType,
   plan plan: Plan,
@@ -185,7 +186,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.org_decoder())
   use name <- decode.field(1, decode.string)
   use type_ <- decode.field(2, org_type.decoder())
   use level <- decode.field(3, decode.optional(level_decoder()))
@@ -242,7 +243,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.org_sql(row.id),
     sqlight.text(row.name),
     sqlight.text(org_type.to_string(row.type_)),
     sqlight.nullable(fn(v) { sqlight.text(level_to_string(v)) }, row.level),

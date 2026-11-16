@@ -12,17 +12,18 @@ import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/guardian_children as link_row
 import scoutbox/rows/guardians as row
+import scoutbox/rows/id
 import scoutbox/rows/idv_queue as idv_row
 import sqlight
 
 pub type CoGuardian {
-  CoGuardian(id: String, name: String, email: String)
+  CoGuardian(id: id.GuardianId, name: String, email: String)
 }
 
 pub type Guardian {
   Guardian(
     row: row.Row,
-    child_ids: List(String),
+    child_ids: List(id.PlayerId),
     co_guardians: List(CoGuardian),
   )
 }
@@ -39,16 +40,16 @@ fn complete(read: Read, r: row.Row) -> Result(Guardian, Fail(e)) {
   use child_ids <- result.try(store.query(
     read,
     "SELECT player_id FROM guardian_children WHERE guardian_id = ? ORDER BY rowid",
-    [sqlight.text(r.id)],
-    decode.at([0], decode.string),
+    [id.guardian_sql(r.id)],
+    decode.at([0], id.player_decoder()),
   ))
   use co_guardians <- result.map(
     store.query(
       read,
       "SELECT id, name, email FROM guardians WHERE co_guardian_of = ? ORDER BY rowid",
-      [sqlight.text(r.id)],
+      [id.guardian_sql(r.id)],
       {
-        use id <- decode.field(0, decode.string)
+        use id <- decode.field(0, id.guardian_decoder())
         use name <- decode.field(1, decode.string)
         use email <- decode.field(2, decode.string)
         decode.success(CoGuardian(id:, name:, email:))
@@ -70,8 +71,11 @@ fn first(
   }
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Guardian), Fail(e)) {
-  first(read, "WHERE id = ?", [sqlight.text(id)])
+pub fn by_id(
+  read: Read,
+  id: id.GuardianId,
+) -> Result(Option(Guardian), Fail(e)) {
+  first(read, "WHERE id = ?", [id.guardian_sql(id)])
 }
 
 /// By e-mail, compared case-insensitively (the table's unique index is on `lower(email)`).
@@ -126,7 +130,7 @@ pub fn page(
 /// Refuses an e-mail any guardian already has, compared case-insensitively.
 pub fn create_co_guardian(
   tx: Tx,
-  id id: String,
+  id id: id.GuardianId,
   primary primary: Guardian,
   name name: String,
   email email: String,
@@ -163,7 +167,7 @@ pub fn create_co_guardian(
 pub fn self_view(g: Guardian) -> Json {
   let r = g.row
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.guardian_json(r.id)),
     #("name", json.string(r.name)),
     #("email", json.string(r.email)),
     #("emailVerified", json.bool(r.email_verified)),
@@ -171,10 +175,10 @@ pub fn self_view(g: Guardian) -> Json {
     #("idvReference", json.nullable(r.idv_reference, json.string)),
     #("disclaimerAccepted", json.bool(r.disclaimer_accepted)),
     #("disclaimerAcceptedAt", json.nullable(r.disclaimer_accepted_at, json.int)),
-    #("coGuardianOf", json.nullable(r.co_guardian_of, json.string)),
+    #("coGuardianOf", json.nullable(r.co_guardian_of, id.guardian_json)),
     #("notificationPrefs", prefs(r)),
     #("createdAt", json.nullable(r.created_at, json.int)),
-    #("childIds", json.array(g.child_ids, json.string)),
+    #("childIds", json.array(g.child_ids, id.player_json)),
     #("coGuardians", co_guardians_json(g)),
   ])
 }
@@ -183,15 +187,15 @@ pub fn self_view(g: Guardian) -> Json {
 pub fn admin_view(g: Guardian) -> Json {
   let r = g.row
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.guardian_json(r.id)),
     #("name", json.string(r.name)),
     #("email", json.string(r.email)),
     #("emailVerified", json.bool(r.email_verified)),
     #("idVerified", json.bool(r.id_verified)),
     #("idvReference", json.nullable(r.idv_reference, json.string)),
     #("disclaimerAccepted", json.bool(r.disclaimer_accepted)),
-    #("childIds", json.array(g.child_ids, json.string)),
-    #("coGuardianOf", json.nullable(r.co_guardian_of, json.string)),
+    #("childIds", json.array(g.child_ids, id.player_json)),
+    #("coGuardianOf", json.nullable(r.co_guardian_of, id.guardian_json)),
     #("coGuardians", co_guardians_json(g)),
     #("notificationPrefs", prefs(r)),
     #("createdAt", json.nullable(r.created_at, json.int)),
@@ -210,7 +214,7 @@ fn prefs(r: row.Row) -> Json {
 fn co_guardians_json(g: Guardian) -> Json {
   json.array(g.co_guardians, fn(c) {
     json.object([
-      #("id", json.string(c.id)),
+      #("id", id.guardian_json(c.id)),
       #("name", json.string(c.name)),
       #("email", json.string(c.email)),
     ])
@@ -220,13 +224,13 @@ fn co_guardians_json(g: Guardian) -> Json {
 /// Trust & Safety's decision on a guardian's ID check, recorded on their first queue entry.
 pub fn review_id_check(
   tx: Tx,
-  id: String,
+  id: id.GuardianId,
   approved: Bool,
 ) -> Result(Guardian, Fail(e)) {
   use _ <- result.try(
     store.run(tx, "UPDATE guardians SET id_verified = ? WHERE id = ?", [
       sqlight.bool(approved),
-      sqlight.text(id),
+      id.guardian_sql(id),
     ]),
   )
   use _ <- result.try(
@@ -238,7 +242,7 @@ pub fn review_id_check(
           True -> "approved"
           False -> "revoked"
         }),
-        sqlight.text(id),
+        id.guardian_sql(id),
       ],
     ),
   )
@@ -259,8 +263,8 @@ pub fn idv_queue(read: Read) -> Result(List(idv_row.Row), Fail(e)) {
 
 pub fn idv_view(q: idv_row.Row) -> Json {
   json.object([
-    #("id", json.string(q.id)),
-    #("guardianId", json.string(q.guardian_id)),
+    #("id", id.idv_case_json(q.id)),
+    #("guardianId", id.guardian_json(q.guardian_id)),
     #("guardianName", json.nullable(q.guardian_name, json.string)),
     #("documentType", json.string(q.document_type)),
     #("documentRef", json.string(q.document_ref_last4)),

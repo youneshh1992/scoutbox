@@ -16,6 +16,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Tx}
 import scoutbox/recruitment/requests
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/reports
 import scoutbox/safety/audit
@@ -63,9 +64,9 @@ fn report_shape() -> input.Shape(ReportInput) {
 
 /// Who files a report: the kind, the id, and for staff the organisation.
 type Reporter {
-  ByPlayer(id: String)
+  ByPlayer(id: id.PlayerId)
   ByGuardian(guardian: Guardian)
-  ByStaff(id: String, org_id: String)
+  ByStaff(id: id.OrgUserId, org_id: id.OrgId)
 }
 
 /// Empty text is no value (schemas.mjs `filled`).
@@ -96,19 +97,29 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
       )
     _, None -> http.required("REASON_REQUIRED", "reason")
     Some(target_kind), Some(reason) -> {
-      let target_org_id = nonempty(body.target_org_id)
+      // Ids from the request body.
+      let target_org_id = nonempty(body.target_org_id) |> option.map(id.org)
       let now = clock.now_ms()
       let urgent = body.urgent == Some(True)
       let suspend = urgent && target_org_id != None
       let #(by, by_id, by_org_id) = case reporter {
-        ByPlayer(id) -> #(reports.ByKindPlayer, id, None)
-        ByGuardian(g) -> #(reports.Guardian, g.row.id, None)
-        ByStaff(id, org_id) -> #(reports.OrgUser, id, Some(org_id))
+        // `by_id` is polymorphic: `by` says whose id it is.
+        ByPlayer(p) -> #(reports.ByKindPlayer, id.player_to_string(p), None)
+        ByGuardian(g) -> #(
+          reports.Guardian,
+          id.guardian_to_string(g.row.id),
+          None,
+        )
+        ByStaff(u, org_id) -> #(
+          reports.OrgUser,
+          id.org_user_to_string(u),
+          Some(org_id),
+        )
       }
       // A guardian's report covers every child; a player's, the player; a staff member's, nobody.
       let suspended_players = case suspend, reporter {
         False, _ -> []
-        True, ByPlayer(id) -> [#(id, party.Player)]
+        True, ByPlayer(p) -> [#(p, party.Player)]
         True, ByGuardian(g) ->
           list.map(g.child_ids, fn(c) { #(c, party.Guardian) })
         True, ByStaff(..) -> []
@@ -125,7 +136,8 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
             target_org_id:,
             target_scout_name: nonempty(body.target_scout_name),
             // The target player is not checked against the players (Q4, docs/decisions.md).
-            target_player_id: nonempty(body.target_player_id),
+            target_player_id: nonempty(body.target_player_id)
+              |> option.map(id.player),
             reason:,
             urgent:,
             at: now,
@@ -153,7 +165,7 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
           http.json(
             201,
             json.object([
-              #("reportId", json.string(report.id)),
+              #("reportId", id.report_json(report.id)),
               #("status", reports.status_to_json(report.status)),
               #("suspended", json.bool(suspend)),
             ]),
@@ -171,12 +183,12 @@ type Refusal {
 
 fn org_exists(
   tx: Tx,
-  org_id: Option(String),
+  org_id: Option(id.OrgId),
 ) -> Result(Nil, store.Fail(Refusal)) {
   case org_id {
     None -> Ok(Nil)
-    Some(id) -> {
-      use found <- result.try(orgs.by_id(store.reading(tx), id))
+    Some(org_id) -> {
+      use found <- result.try(orgs.by_id(store.reading(tx), org_id))
       case found {
         Some(_) -> Ok(Nil)
         None -> store.refuse(OrgNotFound)
@@ -188,8 +200,8 @@ fn org_exists(
 /// A block and its ledger row, in one unit.
 fn add_block(
   ctx: Ctx,
-  player_id: String,
-  org_id: String,
+  player_id: id.PlayerId,
+  org_id: id.OrgId,
   by: Party,
   reason: Option(String),
 ) -> Response {
@@ -248,7 +260,7 @@ pub fn player_report(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
 }
 
 pub fn player_reports(ctx: Ctx, p: PlayerAccess) -> Response {
-  reports_of(ctx, reports.ByKindPlayer, p.player.row.id)
+  reports_of(ctx, reports.ByKindPlayer, id.player_to_string(p.player.row.id))
 }
 
 type PlayerBlock {
@@ -268,7 +280,14 @@ pub fn player_block(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   case nonempty(body.org_id) {
     None -> http.required("ORG_REQUIRED", "orgId")
     Some(org_id) ->
-      add_block(ctx, p.player.row.id, org_id, party.Player, body.reason)
+      add_block(
+        ctx,
+        p.player.row.id,
+        // From the request body.
+        id.org(org_id),
+        party.Player,
+        body.reason,
+      )
   }
 }
 
@@ -279,7 +298,7 @@ pub fn guardian_report(ctx: Ctx, req: Request, g: Guardian) -> Response {
 }
 
 pub fn guardian_reports(ctx: Ctx, g: Guardian) -> Response {
-  reports_of(ctx, reports.Guardian, g.row.id)
+  reports_of(ctx, reports.Guardian, id.guardian_to_string(g.row.id))
 }
 
 type GuardianBlock {
@@ -306,11 +325,12 @@ pub fn guardian_block(ctx: Ctx, req: Request, g: Guardian) -> Response {
     input.done(GuardianBlock(org_id:, player_id:, reason:))
   }
   use body <- http.body(req, shape, [])
-  let named = nonempty(body.player_id)
+  // Ids from the request body.
+  let named = nonempty(body.player_id) |> option.map(id.player)
   let child = case named, g.child_ids {
-    Some(id), _ ->
-      case list.contains(g.child_ids, id) {
-        True -> Ok(Some(id))
+    Some(child), _ ->
+      case list.contains(g.child_ids, child) {
+        True -> Ok(Some(child))
         False -> Error(Nil)
       }
     None, [only] -> Ok(Some(only))
@@ -319,7 +339,7 @@ pub fn guardian_block(ctx: Ctx, req: Request, g: Guardian) -> Response {
   case child, nonempty(body.org_id) {
     Error(Nil), _ -> http.error(404, "CHILD_NOT_FOUND")
     Ok(Some(child)), Some(org_id) ->
-      add_block(ctx, child, org_id, party.Guardian, body.reason)
+      add_block(ctx, child, id.org(org_id), party.Guardian, body.reason)
     Ok(_), _ ->
       http.json(
         400,
@@ -348,5 +368,5 @@ pub fn org_report(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
 }
 
 pub fn org_reports(ctx: Ctx, a: OrgAccess) -> Response {
-  reports_of(ctx, reports.OrgUser, a.user.id)
+  reports_of(ctx, reports.OrgUser, id.org_user_to_string(a.user.id))
 }

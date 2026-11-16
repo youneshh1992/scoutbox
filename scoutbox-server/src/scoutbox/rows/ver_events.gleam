@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/attribution
 import sqlight
 
@@ -232,18 +233,18 @@ pub fn actor_kind_decoder() -> decode.Decoder(ActorKind) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.VerEventId,
     occurred_at: Int,
     type_: Type,
     actor_kind: ActorKind,
     actor_id: Option(String),
     actor_name: Option(String),
-    actor_org_id: Option(String),
+    actor_org_id: Option(id.OrgId),
     request_id: Option(String),
     attribution: Option(attribution.Attribution),
-    claim_id: Option(String),
+    claim_id: Option(id.ClaimId),
     subject_id: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     detail: Option(String),
     reason: Option(String),
   )
@@ -251,7 +252,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.VerEventId,
   occurred_at occurred_at: Int,
   type_ type_: Type,
   actor_kind actor_kind: ActorKind,
@@ -276,18 +277,18 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.ver_event_decoder())
   use occurred_at <- decode.field(1, decode.int)
   use type_ <- decode.field(2, type_decoder())
   use actor_kind <- decode.field(3, actor_kind_decoder())
   use actor_id <- decode.field(4, decode.optional(decode.string))
   use actor_name <- decode.field(5, decode.optional(decode.string))
-  use actor_org_id <- decode.field(6, decode.optional(decode.string))
+  use actor_org_id <- decode.field(6, decode.optional(id.org_decoder()))
   use request_id <- decode.field(7, decode.optional(decode.string))
   use attribution <- decode.field(8, decode.optional(attribution.decoder()))
-  use claim_id <- decode.field(9, decode.optional(decode.string))
+  use claim_id <- decode.field(9, decode.optional(id.claim_decoder()))
   use subject_id <- decode.field(10, decode.optional(decode.string))
-  use org_id <- decode.field(11, decode.optional(decode.string))
+  use org_id <- decode.field(11, decode.optional(id.org_decoder()))
   use detail <- decode.field(12, decode.optional(decode.string))
   use reason <- decode.field(13, decode.optional(decode.string))
   decode.success(Row(
@@ -314,21 +315,21 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.ver_event_sql(row.id),
     sqlight.int(row.occurred_at),
     sqlight.text(type_to_string(row.type_)),
     sqlight.text(actor_kind_to_string(row.actor_kind)),
     sqlight.nullable(sqlight.text, row.actor_id),
     sqlight.nullable(sqlight.text, row.actor_name),
-    sqlight.nullable(sqlight.text, row.actor_org_id),
+    sqlight.nullable(id.org_sql, row.actor_org_id),
     sqlight.nullable(sqlight.text, row.request_id),
     sqlight.nullable(
       fn(v) { sqlight.text(attribution.to_string(v)) },
       row.attribution,
     ),
-    sqlight.nullable(sqlight.text, row.claim_id),
+    sqlight.nullable(id.claim_sql, row.claim_id),
     sqlight.nullable(sqlight.text, row.subject_id),
-    sqlight.nullable(sqlight.text, row.org_id),
+    sqlight.nullable(id.org_sql, row.org_id),
     sqlight.nullable(sqlight.text, row.detail),
     sqlight.nullable(sqlight.text, row.reason),
   ]

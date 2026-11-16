@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "org_invites"
@@ -75,8 +76,8 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
+    id: id.OrgInviteId,
+    org_id: id.OrgId,
     email: String,
     name: String,
     role: String,
@@ -87,14 +88,14 @@ pub type Row {
     expires_at: Int,
     accepted_at: Option(Int),
     revoked_at: Option(Int),
-    user_id: Option(String),
+    user_id: Option(id.OrgUserId),
   )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
+  id id: id.OrgInviteId,
+  org_id org_id: id.OrgId,
   email email: String,
   name name: String,
   role role: String,
@@ -122,8 +123,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.org_invite_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
   use email <- decode.field(2, decode.string)
   use name <- decode.field(3, decode.string)
   use role <- decode.field(4, decode.string)
@@ -134,7 +135,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use expires_at <- decode.field(9, decode.int)
   use accepted_at <- decode.field(10, decode.optional(decode.int))
   use revoked_at <- decode.field(11, decode.optional(decode.int))
-  use user_id <- decode.field(12, decode.optional(decode.string))
+  use user_id <- decode.field(12, decode.optional(id.org_user_decoder()))
   decode.success(Row(
     id:,
     org_id:,
@@ -158,8 +159,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
+    id.org_invite_sql(row.id),
+    id.org_sql(row.org_id),
     sqlight.text(row.email),
     sqlight.text(row.name),
     sqlight.text(row.role),
@@ -170,7 +171,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.int(row.expires_at),
     sqlight.nullable(sqlight.int, row.accepted_at),
     sqlight.nullable(sqlight.int, row.revoked_at),
-    sqlight.nullable(sqlight.text, row.user_id),
+    sqlight.nullable(id.org_user_sql, row.user_id),
   ]
 }
 

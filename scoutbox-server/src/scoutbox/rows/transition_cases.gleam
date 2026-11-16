@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/party
 import sqlight
 
@@ -76,8 +77,8 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    player_id: String,
+    id: id.TransitionCaseId,
+    player_id: id.PlayerId,
     player_name: Option(String),
     started_by_kind: party.Party,
     started_by_id: String,
@@ -85,7 +86,7 @@ pub type Row {
     note: Option(String),
     period_ends_at: Int,
     status: Status,
-    placement_org_id: Option(String),
+    placement_org_id: Option(id.OrgId),
     placement_org_name: Option(String),
     placement_at: Option(Int),
     placement_note: Option(String),
@@ -97,8 +98,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  player_id player_id: String,
+  id id: id.TransitionCaseId,
+  player_id player_id: id.PlayerId,
   started_by_kind started_by_kind: party.Party,
   started_by_id started_by_id: String,
   period_ends_at period_ends_at: Int,
@@ -127,8 +128,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use player_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.transition_case_decoder())
+  use player_id <- decode.field(1, id.player_decoder())
   use player_name <- decode.field(2, decode.optional(decode.string))
   use started_by_kind <- decode.field(3, party.decoder())
   use started_by_id <- decode.field(4, decode.string)
@@ -136,7 +137,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use note <- decode.field(6, decode.optional(decode.string))
   use period_ends_at <- decode.field(7, decode.int)
   use status <- decode.field(8, status_decoder())
-  use placement_org_id <- decode.field(9, decode.optional(decode.string))
+  use placement_org_id <- decode.field(9, decode.optional(id.org_decoder()))
   use placement_org_name <- decode.field(10, decode.optional(decode.string))
   use placement_at <- decode.field(11, decode.optional(decode.int))
   use placement_note <- decode.field(12, decode.optional(decode.string))
@@ -169,8 +170,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.player_id),
+    id.transition_case_sql(row.id),
+    id.player_sql(row.player_id),
     sqlight.nullable(sqlight.text, row.player_name),
     sqlight.text(party.to_string(row.started_by_kind)),
     sqlight.text(row.started_by_id),
@@ -178,7 +179,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.note),
     sqlight.int(row.period_ends_at),
     sqlight.text(status_to_string(row.status)),
-    sqlight.nullable(sqlight.text, row.placement_org_id),
+    sqlight.nullable(id.org_sql, row.placement_org_id),
     sqlight.nullable(sqlight.text, row.placement_org_name),
     sqlight.nullable(sqlight.int, row.placement_at),
     sqlight.nullable(sqlight.text, row.placement_note),

@@ -4,6 +4,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/webhook_event
 import sqlight
 
@@ -24,12 +25,16 @@ pub fn qualified(alias: String) -> String {
 }
 
 pub type Row {
-  Row(endpoint_id: String, ord: Int, event: webhook_event.WebhookEvent)
+  Row(
+    endpoint_id: id.WebhookEndpointId,
+    ord: Int,
+    event: webhook_event.WebhookEvent,
+  )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  endpoint_id endpoint_id: String,
+  endpoint_id endpoint_id: id.WebhookEndpointId,
   ord ord: Int,
   event event: webhook_event.WebhookEvent,
 ) -> Row {
@@ -38,7 +43,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use endpoint_id <- decode.field(0, decode.string)
+  use endpoint_id <- decode.field(0, id.webhook_endpoint_decoder())
   use ord <- decode.field(1, decode.int)
   use event <- decode.field(2, webhook_event.decoder())
   decode.success(Row(endpoint_id:, ord:, event:))
@@ -50,7 +55,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.endpoint_id),
+    id.webhook_endpoint_sql(row.endpoint_id),
     sqlight.int(row.ord),
     sqlight.text(webhook_event.to_string(row.event)),
   ]

@@ -11,12 +11,12 @@ import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/safety/ledger
 import wisp.{type Request, type Response}
 
@@ -52,7 +52,8 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
       let found =
         store.read(ctx.store, fn(read) {
           use by_id <- result.try(case body.guardian_id {
-            Some(id) -> guardians.by_id(read, id)
+            // From the request body.
+            Some(guardian_id) -> guardians.by_id(read, id.guardian(guardian_id))
             None -> Ok(None)
           })
           case by_id, body.email {
@@ -68,7 +69,7 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
           http.error(404, "GUARDIAN_NOT_FOUND")
         }
         Ok(Some(g)) -> {
-          let canonical = "guardian:" <> g.row.id
+          let canonical = "guardian:" <> id.guardian_to_string(g.row.id)
           let aliased = limits.login_key(canonical) != limits.login_key(tried)
           case aliased && limits.login_locked(ctx.limits, canonical, now) {
             True -> sign_in.locked_out()
@@ -106,7 +107,7 @@ fn signing_in(ctx: Ctx, g: Guardian, now: Int) -> Response {
           http.json(
             200,
             json.object([
-              #("guardianId", json.string(g.row.id)),
+              #("guardianId", id.guardian_json(g.row.id)),
               #("guardian", guardians.self_view(g)),
               #("token", json.string(token)),
             ]),
@@ -171,7 +172,7 @@ pub fn add_co_guardian(ctx: Ctx, req: Request, g: Guardian) -> Response {
           let now = clock.now_ms()
           let created =
             store.unit(ctx.store, fn(tx) {
-              use id <- result.try(ids.next(tx, "gd"))
+              use id <- result.try(id.next_guardian(tx))
               guardians.create_co_guardian(
                 tx,
                 id:,
@@ -186,7 +187,7 @@ pub fn add_co_guardian(ctx: Ctx, req: Request, g: Guardian) -> Response {
               http.json(
                 201,
                 json.object([
-                  #("guardianId", json.string(co.row.id)),
+                  #("guardianId", id.guardian_json(co.row.id)),
                   #(
                     "note",
                     json.string(
@@ -229,7 +230,7 @@ pub fn admin_list(ctx: Ctx, req: Request) -> Response {
 }
 
 /// `POST /admin/guardians/:id/idv`.
-pub fn review_id(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn review_id(ctx: Ctx, req: Request, id: id.GuardianId) -> Response {
   case store.read(ctx.store, guardians.by_id(_, id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(404, "GUARDIAN_NOT_FOUND")

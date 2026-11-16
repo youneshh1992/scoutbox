@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_evidence"
@@ -385,12 +386,12 @@ pub fn visibility_decoder() -> decode.Decoder(Visibility) {
 
 pub type Row {
   Row(
-    id: String,
+    id: id.EvidenceId,
     type_: Type,
     source: String,
     supplied_by_kind: SuppliedByKind,
     supplied_by_id: Option(String),
-    org_id: Option(String),
+    org_id: Option(id.OrgId),
     received_at: Int,
     media_id: Option(String),
     sha256: Option(String),
@@ -401,7 +402,7 @@ pub type Row {
     domain: Option(String),
     domain_covered_by_org: Option(Bool),
     address_hash: Option(String),
-    root_request_id: Option(String),
+    root_request_id: Option(id.RootRequestId),
     identifier: Option(String),
     licence_type: Option(String),
     registry_valid_until: Option(String),
@@ -418,7 +419,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.EvidenceId,
   type_ type_: Type,
   source source: String,
   supplied_by_kind supplied_by_kind: SuppliedByKind,
@@ -461,12 +462,12 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
+  use id <- decode.field(0, id.evidence_decoder())
   use type_ <- decode.field(1, type_decoder())
   use source <- decode.field(2, decode.string)
   use supplied_by_kind <- decode.field(3, supplied_by_kind_decoder())
   use supplied_by_id <- decode.field(4, decode.optional(decode.string))
-  use org_id <- decode.field(5, decode.optional(decode.string))
+  use org_id <- decode.field(5, decode.optional(id.org_decoder()))
   use received_at <- decode.field(6, decode.int)
   use media_id <- decode.field(7, decode.optional(decode.string))
   use sha256 <- decode.field(8, decode.optional(decode.string))
@@ -480,7 +481,10 @@ pub fn decoder() -> decode.Decoder(Row) {
     decode.optional(sqlight.decode_bool()),
   )
   use address_hash <- decode.field(15, decode.optional(decode.string))
-  use root_request_id <- decode.field(16, decode.optional(decode.string))
+  use root_request_id <- decode.field(
+    16,
+    decode.optional(id.root_request_decoder()),
+  )
   use identifier <- decode.field(17, decode.optional(decode.string))
   use licence_type <- decode.field(18, decode.optional(decode.string))
   use registry_valid_until <- decode.field(19, decode.optional(decode.string))
@@ -536,12 +540,12 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.evidence_sql(row.id),
     sqlight.text(type_to_string(row.type_)),
     sqlight.text(row.source),
     sqlight.text(supplied_by_kind_to_string(row.supplied_by_kind)),
     sqlight.nullable(sqlight.text, row.supplied_by_id),
-    sqlight.nullable(sqlight.text, row.org_id),
+    sqlight.nullable(id.org_sql, row.org_id),
     sqlight.int(row.received_at),
     sqlight.nullable(sqlight.text, row.media_id),
     sqlight.nullable(sqlight.text, row.sha256),
@@ -552,7 +556,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.domain),
     sqlight.nullable(sqlight.bool, row.domain_covered_by_org),
     sqlight.nullable(sqlight.text, row.address_hash),
-    sqlight.nullable(sqlight.text, row.root_request_id),
+    sqlight.nullable(id.root_request_sql, row.root_request_id),
     sqlight.nullable(sqlight.text, row.identifier),
     sqlight.nullable(sqlight.text, row.licence_type),
     sqlight.nullable(sqlight.text, row.registry_valid_until),

@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_domain_request_codes"
@@ -142,12 +143,17 @@ pub fn code_decoder() -> decode.Decoder(Code) {
 }
 
 pub type Row {
-  Row(domain_request_id: String, list: ListValue, position: Int, code: Code)
+  Row(
+    domain_request_id: id.DomainRequestId,
+    list: ListValue,
+    position: Int,
+    code: Code,
+  )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  domain_request_id domain_request_id: String,
+  domain_request_id domain_request_id: id.DomainRequestId,
   list list: ListValue,
   position position: Int,
   code code: Code,
@@ -157,7 +163,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use domain_request_id <- decode.field(0, decode.string)
+  use domain_request_id <- decode.field(0, id.domain_request_decoder())
   use list <- decode.field(1, list_value_decoder())
   use position <- decode.field(2, decode.int)
   use code <- decode.field(3, code_decoder())
@@ -170,7 +176,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.domain_request_id),
+    id.domain_request_sql(row.domain_request_id),
     sqlight.text(list_value_to_string(row.list)),
     sqlight.int(row.position),
     sqlight.text(code_to_string(row.code)),

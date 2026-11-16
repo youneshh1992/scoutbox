@@ -12,6 +12,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/vocab/audience.{type Audience}
 import scoutbox/vocab/party
 import wisp.{type Request, type Response}
@@ -57,10 +58,10 @@ pub fn register_device(ctx: Ctx, req: Request) -> Response {
       use token <- http.body(req, shape, [#("token", "TOKEN_INVALID")])
       case token, holder {
         None, _ | Some(""), _ -> http.required("TOKEN_REQUIRED", "token")
-        Some(token), sessions.Player(id) ->
-          register(ctx, party.Player, id, token, now)
-        Some(token), sessions.Guardian(id) ->
-          register(ctx, party.Guardian, id, token, now)
+        Some(token), sessions.Player(p) ->
+          register(ctx, party.Player, id.player_to_string(p), token, now)
+        Some(token), sessions.Guardian(g) ->
+          register(ctx, party.Guardian, id.guardian_to_string(g), token, now)
         Some(_), sessions.OrgStaff(..) | Some(_), sessions.Reviewer(..) ->
           http.error_message(
             403,
@@ -75,12 +76,12 @@ pub fn register_device(ctx: Ctx, req: Request) -> Response {
 fn register(
   ctx: Ctx,
   kind: party.Party,
-  id: String,
+  ref_id: String,
   token: String,
   now: Int,
 ) -> Response {
   case
-    store.unit(ctx.store, fn(tx) { push.register(tx, kind, id, token, now) })
+    store.unit(ctx.store, fn(tx) { push.register(tx, kind, ref_id, token, now) })
   {
     Ok(moved) ->
       http.json(

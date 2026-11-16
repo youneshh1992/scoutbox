@@ -22,10 +22,10 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/ops_events as ops_row
 import scoutbox/rows/webhook_deliveries as delivery_row
 import scoutbox/rows/webhook_delivery_attempts as attempt_row
@@ -150,7 +150,7 @@ fn subscribe(
   let now = clock.now_ms()
   let made =
     store.unit(ctx.store, fn(tx) {
-      use id <- result.try(ids.next(tx, "whk"))
+      use id <- result.try(id.next_webhook_endpoint(tx))
       let e =
         endpoint_row.Row(
           ..endpoint_row.new(
@@ -196,8 +196,8 @@ fn subscribe(
 /// The endpoint as its creator sees it, its secret included; the previous secret never.
 fn endpoint_view(e: endpoint_row.Row, events: List(WebhookEvent)) -> Json {
   json.object([
-    #("id", json.string(e.id)),
-    #("orgId", json.string(e.org_id)),
+    #("id", id.webhook_endpoint_json(e.id)),
+    #("orgId", id.org_json(e.org_id)),
     #("url", json.string(e.url)),
     #("secret", json.string(e.secret)),
     #(
@@ -214,10 +214,10 @@ fn endpoint_view(e: endpoint_row.Row, events: List(WebhookEvent)) -> Json {
 // ------------------------------------------------------------------------------------------------- emitting
 
 /// Queues `event` about `subject_id` for every active endpoint of `org_id` subscribed to it, in the caller's
-/// unit.
+/// unit. `subject_id` is polymorphic: the event says what it names (a dispatch, a transition, …).
 pub fn emit(
   tx: Tx,
-  org_id: Option(String),
+  org_id: Option(id.OrgId),
   event: WebhookEvent,
   subject_id: String,
   at: Int,
@@ -228,11 +228,11 @@ pub fn emit(
       use endpoints <- result.try(store.query(
         store.reading(tx),
         "SELECT w.id FROM webhook_endpoints w JOIN webhook_endpoint_events e ON e.endpoint_id = w.id WHERE w.org_id = ? AND w.active = 1 AND e.event = ? ORDER BY w.rowid",
-        [sqlight.text(org_id), sqlight.text(webhook_event.to_string(event))],
-        decode.at([0], decode.string),
+        [id.org_sql(org_id), sqlight.text(webhook_event.to_string(event))],
+        decode.at([0], id.webhook_endpoint_decoder()),
       ))
       list.try_each(endpoints, fn(endpoint_id) {
-        use id <- result.try(ids.next(tx, "dlv"))
+        use id <- result.try(id.next_webhook_delivery(tx))
         delivery_row.insert(
           tx,
           delivery_row.new(
@@ -301,7 +301,7 @@ fn deliver_one(ctx: Ctx, d: delivery_row.Row) -> Nil {
         "UPDATE webhook_deliveries SET next_at = ? WHERE id = ? AND status IN ('queued', 'retrying') AND next_at = ? RETURNING id",
         [
           sqlight.int(now + lease_ms),
-          sqlight.text(d.id),
+          id.webhook_delivery_sql(d.id),
           sqlight.int(d.next_at),
         ],
         decode.at([0], decode.string),
@@ -315,14 +315,14 @@ fn deliver_one(ctx: Ctx, d: delivery_row.Row) -> Nil {
             "SELECT "
               <> endpoint_row.columns
               <> " FROM webhook_endpoints WHERE id = ?",
-            [sqlight.text(d.endpoint_id)],
+            [id.webhook_endpoint_sql(d.endpoint_id)],
             endpoint_row.decoder(),
           ))
           use sent <- result.map(
             store.one(
               read,
               "SELECT COUNT(*) FROM webhook_delivery_attempts WHERE delivery_id = ?",
-              [sqlight.text(d.id)],
+              [id.webhook_delivery_sql(d.id)],
               decode.at([0], decode.int),
             )
             |> result.map(result.unwrap(_, 0)),
@@ -483,7 +483,7 @@ fn record(
           store.run(
             tx,
             "UPDATE webhook_deliveries SET status = 'delivered', delivered_at = ? WHERE id = ?",
-            [sqlight.int(now), sqlight.text(d.id)],
+            [sqlight.int(now), id.webhook_delivery_sql(d.id)],
           )
         Some(s) ->
           store.run(
@@ -491,7 +491,7 @@ fn record(
             "UPDATE webhook_deliveries SET status = ? WHERE id = ?",
             [
               sqlight.text(delivery_row.status_to_string(s)),
-              sqlight.text(d.id),
+              id.webhook_delivery_sql(d.id),
             ],
           )
         None -> Ok(Nil)
@@ -499,7 +499,7 @@ fn record(
       use _ <- result.map(case failed_for_good {
         False -> Ok(Nil)
         True -> {
-          use id <- result.try(ids.next(tx, "ops"))
+          use id <- result.try(id.next_ops_event(tx))
           ops_row.insert(
             tx,
             ops_row.New(
@@ -534,7 +534,7 @@ fn record_retry(
       store.run(
         tx,
         "UPDATE webhook_deliveries SET status = 'retrying', next_at = ? WHERE id = ?",
-        [sqlight.int(next_at), sqlight.text(d.id)],
+        [sqlight.int(next_at), id.webhook_delivery_sql(d.id)],
       )
       |> result.replace(Nil)
     })
@@ -551,7 +551,7 @@ fn abandon(ctx: Ctx, d: delivery_row.Row) -> Nil {
         tx,
         "UPDATE webhook_deliveries SET status = 'abandoned' WHERE id = ?",
         [
-          sqlight.text(d.id),
+          id.webhook_delivery_sql(d.id),
         ],
       )
       |> result.replace(Nil)

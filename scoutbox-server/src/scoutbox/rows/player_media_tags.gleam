@@ -4,6 +4,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "player_media_tags"
@@ -23,12 +24,12 @@ pub fn qualified(alias: String) -> String {
 }
 
 pub type Row {
-  Row(media_id: String, position: Int, tag: String, count: Int)
+  Row(media_id: id.MediaId, position: Int, tag: String, count: Int)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  media_id media_id: String,
+  media_id media_id: id.MediaId,
   position position: Int,
   tag tag: String,
   count count: Int,
@@ -38,7 +39,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use media_id <- decode.field(0, decode.string)
+  use media_id <- decode.field(0, id.media_decoder())
   use position <- decode.field(1, decode.int)
   use tag <- decode.field(2, decode.string)
   use count <- decode.field(3, decode.int)
@@ -51,7 +52,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.media_id),
+    id.media_sql(row.media_id),
     sqlight.int(row.position),
     sqlight.text(row.tag),
     sqlight.int(row.count),

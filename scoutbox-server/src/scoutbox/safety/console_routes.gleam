@@ -21,6 +21,7 @@ import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Read}
+import scoutbox/rows/id
 import scoutbox/rows/moderation_log
 import scoutbox/rows/ops_events
 import scoutbox/rows/reports
@@ -206,7 +207,7 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
                     id: r.by_id,
                     type_: "report_resolved",
                     text: "Your report was reviewed: " <> outcome,
-                    ref_id: Some(r.id),
+                    ref_id: Some(id.report_to_string(r.id)),
                     at: now,
                   )
               })
@@ -251,7 +252,7 @@ pub fn clubs(ctx: Ctx, req: Request) -> Response {
   }
 }
 
-fn with_org(ctx: Ctx, id: String, next: fn(Org) -> Response) -> Response {
+fn with_org(ctx: Ctx, id: id.OrgId, next: fn(Org) -> Response) -> Response {
   case store.read(ctx.store, orgs.by_id(_, id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(404, "ORG_NOT_FOUND")
@@ -263,7 +264,7 @@ fn with_org(ctx: Ctx, id: String, next: fn(Org) -> Response) -> Response {
 ///
 /// Not ported yet: storing the password needs scrypt, which OTP's crypto lacks (see sign-in). The input is
 /// checked as the TypeScript server checks it; a valid password is refused as not supported.
-pub fn credentials(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn credentials(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   use _org <- with_org(ctx, id)
   let shape = {
     use password <- input.field(
@@ -300,7 +301,7 @@ fn too_short() -> Response {
 ///
 /// Not ported yet: the TypeScript server mirrors the decision on the organisation's identity claim
 /// (verification), and announces the change on the live stream.
-pub fn verification(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   use org <- with_org(ctx, id)
   let shape = {
     use verified <- input.field("verified", input.optional(input.boolean()))
@@ -376,7 +377,7 @@ pub fn metrics(ctx: Ctx) -> Response {
           "opsEvents",
           json.array(newest, fn(e) {
             json.object([
-              #("id", json.string(e.id)),
+              #("id", id.ops_event_json(e.id)),
               #("at", json.int(e.occurred_at)),
               #("kind", ops_events.kind_to_json(e.kind)),
               #("detail", json.null()),

@@ -5,8 +5,9 @@
 import argv
 import gleam/io
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
-import scoutbox/codegen.{Shared}
+import scoutbox/codegen.{Ided, RefersTo, Shared, Untyped}
 import simplifile
 
 /// The vocabularies several tables share, declared once. Each must be exactly some column's CHECK list.
@@ -21,27 +22,30 @@ pub const shared = [
       "transition.revoked", "delivery.failed",
     ],
   ),
-  Shared("NotificationCategory", [
-    "mentions",
-    "assignments",
-    "room_changes",
-    "evidence_requests",
-    "combine",
-    "trial_updates",
-    "second_look",
-    "brief_updates",
-    "messages",
-    "activity",
-    "discovery_nudges",
-    "watchlist_changes",
-    "development_updates",
-    "representation",
-    "compliance",
-    "transaction_updates",
-    "offer_updates",
-    "signing_updates",
-    "security_account",
-  ]),
+  Shared(
+    "NotificationCategory",
+    [
+      "mentions",
+      "assignments",
+      "room_changes",
+      "evidence_requests",
+      "combine",
+      "trial_updates",
+      "second_look",
+      "brief_updates",
+      "messages",
+      "activity",
+      "discovery_nudges",
+      "watchlist_changes",
+      "development_updates",
+      "representation",
+      "compliance",
+      "transaction_updates",
+      "offer_updates",
+      "signing_updates",
+      "security_account",
+    ],
+  ),
   Shared(
     "Position",
     [
@@ -201,6 +205,127 @@ pub const tables = [
   "webhook_endpoints",
 ]
 
+/// The tables whose ids are typed (`scoutbox/rows/id`), each with the prefix its ids are minted with here
+/// (none for a table only the seed fills).
+pub const ided = [
+  Ided("blocks", "Block", Some("blk")),
+  Ided("channels", "Channel", Some("chan")),
+  Ided("dispatches", "Dispatch", Some("dsp")),
+  Ided("guardians", "Guardian", Some("gd")),
+  Ided("idv_queue", "IdvCase", None),
+  Ided("ledger", "LedgerEntry", Some("led")),
+  Ided("messages", "Message", Some("msg")),
+  Ided("moderation_log", "ModerationEntry", Some("mod")),
+  Ided("notifications", "Notification", Some("ntf")),
+  Ided("ops_events", "OpsEvent", Some("ops")),
+  Ided("org_invites", "OrgInvite", Some("inv")),
+  Ided("org_notes", "OrgNote", Some("note")),
+  Ided("org_users", "OrgUser", Some("usr")),
+  Ided("orgs", "Org", Some("org")),
+  Ided("outbox", "Mail", Some("mail")),
+  Ided("player_attendance", "Attendance", None),
+  Ided("player_drill_results", "DrillResult", None),
+  Ided("player_media", "Media", None),
+  Ided("player_medical_records", "MedicalRecord", None),
+  Ided("players", "Player", Some("pl")),
+  Ided("push_log", "Push", Some("push")),
+  Ided("recruitment_requests", "Request", Some("req")),
+  Ided("reports", "Report", Some("rep")),
+  Ided("support_tickets", "Ticket", Some("tkt")),
+  Ided("transition_case_history", "TransitionEvent", Some("aud")),
+  Ided("transition_cases", "TransitionCase", Some("trn")),
+  Ided("ver_admins", "VerAdmin", Some("vadm")),
+  Ided("ver_claims", "Claim", Some("vclm")),
+  Ided("ver_conflicts", "Conflict", Some("vcoi")),
+  Ided("ver_disputes", "Dispute", Some("vdsp")),
+  Ided("ver_domain_requests", "DomainRequest", Some("vdom")),
+  Ided("ver_events", "VerEvent", Some("vevt")),
+  Ided("ver_evidence", "Evidence", Some("vevd")),
+  Ided("ver_player_invites", "PlayerInvite", Some("vpin")),
+  Ided("ver_references", "Reference", Some("vref")),
+  Ided("ver_root_requests", "RootRequest", Some("vroot")),
+  Ided("ver_root_transfers", "RootTransfer", Some("vrtx")),
+  Ided("ver_tokens", "VerToken", Some("vtk")),
+  Ided("webhook_deliveries", "WebhookDelivery", Some("dlv")),
+  Ided("webhook_endpoints", "WebhookEndpoint", Some("whk")),
+]
+
+/// Id columns no foreign key types. See `codegen.IdColumn`.
+pub const id_columns = [
+  RefersTo("player_id", "players"),
+  RefersTo("target_player_id", "players"),
+  RefersTo("recipient_player_id", "players"),
+  RefersTo("context_player_id", "players"),
+  RefersTo("guardian_id", "guardians"),
+  RefersTo("recipient_guardian_id", "guardians"),
+  RefersTo("guardian_approved_id", "guardians"),
+  RefersTo("context_channel_id", "channels"),
+  RefersTo("contact_channel_id", "channels"),
+  RefersTo("context_request_id", "recruitment_requests"),
+  RefersTo("notification_id", "notifications"),
+  RefersTo("detail_dispatch_id", "dispatches"),
+  RefersTo("detail_delivery_id", "webhook_deliveries"),
+  RefersTo("detail_endpoint_id", "webhook_endpoints"),
+  RefersTo("detail_root_request_id", "ver_root_requests"),
+  RefersTo("detail_org_id", "orgs"),
+  RefersTo("detail_claim_id", "ver_claims"),
+  RefersTo("verified_clip_attendance_id", "player_attendance"),
+  RefersTo("message_attachments.media_id", "player_media"),
+  Untyped("subject_id", "polymorphic: its kind is in another column"),
+  Untyped("sender_person_id", "polymorphic: its kind is in another column"),
+  Untyped("audience_id", "polymorphic: its kind is in another column"),
+  Untyped("ref_id", "polymorphic: its kind is in another column"),
+  Untyped("by_id", "polymorphic: its kind is in another column"),
+  Untyped("actor_id", "polymorphic: its kind is in another column"),
+  Untyped("authority_id", "polymorphic: its kind is in another column"),
+  Untyped("verified_by_id", "polymorphic: its kind is in another column"),
+  Untyped("revoked_by_id", "polymorphic: its kind is in another column"),
+  Untyped("started_by_id", "polymorphic: its kind is in another column"),
+  Untyped("supplied_by_id", "polymorphic: its kind is in another column"),
+  Untyped(
+    "transition_case_pack_items.item_id",
+    "polymorphic: its kind is in another column",
+  ),
+  Untyped("resolved_by_id", "a Trust & Safety reviewer, who has no table here"),
+  Untyped("decided_by_id", "a Trust & Safety reviewer, who has no table here"),
+  Untyped("pair_id", "links a claim pair; no table of its own"),
+  Untyped(
+    "ver_events.request_id",
+    "the HTTP request that caused the event, not a record",
+  ),
+  Untyped(
+    "webhook_deliveries.event_id",
+    "the event's own id, as the subscriber receives it",
+  ),
+  Untyped("provider_message_id", "chosen by the delivery provider"),
+  Untyped("callback_id", "chosen by the delivery provider"),
+  Untyped("client_msg_id", "chosen by the client, for idempotency"),
+  Untyped("external_id", "another system's id"),
+  Untyped("federation_registration_id", "a federation's id"),
+  Untyped("trial_id", "its table is not ported yet"),
+  Untyped("context_trial_id", "its table is not ported yet"),
+  Untyped("detail_trial_id", "its table is not ported yet"),
+  Untyped("drill_id", "its table is not ported yet"),
+  Untyped("detail_drill_id", "its table is not ported yet"),
+  Untyped("session_id", "its table is not ported yet"),
+  Untyped("detail_session_id", "its table is not ported yet"),
+  Untyped("box_session_id", "its table is not ported yet"),
+  Untyped("review_id", "its table is not ported yet"),
+  Untyped("signing_package_id", "its table is not ported yet"),
+  Untyped("representation_id", "its table is not ported yet"),
+  Untyped("contact_id", "its table is not ported yet"),
+  Untyped("case_id", "its table is not ported yet"),
+  Untyped("message_attachments.report_id", "its table is not ported yet"),
+  Untyped("ver_evidence.media_id", "its table is not ported yet"),
+  Untyped("detail_media_id", "its table is not ported yet"),
+  Untyped("detail_assignment_id", "its table is not ported yet"),
+  Untyped("detail_challenge_id", "its table is not ported yet"),
+  Untyped("detail_attempt_id", "its table is not ported yet"),
+  Untyped("detail_share_id", "its table is not ported yet"),
+  Untyped("detail_dispute_id", "its table is not ported yet"),
+  Untyped("detail_request_id", "its table is not ported yet"),
+]
+
 /// The migrations' SQL, concatenated after the bookkeeping tables the runner creates, with their clock and
 /// session lifetime filled in.
 pub fn schema() -> String {
@@ -231,7 +356,7 @@ pub fn main() -> Nil {
     simplifile.delete_all([out <> "/scoutbox/rows", out <> "/scoutbox/vocab"])
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/rows")
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/vocab")
-  list.each(codegen.generate(schema, shared, tables), fn(g) {
+  list.each(codegen.generate(schema, shared, tables, ided:, id_columns:), fn(g) {
     let path = out <> "/" <> g.module <> ".gleam"
     let assert Ok(_) = simplifile.write(path, g.source)
     io.println("wrote " <> path)

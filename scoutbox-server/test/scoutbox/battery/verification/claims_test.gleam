@@ -5,6 +5,7 @@ import gleam/dict
 import gleam/json
 import gleam/option.{None, Some}
 import scoutbox/battery/base
+import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
@@ -49,12 +50,12 @@ pub fn no_path_from_evidence_collection_directly_to_verified_2_test() {
 pub fn document_submitted_can_never_produce_a_verified_claim_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.AutomatedChecksPassed,
         current: True,
         valid_from: None,
@@ -76,12 +77,12 @@ pub fn document_submitted_can_never_produce_a_verified_claim_test() {
 pub fn domain_email_control_alone_cannot_verify_organisation_identity_security_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.OrganisationIdentity,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.AutomatedChecksPassed,
         current: True,
         valid_from: None,
@@ -103,12 +104,12 @@ pub fn domain_email_control_alone_cannot_verify_organisation_identity_security_t
 pub fn official_domain_email_verifies_exactly_the_domain_claim_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.OrganisationDomain,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.AutomatedChecksPassed,
         current: True,
         valid_from: None,
@@ -125,12 +126,12 @@ pub fn official_domain_email_verifies_exactly_the_domain_claim_test() {
     )
     == Ok(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.OrganisationDomain,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Verified,
         current: True,
         valid_from: None,
@@ -150,12 +151,12 @@ pub fn official_domain_email_verifies_exactly_the_domain_claim_test() {
 pub fn revocation_without_a_reason_is_refused_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Verified,
         current: True,
         valid_from: None,
@@ -176,12 +177,12 @@ pub fn revocation_without_a_reason_is_refused_test() {
 pub fn revocation_records_reason_and_ends_currency_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Verified,
         current: True,
         valid_from: None,
@@ -202,12 +203,12 @@ pub fn revocation_records_reason_and_ends_currency_test() {
     )
     == Ok(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Revoked,
         current: False,
         valid_from: None,
@@ -229,12 +230,12 @@ pub fn revocation_records_reason_and_ends_currency_test() {
 pub fn reinstatement_from_revoked_is_possible_policy_gated_at_the_route_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Revoked,
         current: False,
         valid_from: None,
@@ -259,12 +260,12 @@ pub fn reinstatement_from_revoked_is_possible_policy_gated_at_the_route_test() {
     )
     == Ok(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Verified,
         current: False,
         valid_from: None,
@@ -290,12 +291,12 @@ pub fn reinstatement_from_revoked_is_possible_policy_gated_at_the_route_test() {
 pub fn rejected_is_terminal_resubmission_is_a_new_claim_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Rejected,
         current: True,
         valid_from: None,
@@ -316,12 +317,12 @@ pub fn rejected_is_terminal_resubmission_is_a_new_claim_test() {
 pub fn idempotent_same_state_transition_is_rejected_predictably_test() {
   assert claims.transition(
       ver_claims.Row(
-        ..base.claim,
-        id: "c1",
+        ..base.claim(),
+        id: id.claim("c1"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.ClubRole,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         status: ver_claims.Verified,
         current: True,
         valid_from: None,
@@ -341,20 +342,20 @@ pub fn idempotent_same_state_transition_is_rejected_predictably_test() {
 pub fn verified_eligible_org_displays_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: True,
         valid_from: Some(1),
         valid_until: None,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: False,
           verification_revoked_at: None,
         ),
@@ -375,20 +376,20 @@ pub fn verified_eligible_org_displays_test() {
 pub fn validuntil_in_the_past_reads_as_expired_regardless_of_stored_status_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: True,
         valid_from: Some(1),
         valid_until: Some(1_794_743_999_000),
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: False,
           verification_revoked_at: None,
         ),
@@ -409,20 +410,20 @@ pub fn validuntil_in_the_past_reads_as_expired_regardless_of_stored_status_test(
 pub fn suspended_organisation_suppresses_the_badge_at_read_time_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: True,
         valid_from: Some(1),
         valid_until: None,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: True,
           verification_revoked_at: None,
         ),
@@ -443,20 +444,20 @@ pub fn suspended_organisation_suppresses_the_badge_at_read_time_test() {
 pub fn revoked_organisation_suppresses_the_badge_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: True,
         valid_from: Some(1),
         valid_until: None,
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: False,
           verification_revoked_at: Some(5),
         ),
@@ -477,20 +478,20 @@ pub fn revoked_organisation_suppresses_the_badge_test() {
 pub fn closed_period_stays_displayable_as_history_security_case_15_never_as_cur_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: False,
         valid_from: Some(1),
         valid_until: Some(1_794_744_000_010),
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: False,
           verification_revoked_at: None,
         ),
@@ -511,20 +512,20 @@ pub fn closed_period_stays_displayable_as_history_security_case_15_never_as_cur_
 pub fn a_fraud_revoked_organisation_stops_lending_even_historical_badges_test() {
   assert claims.effective_status(
       ver_claims.Row(
-        ..base.claim,
+        ..base.claim(),
         status: ver_claims.Verified,
         current: False,
         valid_from: Some(1),
         valid_until: Some(99),
-        organisation_id: Some("o1"),
+        organisation_id: Some(id.org("o1")),
         verification_method: Some(
           verification_method.OrganisationAdminConfirmation,
         ),
       ),
       org: Some(
         orgs.Row(
-          ..base.org,
-          id: "o1",
+          ..base.org(),
+          id: id.org("o1"),
           suspended: False,
           verification_revoked_at: Some(5),
         ),
@@ -770,7 +771,7 @@ pub fn projector_identity_flag_only_displayable_claims_pending_licence_excluded_
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
+          ..base.claim(),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.PersonIdentity,
@@ -780,14 +781,14 @@ pub fn projector_identity_flag_only_displayable_claims_pending_licence_excluded_
           organisation_id: None,
         ),
         ver_claims.Row(
-          ..base.claim,
+          ..base.claim(),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.ClubRole,
           role: Some("Academy Scout"),
           status: ver_claims.Verified,
           current: True,
-          organisation_id: Some("o1"),
+          organisation_id: Some(id.org("o1")),
           verification_method: Some(
             verification_method.OrganisationAdminConfirmation,
           ),
@@ -796,7 +797,7 @@ pub fn projector_identity_flag_only_displayable_claims_pending_licence_excluded_
           work_email: Some("secret@chelseafc.com"),
         ),
         ver_claims.Row(
-          ..base.claim,
+          ..base.claim(),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.Licence,
@@ -809,10 +810,10 @@ pub fn projector_identity_flag_only_displayable_claims_pending_licence_excluded_
       ],
       orgs: dict.from_list([
         #(
-          "o1",
+          id.org("o1"),
           orgs.Row(
-            ..base.org,
-            id: "o1",
+            ..base.org(),
+            id: id.org("o1"),
             name: "Chelsea FC",
             suspended: False,
             verification_revoked_at: None,
@@ -828,7 +829,7 @@ pub fn projector_identity_flag_only_displayable_claims_pending_licence_excluded_
 // organisationsAndStaff: orgVerificationStatus — org lifecycle: suspension outranks verified
 pub fn org_lifecycle_suspension_outranks_verified_test() {
   assert claims.org_verification_status(
-      Some(orgs.Row(..base.org, verified: True, suspended: True)),
+      Some(orgs.Row(..base.org(), verified: True, suspended: True)),
       False,
     )
     == claims.OrgSuspended
@@ -839,22 +840,22 @@ pub fn revoked_authority_rows_do_not_count_test() {
   assert claims.ver_level_for(
       [
         ver_admins.Row(
-          ..base.admin,
-          org_id: "o",
-          user_id: "u",
+          ..base.admin(),
+          org_id: id.org("o"),
+          user_id: id.org_user("u"),
           level: ver_level.VerificationReviewer,
           status: ver_admins.Active,
         ),
         ver_admins.Row(
-          ..base.admin,
-          org_id: "o",
-          user_id: "u",
+          ..base.admin(),
+          org_id: id.org("o"),
+          user_id: id.org_user("u"),
           level: ver_level.VerificationRootAdmin,
           status: ver_admins.Revoked,
         ),
       ],
-      "o",
-      "u",
+      id.org("o"),
+      id.org_user("u"),
     )
     == Some(ver_level.VerificationReviewer)
 }
@@ -1384,8 +1385,8 @@ pub fn metadata_only_validation_still_works_where_no_bytes_are_in_play_test() {
 pub fn registry_match_authoritative_test() {
   assert claims.assurance_for_claim(
       ver_claims.Row(
-        ..base.claim,
-        id: "c",
+        ..base.claim(),
+        id: id.claim("c"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.Licence,
@@ -1406,8 +1407,8 @@ pub fn registry_match_authoritative_test() {
 pub fn manual_review_scoutbox_document_review_test() {
   assert claims.assurance_for_claim(
       ver_claims.Row(
-        ..base.claim,
-        id: "c",
+        ..base.claim(),
+        id: id.claim("c"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.Licence,
@@ -1428,8 +1429,8 @@ pub fn manual_review_scoutbox_document_review_test() {
 pub fn org_confirmation_organisation_attested_test() {
   assert claims.assurance_for_claim(
       ver_claims.Row(
-        ..base.claim,
-        id: "c",
+        ..base.claim(),
+        id: id.claim("c"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.Licence,
@@ -1455,8 +1456,8 @@ pub fn authoritative_source_may_say_licence_verified_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "c",
+          ..base.claim(),
+          id: id.claim("c"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.Licence,
@@ -1484,8 +1485,8 @@ pub fn document_review_never_says_licence_verified_it_says_credential_reviewed_t
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "c",
+          ..base.claim(),
+          id: id.claim("c"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.Licence,
@@ -1510,8 +1511,8 @@ pub fn document_review_never_says_licence_verified_it_says_credential_reviewed_t
 pub fn licence_provenance_override_exact_test() {
   assert claims.claim_provenance_label(
       ver_claims.Row(
-        ..base.claim,
-        id: "c",
+        ..base.claim(),
+        id: id.claim("c"),
         subject_kind: ver_claims.User,
         subject_id: "u1",
         claim_type: claim_type.Licence,
@@ -1536,8 +1537,8 @@ pub fn document_upload_alone_no_licence_badge_of_any_kind_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "c",
+          ..base.claim(),
+          id: id.claim("c"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.Licence,
@@ -1565,8 +1566,8 @@ pub fn manual_identity_review_confirmed_with_scoutbox_document_review_assurance_
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "i",
+          ..base.claim(),
+          id: id.claim("i"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.PersonIdentity,
@@ -1593,8 +1594,8 @@ pub fn a_future_test_authoritative_identity_method_is_distinguishable_from_docu_
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "i",
+          ..base.claim(),
+          id: id.claim("i"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.PersonIdentity,
@@ -1621,8 +1622,8 @@ pub fn pending_identity_exposes_nothing_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "i",
+          ..base.claim(),
+          id: id.claim("i"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.PersonIdentity,
@@ -1649,8 +1650,8 @@ pub fn revoked_identity_exposes_nothing_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "i",
+          ..base.claim(),
+          id: id.claim("i"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.PersonIdentity,
@@ -1677,12 +1678,12 @@ pub fn active_account_current_badge_displays_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "c",
+          ..base.claim(),
+          id: id.claim("c"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.ClubRole,
-          organisation_id: Some("o1"),
+          organisation_id: Some(id.org("o1")),
           status: ver_claims.Verified,
           current: True,
           valid_from: Some(1),
@@ -1694,12 +1695,12 @@ pub fn active_account_current_badge_displays_test() {
           role: Some("Scout"),
         ),
         ver_claims.Row(
-          ..base.claim,
-          id: "h",
+          ..base.claim(),
+          id: id.claim("h"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.ClubRole,
-          organisation_id: Some("o1"),
+          organisation_id: Some(id.org("o1")),
           status: ver_claims.Verified,
           current: False,
           valid_from: Some(1),
@@ -1713,10 +1714,10 @@ pub fn active_account_current_badge_displays_test() {
       ],
       orgs: dict.from_list([
         #(
-          "o1",
+          id.org("o1"),
           orgs.Row(
-            ..base.org,
-            id: "o1",
+            ..base.org(),
+            id: id.org("o1"),
             name: "X",
             suspended: False,
             verification_revoked_at: None,
@@ -1736,12 +1737,12 @@ pub fn active_account_current_badge_displays_2_test() {
       subject_id: "u1",
       claims: [
         ver_claims.Row(
-          ..base.claim,
-          id: "c",
+          ..base.claim(),
+          id: id.claim("c"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.ClubRole,
-          organisation_id: Some("o1"),
+          organisation_id: Some(id.org("o1")),
           status: ver_claims.Verified,
           current: True,
           valid_from: Some(1),
@@ -1753,12 +1754,12 @@ pub fn active_account_current_badge_displays_2_test() {
           role: Some("Scout"),
         ),
         ver_claims.Row(
-          ..base.claim,
-          id: "h",
+          ..base.claim(),
+          id: id.claim("h"),
           subject_kind: ver_claims.User,
           subject_id: "u1",
           claim_type: claim_type.ClubRole,
-          organisation_id: Some("o1"),
+          organisation_id: Some(id.org("o1")),
           status: ver_claims.Verified,
           current: False,
           valid_from: Some(1),
@@ -1772,10 +1773,10 @@ pub fn active_account_current_badge_displays_2_test() {
       ],
       orgs: dict.from_list([
         #(
-          "o1",
+          id.org("o1"),
           orgs.Row(
-            ..base.org,
-            id: "o1",
+            ..base.org(),
+            id: id.org("o1"),
             name: "X",
             suspended: False,
             verification_revoked_at: None,

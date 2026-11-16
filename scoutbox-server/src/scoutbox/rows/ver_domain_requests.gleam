@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_domain_requests"
@@ -115,10 +116,10 @@ pub fn method_decoder() -> decode.Decoder(Method) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
+    id: id.DomainRequestId,
+    org_id: id.OrgId,
     domain: String,
-    requested_by: String,
+    requested_by: id.OrgUserId,
     status: Status,
     method: Option(Method),
     created_at: Int,
@@ -130,10 +131,10 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
+  id id: id.DomainRequestId,
+  org_id org_id: id.OrgId,
   domain domain: String,
-  requested_by requested_by: String,
+  requested_by requested_by: id.OrgUserId,
   status status: Status,
   created_at created_at: Int,
 ) -> Row {
@@ -153,10 +154,10 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.domain_request_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
   use domain <- decode.field(2, decode.string)
-  use requested_by <- decode.field(3, decode.string)
+  use requested_by <- decode.field(3, id.org_user_decoder())
   use status <- decode.field(4, status_decoder())
   use method <- decode.field(5, decode.optional(method_decoder()))
   use created_at <- decode.field(6, decode.int)
@@ -183,10 +184,10 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
+    id.domain_request_sql(row.id),
+    id.org_sql(row.org_id),
     sqlight.text(row.domain),
-    sqlight.text(row.requested_by),
+    id.org_user_sql(row.requested_by),
     sqlight.text(status_to_string(row.status)),
     sqlight.nullable(fn(v) { sqlight.text(method_to_string(v)) }, row.method),
     sqlight.int(row.created_at),

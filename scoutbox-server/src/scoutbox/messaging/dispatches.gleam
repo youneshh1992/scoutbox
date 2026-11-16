@@ -14,6 +14,7 @@ import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/dispatch_attempts as attempt_row
 import scoutbox/rows/dispatches as row
+import scoutbox/rows/id
 import scoutbox/vocab/audience
 import sqlight
 
@@ -91,18 +92,21 @@ fn many(
   with_attempts(read, rows)
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Dispatch), Fail(e)) {
-  many(read, "WHERE id = ?", [sqlight.text(id)])
+pub fn by_id(
+  read: Read,
+  id: id.DispatchId,
+) -> Result(Option(Dispatch), Fail(e)) {
+  many(read, "WHERE id = ?", [id.dispatch_sql(id)])
   |> result.map(fn(ds) { list.first(ds) |> option.from_result })
 }
 
 /// Every dispatch of one notification, in creation order.
 pub fn for_notification(
   read: Read,
-  notification_id: String,
+  notification_id: id.NotificationId,
 ) -> Result(List(Dispatch), Fail(e)) {
   many(read, "WHERE notification_id = ? ORDER BY seq", [
-    sqlight.text(notification_id),
+    id.notification_sql(notification_id),
   ])
 }
 
@@ -138,7 +142,7 @@ pub fn unopened_in_app_read(read: Read) -> Result(List(row.Row), Fail(e)) {
 /// One organisation's staff dispatches, newest first, keyed by `seq`.
 pub fn page_for_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   page: Page,
 ) -> Result(#(List(Dispatch), Option(String)), Fail(e)) {
   let #(after, args) = case page.after {
@@ -148,7 +152,7 @@ pub fn page_for_org(
   use rows <- result.try(store.query(
     read,
     select("WHERE org_id = ?" <> after <> " ORDER BY seq DESC LIMIT ?"),
-    list.flatten([[sqlight.text(org_id)], args, [sqlight.int(page.limit + 1)]]),
+    list.flatten([[id.org_sql(org_id)], args, [sqlight.int(page.limit + 1)]]),
     row.decoder(),
   ))
   let #(items, next) =
@@ -244,7 +248,7 @@ pub type Change {
 
 pub fn patch(
   tx: Tx,
-  id: String,
+  id: id.DispatchId,
   changes: List(Change),
 ) -> Result(Nil, Fail(e)) {
   case changes {
@@ -268,7 +272,7 @@ pub fn patch(
         "UPDATE dispatches SET "
           <> string.join(list.map(sets, fn(s) { s.0 <> " = ?" }), ", ")
           <> " WHERE id = ?",
-        list.append(list.map(sets, fn(s) { s.1 }), [sqlight.text(id)]),
+        list.append(list.map(sets, fn(s) { s.1 }), [id.dispatch_sql(id)]),
       )
     }
   }
@@ -282,8 +286,8 @@ pub fn view(d: Dispatch) -> Json {
   let opt_s = json.nullable(_, json.string)
   let opt_i = json.nullable(_, json.int)
   json.object([
-    #("id", json.string(r.id)),
-    #("notificationId", json.string(r.notification_id)),
+    #("id", id.dispatch_json(r.id)),
+    #("notificationId", id.notification_json(r.notification_id)),
     #(
       "audience",
       json.object([
@@ -291,7 +295,7 @@ pub fn view(d: Dispatch) -> Json {
         #("id", json.string(r.audience_id)),
       ]),
     ),
-    #("orgId", opt_s(r.org_id)),
+    #("orgId", json.nullable(r.org_id, id.org_json)),
     #("channel", row.channel_to_json(r.channel)),
     #("to", opt_s(r.to_address)),
     #("provider", row.provider_to_json(r.provider)),

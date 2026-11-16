@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "webhook_endpoints"
@@ -26,8 +27,8 @@ pub fn qualified(alias: String) -> String {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
+    id: id.WebhookEndpointId,
+    org_id: id.OrgId,
     url: String,
     secret: String,
     secret_prev: Option(String),
@@ -40,8 +41,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
+  id id: id.WebhookEndpointId,
+  org_id org_id: id.OrgId,
   url url: String,
   secret secret: String,
   active active: Bool,
@@ -62,8 +63,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.webhook_endpoint_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
   use url <- decode.field(2, decode.string)
   use secret <- decode.field(3, decode.string)
   use secret_prev <- decode.field(4, decode.optional(decode.string))
@@ -90,8 +91,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
+    id.webhook_endpoint_sql(row.id),
+    id.org_sql(row.org_id),
     sqlight.text(row.url),
     sqlight.text(row.secret),
     sqlight.nullable(sqlight.text, row.secret_prev),

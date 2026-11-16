@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "reports"
@@ -160,15 +161,15 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.ReportId,
     created_at: Int,
     by_kind: ByKind,
     by_id: String,
-    by_org_id: Option(String),
+    by_org_id: Option(id.OrgId),
     target_kind: TargetKind,
-    target_org_id: Option(String),
+    target_org_id: Option(id.OrgId),
     target_scout_name: Option(String),
-    target_player_id: Option(String),
+    target_player_id: Option(id.PlayerId),
     reason: String,
     urgent: Bool,
     status: Status,
@@ -180,15 +181,15 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.ReportId,
     created_at: Int,
     by_kind: ByKind,
     by_id: String,
-    by_org_id: Option(String),
+    by_org_id: Option(id.OrgId),
     target_kind: TargetKind,
-    target_org_id: Option(String),
+    target_org_id: Option(id.OrgId),
     target_scout_name: Option(String),
-    target_player_id: Option(String),
+    target_player_id: Option(id.PlayerId),
     reason: String,
     urgent: Bool,
     status: Status,
@@ -199,7 +200,7 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.ReportId,
   created_at created_at: Int,
   by_kind by_kind: ByKind,
   by_id by_id: String,
@@ -229,15 +230,15 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.report_decoder())
   use created_at <- decode.field(2, decode.int)
   use by_kind <- decode.field(3, by_kind_decoder())
   use by_id <- decode.field(4, decode.string)
-  use by_org_id <- decode.field(5, decode.optional(decode.string))
+  use by_org_id <- decode.field(5, decode.optional(id.org_decoder()))
   use target_kind <- decode.field(6, target_kind_decoder())
-  use target_org_id <- decode.field(7, decode.optional(decode.string))
+  use target_org_id <- decode.field(7, decode.optional(id.org_decoder()))
   use target_scout_name <- decode.field(8, decode.optional(decode.string))
-  use target_player_id <- decode.field(9, decode.optional(decode.string))
+  use target_player_id <- decode.field(9, decode.optional(id.player_decoder()))
   use reason <- decode.field(10, decode.string)
   use urgent <- decode.field(11, sqlight.decode_bool())
   use status <- decode.field(12, status_decoder())
@@ -268,15 +269,15 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.report_sql(row.id),
     sqlight.int(row.created_at),
     sqlight.text(by_kind_to_string(row.by_kind)),
     sqlight.text(row.by_id),
-    sqlight.nullable(sqlight.text, row.by_org_id),
+    sqlight.nullable(id.org_sql, row.by_org_id),
     sqlight.text(target_kind_to_string(row.target_kind)),
-    sqlight.nullable(sqlight.text, row.target_org_id),
+    sqlight.nullable(id.org_sql, row.target_org_id),
     sqlight.nullable(sqlight.text, row.target_scout_name),
-    sqlight.nullable(sqlight.text, row.target_player_id),
+    sqlight.nullable(id.player_sql, row.target_player_id),
     sqlight.text(row.reason),
     sqlight.bool(row.urgent),
     sqlight.text(status_to_string(row.status)),

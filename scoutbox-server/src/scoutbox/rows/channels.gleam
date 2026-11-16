@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/party
 import sqlight
 
@@ -28,17 +29,17 @@ pub fn qualified(alias: String) -> String {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
-    request_id: String,
-    player_id: String,
+    id: id.ChannelId,
+    request_id: id.RequestId,
+    player_id: id.PlayerId,
     player_name: Option(String),
-    org_id: String,
+    org_id: id.OrgId,
     org_name: String,
     org_verified: Option(Bool),
     scout_name: Option(String),
     scout_role: Option(String),
     counterparty: party.Party,
-    guardian_id: Option(String),
+    guardian_id: Option(id.GuardianId),
     created_at: Int,
     last_activity_at: Int,
     read_by_org_at: Option(Int),
@@ -49,17 +50,17 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
-    request_id: String,
-    player_id: String,
+    id: id.ChannelId,
+    request_id: id.RequestId,
+    player_id: id.PlayerId,
     player_name: Option(String),
-    org_id: String,
+    org_id: id.OrgId,
     org_name: String,
     org_verified: Option(Bool),
     scout_name: Option(String),
     scout_role: Option(String),
     counterparty: party.Party,
-    guardian_id: Option(String),
+    guardian_id: Option(id.GuardianId),
     created_at: Int,
     last_activity_at: Int,
     read_by_org_at: Option(Int),
@@ -69,10 +70,10 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  request_id request_id: String,
-  player_id player_id: String,
-  org_id org_id: String,
+  id id: id.ChannelId,
+  request_id request_id: id.RequestId,
+  player_id player_id: id.PlayerId,
+  org_id org_id: id.OrgId,
   org_name org_name: String,
   counterparty counterparty: party.Party,
   created_at created_at: Int,
@@ -100,17 +101,17 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
-  use request_id <- decode.field(2, decode.string)
-  use player_id <- decode.field(3, decode.string)
+  use id <- decode.field(1, id.channel_decoder())
+  use request_id <- decode.field(2, id.request_decoder())
+  use player_id <- decode.field(3, id.player_decoder())
   use player_name <- decode.field(4, decode.optional(decode.string))
-  use org_id <- decode.field(5, decode.string)
+  use org_id <- decode.field(5, id.org_decoder())
   use org_name <- decode.field(6, decode.string)
   use org_verified <- decode.field(7, decode.optional(sqlight.decode_bool()))
   use scout_name <- decode.field(8, decode.optional(decode.string))
   use scout_role <- decode.field(9, decode.optional(decode.string))
   use counterparty <- decode.field(10, party.decoder())
-  use guardian_id <- decode.field(11, decode.optional(decode.string))
+  use guardian_id <- decode.field(11, decode.optional(id.guardian_decoder()))
   use created_at <- decode.field(12, decode.int)
   use last_activity_at <- decode.field(13, decode.int)
   use read_by_org_at <- decode.field(14, decode.optional(decode.int))
@@ -141,17 +142,17 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.request_id),
-    sqlight.text(row.player_id),
+    id.channel_sql(row.id),
+    id.request_sql(row.request_id),
+    id.player_sql(row.player_id),
     sqlight.nullable(sqlight.text, row.player_name),
-    sqlight.text(row.org_id),
+    id.org_sql(row.org_id),
     sqlight.text(row.org_name),
     sqlight.nullable(sqlight.bool, row.org_verified),
     sqlight.nullable(sqlight.text, row.scout_name),
     sqlight.nullable(sqlight.text, row.scout_role),
     sqlight.text(party.to_string(row.counterparty)),
-    sqlight.nullable(sqlight.text, row.guardian_id),
+    sqlight.nullable(id.guardian_sql, row.guardian_id),
     sqlight.int(row.created_at),
     sqlight.int(row.last_activity_at),
     sqlight.nullable(sqlight.int, row.read_by_org_at),

@@ -28,6 +28,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Read}
 import scoutbox/recruitment/requests
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rules/visibility.{type Access}
 import scoutbox/safety/audit
@@ -81,7 +82,7 @@ fn org_standing(
 fn counterparty_standing(
   read: Read,
   t: Thread,
-  player_id: String,
+  player_id: id.PlayerId,
 ) -> Result(Option(Closed), store.Fail(e)) {
   use org <- result.try(orgs.by_id(read, t.row.org_id))
   case org {
@@ -111,7 +112,7 @@ fn counterparty_standing(
 /// The thread, if `owns` says this reader may use it.
 fn find_thread(
   ctx: Ctx,
-  id: String,
+  id: id.ChannelId,
   owns: fn(Thread) -> Bool,
   next: fn(Thread) -> Response,
 ) -> Response {
@@ -129,7 +130,7 @@ fn find_thread(
 fn org_thread(
   ctx: Ctx,
   a: OrgAccess,
-  id: String,
+  id: id.ChannelId,
   next: fn(Thread) -> Response,
 ) {
   find_thread(ctx, id, fn(t) { t.row.org_id == a.org.id }, next)
@@ -138,7 +139,7 @@ fn org_thread(
 fn player_thread(
   ctx: Ctx,
   p: PlayerAccess,
-  id: String,
+  id: id.ChannelId,
   next: fn(Thread) -> Response,
 ) {
   find_thread(
@@ -154,7 +155,7 @@ fn player_thread(
 fn guardian_thread(
   ctx: Ctx,
   g: Guardian,
-  id: String,
+  id: id.ChannelId,
   next: fn(Thread) -> Response,
 ) {
   find_thread(ctx, id, fn(t) { t.row.guardian_id == Some(g.row.id) }, next)
@@ -215,6 +216,8 @@ fn attachment(
   case named(body.attach_media_id), named(body.attach_trial_report_id) {
     None, None -> Ok(NoAttachment)
     Some(media_id), _ -> {
+      // From the request body.
+      let media_id = id.media(media_id)
       use player <- result.map(players.by_id(read, t.row.player_id))
       let clip =
         option.to_result(player, Nil)
@@ -328,21 +331,28 @@ fn post(
               id:,
               type_: "message",
               text:,
-              ref_id: Some(c.id),
+              ref_id: Some(id.channel_to_string(c.id)),
               at: now,
             )
           }
           use _ <- result.map(case sender.kind {
             audience.OrgUser -> {
+              // The notice's audience id is polymorphic: its kind says whose it is.
               let recipient = case c.counterparty {
-                party.Guardian -> #(audience.Guardian, c.guardian_id)
-                party.Player -> #(audience.Player, Some(c.player_id))
+                party.Guardian -> #(
+                  audience.Guardian,
+                  option.map(c.guardian_id, id.guardian_to_string),
+                )
+                party.Player -> #(
+                  audience.Player,
+                  Some(id.player_to_string(c.player_id)),
+                )
               }
               case recipient {
-                #(kind, Some(id)) ->
+                #(kind, Some(recipient_id)) ->
                   notice(
                     kind,
-                    id,
+                    recipient_id,
                     c.org_name
                       <> " ("
                       <> option.unwrap(c.scout_role, "null")
@@ -366,7 +376,7 @@ fn post(
               list.try_each(staff, fn(uid) {
                 notice(
                   audience.OrgUser,
-                  uid,
+                  id.org_user_to_string(uid),
                   sender_name
                     <> " replied in the "
                     <> option.unwrap(c.player_name, "null")
@@ -482,7 +492,12 @@ pub fn org_counts(ctx: Ctx, a: OrgAccess) -> Response {
   }
 }
 
-pub fn org_send(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
+pub fn org_send(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  id: id.ChannelId,
+) -> Response {
   use t <- org_thread(ctx, a, id)
   let now = clock.now_ms()
   send(
@@ -493,7 +508,7 @@ pub fn org_send(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
     "org_message",
     Sender(
       kind: audience.OrgUser,
-      id: a.user.id,
+      id: id.org_user_to_string(a.user.id),
       name: a.user.name
         <> " · "
         <> case a.user.role {
@@ -506,7 +521,12 @@ pub fn org_send(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
   )
 }
 
-pub fn org_read(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
+pub fn org_read(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  id: id.ChannelId,
+) -> Response {
   use t <- org_thread(ctx, a, id)
   mark_read(ctx, req, t, OrgSide)
 }
@@ -515,7 +535,7 @@ pub fn org_typing(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use t <- org_thread(ctx, a, id)
   case store.read(ctx.store, org_standing(_, t, a.org, clock.now_ms())) {
@@ -544,7 +564,7 @@ pub fn player_send(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use <- access.guardian_managed_only(p)
   use t <- player_thread(ctx, p, id)
@@ -555,7 +575,7 @@ pub fn player_send(
     t,
     counterparty_standing(_, t, me.id),
     "player_message",
-    Sender(kind: audience.Player, id: me.id, name: me.name),
+    Sender(kind: audience.Player, id: id.player_to_string(me.id), name: me.name),
   )
 }
 
@@ -563,7 +583,7 @@ pub fn player_read(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use <- access.guardian_managed_only(p)
   use t <- player_thread(ctx, p, id)
@@ -574,7 +594,7 @@ pub fn player_typing(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use <- access.guardian_managed_only(p)
   use _ <- player_thread(ctx, p, id)
@@ -596,7 +616,7 @@ pub fn guardian_send(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use t <- guardian_thread(ctx, g, id)
   send(
@@ -605,7 +625,11 @@ pub fn guardian_send(
     t,
     counterparty_standing(_, t, t.row.player_id),
     "guardian_message",
-    Sender(kind: audience.Guardian, id: g.row.id, name: g.row.name),
+    Sender(
+      kind: audience.Guardian,
+      id: id.guardian_to_string(g.row.id),
+      name: g.row.name,
+    ),
   )
 }
 
@@ -613,7 +637,7 @@ pub fn guardian_read(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use t <- guardian_thread(ctx, g, id)
   mark_read(ctx, req, t, CounterpartySide)
@@ -623,7 +647,7 @@ pub fn guardian_typing(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.ChannelId,
 ) -> Response {
   use _ <- guardian_thread(ctx, g, id)
   typing(req)
@@ -639,7 +663,7 @@ pub fn admin_list(ctx: Ctx, req: Request) -> Response {
       pages.respond(items, next, fn(t) {
         json.object(
           list.append(channels.view_fields(t, ForAdmin), [
-            #("guardianId", json.nullable(t.row.guardian_id, json.string)),
+            #("guardianId", json.nullable(t.row.guardian_id, id.guardian_json)),
           ]),
         )
       })

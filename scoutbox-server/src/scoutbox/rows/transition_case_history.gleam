@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "transition_case_history"
@@ -127,22 +128,22 @@ pub fn action_decoder() -> decode.Decoder(Action) {
 
 pub type Row {
   Row(
-    id: String,
-    transition_case_id: String,
+    id: id.TransitionEventId,
+    transition_case_id: id.TransitionCaseId,
     at: Int,
     by_kind: ByKind,
     by_id: String,
     by_name: Option(String),
     action: Action,
     detail_items: Option(Int),
-    detail_org_id: Option(String),
+    detail_org_id: Option(id.OrgId),
   )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  transition_case_id transition_case_id: String,
+  id id: id.TransitionEventId,
+  transition_case_id transition_case_id: id.TransitionCaseId,
   at at: Int,
   by_kind by_kind: ByKind,
   by_id by_id: String,
@@ -163,15 +164,15 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use transition_case_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.transition_event_decoder())
+  use transition_case_id <- decode.field(1, id.transition_case_decoder())
   use at <- decode.field(2, decode.int)
   use by_kind <- decode.field(3, by_kind_decoder())
   use by_id <- decode.field(4, decode.string)
   use by_name <- decode.field(5, decode.optional(decode.string))
   use action <- decode.field(6, action_decoder())
   use detail_items <- decode.field(7, decode.optional(decode.int))
-  use detail_org_id <- decode.field(8, decode.optional(decode.string))
+  use detail_org_id <- decode.field(8, decode.optional(id.org_decoder()))
   decode.success(Row(
     id:,
     transition_case_id:,
@@ -191,15 +192,15 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.transition_case_id),
+    id.transition_event_sql(row.id),
+    id.transition_case_sql(row.transition_case_id),
     sqlight.int(row.at),
     sqlight.text(by_kind_to_string(row.by_kind)),
     sqlight.text(row.by_id),
     sqlight.nullable(sqlight.text, row.by_name),
     sqlight.text(action_to_string(row.action)),
     sqlight.nullable(sqlight.int, row.detail_items),
-    sqlight.nullable(sqlight.text, row.detail_org_id),
+    sqlight.nullable(id.org_sql, row.detail_org_id),
   ]
 }
 

@@ -5,8 +5,8 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option}
 import gleam/result
-import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/org_invites as row
 import sqlight
 
@@ -27,7 +27,7 @@ pub type InviteError {
 
 pub type NewInvite {
   NewInvite(
-    org_id: String,
+    org_id: id.OrgId,
     email: String,
     name: String,
     role: String,
@@ -38,7 +38,7 @@ pub type NewInvite {
 }
 
 pub fn create(tx: Tx, new: NewInvite) -> Result(Invite, Fail(e)) {
-  use id <- result.try(ids.next(tx, "inv"))
+  use id <- result.try(id.next_org_invite(tx))
   use rows <- result.try(store.write(
     tx,
     row.insert_sql <> " RETURNING " <> row.columns,
@@ -79,7 +79,7 @@ pub fn by_token_hash(
 
 fn move(
   tx: Tx,
-  id: String,
+  id: id.OrgInviteId,
   set: String,
   args: List(sqlight.Value),
 ) -> Result(Invite, Fail(InviteError)) {
@@ -89,7 +89,7 @@ fn move(
       <> set
       <> " WHERE id = ? AND status = 'pending' RETURNING "
       <> row.columns,
-    list.append(args, [sqlight.text(id)]),
+    list.append(args, [id.org_invite_sql(id)]),
     row.decoder(),
   ))
   case rows {
@@ -100,25 +100,25 @@ fn move(
 
 pub fn accept(
   tx: Tx,
-  id: String,
-  user_id user_id: String,
+  id: id.OrgInviteId,
+  user_id user_id: id.OrgUserId,
   at at: Int,
 ) -> Result(Invite, Fail(InviteError)) {
   move(tx, id, "status = 'accepted', user_id = ?, accepted_at = ?", [
-    sqlight.text(user_id),
+    id.org_user_sql(user_id),
     sqlight.int(at),
   ])
 }
 
-pub fn expire(tx: Tx, id: String) -> Result(Invite, Fail(InviteError)) {
+pub fn expire(tx: Tx, id: id.OrgInviteId) -> Result(Invite, Fail(InviteError)) {
   move(tx, id, "status = 'expired'", [])
 }
 
 pub fn view(i: Invite) -> Json {
   let opt_int = json.nullable(_, json.int)
   json.object([
-    #("id", json.string(i.id)),
-    #("orgId", json.string(i.org_id)),
+    #("id", id.org_invite_json(i.id)),
+    #("orgId", id.org_json(i.org_id)),
     #("email", json.string(i.email)),
     #("name", json.string(i.name)),
     #("role", json.string(i.role)),
@@ -128,6 +128,6 @@ pub fn view(i: Invite) -> Json {
     #("expiresAt", json.int(i.expires_at)),
     #("acceptedAt", opt_int(i.accepted_at)),
     #("revokedAt", opt_int(i.revoked_at)),
-    #("userId", json.nullable(i.user_id, json.string)),
+    #("userId", json.nullable(i.user_id, id.org_user_json)),
   ])
 }

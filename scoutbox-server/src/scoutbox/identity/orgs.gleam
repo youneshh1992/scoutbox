@@ -9,6 +9,7 @@ import gleam/result
 import gleam/string
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/orgs as row
 import scoutbox/safety/audit
 import scoutbox/vocab/org_type
@@ -45,11 +46,11 @@ pub fn has_password(org: Org) -> Bool {
   option.is_some(org.password_hash)
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Org), Fail(e)) {
+pub fn by_id(read: Read, id: id.OrgId) -> Result(Option(Org), Fail(e)) {
   store.one(
     read,
     "SELECT " <> row.columns <> " FROM orgs WHERE id = ?",
-    [sqlight.text(id)],
+    [id.org_sql(id)],
     row.decoder(),
   )
   |> result.map(option.from_result)
@@ -79,7 +80,7 @@ pub fn safeguarding_certified(read: Read, org: Org) -> Result(Bool, Fail(e)) {
 pub fn view(org: Org) -> List(#(String, Json)) {
   let opt_string = json.nullable(_, json.string)
   [
-    #("id", json.string(org.id)),
+    #("id", id.org_json(org.id)),
     #("name", json.string(org.name)),
     #("type", org_type.to_json(org.type_)),
     #(
@@ -153,8 +154,10 @@ pub fn page(
   #(list.map(items, fn(p) { p.0 }), next)
 }
 
-pub fn suspend(tx: Tx, id: String) -> Result(Nil, Fail(e)) {
-  store.run(tx, "UPDATE orgs SET suspended = 1 WHERE id = ?", [sqlight.text(id)])
+pub fn suspend(tx: Tx, org_id: id.OrgId) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE orgs SET suspended = 1 WHERE id = ?", [
+    id.org_sql(org_id),
+  ])
 }
 
 /// The standing switches Trust & Safety sets. `None` leaves a field as it is; a verified domain of
@@ -168,7 +171,7 @@ pub type Standing {
   )
 }
 
-pub fn set_standing(tx: Tx, id: String, s: Standing) -> Result(Nil, Fail(e)) {
+pub fn set_standing(tx: Tx, id: id.OrgId, s: Standing) -> Result(Nil, Fail(e)) {
   let bool = fn(column, v) {
     option.map(v, fn(b) { #(column <> " = ?", sqlight.bool(b)) })
   }
@@ -189,7 +192,7 @@ pub fn set_standing(tx: Tx, id: String, s: Standing) -> Result(Nil, Fail(e)) {
         "UPDATE orgs SET "
           <> list.map(sets, fn(s) { s.0 }) |> string.join(", ")
           <> " WHERE id = ?",
-        list.append(list.map(sets, fn(s) { s.1 }), [sqlight.text(id)]),
+        list.append(list.map(sets, fn(s) { s.1 }), [id.org_sql(id)]),
       )
   }
 }

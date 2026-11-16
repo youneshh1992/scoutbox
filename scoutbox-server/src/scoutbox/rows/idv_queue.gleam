@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "idv_queue"
@@ -65,8 +66,8 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
-    guardian_id: String,
+    id: id.IdvCaseId,
+    guardian_id: id.GuardianId,
     guardian_name: Option(String),
     document_type: String,
     document_ref_last4: String,
@@ -80,8 +81,8 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
-    guardian_id: String,
+    id: id.IdvCaseId,
+    guardian_id: id.GuardianId,
     guardian_name: Option(String),
     document_type: String,
     document_ref_last4: String,
@@ -94,8 +95,8 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  guardian_id guardian_id: String,
+  id id: id.IdvCaseId,
+  guardian_id guardian_id: id.GuardianId,
   document_type document_type: String,
   document_ref_last4 document_ref_last4: String,
   provider provider: String,
@@ -119,8 +120,8 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
-  use guardian_id <- decode.field(2, decode.string)
+  use id <- decode.field(1, id.idv_case_decoder())
+  use guardian_id <- decode.field(2, id.guardian_decoder())
   use guardian_name <- decode.field(3, decode.optional(decode.string))
   use document_type <- decode.field(4, decode.string)
   use document_ref_last4 <- decode.field(5, decode.string)
@@ -148,8 +149,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.guardian_id),
+    id.idv_case_sql(row.id),
+    id.guardian_sql(row.guardian_id),
     sqlight.nullable(sqlight.text, row.guardian_name),
     sqlight.text(row.document_type),
     sqlight.text(row.document_ref_last4),

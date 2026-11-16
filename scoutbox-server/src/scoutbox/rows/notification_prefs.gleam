@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/audience
 import sqlight
 
@@ -29,7 +30,7 @@ pub type Row {
   Row(
     audience_kind: audience.Audience,
     audience_id: String,
-    staff_id: Option(String),
+    staff_id: Option(id.OrgUserId),
     email_intent: Bool,
     updated_at: Int,
   )
@@ -58,7 +59,7 @@ pub fn new(
 pub fn decoder() -> decode.Decoder(Row) {
   use audience_kind <- decode.field(0, audience.decoder())
   use audience_id <- decode.field(1, decode.string)
-  use staff_id <- decode.field(2, decode.optional(decode.string))
+  use staff_id <- decode.field(2, decode.optional(id.org_user_decoder()))
   use email_intent <- decode.field(3, sqlight.decode_bool())
   use updated_at <- decode.field(4, decode.int)
   decode.success(Row(

@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/ver_level
 import sqlight
 
@@ -65,24 +66,24 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 
 pub type Row {
   Row(
-    id: String,
-    org_id: String,
-    user_id: String,
+    id: id.VerAdminId,
+    org_id: id.OrgId,
+    user_id: id.OrgUserId,
     level: ver_level.VerLevel,
     status: Status,
     invited_by: String,
     created_at: Int,
     accepted_at: Option(Int),
     revoked_at: Option(Int),
-    revoked_by: Option(String),
+    revoked_by: Option(id.OrgUserId),
   )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  org_id org_id: String,
-  user_id user_id: String,
+  id id: id.VerAdminId,
+  org_id org_id: id.OrgId,
+  user_id user_id: id.OrgUserId,
   level level: ver_level.VerLevel,
   status status: Status,
   invited_by invited_by: String,
@@ -104,16 +105,16 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
-  use user_id <- decode.field(2, decode.string)
+  use id <- decode.field(0, id.ver_admin_decoder())
+  use org_id <- decode.field(1, id.org_decoder())
+  use user_id <- decode.field(2, id.org_user_decoder())
   use level <- decode.field(3, ver_level.decoder())
   use status <- decode.field(4, status_decoder())
   use invited_by <- decode.field(5, decode.string)
   use created_at <- decode.field(6, decode.int)
   use accepted_at <- decode.field(7, decode.optional(decode.int))
   use revoked_at <- decode.field(8, decode.optional(decode.int))
-  use revoked_by <- decode.field(9, decode.optional(decode.string))
+  use revoked_by <- decode.field(9, decode.optional(id.org_user_decoder()))
   decode.success(Row(
     id:,
     org_id:,
@@ -134,16 +135,16 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.org_id),
-    sqlight.text(row.user_id),
+    id.ver_admin_sql(row.id),
+    id.org_sql(row.org_id),
+    id.org_user_sql(row.user_id),
     sqlight.text(ver_level.to_string(row.level)),
     sqlight.text(status_to_string(row.status)),
     sqlight.text(row.invited_by),
     sqlight.int(row.created_at),
     sqlight.nullable(sqlight.int, row.accepted_at),
     sqlight.nullable(sqlight.int, row.revoked_at),
-    sqlight.nullable(sqlight.text, row.revoked_by),
+    sqlight.nullable(id.org_user_sql, row.revoked_by),
   ]
 }
 

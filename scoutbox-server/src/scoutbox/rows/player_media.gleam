@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "player_media"
@@ -61,15 +62,15 @@ pub fn captured_by_decoder() -> decode.Decoder(CapturedBy) {
 
 pub type Row {
   Row(
-    id: String,
-    player_id: String,
+    id: id.MediaId,
+    player_id: id.PlayerId,
     position: Int,
     title: String,
     kind: Option(String),
     uploaded_at: Option(String),
     url: Option(String),
     views: Int,
-    verified_clip_attendance_id: Option(String),
+    verified_clip_attendance_id: Option(id.AttendanceId),
     captions: Option(String),
     size_bytes: Option(Int),
     captured_by: Option(CapturedBy),
@@ -79,8 +80,8 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
-  player_id player_id: String,
+  id id: id.MediaId,
+  player_id player_id: id.PlayerId,
   position position: Int,
   title title: String,
 ) -> Row {
@@ -103,8 +104,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use id <- decode.field(0, decode.string)
-  use player_id <- decode.field(1, decode.string)
+  use id <- decode.field(0, id.media_decoder())
+  use player_id <- decode.field(1, id.player_decoder())
   use position <- decode.field(2, decode.int)
   use title <- decode.field(3, decode.string)
   use kind <- decode.field(4, decode.optional(decode.string))
@@ -113,7 +114,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use views <- decode.field(7, decode.int)
   use verified_clip_attendance_id <- decode.field(
     8,
-    decode.optional(decode.string),
+    decode.optional(id.attendance_decoder()),
   )
   use captions <- decode.field(9, decode.optional(decode.string))
   use size_bytes <- decode.field(10, decode.optional(decode.int))
@@ -142,15 +143,15 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
-    sqlight.text(row.player_id),
+    id.media_sql(row.id),
+    id.player_sql(row.player_id),
     sqlight.int(row.position),
     sqlight.text(row.title),
     sqlight.nullable(sqlight.text, row.kind),
     sqlight.nullable(sqlight.text, row.uploaded_at),
     sqlight.nullable(sqlight.text, row.url),
     sqlight.int(row.views),
-    sqlight.nullable(sqlight.text, row.verified_clip_attendance_id),
+    sqlight.nullable(id.attendance_sql, row.verified_clip_attendance_id),
     sqlight.nullable(sqlight.text, row.captions),
     sqlight.nullable(sqlight.int, row.size_bytes),
     sqlight.nullable(

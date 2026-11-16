@@ -16,6 +16,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/secrets
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/rows/org_invites
 import wisp.{type Request, type Response}
 
@@ -223,7 +224,7 @@ fn accepting(
         json.object(
           list.flatten([
             [
-              #("userId", json.string(user.id)),
+              #("userId", id.org_user_json(user.id)),
               #("role", json.string(user.role)),
               #("org", json.object(orgs.view(org))),
               #("token", json.string(token)),

@@ -17,9 +17,9 @@ import scoutbox/identity/players
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/id
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_references as row
@@ -55,20 +55,20 @@ fn where(
 
 pub fn record(r: Reference) -> Json {
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.reference_json(r.id)),
     #("version", json.int(r.version)),
-    #("supersedesId", json.nullable(r.supersedes_id, json.string)),
-    #("playerId", json.string(r.player_id)),
+    #("supersedesId", json.nullable(r.supersedes_id, id.reference_json)),
+    #("playerId", id.player_json(r.player_id)),
     #("playerName", json.nullable(r.player_name, json.string)),
-    #("coachUserId", json.string(r.coach_user_id)),
+    #("coachUserId", id.org_user_json(r.coach_user_id)),
     #("coachName", json.nullable(r.coach_name, json.string)),
-    #("orgId", json.string(r.org_id)),
+    #("orgId", id.org_json(r.org_id)),
     #("orgName", json.nullable(r.org_name, json.string)),
     #("roleAtTime", json.nullable(r.role_at_time, json.string)),
     #(
       "provenanceSnapshot",
       json.object([
-        #("claimId", json.string(r.provenance_claim_id)),
+        #("claimId", id.claim_json(r.provenance_claim_id)),
         #("claimType", claim_type.to_json(r.provenance_claim_type)),
         #("status", row.provenance_status_to_json(r.provenance_status)),
         #(
@@ -101,7 +101,7 @@ fn structured(r: Reference) -> Json {
 
 type NewReference {
   NewReference(
-    player_id: String,
+    player_id: id.PlayerId,
     relationship: Option(String),
     capacity: Option(String),
     from_year: Option(Int),
@@ -131,7 +131,8 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
     )
     use summary <- input.field("summary", input.nullish(input.text(800)))
     input.done(NewReference(
-      player_id:,
+      // From the request body.
+      player_id: id.player(player_id),
       relationship:,
       capacity:,
       from_year:,
@@ -148,7 +149,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   use theirs <- result.try(records.claims_for(
     read,
     claim_row.User,
-    access.user.id,
+    id.org_user_to_string(access.user.id),
   ))
   let role_claim =
     list.find(theirs, fn(c) {
@@ -192,7 +193,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
           let summary = input.filled(body.summary)
           case relationship, summary {
             Some(relationship), Some(summary) -> {
-              use id <- result.try(ids.next(tx, "vref"))
+              use id <- result.try(id.next_reference(tx))
               let r =
                 row.Row(
                   id:,
@@ -235,10 +236,10 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 core.About(
                   ..core.nothing,
                   org_id: Some(access.org.id),
-                  subject_id: Some(p.row.id),
+                  subject_id: Some(id.player_to_string(p.row.id)),
                   detail: records.detail([], [
-                    #("reference", Some(id)),
-                    #("provenance", Some(role_claim.id)),
+                    #("reference", Some(id.reference_to_string(id))),
+                    #("provenance", Some(id.claim_to_string(role_claim.id))),
                   ]),
                 ),
                 now,
@@ -249,20 +250,20 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                     notifications.notify(
                       tx,
                       to: audience.Player,
-                      id: p.row.id,
+                      id: id.player_to_string(p.row.id),
                       type_: "verification",
                       text: access.user.name
                         <> " ("
                         <> access.org.name
                         <> ") added a structured reference to your profile.",
-                      ref_id: Some(id),
+                      ref_id: Some(id.reference_to_string(id)),
                       at: now,
                     )
                   False, Some(guardian_id) ->
                     notifications.notify(
                       tx,
                       to: audience.Guardian,
-                      id: guardian_id,
+                      id: id.guardian_to_string(guardian_id),
                       type_: "verification",
                       text: access.user.name
                         <> " (verified at "
@@ -270,7 +271,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                         <> ") added a structured reference for "
                         <> p.row.name
                         <> ". You can review it in the app.",
-                      ref_id: Some(id),
+                      ref_id: Some(id.reference_to_string(id)),
                       at: now,
                     )
                   False, None -> Ok(Nil)
@@ -314,7 +315,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 pub fn list_for_org(ctx: Ctx, access: OrgAccess) -> Response {
   use read <- core.look(ctx)
   use items <- result.map(
-    where(read, "org_id = ?", [sqlight.text(access.org.id)]),
+    where(read, "org_id = ?", [id.org_sql(access.org.id)]),
   )
   http.json(200, json.object([#("items", json.array(items, record))]))
 }
@@ -366,7 +367,7 @@ pub fn withdraw(
             store.run(
               tx,
               "UPDATE ver_references SET status = 'withdrawn', withdrawn_at = ?, withdraw_reason = ? WHERE id = ? AND status = 'active'",
-              [sqlight.int(now), sqlight.text(reason), sqlight.text(r.id)],
+              [sqlight.int(now), sqlight.text(reason), id.reference_sql(r.id)],
             ),
           )
           use _ <- result.try(core.event(
@@ -376,9 +377,12 @@ pub fn withdraw(
             core.About(
               ..core.nothing,
               org_id: Some(access.org.id),
-              subject_id: Some(r.player_id),
+              subject_id: Some(id.player_to_string(r.player_id)),
               detail: records.detail(
-                [#("reference", Some(r.id)), #("status", Some("active"))],
+                [
+                  #("reference", Some(id.reference_to_string(r.id))),
+                  #("status", Some("active")),
+                ],
                 [#("status", Some("withdrawn"))],
               ),
               reason: Some(reason),
@@ -444,10 +448,10 @@ pub fn correct(
             store.run(
               tx,
               "UPDATE ver_references SET status = 'superseded' WHERE id = ? AND status = 'active'",
-              [sqlight.text(old.id)],
+              [id.reference_sql(old.id)],
             ),
           )
-          use next_id <- result.try(ids.next(tx, "vref"))
+          use next_id <- result.try(id.next_reference(tx))
           let next =
             row.Row(
               ..old,
@@ -467,11 +471,14 @@ pub fn correct(
             core.About(
               ..core.nothing,
               org_id: Some(access.org.id),
-              subject_id: Some(old.player_id),
-              detail: records.detail([#("reference", Some(old.id))], [
-                #("reference", Some(next_id)),
-                #("version", Some(string.inspect(next.version))),
-              ]),
+              subject_id: Some(id.player_to_string(old.player_id)),
+              detail: records.detail(
+                [#("reference", Some(id.reference_to_string(old.id)))],
+                [
+                  #("reference", Some(id.reference_to_string(next_id))),
+                  #("version", Some(string.inspect(next.version))),
+                ],
+              ),
             ),
             now,
           ))
@@ -479,7 +486,7 @@ pub fn correct(
             200,
             json.object([
               #("reference", record(next)),
-              #("superseded", json.string(old.id)),
+              #("superseded", id.reference_json(old.id)),
               #(
                 "note",
                 json.string(
@@ -502,7 +509,7 @@ fn player_view(read: Read, r: Reference, now: Int) -> Result(Json, Fail(e)) {
     None -> False
   }
   json.object([
-    #("id", json.string(r.id)),
+    #("id", id.reference_json(r.id)),
     #("version", json.int(r.version)),
     #("coachName", json.nullable(r.coach_name, json.string)),
     #("orgName", json.nullable(r.org_name, json.string)),
@@ -528,12 +535,12 @@ fn player_view(read: Read, r: Reference, now: Int) -> Result(Json, Fail(e)) {
   ])
 }
 
-fn for_player(ctx: Ctx, player_id: String) -> Response {
+fn for_player(ctx: Ctx, player_id: id.PlayerId) -> Response {
   let now = clock.now_ms()
   use read <- core.look(ctx)
   use refs <- result.try(
     where(read, "player_id = ? AND status <> 'superseded'", [
-      sqlight.text(player_id),
+      id.player_sql(player_id),
     ]),
   )
   use items <- result.map(list.try_map(refs, player_view(read, _, now)))
@@ -546,7 +553,7 @@ pub fn mine(ctx: Ctx, p: access.PlayerAccess) -> Response {
 }
 
 /// `GET /guardian/children/:id/references`.
-pub fn child(ctx: Ctx, g: Guardian, child_id: String) -> Response {
+pub fn child(ctx: Ctx, g: Guardian, child_id: id.PlayerId) -> Response {
   case list.contains(g.child_ids, child_id) {
     True -> for_player(ctx, child_id)
     False -> http.error(404, "CHILD_NOT_FOUND")

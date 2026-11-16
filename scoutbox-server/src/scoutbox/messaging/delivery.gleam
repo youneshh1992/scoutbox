@@ -23,7 +23,6 @@ import scoutbox/messaging/notifications.{type Notification}
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
@@ -31,6 +30,7 @@ import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/dispatches as row
 import scoutbox/rows/guardians as guardian_row
+import scoutbox/rows/id
 import scoutbox/rows/ops_events as ops_row
 import scoutbox/rows/org_users as staff_row
 import scoutbox/rows/players as player_row
@@ -107,7 +107,12 @@ fn dispatch_new(ctx: Ctx, after_seq: Int, changed: Int) -> Int {
     Ok(batch) -> {
       let changed =
         list.fold(batch, changed, fn(acc, n) {
-          acc + item(ctx, "notification " <> n.id, make_dispatches(ctx, _, n))
+          acc
+          + item(
+            ctx,
+            "notification " <> id.notification_to_string(n.id),
+            make_dispatches(ctx, _, n),
+          )
         })
       let assert Ok(last) = list.last(batch)
       dispatch_new(ctx, last.seq, changed)
@@ -131,7 +136,7 @@ fn email(to: Option(String)) -> Destination {
 fn destinations(
   read: Read,
   n: Notification,
-) -> Result(#(List(Destination), Option(String)), Fail(e)) {
+) -> Result(#(List(Destination), Option(id.OrgId)), Fail(e)) {
   let in_app =
     Destination(
       row.ChannelInApp,
@@ -255,7 +260,7 @@ fn make_dispatches(
             None, False, Some(_) -> row.HeldQuietHours
             None, False, None -> row.Queued
           }
-          use id <- result.try(ids.next(tx, "dsp"))
+          use id <- result.try(id.next_dispatch(tx))
           dispatches.create(
             tx,
             row.New(
@@ -303,7 +308,12 @@ fn send_due(ctx: Ctx) -> Int {
     }
     Ok(due) ->
       list.fold(due, 0, fn(acc, d) {
-        acc + item(ctx, "dispatch " <> d.row.id, attempt(ctx, _, d))
+        acc
+        + item(ctx, "dispatch " <> id.dispatch_to_string(d.row.id), attempt(
+          ctx,
+          _,
+          d,
+        ))
       })
   }
 }
@@ -407,7 +417,7 @@ fn send(ctx: Ctx, tx: Tx, due: Dispatch, now: Int) -> Result(Int, Fail(Nil)) {
                 tx,
                 d.org_id,
                 webhook_event.DeliveryFailed,
-                d.id,
+                id.dispatch_to_string(d.id),
                 clock.now_ms(),
               )
             }
@@ -427,7 +437,7 @@ fn send(ctx: Ctx, tx: Tx, due: Dispatch, now: Int) -> Result(Int, Fail(Nil)) {
 }
 
 fn delivery_failed(tx: Tx, d: row.Row, at: Int) -> Result(Nil, Fail(e)) {
-  use id <- result.try(ids.next(tx, "ops"))
+  use id <- result.try(id.next_ops_event(tx))
   ops_row.insert(
     tx,
     ops_row.New(
@@ -448,7 +458,7 @@ fn mirror_reads(ctx: Ctx) -> Int {
     Ok(rows) ->
       list.fold(rows, 0, fn(acc, d) {
         acc
-        + item(ctx, "dispatch " <> d.id, fn(tx) {
+        + item(ctx, "dispatch " <> id.dispatch_to_string(d.id), fn(tx) {
           let now = clock.now_ms()
           dispatches.patch(
             tx,
@@ -542,7 +552,7 @@ pub fn ack(
   ctx: Ctx,
   kind: audience.Audience,
   audience_id: String,
-  id: String,
+  id: id.NotificationId,
 ) -> Response {
   let now = clock.now_ms()
   let acked =

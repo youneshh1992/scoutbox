@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "guardian_children"
@@ -61,13 +62,13 @@ pub fn role_decoder() -> decode.Decoder(Role) {
 }
 
 pub type Row {
-  Row(guardian_id: String, player_id: String, role: Role)
+  Row(guardian_id: id.GuardianId, player_id: id.PlayerId, role: Role)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  guardian_id guardian_id: String,
-  player_id player_id: String,
+  guardian_id guardian_id: id.GuardianId,
+  player_id player_id: id.PlayerId,
   role role: Role,
 ) -> Row {
   Row(guardian_id:, player_id:, role:)
@@ -75,8 +76,8 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use guardian_id <- decode.field(0, decode.string)
-  use player_id <- decode.field(1, decode.string)
+  use guardian_id <- decode.field(0, id.guardian_decoder())
+  use player_id <- decode.field(1, id.player_decoder())
   use role <- decode.field(2, role_decoder())
   decode.success(Row(guardian_id:, player_id:, role:))
 }
@@ -87,8 +88,8 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.guardian_id),
-    sqlight.text(row.player_id),
+    id.guardian_sql(row.guardian_id),
+    id.player_sql(row.player_id),
     sqlight.text(role_to_string(row.role)),
   ]
 }

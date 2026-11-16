@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/audience
 import sqlight
 
@@ -65,7 +66,7 @@ pub fn transport_decoder() -> decode.Decoder(Transport) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.PushId,
     created_at: Int,
     audience_kind: audience.Audience,
     audience_id: String,
@@ -78,7 +79,7 @@ pub type Row {
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.PushId,
     created_at: Int,
     audience_kind: audience.Audience,
     audience_id: String,
@@ -90,7 +91,7 @@ pub type New {
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.PushId,
   created_at created_at: Int,
   audience_kind audience_kind: audience.Audience,
   audience_id audience_id: String,
@@ -104,7 +105,7 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.push_decoder())
   use created_at <- decode.field(2, decode.int)
   use audience_kind <- decode.field(3, audience.decoder())
   use audience_id <- decode.field(4, decode.string)
@@ -129,7 +130,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.push_sql(row.id),
     sqlight.int(row.created_at),
     sqlight.text(audience.to_string(row.audience_kind)),
     sqlight.text(row.audience_id),

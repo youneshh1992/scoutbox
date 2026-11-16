@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "org_verified_domains"
@@ -99,7 +100,7 @@ pub fn method_decoder() -> decode.Decoder(Method) {
 
 pub type Row {
   Row(
-    org_id: String,
+    org_id: id.OrgId,
     domain: String,
     status: Status,
     method: Method,
@@ -110,7 +111,7 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  org_id org_id: String,
+  org_id org_id: id.OrgId,
   domain domain: String,
   status status: Status,
   method method: Method,
@@ -122,7 +123,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use org_id <- decode.field(0, decode.string)
+  use org_id <- decode.field(0, id.org_decoder())
   use domain <- decode.field(1, decode.string)
   use status <- decode.field(2, status_decoder())
   use method <- decode.field(3, method_decoder())
@@ -144,7 +145,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.org_id),
+    id.org_sql(row.org_id),
     sqlight.text(row.domain),
     sqlight.text(status_to_string(row.status)),
     sqlight.text(method_to_string(row.method)),

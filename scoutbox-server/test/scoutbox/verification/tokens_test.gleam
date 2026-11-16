@@ -8,6 +8,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/rows/ver_tokens as token_row
 import scoutbox/support
 import scoutbox/verification/core
@@ -83,12 +84,12 @@ fn stored_hashes(s) -> List(String) {
   hashes
 }
 
-fn used(s, id: String) -> Bool {
+fn used(s, id: id.VerTokenId) -> Bool {
   let assert Ok([used]) =
     store.read(s, store.query(
       _,
       "SELECT used_at IS NOT NULL FROM ver_tokens WHERE id = ?",
-      [sqlight.text(id)],
+      [id.ver_token_sql(id)],
       decode.at([0], sqlight.decode_bool()),
     ))
   used

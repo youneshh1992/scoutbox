@@ -41,6 +41,14 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 
 - Tables come from `priv/migrations`; their Gleam is generated (`npm run codegen`). Shared vocabularies are declared
   once in `dev/scoutbox_dev.gleam`.
+- Ids are typed: each table declared `Ided` in `dev/scoutbox_dev.gleam` has an opaque `<Name>Id` in the generated
+  `scoutbox/rows/id`, with `<name>_sql`, `<name>_json`, `<name>_decoder`, `<name>_to_string` and, given a prefix,
+  `next_<name>(tx)` to mint one. Functions take and return the typed id. `id.<name>(text)` makes one only at a
+  boundary: a path segment in the router, a request body or query field, a polymorphic column whose kind column
+  says whose id it is, or a test's literal. `_to_string` is for text: a polymorphic column, a log line, a key.
+  Every column named `id` or `*_id` must be typed by a foreign key or decided in `id_columns` (`RefersTo` or
+  `Untyped` with its reason), or `npm run codegen` refuses it. Polymorphic pairs (`subject_kind` + `subject_id`,
+  `audience_*`, `ref_id`, `by_*`) stay `String` for now.
 - SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
 - A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the

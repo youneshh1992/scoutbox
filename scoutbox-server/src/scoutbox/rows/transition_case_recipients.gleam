@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "transition_case_recipients"
@@ -26,9 +27,9 @@ pub fn qualified(alias: String) -> String {
 
 pub type Row {
   Row(
-    transition_case_id: String,
+    transition_case_id: id.TransitionCaseId,
     ord: Int,
-    org_id: String,
+    org_id: id.OrgId,
     org_name: Option(String),
     granted_at: Int,
     expires_at: Int,
@@ -39,9 +40,9 @@ pub type Row {
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  transition_case_id transition_case_id: String,
+  transition_case_id transition_case_id: id.TransitionCaseId,
   ord ord: Int,
-  org_id org_id: String,
+  org_id org_id: id.OrgId,
   granted_at granted_at: Int,
   expires_at expires_at: Int,
 ) -> Row {
@@ -59,9 +60,9 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use transition_case_id <- decode.field(0, decode.string)
+  use transition_case_id <- decode.field(0, id.transition_case_decoder())
   use ord <- decode.field(1, decode.int)
-  use org_id <- decode.field(2, decode.string)
+  use org_id <- decode.field(2, id.org_decoder())
   use org_name <- decode.field(3, decode.optional(decode.string))
   use granted_at <- decode.field(4, decode.int)
   use expires_at <- decode.field(5, decode.int)
@@ -85,9 +86,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.transition_case_id),
+    id.transition_case_sql(row.transition_case_id),
     sqlight.int(row.ord),
-    sqlight.text(row.org_id),
+    id.org_sql(row.org_id),
     sqlight.nullable(sqlight.text, row.org_name),
     sqlight.int(row.granted_at),
     sqlight.int(row.expires_at),

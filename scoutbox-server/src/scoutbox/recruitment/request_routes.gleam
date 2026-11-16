@@ -27,6 +27,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
 import scoutbox/recruitment/requests
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/recruitment_requests as request_row
 import scoutbox/safety/audit
@@ -47,7 +48,12 @@ type Direct {
 ///
 /// Not ported yet: trial requests (their logistics, slots and the overdue-report rule), and the per-club budget
 /// of 30 contacts an hour.
-pub fn request(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
+pub fn request(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  id: id.PlayerId,
+) -> Response {
   let now = clock.now_ms()
   case store.read(ctx.store, players.for_org(_, id, a.org, now)) {
     Error(failure) -> http.internal(failure)
@@ -115,7 +121,7 @@ pub fn request(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
 }
 
 type Refusal {
-  Pending(request_id: String)
+  Pending(request_id: id.RequestId)
 }
 
 fn contact(
@@ -183,7 +189,7 @@ fn contact(
           id: to,
           type_: "request",
           text:,
-          ref_id: Some(r.id),
+          ref_id: Some(id.request_to_string(r.id)),
           at: now,
         )
       }
@@ -191,7 +197,7 @@ fn contact(
         Some(g) -> {
           use _ <- result.try(notice(
             audience.Guardian,
-            g,
+            id.guardian_to_string(g),
             a.org.name
               <> " has requested to discuss a conversation for "
               <> p.row.name
@@ -199,7 +205,7 @@ fn contact(
           ))
           notice(
             audience.Player,
-            p.row.id,
+            id.player_to_string(p.row.id),
             a.org.name
               <> " contacted your parent/guardian about a conversation.",
           )
@@ -207,7 +213,7 @@ fn contact(
         None ->
           notice(
             audience.Player,
-            p.row.id,
+            id.player_to_string(p.row.id),
             a.org.name <> " sent you a contact request.",
           )
       })
@@ -220,7 +226,7 @@ fn contact(
         201,
         json.object([
           #("ok", json.bool(True)),
-          #("requestId", json.string(r.id)),
+          #("requestId", id.request_json(r.id)),
           #("status", json.string("pending")),
           #("routedTo", party.to_json(r.routed_to)),
         ]),
@@ -236,7 +242,7 @@ fn contact(
               "A contact request to this player is already awaiting an answer.",
             ),
           ),
-          #("requestId", json.string(request_id)),
+          #("requestId", id.request_json(request_id)),
         ]),
       )
     Error(failure) -> http.internal(failure)
@@ -397,14 +403,20 @@ pub fn player_respond(
   ctx: Ctx,
   req: Request,
   p: access.PlayerAccess,
-  id: String,
+  id: id.RequestId,
 ) -> Response {
   use <- access.guardian_managed_only(p)
   let me = p.player
   case store.read(ctx.store, requests.by_id(_, id)) {
     Error(failure) -> http.internal(failure)
     Ok(Some(r)) if r.player_id == me.row.id && r.routed_to == party.Player ->
-      respond(ctx, req, r, me, Responder(party.Player, me.row.id, me.row.name))
+      respond(
+        ctx,
+        req,
+        r,
+        me,
+        Responder(party.Player, id.player_to_string(me.row.id), me.row.name),
+      )
     Ok(_) -> http.error(404, "REQUEST_NOT_FOUND")
   }
 }
@@ -414,7 +426,7 @@ pub fn guardian_respond(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.RequestId,
 ) -> Response {
   let found =
     store.read(ctx.store, fn(read) {
@@ -433,7 +445,13 @@ pub fn guardian_respond(
   case found {
     Error(failure) -> http.internal(failure)
     Ok(Some(#(r, p))) ->
-      respond(ctx, req, r, p, Responder(party.Guardian, g.row.id, g.row.name))
+      respond(
+        ctx,
+        req,
+        r,
+        p,
+        Responder(party.Guardian, id.guardian_to_string(g.row.id), g.row.name),
+      )
     Ok(None) -> http.error(404, "REQUEST_NOT_FOUND")
   }
 }
@@ -531,7 +549,7 @@ fn answer(
       )
       use _ <- result.try(requests.record_response(
         tx,
-        r.id,
+        id.request_to_string(r.id),
         accept,
         by.kind,
         now,
@@ -557,13 +575,14 @@ fn answer(
         True -> "accepted"
         False -> "declined"
       }
+      // The club's notice points at the thread when one opens, else at the request.
       use org_ref <- result.try(case accept {
         True -> {
           use thread <- result.try(channels.open(tx, r, now))
           use _ <- result.map(requests.attach_channel(tx, r.id, thread.id))
-          thread.id
+          id.channel_to_string(thread.id)
         }
-        False -> Ok(r.id)
+        False -> Ok(id.request_to_string(r.id))
       })
       use _ <- result.try(ledger.append(
         tx,
@@ -579,7 +598,7 @@ fn answer(
       ))
       use _ <- result.try(notice(
         audience.OrgUser,
-        r.user_id,
+        id.org_user_to_string(r.user_id),
         outcome,
         case accept {
           True -> who <> " accepted your " <> kind <> " request — thread open."
@@ -592,7 +611,7 @@ fn answer(
         True ->
           notice(
             audience.Player,
-            player.row.id,
+            id.player_to_string(player.row.id),
             "guardian_decision",
             "Your parent/guardian "
               <> outcome
@@ -601,7 +620,7 @@ fn answer(
               <> " with "
               <> r.org_name
               <> ".",
-            r.id,
+            id.request_to_string(r.id),
           )
         False -> Ok(Nil)
       })

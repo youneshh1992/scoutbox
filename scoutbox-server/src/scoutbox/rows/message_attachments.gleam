@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "message_attachments"
@@ -64,9 +65,9 @@ pub fn kind_decoder() -> decode.Decoder(Kind) {
 
 pub type Row {
   Row(
-    message_id: String,
+    message_id: id.MessageId,
     kind: Kind,
-    media_id: Option(String),
+    media_id: Option(id.MediaId),
     title: Option(String),
     url: Option(String),
     verified_clip: Option(Bool),
@@ -77,7 +78,7 @@ pub type Row {
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
-pub fn new(message_id message_id: String, kind kind: Kind) -> Row {
+pub fn new(message_id message_id: id.MessageId, kind kind: Kind) -> Row {
   Row(
     message_id:,
     kind:,
@@ -93,9 +94,9 @@ pub fn new(message_id message_id: String, kind kind: Kind) -> Row {
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use message_id <- decode.field(0, decode.string)
+  use message_id <- decode.field(0, id.message_decoder())
   use kind <- decode.field(1, kind_decoder())
-  use media_id <- decode.field(2, decode.optional(decode.string))
+  use media_id <- decode.field(2, decode.optional(id.media_decoder()))
   use title <- decode.field(3, decode.optional(decode.string))
   use url <- decode.field(4, decode.optional(decode.string))
   use verified_clip <- decode.field(5, decode.optional(sqlight.decode_bool()))
@@ -121,9 +122,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.message_id),
+    id.message_sql(row.message_id),
     sqlight.text(kind_to_string(row.kind)),
-    sqlight.nullable(sqlight.text, row.media_id),
+    sqlight.nullable(id.media_sql, row.media_id),
     sqlight.nullable(sqlight.text, row.title),
     sqlight.nullable(sqlight.text, row.url),
     sqlight.nullable(sqlight.bool, row.verified_clip),

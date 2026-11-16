@@ -21,9 +21,9 @@ import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/orgs as org_row
 import scoutbox/rows/ver_admins as admin_row
@@ -86,20 +86,20 @@ pub fn awaiting_review(
 
 fn codes(
   read: Read,
-  id: String,
+  id: id.RootRequestId,
   l: code_row.ListValue,
 ) -> Result(List(VerCode), Fail(e)) {
   store.query(
     read,
     "SELECT code FROM ver_root_request_codes WHERE root_request_id = ? AND list = ? ORDER BY position",
-    [sqlight.text(id), sqlight.text(code_row.list_value_to_string(l))],
+    [id.root_request_sql(id), sqlight.text(code_row.list_value_to_string(l))],
     decode.at([0], ver_code.decoder()),
   )
 }
 
 fn add_codes(
   tx: Tx,
-  id: String,
+  id: id.RootRequestId,
   l: code_row.ListValue,
   new: List(VerCode),
 ) -> Result(Nil, Fail(e)) {
@@ -133,18 +133,21 @@ fn rewrite(tx: Tx, a: Application, guard: String) -> Result(Bool, Fail(e)) {
       <> ") WHERE id = ? AND "
       <> guard
       <> " RETURNING 1",
-    list.append(row.values(a), [sqlight.text(a.id)]),
+    list.append(row.values(a), [id.root_request_sql(a.id)]),
     decode.success(Nil),
   )
   |> result.map(fn(rows) { rows != [] })
 }
 
-fn evidence_ids(read: Read, id: String) -> Result(List(String), Fail(e)) {
+fn evidence_ids(
+  read: Read,
+  id: id.RootRequestId,
+) -> Result(List(id.EvidenceId), Fail(e)) {
   store.query(
     read,
     "SELECT id FROM ver_evidence WHERE root_request_id = ? ORDER BY rowid",
-    [sqlight.text(id)],
-    decode.at([0], decode.string),
+    [id.root_request_sql(id)],
+    decode.at([0], id.evidence_decoder()),
   )
 }
 
@@ -155,7 +158,7 @@ pub fn record(read: Read, a: Application) -> Result(Json, Fail(e)) {
   use evidence <- result.map(evidence_ids(read, a.id))
   let text = fn(v) { json.nullable(v, json.string) }
   json.object([
-    #("id", json.string(a.id)),
+    #("id", id.root_request_json(a.id)),
     #("status", row.status_to_json(a.status)),
     #("orgName", json.string(a.org_name)),
     #("orgType", ver_org_type.to_json(a.org_type)),
@@ -173,7 +176,7 @@ pub fn record(read: Read, a: Application) -> Result(Json, Fail(e)) {
     }),
     #("checks", checks_json(a)),
     #("emailProved", json.bool(a.email_proved)),
-    #("existingOrgId", text(a.existing_org_id)),
+    #("existingOrgId", json.nullable(a.existing_org_id, id.org_json)),
     #("createdAt", json.int(a.created_at)),
     #("decidedAt", json.nullable(a.decided_at, json.int)),
     #("decidedBy", text(a.decided_by_name)),
@@ -183,12 +186,12 @@ pub fn record(read: Read, a: Application) -> Result(Json, Fail(e)) {
       json.nullable(a.decision_attribution, attribution.to_json),
     ),
     #("decisionReason", text(a.decision_reason)),
-    #("resultOrgId", text(a.result_org_id)),
-    #("resultUserId", text(a.result_user_id)),
+    #("resultOrgId", json.nullable(a.result_org_id, id.org_json)),
+    #("resultUserId", json.nullable(a.result_user_id, id.org_user_json)),
     #("identityLink", json.nullable(a.identity_link, identity_link.to_json)),
     #("reviewReasons", json.array(reasons, ver_code.to_json)),
     #("riskFlags", json.array(flags, ver_code.to_json)),
-    #("evidenceIds", json.array(evidence, json.string)),
+    #("evidenceIds", json.array(evidence, id.evidence_json)),
   ])
 }
 
@@ -247,7 +250,7 @@ fn by_org_name(read: Read, name: String) -> Result(Option(orgs.Org), Fail(e)) {
         read,
         "SELECT id FROM orgs WHERE lower(name) = lower(?) ORDER BY rowid LIMIT 1",
         [sqlight.text(trimmed)],
-        decode.at([0], decode.string),
+        decode.at([0], id.org_decoder()),
       )
       |> result.try(fn(found) {
         case found {
@@ -393,7 +396,8 @@ fn applying(
   ))
   let application =
     row.Row(
-      id: "",
+      // Not stored: the checks run on the application before it has an id.
+      id: id.root_request(""),
       status: row.CollectingEvidence,
       org_name: string.trim(org_name),
       org_type:,
@@ -441,7 +445,7 @@ fn applying(
       result_user_id: None,
       identity_link: None,
     )
-  use id <- result.try(ids.next(tx, "vroot"))
+  use id <- result.try(id.next_root_request(tx))
   let application = row.Row(..application, id:)
   use _ <- result.try(store.run(tx, row.insert_sql, row.values(application)))
   let flags =
@@ -463,7 +467,7 @@ fn applying(
     None,
     None,
     None,
-    Some(id),
+    Some(id.root_request_to_string(id)),
     core.work_email_ttl_ms,
     now,
   ))
@@ -474,7 +478,7 @@ fn applying(
     core.About(
       ..core.nothing,
       detail: records.detail([], [
-        #("rootRequest", Some(id)),
+        #("rootRequest", Some(id.root_request_to_string(id))),
         #("checks", Some(checks_line(application))),
       ]),
     ),
@@ -495,7 +499,7 @@ fn applying(
   Ok(http.json(
     201,
     json.object([
-      #("requestId", json.string(id)),
+      #("requestId", id.root_request_json(id)),
       #("applicantSecret", json.string(secret)),
       #("checks", checks_json(application)),
       #(
@@ -584,7 +588,8 @@ pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
         None,
         now,
       ))
-      let own = Some(a.id)
+      // A token's `ref_id` is polymorphic text.
+      let own = Some(id.root_request_to_string(a.id))
       case peek {
         Error(code) -> {
           use _ <- result.try(core.count(tx, "emailChallengeFailures"))
@@ -613,7 +618,9 @@ pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
             core.system_actor(Some(req)),
             core.About(
               ..core.nothing,
-              detail: records.detail([], [#("rootRequest", Some(a.id))]),
+              detail: records.detail([], [
+                #("rootRequest", Some(id.root_request_to_string(a.id))),
+              ]),
             ),
             now,
           ))
@@ -677,7 +684,7 @@ pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
                     evidence_row.Applicant,
                     now,
                   ),
-                  supplied_by_id: Some(a.id),
+                  supplied_by_id: Some(id.root_request_to_string(a.id)),
                   note: Some(option.unwrap(note, "")),
                   root_request_id: Some(a.id),
                 )
@@ -703,7 +710,7 @@ pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
               #(
                 "evidence",
                 json.object([
-                  #("id", json.string(ev.id)),
+                  #("id", id.evidence_json(ev.id)),
                   #("checks", core.evidence_checks(ev)),
                 ]),
               ),
@@ -763,7 +770,7 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
         store.run(
           tx,
           "DELETE FROM ver_root_request_codes WHERE root_request_id = ? AND list = 'review_reason'",
-          [sqlight.text(a.id)],
+          [id.root_request_sql(a.id)],
         ),
       )
       use _ <- result.try(add_codes(
@@ -779,7 +786,7 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
         core.About(
           ..core.nothing,
           detail: records.detail([], [
-            #("rootRequest", Some(a.id)),
+            #("rootRequest", Some(id.root_request_to_string(a.id))),
             #(
               "reasons",
               Some(string.join(
@@ -827,12 +834,12 @@ pub fn status(ctx: Ctx, req: Request, id: String) -> Response {
       http.json(
         200,
         json.object([
-          #("id", json.string(a.id)),
+          #("id", id.root_request_json(a.id)),
           #("status", row.status_to_json(a.status)),
           #("checks", checks_json(a)),
           #("reviewReasons", json.array(reasons, ver_code.to_json)),
           #("decisionReason", json.nullable(a.decision_reason, json.string)),
-          #("resultOrgId", json.nullable(a.result_org_id, json.string)),
+          #("resultOrgId", json.nullable(a.result_org_id, id.org_json)),
         ]),
       )
     }
@@ -948,7 +955,8 @@ fn approving(
   use #(user, link) <- result.try(
     case body.link_user_id, body.provision, email_matches {
       Some(link_id), _, _ ->
-        case list.find(active, fn(u) { u.id == link_id }) {
+        // From the request body.
+        case list.find(active, fn(u) { u.id == id.org_user(link_id) }) {
           Ok(u) -> Ok(#(Some(u), Some(identity_link.TrustSafetySelection)))
           Error(Nil) ->
             stop(http.error_message(
@@ -977,7 +985,7 @@ fn approving(
                   "candidates",
                   json.array(list.append(matches, name_candidates), fn(u) {
                     json.object([
-                      #("id", json.string(u.id)),
+                      #("id", id.org_user_json(u.id)),
                       #("name", json.string(u.name)),
                       #(
                         "matched",
@@ -1080,7 +1088,7 @@ fn approving(
         ..trust_safety(core.blank_claim(
           claim_id,
           claim_row.Org,
-          org.id,
+          id.org_to_string(org.id),
           claim_type.OrganisationIdentity,
           now,
         )),
@@ -1100,9 +1108,9 @@ fn approving(
         tx,
         "INSERT INTO ver_claim_evidence (claim_id, position, evidence_id) VALUES (?, ?, ?)",
         [
-          sqlight.text(identity_claim.id),
+          id.claim_sql(identity_claim.id),
           sqlight.int(list.length(have)),
-          sqlight.text(ev_id),
+          id.evidence_sql(ev_id),
         ],
       )
     }),
@@ -1140,7 +1148,7 @@ fn approving(
               ..trust_safety(core.blank_claim(
                 claim_id,
                 claim_row.Org,
-                org.id,
+                id.org_to_string(org.id),
                 claim_type.OrganisationDomain,
                 now,
               )),
@@ -1163,7 +1171,7 @@ fn approving(
         ..trust_safety(core.blank_claim(
           claim_id,
           claim_row.User,
-          user.id,
+          id.org_user_to_string(user.id),
           claim_type.OrganisationAdmin,
           now,
         )),
@@ -1185,7 +1193,7 @@ fn approving(
     {
       True -> Ok(Nil)
       False -> {
-        use admin_id <- result.try(ids.next(tx, "vadm"))
+        use admin_id <- result.try(id.next_ver_admin(tx))
         records.create_admin(
           tx,
           admin_row.Row(
@@ -1231,11 +1239,11 @@ fn approving(
     core.About(
       ..core.nothing,
       org_id: Some(org.id),
-      subject_id: Some(user.id),
+      subject_id: Some(id.org_user_to_string(user.id)),
       detail: records.detail([], [
-        #("rootRequest", Some(a.id)),
-        #("org", Some(org.id)),
-        #("rootAdmin", Some(user.id)),
+        #("rootRequest", Some(id.root_request_to_string(a.id))),
+        #("org", Some(id.org_to_string(org.id))),
+        #("rootAdmin", Some(id.org_user_to_string(user.id))),
         #("identityLink", Some(identity_link.to_string(link))),
       ]),
       reason: Some(body.reason),
@@ -1261,8 +1269,8 @@ fn approving(
     200,
     json.object([
       #("request", request),
-      #("orgId", json.string(org.id)),
-      #("rootAdminUserId", json.string(user.id)),
+      #("orgId", id.org_json(org.id)),
+      #("rootAdminUserId", id.org_user_json(user.id)),
       #("identityLink", identity_link.to_json(link)),
       #(
         "note",
@@ -1274,7 +1282,7 @@ fn approving(
   ))
 }
 
-fn org_verified_domain(org_id: String, domain: String, now: Int) {
+fn org_verified_domain(org_id: id.OrgId, domain: String, now: Int) {
   records.verified_domain(
     org_id,
     domain,
@@ -1287,7 +1295,7 @@ fn org_verified_domain(org_id: String, domain: String, now: Int) {
 /// A new organisation for an approved application. The placeholder ground of a grassroots club is a known issue
 /// of the TypeScript server, kept as it is.
 fn register(tx: Tx, a: Application, now: Int) -> Result(orgs.Org, Fail(e)) {
-  use id <- result.try(ids.next(tx, "org"))
+  use id <- result.try(id.next_org(tx))
   let grassroots = a.org_type == ver_org_type.GrassrootsClub
   let federation =
     option.map(a.federation, string.trim)
@@ -1385,7 +1393,9 @@ pub fn reject(ctx: Ctx, req: Request, id: String) -> Response {
                 reviewer.actor(req),
                 core.About(
                   ..core.nothing,
-                  detail: records.detail([], [#("rootRequest", Some(a.id))]),
+                  detail: records.detail([], [
+                    #("rootRequest", Some(id.root_request_to_string(a.id))),
+                  ]),
                   reason: Some(reason),
                   attribution: Some(reviewer.attribution),
                 ),

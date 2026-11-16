@@ -10,6 +10,7 @@ import gleam/result
 import scoutbox/identity/orgs
 import scoutbox/identity/staff
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/id
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_evidence as evidence_row
@@ -24,7 +25,6 @@ import scoutbox/vocab/ver_code
 import scoutbox/vocab/ver_level
 import scoutbox/vocab/ver_org_type
 import scoutbox/vocab/verification_method
-import sqlight
 
 fn int(v: Option(Int)) -> Json {
   json.nullable(v, json.int)
@@ -90,11 +90,11 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
     _, _ -> None
   }
   json.object([
-    #("id", json.string(c.id)),
+    #("id", id.claim_json(c.id)),
     #("subjectType", claim_row.subject_kind_to_json(c.subject_kind)),
     #("subjectId", json.string(c.subject_id)),
     #("claimType", claim_type.to_json(c.claim_type)),
-    #("organisationId", text(c.organisation_id)),
+    #("organisationId", json.nullable(c.organisation_id, id.org_json)),
     #("role", text(c.role)),
     #("status", claim_row.status_to_json(c.status)),
     #("validFrom", int(c.valid_from)),
@@ -139,7 +139,7 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
         #("holderName", some_text(c.holder_name)),
         #("display", some_text(c.display)),
         #("registry", registry),
-        #("rootRequest", some_text(c.root_request_id)),
+        #("rootRequest", option.map(c.root_request_id, id.root_request_json)),
         #("orgType", option.map(c.org_type, ver_org_type.to_json)),
         #("website", some_text(c.website)),
         #("level", option.map(c.admin_level, ver_level.to_json)),
@@ -179,7 +179,7 @@ pub fn evidence_record(read: Read, e: Evidence) -> Result(Json, Fail(err)) {
   use claim_ids <- result.map(store.query(
     read,
     "SELECT claim_id FROM ver_claim_evidence WHERE evidence_id = ? ORDER BY rowid",
-    [sqlight.text(e.id)],
+    [id.evidence_sql(e.id)],
     decode.at([0], decode.string),
   ))
   json.object(
@@ -196,7 +196,7 @@ pub fn evidence_fields(
 ) -> List(#(String, Json)) {
   list.flatten([
     [
-      #("id", json.string(e.id)),
+      #("id", id.evidence_json(e.id)),
       #("type", evidence_row.type_to_json(e.type_)),
       #("source", json.string(e.source)),
       #(
@@ -204,7 +204,7 @@ pub fn evidence_fields(
         evidence_row.supplied_by_kind_to_json(e.supplied_by_kind),
       ),
       #("suppliedById", text(e.supplied_by_id)),
-      #("orgId", text(e.org_id)),
+      #("orgId", json.nullable(e.org_id, id.org_json)),
       #("receivedAt", json.int(e.received_at)),
     ],
     case include_media {
@@ -226,7 +226,7 @@ pub fn evidence_fields(
             option.map(e.domain_covered_by_org, json.bool),
           ),
           #("addressHash", some_text(e.address_hash)),
-          #("rootRequest", some_text(e.root_request_id)),
+          #("rootRequest", option.map(e.root_request_id, id.root_request_json)),
           #("identifier", some_text(e.identifier)),
           #("licenceType", some_text(e.licence_type)),
           #("validUntil", some_text(e.registry_valid_until)),
@@ -251,18 +251,18 @@ pub fn evidence_fields(
 
 pub fn event_record(e: event_row.Row) -> Json {
   json.object([
-    #("id", json.string(e.id)),
+    #("id", id.ver_event_json(e.id)),
     #("ts", json.int(e.occurred_at)),
     #("type", event_row.type_to_json(e.type_)),
     #("actorKind", event_row.actor_kind_to_json(e.actor_kind)),
     #("actorId", text(e.actor_id)),
     #("actorName", text(e.actor_name)),
-    #("actorOrgId", text(e.actor_org_id)),
+    #("actorOrgId", json.nullable(e.actor_org_id, id.org_json)),
     #("requestId", text(e.request_id)),
     #("attribution", json.nullable(e.attribution, attribution.to_json)),
-    #("claimId", text(e.claim_id)),
+    #("claimId", json.nullable(e.claim_id, id.claim_json)),
     #("subjectId", text(e.subject_id)),
-    #("orgId", text(e.org_id)),
+    #("orgId", json.nullable(e.org_id, id.org_json)),
     #("detail", text(e.detail)),
     #("reason", text(e.reason)),
   ])
@@ -279,17 +279,18 @@ pub fn admin_claim_row(read: Read, c: Claim) -> Result(Json, Fail(e)) {
     None -> Ok(None)
   })
   use name <- result.try(case c.subject_kind {
+    // `subject_id` is polymorphic text: `subject_kind` says whose it is.
     claim_row.User ->
-      staff.by_id(read, c.subject_id)
+      staff.by_id(read, id.org_user(c.subject_id))
       |> result.map(option.map(_, fn(u) { u.name }))
     claim_row.Org ->
-      orgs.by_id(read, c.subject_id)
+      orgs.by_id(read, id.org(c.subject_id))
       |> result.map(option.map(_, fn(o) { o.name }))
   })
   use reasons <- result.try(records.codes(read, c.id, records.ReviewReasons))
   use flags <- result.map(records.codes(read, c.id, records.RiskFlags))
   json.object([
-    #("id", json.string(c.id)),
+    #("id", id.claim_json(c.id)),
     #("claimType", claim_type.to_json(c.claim_type)),
     #("status", claim_row.status_to_json(c.status)),
     #("role", text(c.role)),
@@ -304,7 +305,7 @@ pub fn admin_claim_row(read: Read, c: Claim) -> Result(Json, Fail(e)) {
     #("organisation", case org, org_status {
       Some(o), Some(s) ->
         json.object([
-          #("id", json.string(o.id)),
+          #("id", id.org_json(o.id)),
           #("name", json.string(o.name)),
           #("status", json.string(claims.org_status_code(s))),
         ])

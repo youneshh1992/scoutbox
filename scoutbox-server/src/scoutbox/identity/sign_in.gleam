@@ -18,6 +18,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/platform/vocabulary
+import scoutbox/rows/id
 import scoutbox/rows/orgs as org_row
 import scoutbox/vocab/org_type
 import wisp.{type Request, type Response}
@@ -92,7 +93,8 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
   let budget_key = "org:" <> option.unwrap(body.org_id, "undefined")
   use <- guard(limits.login_locked(ctx.limits, budget_key, now), locked_out)
   let org = case body.org_id {
-    Some(id) -> store.read(ctx.store, orgs.by_id(_, id))
+    // From the request body.
+    Some(org_id) -> store.read(ctx.store, orgs.by_id(_, id.org(org_id)))
     None -> Ok(None)
   }
   case org {
@@ -345,7 +347,7 @@ fn signed_in(
   http.json(
     200,
     json.object([
-      #("userId", json.string(user.id)),
+      #("userId", id.org_user_json(user.id)),
       #("role", json.string(user.role)),
       #(
         "org",
@@ -385,7 +387,7 @@ pub fn org_list(ctx: Ctx, req: Request) -> Response {
         read,
         "SELECT id FROM orgs" <> where <> " ORDER BY rowid",
         [],
-        decode.at([0], decode.string),
+        decode.at([0], id.org_decoder()),
       ))
       use found <- result.try(list.try_map(ids, orgs.by_id(read, _)))
       list.filter_map(found, option.to_result(_, Nil))
@@ -394,7 +396,7 @@ pub fn org_list(ctx: Ctx, req: Request) -> Response {
         json.object(
           list.flatten([
             [
-              #("id", json.string(o.id)),
+              #("id", id.org_json(o.id)),
               #("name", json.string(o.name)),
               #("type", org_type.to_json(o.type_)),
               #("level", json.nullable(o.level, org_row.level_to_json)),

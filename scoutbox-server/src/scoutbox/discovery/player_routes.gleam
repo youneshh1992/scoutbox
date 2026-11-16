@@ -14,6 +14,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rules/visibility.{type Access}
 import scoutbox/safety/audit
@@ -26,7 +27,7 @@ const note_max = 2000
 fn with_player(
   ctx: Ctx,
   a: OrgAccess,
-  id: String,
+  id: id.PlayerId,
   now: Int,
   next: fn(Player, Access) -> Response,
 ) -> Response {
@@ -48,7 +49,7 @@ fn append(
   p: Player,
   type_: ledger_row.Type,
   now: Int,
-) -> Result(String, store.UnitError(e)) {
+) -> Result(id.LedgerEntryId, store.UnitError(e)) {
   store.unit(ctx.store, fn(tx) {
     use id <- result.map(ledger.append(
       tx,
@@ -67,7 +68,7 @@ fn append(
 }
 
 /// `GET /org/players/:id`.
-pub fn profile(ctx: Ctx, a: OrgAccess, id: String) -> Response {
+pub fn profile(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
   let now = clock.now_ms()
   use p, access <- with_player(ctx, a, id, now)
   case access.visible, access.blocked {
@@ -123,7 +124,12 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: String) -> Response {
 }
 
 /// A profile the club was shown is exposure (the review queue's source), recorded once it has answered.
-fn exposed(ctx: Ctx, a: OrgAccess, player_id: String, view: fn() -> Response) {
+fn exposed(
+  ctx: Ctx,
+  a: OrgAccess,
+  player_id: id.PlayerId,
+  view: fn() -> Response,
+) {
   let response = view()
   review_queue.record_exposure(
     ctx,
@@ -135,7 +141,12 @@ fn exposed(ctx: Ctx, a: OrgAccess, player_id: String, view: fn() -> Response) {
 }
 
 /// `POST /org/players/:id/notes`: shared inside the organisation only.
-pub fn add_note(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
+pub fn add_note(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  id: id.PlayerId,
+) -> Response {
   let now = clock.now_ms()
   use p, access <- with_player(ctx, a, id, now)
   case access.visible && !access.blocked {
@@ -176,7 +187,7 @@ pub fn mark(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  id: String,
+  id: id.PlayerId,
   type_: ledger_row.Type,
 ) -> Response {
   let now = clock.now_ms()
@@ -192,7 +203,7 @@ pub fn mark(
             201,
             json.object([
               #("ok", json.bool(True)),
-              #("ledgerId", json.string(ledger_id)),
+              #("ledgerId", id.ledger_entry_json(ledger_id)),
             ]),
           )
         Error(failure) -> http.internal(failure)

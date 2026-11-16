@@ -23,6 +23,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{type Page, IntKind, TextKey, TextKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Read}
+import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/age
 import scoutbox/rules/visibility
@@ -216,7 +217,7 @@ fn directory_page(
   f: Filter,
   page: Page,
   now: Int,
-) -> Result(#(List(String), Option(String)), store.Fail(e)) {
+) -> Result(#(List(id.PlayerId), Option(String)), store.Fail(e)) {
   let order = directory_order(org)
   let query =
     keyset.query(
@@ -230,7 +231,7 @@ fn directory_page(
     )
   use rows <- result.map(
     store.query(read, query.sql, query.args, {
-      use id <- decode.field(0, decode.string)
+      use id <- decode.field(0, id.player_decoder())
       use keys <- decode.then(keyset.keys_decoder(1, order))
       decode.success(#(id, keys))
     }),
@@ -326,8 +327,8 @@ pub fn film_room(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         )
       use rows <- result.try(
         store.query(read, query.sql, query.args, {
-          use player_id <- decode.field(0, decode.string)
-          use media_id <- decode.field(1, decode.string)
+          use player_id <- decode.field(0, id.player_decoder())
+          use media_id <- decode.field(1, id.media_decoder())
           use keys <- decode.then(keyset.keys_decoder(2, order))
           decode.success(#(player_id, media_id, keys))
         }),
@@ -370,13 +371,13 @@ fn clip_json(
     #(
       "media",
       json.object([
-        #("id", json.string(m.clip.id)),
+        #("id", id.media_json(m.clip.id)),
         #("title", json.string(m.clip.title)),
         #("url", json.nullable(m.clip.url, json.string)),
         #("views", json.int(m.clip.views)),
         #(
           "verifiedClip",
-          json.nullable(m.clip.verified_clip_attendance_id, json.string),
+          json.nullable(m.clip.verified_clip_attendance_id, id.attendance_json),
         ),
         #(
           "tags",
@@ -387,7 +388,7 @@ fn clip_json(
     #(
       "player",
       json.object([
-        #("id", json.string(r.id)),
+        #("id", id.player_json(r.id)),
         #("name", json.string(r.name)),
         #(
           "position",
@@ -497,7 +498,7 @@ pub fn fixtures(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               json.array(in_group, fn(m) {
                 let p = m.3
                 json.object([
-                  #("id", json.string(p.id)),
+                  #("id", id.player_json(p.id)),
                   #("name", json.string(p.name)),
                   #(
                     "position",

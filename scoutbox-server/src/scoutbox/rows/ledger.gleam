@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ledger"
@@ -268,13 +269,13 @@ pub fn type_decoder() -> decode.Decoder(Type) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.LedgerEntryId,
     occurred_at: Int,
     type_: Type,
-    player_id: Option(String),
-    org_id: Option(String),
+    player_id: Option(id.PlayerId),
+    org_id: Option(id.OrgId),
     org_name: Option(String),
-    user_id: Option(String),
+    user_id: Option(id.OrgUserId),
     actor_name: Option(String),
     detail_assignment_id: Option(String),
     detail_drill_id: Option(String),
@@ -299,22 +300,22 @@ pub type Row {
     detail_via: Option(String),
     detail_mode: Option(String),
     detail_share_id: Option(String),
-    detail_claim_id: Option(String),
+    detail_claim_id: Option(id.ClaimId),
     detail_action: Option(String),
-    detail_root_request_id: Option(String),
+    detail_root_request_id: Option(id.RootRequestId),
   )
 }
 
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.LedgerEntryId,
     occurred_at: Int,
     type_: Type,
-    player_id: Option(String),
-    org_id: Option(String),
+    player_id: Option(id.PlayerId),
+    org_id: Option(id.OrgId),
     org_name: Option(String),
-    user_id: Option(String),
+    user_id: Option(id.OrgUserId),
     actor_name: Option(String),
     detail_assignment_id: Option(String),
     detail_drill_id: Option(String),
@@ -339,15 +340,15 @@ pub type New {
     detail_via: Option(String),
     detail_mode: Option(String),
     detail_share_id: Option(String),
-    detail_claim_id: Option(String),
+    detail_claim_id: Option(id.ClaimId),
     detail_action: Option(String),
-    detail_root_request_id: Option(String),
+    detail_root_request_id: Option(id.RootRequestId),
   )
 }
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.LedgerEntryId,
   occurred_at occurred_at: Int,
   type_ type_: Type,
 ) -> New {
@@ -392,13 +393,13 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.ledger_entry_decoder())
   use occurred_at <- decode.field(2, decode.int)
   use type_ <- decode.field(3, type_decoder())
-  use player_id <- decode.field(4, decode.optional(decode.string))
-  use org_id <- decode.field(5, decode.optional(decode.string))
+  use player_id <- decode.field(4, decode.optional(id.player_decoder()))
+  use org_id <- decode.field(5, decode.optional(id.org_decoder()))
   use org_name <- decode.field(6, decode.optional(decode.string))
-  use user_id <- decode.field(7, decode.optional(decode.string))
+  use user_id <- decode.field(7, decode.optional(id.org_user_decoder()))
   use actor_name <- decode.field(8, decode.optional(decode.string))
   use detail_assignment_id <- decode.field(9, decode.optional(decode.string))
   use detail_drill_id <- decode.field(10, decode.optional(decode.string))
@@ -426,9 +427,12 @@ pub fn decoder() -> decode.Decoder(Row) {
   use detail_via <- decode.field(29, decode.optional(decode.string))
   use detail_mode <- decode.field(30, decode.optional(decode.string))
   use detail_share_id <- decode.field(31, decode.optional(decode.string))
-  use detail_claim_id <- decode.field(32, decode.optional(decode.string))
+  use detail_claim_id <- decode.field(32, decode.optional(id.claim_decoder()))
   use detail_action <- decode.field(33, decode.optional(decode.string))
-  use detail_root_request_id <- decode.field(34, decode.optional(decode.string))
+  use detail_root_request_id <- decode.field(
+    34,
+    decode.optional(id.root_request_decoder()),
+  )
   decode.success(Row(
     seq:,
     id:,
@@ -474,13 +478,13 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.ledger_entry_sql(row.id),
     sqlight.int(row.occurred_at),
     sqlight.text(type_to_string(row.type_)),
-    sqlight.nullable(sqlight.text, row.player_id),
-    sqlight.nullable(sqlight.text, row.org_id),
+    sqlight.nullable(id.player_sql, row.player_id),
+    sqlight.nullable(id.org_sql, row.org_id),
     sqlight.nullable(sqlight.text, row.org_name),
-    sqlight.nullable(sqlight.text, row.user_id),
+    sqlight.nullable(id.org_user_sql, row.user_id),
     sqlight.nullable(sqlight.text, row.actor_name),
     sqlight.nullable(sqlight.text, row.detail_assignment_id),
     sqlight.nullable(sqlight.text, row.detail_drill_id),
@@ -505,9 +509,9 @@ pub fn values(row: New) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.detail_via),
     sqlight.nullable(sqlight.text, row.detail_mode),
     sqlight.nullable(sqlight.text, row.detail_share_id),
-    sqlight.nullable(sqlight.text, row.detail_claim_id),
+    sqlight.nullable(id.claim_sql, row.detail_claim_id),
     sqlight.nullable(sqlight.text, row.detail_action),
-    sqlight.nullable(sqlight.text, row.detail_root_request_id),
+    sqlight.nullable(id.root_request_sql, row.detail_root_request_id),
   ]
 }
 

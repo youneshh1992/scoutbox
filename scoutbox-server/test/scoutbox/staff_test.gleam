@@ -6,11 +6,12 @@ import scoutbox/identity/invites
 import scoutbox/identity/staff
 import scoutbox/platform/secrets
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/support
 
 fn new(name: String, email: option.Option(String)) -> staff.NewStaff {
   staff.NewStaff(
-    org_id: "org-eastport",
+    org_id: id.org("org-eastport"),
     name:,
     role: "Scout",
     email:,
@@ -65,7 +66,7 @@ pub fn of_two_racing_acceptances_one_wins_test() {
     act(s, invites.create(
       _,
       invites.NewInvite(
-        org_id: "org-eastport",
+        org_id: id.org("org-eastport"),
         email: "n@x.example",
         name: "N",
         role: "Scout",

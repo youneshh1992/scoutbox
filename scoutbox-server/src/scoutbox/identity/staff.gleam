@@ -13,9 +13,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/org_users as row
 import sqlight
 
@@ -94,21 +94,21 @@ fn first(
 
 // ----------------------------------------------------------------------------------------------- reads
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Staff), Fail(e)) {
-  first(read, "WHERE id = ?", [sqlight.text(id)])
+pub fn by_id(read: Read, id: id.OrgUserId) -> Result(Option(Staff), Fail(e)) {
+  first(read, "WHERE id = ?", [id.org_user_sql(id)])
 }
 
 /// The account with this name in the organisation (case-insensitive; removed accounts included).
 pub fn by_org_and_name(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   name: String,
 ) -> Result(Option(Staff), Fail(e)) {
   case name_key(name) {
     "" -> Ok(None)
     key ->
       first(read, "WHERE org_id = ? AND name_key = ?", [
-        sqlight.text(org_id),
+        id.org_sql(org_id),
         sqlight.text(key),
       ])
   }
@@ -117,7 +117,7 @@ pub fn by_org_and_name(
 /// The organisation's staff in creation order; `active_only` leaves out removed accounts.
 pub fn for_org(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   active_only active_only: Bool,
 ) -> Result(List(Staff), Fail(e)) {
   let filter = case active_only {
@@ -127,7 +127,7 @@ pub fn for_org(
   store.query(
     read,
     select("WHERE org_id = ?" <> filter <> " ORDER BY rowid"),
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     row.decoder(),
   )
 }
@@ -145,20 +145,20 @@ pub fn first_active(
 /// The current staff member with this e-mail (case-insensitive).
 pub fn active_by_email(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
   email: String,
 ) -> Result(Option(Staff), Fail(e)) {
   first(
     read,
     "WHERE org_id = ? AND lower(email) = lower(?) AND removed_at IS NULL",
-    [sqlight.text(org_id), sqlight.text(email)],
+    [id.org_sql(org_id), sqlight.text(email)],
   )
 }
 
 /// The TOTP secret, for the code checks only.
 pub fn mfa_secret_of(
   read: Read,
-  id: String,
+  id: id.OrgUserId,
 ) -> Result(Option(String), Fail(e)) {
   by_id(read, id)
   |> result.map(option.then(_, fn(staff) { staff.mfa_secret }))
@@ -189,8 +189,8 @@ fn check_email(email: Option(String)) -> Result(Nil, Fail(StaffError)) {
 /// The uniqueness rules, named before the engine would refuse them. `id` is the row being written.
 fn check_clashes(
   tx: Tx,
-  id: String,
-  org_id: String,
+  id: id.OrgUserId,
+  org_id: id.OrgId,
   name: String,
   email: Option(String),
   removed: Bool,
@@ -199,7 +199,7 @@ fn check_clashes(
   use name_clash <- result.try(store.one(
     read,
     "SELECT 1 FROM org_users WHERE org_id = ? AND name_key = ? AND id <> ?",
-    [sqlight.text(org_id), sqlight.text(name_key(name)), sqlight.text(id)],
+    [id.org_sql(org_id), sqlight.text(name_key(name)), id.org_user_sql(id)],
     decode.success(Nil),
   ))
   use <- refuse_when(name_clash == Ok(Nil), NameTaken)
@@ -208,7 +208,7 @@ fn check_clashes(
       use email_clash <- result.try(store.one(
         read,
         "SELECT 1 FROM org_users WHERE org_id = ? AND lower(email) = lower(?) AND removed_at IS NULL AND id <> ?",
-        [sqlight.text(org_id), sqlight.text(email), sqlight.text(id)],
+        [id.org_sql(org_id), sqlight.text(email), id.org_user_sql(id)],
         decode.success(Nil),
       ))
       use <- refuse_when(email_clash == Ok(Nil), EmailTaken)
@@ -229,7 +229,7 @@ fn refuse_when(
   }
 }
 
-fn stored(tx: Tx, id: String) -> Result(Staff, Fail(StaffError)) {
+fn stored(tx: Tx, id: id.OrgUserId) -> Result(Staff, Fail(StaffError)) {
   use found <- result.try(by_id(store.reading(tx), id))
   case found {
     Some(staff) -> Ok(staff)
@@ -239,7 +239,7 @@ fn stored(tx: Tx, id: String) -> Result(Staff, Fail(StaffError)) {
 
 pub type NewStaff {
   NewStaff(
-    org_id: String,
+    org_id: id.OrgId,
     name: String,
     role: String,
     email: Option(String),
@@ -256,11 +256,11 @@ pub fn create(tx: Tx, new: NewStaff) -> Result(Staff, Fail(StaffError)) {
   use org <- result.try(store.one(
     store.reading(tx),
     "SELECT 1 FROM orgs WHERE id = ?",
-    [sqlight.text(new.org_id)],
+    [id.org_sql(new.org_id)],
     decode.success(Nil),
   ))
   use <- refuse_when(org != Ok(Nil), OrgMissing)
-  use id <- result.try(ids.next(tx, "usr"))
+  use id <- result.try(id.next_org_user(tx))
   use _ <- result.try(check_clashes(
     tx,
     id,
@@ -274,8 +274,8 @@ pub fn create(tx: Tx, new: NewStaff) -> Result(Staff, Fail(StaffError)) {
       tx,
       "INSERT INTO org_users (id, org_id, name, name_key, role, email, created_at, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        sqlight.text(id),
-        sqlight.text(new.org_id),
+        id.org_user_sql(id),
+        id.org_sql(new.org_id),
         sqlight.text(new.name),
         sqlight.text(name_key(new.name)),
         sqlight.text(new.role),
@@ -295,7 +295,7 @@ pub fn create(tx: Tx, new: NewStaff) -> Result(Staff, Fail(StaffError)) {
 /// another current staff member has.
 pub fn restore(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   role role: String,
   email email: Option(String),
 ) -> Result(Staff, Fail(StaffError)) {
@@ -318,7 +318,7 @@ pub fn restore(
       [
         sqlight.text(role),
         sqlight.nullable(sqlight.text, email),
-        sqlight.text(id),
+        id.org_user_sql(id),
       ],
     ),
   )
@@ -328,7 +328,7 @@ pub fn restore(
 /// Sets the e-mail. Refuses one another current staff member has.
 pub fn set_email(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   email: Option(String),
 ) -> Result(Staff, Fail(StaffError)) {
   use before <- result.try(stored(tx, id))
@@ -344,7 +344,7 @@ pub fn set_email(
   use _ <- result.try(
     store.run(tx, "UPDATE org_users SET email = ? WHERE id = ?", [
       sqlight.nullable(sqlight.text, email),
-      sqlight.text(id),
+      id.org_user_sql(id),
     ]),
   )
   stored(tx, id)
@@ -352,14 +352,14 @@ pub fn set_email(
 
 pub fn set_role(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   role: String,
 ) -> Result(Staff, Fail(StaffError)) {
   use _ <- result.try(check_text(role, "role", 1, role_max))
   use changed <- result.try(store.write(
     tx,
     "UPDATE org_users SET role = ? WHERE id = ? RETURNING id",
-    [sqlight.text(role), sqlight.text(id)],
+    [sqlight.text(role), id.org_user_sql(id)],
     decode.success(Nil),
   ))
   use <- refuse_when(changed == [], NotFound)
@@ -368,7 +368,7 @@ pub fn set_role(
 
 pub fn set_delivery_prefs(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   prefs: DeliveryPrefs,
 ) -> Result(Staff, Fail(StaffError)) {
   let time_ok = fn(t) { option.map(t, input.is_hhmm) |> option.unwrap(True) }
@@ -381,7 +381,7 @@ pub fn set_delivery_prefs(
       sqlight.nullable(sqlight.text, prefs.quiet_start),
       sqlight.nullable(sqlight.text, prefs.quiet_end),
       sqlight.bool(prefs.email),
-      sqlight.text(id),
+      id.org_user_sql(id),
     ],
     decode.success(Nil),
   ))
@@ -393,9 +393,9 @@ pub fn set_delivery_prefs(
 /// attributed. Only the call that changed the row succeeds: a second removal is AlreadyRemoved.
 pub fn remove(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   at at: Int,
-  by by: String,
+  by by: id.OrgUserId,
 ) -> Result(Staff, Fail(StaffError)) {
   use before <- result.try(stored(tx, id))
   use remover <- result.try(by_id(store.reading(tx), by))
@@ -406,7 +406,7 @@ pub fn remove(
   use changed <- result.try(store.write(
     tx,
     "UPDATE org_users SET removed_at = ?, removed_by_id = ? WHERE id = ? AND removed_at IS NULL RETURNING id",
-    [sqlight.int(at), sqlight.text(by), sqlight.text(id)],
+    [sqlight.int(at), id.org_user_sql(by), id.org_user_sql(id)],
     decode.success(Nil),
   ))
   use <- refuse_when(changed == [], AlreadyRemoved)
@@ -416,7 +416,7 @@ pub fn remove(
 /// Begins MFA set-up with a new secret, replacing an unconfirmed one. Refused once MFA is enabled.
 pub fn start_mfa(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   secret_b32: String,
 ) -> Result(Staff, Fail(StaffError)) {
   use before <- result.try(stored(tx, id))
@@ -432,12 +432,12 @@ pub fn start_mfa(
     store.run(
       tx,
       "UPDATE org_users SET mfa_secret = ?, mfa_enabled_at = NULL WHERE id = ?",
-      [sqlight.text(secret_b32), sqlight.text(id)],
+      [sqlight.text(secret_b32), id.org_user_sql(id)],
     ),
   )
   use _ <- result.try(
     store.run(tx, "DELETE FROM org_user_recovery_codes WHERE org_user_id = ?", [
-      sqlight.text(id),
+      id.org_user_sql(id),
     ]),
   )
   stored(tx, id)
@@ -446,7 +446,7 @@ pub fn start_mfa(
 /// Confirms MFA: enabled from `at`, with these recovery-code hashes, each usable once.
 pub fn enable_mfa(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   at at: Int,
   recovery_hashes hashes: List(String),
 ) -> Result(Staff, Fail(StaffError)) {
@@ -459,7 +459,7 @@ pub fn enable_mfa(
   use _ <- result.try(
     store.run(tx, "UPDATE org_users SET mfa_enabled_at = ? WHERE id = ?", [
       sqlight.int(at),
-      sqlight.text(id),
+      id.org_user_sql(id),
     ]),
   )
   use _ <- result.try(
@@ -467,7 +467,7 @@ pub fn enable_mfa(
       store.run(
         tx,
         "INSERT INTO org_user_recovery_codes (org_user_id, code_hash) VALUES (?, ?)",
-        [sqlight.text(id), sqlight.text(hash)],
+        [id.org_user_sql(id), sqlight.text(hash)],
       )
     }),
   )
@@ -475,18 +475,21 @@ pub fn enable_mfa(
 }
 
 /// Turns MFA off: the secret and the unused recovery codes go.
-pub fn disable_mfa(tx: Tx, id: String) -> Result(Staff, Fail(StaffError)) {
+pub fn disable_mfa(
+  tx: Tx,
+  id: id.OrgUserId,
+) -> Result(Staff, Fail(StaffError)) {
   use _ <- result.try(stored(tx, id))
   use _ <- result.try(
     store.run(tx, "DELETE FROM org_user_recovery_codes WHERE org_user_id = ?", [
-      sqlight.text(id),
+      id.org_user_sql(id),
     ]),
   )
   use _ <- result.try(
     store.run(
       tx,
       "UPDATE org_users SET mfa_secret = NULL, mfa_enabled_at = NULL WHERE id = ?",
-      [sqlight.text(id)],
+      [id.org_user_sql(id)],
     ),
   )
   stored(tx, id)
@@ -495,7 +498,7 @@ pub fn disable_mfa(tx: Tx, id: String) -> Result(Staff, Fail(StaffError)) {
 /// Spends one recovery code, by its hash. True only for the call that deleted the row: a code works once.
 pub fn use_recovery_code(
   tx: Tx,
-  id: String,
+  id: id.OrgUserId,
   code_hash: String,
 ) -> Result(Bool, Fail(e)) {
   case is_hash(code_hash) {
@@ -504,7 +507,7 @@ pub fn use_recovery_code(
       store.write(
         tx,
         "DELETE FROM org_user_recovery_codes WHERE org_user_id = ? AND code_hash = ? RETURNING 1",
-        [sqlight.text(id), sqlight.text(code_hash)],
+        [id.org_user_sql(id), sqlight.text(code_hash)],
         decode.success(Nil),
       )
       |> result.map(fn(rows) { rows != [] })

@@ -15,9 +15,9 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/org_verified_domains as domain_row
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claims as claim_row
@@ -74,11 +74,14 @@ pub fn awaiting_review(read: Read) -> Result(List(DomainRequest), Fail(e)) {
   requests_where(read, "status = 'requires_human_review'", [])
 }
 
-fn request_reasons(read: Read, id: String) -> Result(List(VerCode), Fail(e)) {
+fn request_reasons(
+  read: Read,
+  id: id.DomainRequestId,
+) -> Result(List(VerCode), Fail(e)) {
   store.query(
     read,
     "SELECT code FROM ver_domain_request_codes WHERE domain_request_id = ? AND list = 'review_reason' ORDER BY position",
-    [sqlight.text(id)],
+    [id.domain_request_sql(id)],
     decode.at([0], ver_code.decoder()),
   )
 }
@@ -86,10 +89,10 @@ fn request_reasons(read: Read, id: String) -> Result(List(VerCode), Fail(e)) {
 pub fn request_record(read: Read, r: DomainRequest) -> Result(Json, Fail(e)) {
   use reasons <- result.map(request_reasons(read, r.id))
   json.object([
-    #("id", json.string(r.id)),
-    #("orgId", json.string(r.org_id)),
+    #("id", id.domain_request_json(r.id)),
+    #("orgId", id.org_json(r.org_id)),
     #("domain", json.string(r.domain)),
-    #("requestedBy", json.string(r.requested_by)),
+    #("requestedBy", id.org_user_json(r.requested_by)),
     #("status", request_row.status_to_json(r.status)),
     #("method", json.nullable(r.method, request_row.method_to_json)),
     #("createdAt", json.int(r.created_at)),
@@ -116,7 +119,7 @@ pub fn update_request(
       <> marks
       <> ") WHERE id = ? AND status = ? RETURNING 1",
     list.append(request_row.values(r), [
-      sqlight.text(r.id),
+      id.domain_request_sql(r.id),
       sqlight.text(request_row.status_to_string(from)),
     ]),
     decode.success(Nil),
@@ -136,42 +139,42 @@ pub fn domain_record(d: domain_row.Row) -> Json {
 
 pub fn admin_record(a: admin_row.Row) -> List(#(String, Json)) {
   [
-    #("id", json.string(a.id)),
-    #("orgId", json.string(a.org_id)),
-    #("userId", json.string(a.user_id)),
+    #("id", id.ver_admin_json(a.id)),
+    #("orgId", id.org_json(a.org_id)),
+    #("userId", id.org_user_json(a.user_id)),
     #("level", ver_level.to_json(a.level)),
     #("status", admin_row.status_to_json(a.status)),
     #("invitedBy", json.string(a.invited_by)),
     #("createdAt", json.int(a.created_at)),
     #("acceptedAt", json.nullable(a.accepted_at, json.int)),
     #("revokedAt", json.nullable(a.revoked_at, json.int)),
-    #("revokedBy", json.nullable(a.revoked_by, json.string)),
+    #("revokedBy", json.nullable(a.revoked_by, id.org_user_json)),
   ]
 }
 
 fn transfer_record(t: transfer_row.Row) -> Json {
   json.object([
-    #("id", json.string(t.id)),
-    #("orgId", json.string(t.org_id)),
-    #("toUserId", json.string(t.to_user_id)),
-    #("proposedBy", json.string(t.proposed_by)),
+    #("id", id.root_transfer_json(t.id)),
+    #("orgId", id.org_json(t.org_id)),
+    #("toUserId", id.org_user_json(t.to_user_id)),
+    #("proposedBy", id.org_user_json(t.proposed_by)),
     #("status", transfer_row.status_to_json(t.status)),
     #("createdAt", json.int(t.created_at)),
-    #("approvedBy", json.nullable(t.approved_by, json.string)),
+    #("approvedBy", json.nullable(t.approved_by, id.org_user_json)),
     #("approvedAt", json.nullable(t.approved_at, json.int)),
   ])
 }
 
 fn transfers_of(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(List(transfer_row.Row), Fail(e)) {
   store.query(
     read,
     "SELECT "
       <> transfer_row.columns
       <> " FROM ver_root_transfers WHERE org_id = ? ORDER BY rowid",
-    [sqlight.text(org_id)],
+    [id.org_sql(org_id)],
     transfer_row.decoder(),
   )
 }
@@ -223,7 +226,7 @@ pub fn domains(ctx: Ctx, access: OrgAccess) -> Response {
   use <- look_guard(read, access, ver_level.VerificationViewer)
   use ds <- result.try(records.domains_of(read, access.org.id))
   use rs <- result.try(
-    requests_where(read, "org_id = ?", [sqlight.text(access.org.id)]),
+    requests_where(read, "org_id = ?", [id.org_sql(access.org.id)]),
   )
   use rs <- result.map(list.try_map(rs, request_record(read, _)))
   http.json(
@@ -310,7 +313,7 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
           ),
         )
       }
-      use id <- result.try(ids.next(tx, "vdom"))
+      use id <- result.try(id.next_domain_request(tx))
       let r =
         request_row.Row(
           id:,
@@ -381,7 +384,7 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             None,
             None,
             Some(access.org.id),
-            Some(id),
+            Some(id.domain_request_to_string(id)),
             core.work_email_ttl_ms,
             now,
           ))
@@ -455,7 +458,8 @@ pub fn confirm_domain(
             None,
             now,
           ))
-          let own = Some(r.id)
+          // A token's `ref_id` is polymorphic text.
+          let own = Some(id.domain_request_to_string(r.id))
           case peek {
             Error(code) -> {
               use _ <- result.try(core.count(tx, "emailChallengeFailures"))
@@ -493,7 +497,7 @@ pub fn confirm_domain(
                       r.domain,
                       records.DomainByEmail,
                       now,
-                      access.user.id,
+                      id.org_user_to_string(access.user.id),
                     ),
                   )
               })
@@ -504,7 +508,7 @@ pub fn confirm_domain(
                     ..core.blank_claim(
                       claim_id,
                       claim_row.Org,
-                      access.org.id,
+                      id.org_to_string(access.org.id),
                       claim_type.OrganisationDomain,
                       now,
                     ),
@@ -515,7 +519,7 @@ pub fn confirm_domain(
                     ),
                     verified_at: Some(now),
                     verified_by_kind: Some(actor_kind.OrgAdmin),
-                    verified_by_id: Some(access.user.id),
+                    verified_by_id: Some(id.org_user_to_string(access.user.id)),
                     domain: Some(r.domain),
                   )
                 },
@@ -564,7 +568,7 @@ pub fn admins(ctx: Ctx, access: OrgAccess) -> Response {
           #(
             "person",
             json.object([
-              #("id", json.string(a.user_id)),
+              #("id", id.org_user_json(a.user_id)),
               #(
                 "name",
                 json.string(
@@ -595,7 +599,8 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
       "level",
       input.required(input.one_of(ver_level.pairs)),
     )
-    input.done(#(user_id, level))
+    // From the request body.
+    input.done(#(id.org_user(user_id), level))
   }
   use #(user_id, level) <- http.body(req, shape, [#("level", "LEVEL_UNKNOWN")])
   let now = clock.now_ms()
@@ -623,7 +628,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         core.About(
           ..core.nothing,
           org_id: Some(access.org.id),
-          subject_id: Some(user_id),
+          subject_id: Some(id.org_user_to_string(user_id)),
           reason: Some("self-promotion attempt"),
         ),
         now,
@@ -645,7 +650,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 list.any(transfers, fn(t) { t.status == transfer_row.Pending }),
                 fn() { stop(http.error(409, "TRANSFER_ALREADY_PENDING")) },
               )
-              use id <- result.try(ids.next(tx, "vrtx"))
+              use id <- result.try(id.next_root_transfer(tx))
               let t =
                 transfer_row.Row(
                   id:,
@@ -669,7 +674,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 core.About(
                   ..core.nothing,
                   org_id: Some(access.org.id),
-                  subject_id: Some(user_id),
+                  subject_id: Some(id.org_user_to_string(user_id)),
                   detail: records.detail([], [
                     #("level", Some(ver_level.to_string(level))),
                     #("dualControl", Some("pending")),
@@ -701,7 +706,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 }),
                 fn() { stop(http.error(409, "ALREADY_GRANTED")) },
               )
-              use id <- result.try(ids.next(tx, "vadm"))
+              use id <- result.try(id.next_ver_admin(tx))
               use a <- result.try(records.create_admin(
                 tx,
                 admin_row.Row(
@@ -710,7 +715,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                   user_id:,
                   level:,
                   status: admin_row.Active,
-                  invited_by: access.user.id,
+                  invited_by: id.org_user_to_string(access.user.id),
                   created_at: now,
                   accepted_at: Some(now),
                   revoked_at: None,
@@ -724,7 +729,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 core.About(
                   ..core.nothing,
                   org_id: Some(access.org.id),
-                  subject_id: Some(user_id),
+                  subject_id: Some(id.org_user_to_string(user_id)),
                   detail: records.detail([], [
                     #("level", Some(ver_level.to_string(level))),
                   ]),
@@ -734,14 +739,14 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
               use _ <- result.try(notifications.notify(
                 tx,
                 to: audience.OrgUser,
-                id: user_id,
+                id: id.org_user_to_string(user_id),
                 type_: "verification",
                 text: "You now hold "
                   <> string.replace(ver_level.to_string(level), "_", " ")
                   <> " authority for "
                   <> access.org.name
                   <> ".",
-                ref_id: Some(a.id),
+                ref_id: Some(id.ver_admin_to_string(a.id)),
                 at: now,
               ))
               reply(http.json(
@@ -761,7 +766,7 @@ pub fn approve_transfer(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  id: String,
+  id: id.RootTransferId,
 ) -> Response {
   let now = clock.now_ms()
   let actor = core.staff_actor(access, req)
@@ -797,7 +802,11 @@ pub fn approve_transfer(
         store.run(
           tx,
           "UPDATE ver_root_transfers SET status = 'approved', approved_by = ?, approved_at = ? WHERE id = ? AND status = 'pending'",
-          [sqlight.text(access.user.id), sqlight.int(now), sqlight.text(t.id)],
+          [
+            id.org_user_sql(access.user.id),
+            sqlight.int(now),
+            id.root_transfer_sql(t.id),
+          ],
         ),
       )
       use grants <- result.try(records.active_admins_of(read, access.org.id))
@@ -810,7 +819,7 @@ pub fn approve_transfer(
         {
           Ok(held) -> Ok(held)
           Error(Nil) -> {
-            use admin_id <- result.try(ids.next(tx, "vadm"))
+            use admin_id <- result.try(id.next_ver_admin(tx))
             records.create_admin(
               tx,
               admin_row.Row(
@@ -819,7 +828,7 @@ pub fn approve_transfer(
                 user_id: t.to_user_id,
                 level: ver_level.VerificationRootAdmin,
                 status: admin_row.Active,
-                invited_by: t.proposed_by,
+                invited_by: id.org_user_to_string(t.proposed_by),
                 created_at: now,
                 accepted_at: Some(now),
                 revoked_at: None,
@@ -836,10 +845,13 @@ pub fn approve_transfer(
         core.About(
           ..core.nothing,
           org_id: Some(access.org.id),
-          subject_id: Some(t.to_user_id),
+          subject_id: Some(id.org_user_to_string(t.to_user_id)),
           detail: records.detail([], [
             #("level", Some("verification_root_admin")),
-            #("dualControl", Some("approved by " <> access.user.id)),
+            #(
+              "dualControl",
+              Some("approved by " <> id.org_user_to_string(access.user.id)),
+            ),
           ]),
         ),
         now,
@@ -861,7 +873,7 @@ pub fn revoke(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  id: String,
+  id: id.VerAdminId,
 ) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(600)))
@@ -926,7 +938,7 @@ pub fn revoke(
             core.About(
               ..core.nothing,
               org_id: Some(access.org.id),
-              subject_id: Some(a.user_id),
+              subject_id: Some(id.org_user_to_string(a.user_id)),
               reason: Some(option.unwrap(
                 input.filled(reason),
                 "revoked by organisation",
@@ -974,7 +986,7 @@ pub fn declare(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   ])
   let now = clock.now_ms()
   use tx <- act(ctx)
-  use id <- result.try(ids.next(tx, "vcoi"))
+  use id <- result.try(id.next_conflict(tx))
   let c =
     conflict_row.Row(
       id:,

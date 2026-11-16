@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import scoutbox/vocab/ver_code
 import sqlight
 
@@ -65,12 +66,17 @@ pub fn list_value_decoder() -> decode.Decoder(ListValue) {
 }
 
 pub type Row {
-  Row(claim_id: String, list: ListValue, position: Int, code: ver_code.VerCode)
+  Row(
+    claim_id: id.ClaimId,
+    list: ListValue,
+    position: Int,
+    code: ver_code.VerCode,
+  )
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  claim_id claim_id: String,
+  claim_id claim_id: id.ClaimId,
   list list: ListValue,
   position position: Int,
   code code: ver_code.VerCode,
@@ -80,7 +86,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use claim_id <- decode.field(0, decode.string)
+  use claim_id <- decode.field(0, id.claim_decoder())
   use list <- decode.field(1, list_value_decoder())
   use position <- decode.field(2, decode.int)
   use code <- decode.field(3, ver_code.decoder())
@@ -93,7 +99,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.claim_id),
+    id.claim_sql(row.claim_id),
     sqlight.text(list_value_to_string(row.list)),
     sqlight.int(row.position),
     sqlight.text(ver_code.to_string(row.code)),

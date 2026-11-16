@@ -5,6 +5,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "support_ticket_refs"
@@ -61,12 +62,12 @@ pub fn kind_decoder() -> decode.Decoder(Kind) {
 }
 
 pub type Row {
-  Row(ticket_id: String, ord: Int, kind: Kind, ref_id: String)
+  Row(ticket_id: id.TicketId, ord: Int, kind: Kind, ref_id: String)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  ticket_id ticket_id: String,
+  ticket_id ticket_id: id.TicketId,
   ord ord: Int,
   kind kind: Kind,
   ref_id ref_id: String,
@@ -76,7 +77,7 @@ pub fn new(
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use ticket_id <- decode.field(0, decode.string)
+  use ticket_id <- decode.field(0, id.ticket_decoder())
   use ord <- decode.field(1, decode.int)
   use kind <- decode.field(2, kind_decoder())
   use ref_id <- decode.field(3, decode.string)
@@ -89,7 +90,7 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.ticket_id),
+    id.ticket_sql(row.ticket_id),
     sqlight.int(row.ord),
     sqlight.text(kind_to_string(row.kind)),
     sqlight.text(row.ref_id),

@@ -20,11 +20,11 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/http
-import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/media
 import scoutbox/platform/store
 import scoutbox/platform/temporal
+import scoutbox/rows/id
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_disputes as dispute_row
@@ -69,11 +69,12 @@ fn reason_required() -> Response {
 
 /// `POST /admin/verification/orgs/:id/appoint-root`: Trust & Safety establishes a verified organisation's first
 /// root verification administrator, audited.
-pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
+pub fn appoint_root(ctx: Ctx, req: Request, org_id: id.OrgId) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(300)))
     use user_id <- input.field("userId", input.nullish(input.id()))
-    input.done(#(reason, user_id))
+    // From the request body.
+    input.done(#(reason, option.map(user_id, id.org_user)))
   }
   let parsed = http.parse_body(req, shape, [])
   let now = clock.now_ms()
@@ -98,7 +99,7 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                 ))
               })
               use user <- result.try(case user_id {
-                Some(id) -> staff.by_id(read, id)
+                Some(user_id) -> staff.by_id(read, user_id)
                 None -> Ok(None)
               })
               case user {
@@ -114,7 +115,7 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                     }),
                     fn() { stop(http.error(409, "ALREADY_ROOT_ADMIN")) },
                   )
-                  use id <- result.try(ids.next(tx, "vadm"))
+                  use id <- result.try(id.next_ver_admin(tx))
                   use _ <- result.try(records.create_admin(
                     tx,
                     admin_row.Row(
@@ -137,7 +138,7 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                         ..core.blank_claim(
                           id,
                           claim_row.User,
-                          u.id,
+                          id.org_user_to_string(u.id),
                           claim_type.OrganisationAdmin,
                           now,
                         ),
@@ -158,19 +159,19 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                   use _ <- result.try(notifications.notify(
                     tx,
                     to: audience.OrgUser,
-                    id: u.id,
+                    id: id.org_user_to_string(u.id),
                     type_: "verification",
                     text: "Trust & Safety appointed you root verification administrator for "
                       <> org.name
                       <> ".",
-                    ref_id: Some(org.id),
+                    ref_id: Some(id.org_to_string(org.id)),
                     at: now,
                   ))
                   reply(http.json(
                     201,
                     json.object([
-                      #("orgId", json.string(org.id)),
-                      #("rootAdminUserId", json.string(u.id)),
+                      #("orgId", id.org_json(org.id)),
+                      #("rootAdminUserId", id.org_user_json(u.id)),
                     ]),
                   ))
                 }
@@ -381,7 +382,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             ..core.blank_claim(
               id,
               claim_row.User,
-              access.user.id,
+              id.org_user_to_string(access.user.id),
               claim_type.Licence,
               now,
             ),
@@ -416,7 +417,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                   evidence_row.OrgUser,
                   now,
                 ),
-                supplied_by_id: Some(access.user.id),
+                supplied_by_id: Some(id.org_user_to_string(access.user.id)),
                 org_id: Some(access.org.id),
               )
               |> core.with_file(f)
@@ -446,7 +447,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 
 fn licence_view(c: records.Claim) -> json.Json {
   json.object([
-    #("id", json.string(c.id)),
+    #("id", id.claim_json(c.id)),
     #("status", claim_row.status_to_json(c.status)),
     #("display", json.nullable(c.display, json.string)),
   ])
@@ -458,7 +459,7 @@ pub fn submit_licence(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  claim_id: String,
+  claim_id: id.ClaimId,
 ) -> Response {
   let shape = {
     use provider <- input.field("providerId", input.nullish(input.text(60)))
@@ -471,10 +472,11 @@ pub fn submit_licence(
   use tx <- act(ctx)
   let read = store.reading(tx)
   use found <- result.try(records.claim(read, claim_id))
+  // A claim's `subject_id` is polymorphic text.
+  let me = id.org_user_to_string(access.user.id)
   case found {
     Some(claim)
-      if claim.subject_id == access.user.id
-      && claim.claim_type == claim_type.Licence
+      if claim.subject_id == me && claim.claim_type == claim_type.Licence
     ->
       case claim.status {
         claim_row.CollectingEvidence | claim_row.Pending ->
@@ -509,7 +511,7 @@ pub fn submit_licence(
 
 fn move(
   tx: store.Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   to: claim_row.Status,
   actor: core.Actor,
   method: Option(verification_method.VerificationMethod),
@@ -798,8 +800,8 @@ pub fn admin_evidence(ctx: Ctx, req: Request, evidence_id: String) -> Response {
       use linked <- result.try(store.one(
         read,
         "SELECT claim_id FROM ver_claim_evidence WHERE evidence_id = ? ORDER BY rowid",
-        [sqlight.text(ev.id)],
-        decode.at([0], decode.string),
+        [id.evidence_sql(ev.id)],
+        decode.at([0], id.claim_decoder()),
       ))
       use _ <- result.try(core.event(
         tx,
@@ -811,7 +813,7 @@ pub fn admin_evidence(ctx: Ctx, req: Request, evidence_id: String) -> Response {
           subject_id: ev.supplied_by_id,
           org_id: ev.org_id,
           detail: records.detail([], [
-            #("evidenceId", Some(ev.id)),
+            #("evidenceId", Some(id.evidence_to_string(ev.id))),
             #("by", Some("trust_safety")),
           ]),
         ),
@@ -877,8 +879,8 @@ pub fn org_evidence(
               subject_id: ev.supplied_by_id,
               org_id: ev.org_id,
               detail: records.detail([], [
-                #("evidenceId", Some(ev.id)),
-                #("by", Some(access.user.id)),
+                #("evidenceId", Some(id.evidence_to_string(ev.id))),
+                #("by", Some(id.org_user_to_string(access.user.id))),
               ]),
             ),
             now,
@@ -886,7 +888,7 @@ pub fn org_evidence(
           use claim_ids <- result.try(store.query(
             read,
             "SELECT claim_id FROM ver_claim_evidence WHERE evidence_id = ? ORDER BY rowid",
-            [sqlight.text(ev.id)],
+            [id.evidence_sql(ev.id)],
             decode.at([0], decode.string),
           ))
           reply(http.json(
@@ -912,7 +914,7 @@ pub fn org_evidence(
 // ------------------------------------------------------------------------------------------- cases
 
 /// `GET /admin/verification/cases/:id`: everything a reviewer decides from.
-pub fn case_view(ctx: Ctx, claim_id: String) -> Response {
+pub fn case_view(ctx: Ctx, claim_id: id.ClaimId) -> Response {
   use read <- core.look(ctx)
   use found <- result.try(records.claim(read, claim_id))
   case found {
@@ -960,7 +962,7 @@ pub fn case_view(ctx: Ctx, claim_id: String) -> Response {
   }
 }
 
-fn claim_reply(tx: store.Tx, claim_id: String) -> core.Done {
+fn claim_reply(tx: store.Tx, claim_id: id.ClaimId) -> core.Done {
   let read = store.reading(tx)
   use found <- result.try(records.claim(read, claim_id))
   let assert Some(c) = found as "a decided claim exists"
@@ -1031,7 +1033,7 @@ fn notify_subject(
         id: c.subject_id,
         type_: "verification",
         text:,
-        ref_id: Some(c.id),
+        ref_id: Some(id.claim_to_string(c.id)),
         at: now,
       )
     claim_row.Org -> Ok(Nil)
@@ -1055,7 +1057,7 @@ fn admin_how(
 
 fn admin_move(
   tx: store.Tx,
-  claim_id: String,
+  claim_id: id.ClaimId,
   to: claim_row.Status,
   how: core.How,
   also: core.Also,
@@ -1070,7 +1072,7 @@ fn admin_move(
 
 /// `POST /admin/verification/claims/:id/approve`. A licence is only ever verified by a register, never by a
 /// reviewer naming one; a manual review of its document is labelled as one.
-pub fn approve(ctx: Ctx, req: Request, claim_id: String) -> Response {
+pub fn approve(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
   let body = reason_body(req, 600)
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -1159,7 +1161,7 @@ pub fn approve(ctx: Ctx, req: Request, claim_id: String) -> Response {
 }
 
 /// `POST /admin/verification/claims/:id/reject`.
-pub fn reject(ctx: Ctx, req: Request, claim_id: String) -> Response {
+pub fn reject(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
   let body = reason_only(req)
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -1205,7 +1207,7 @@ pub fn reject(ctx: Ctx, req: Request, claim_id: String) -> Response {
 }
 
 /// `POST /admin/verification/claims/:id/request-info`.
-pub fn request_info(ctx: Ctx, req: Request, claim_id: String) -> Response {
+pub fn request_info(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
   let body = reason_only(req)
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -1238,7 +1240,7 @@ pub fn request_info(ctx: Ctx, req: Request, claim_id: String) -> Response {
 pub fn suspend_or_revoke(
   ctx: Ctx,
   req: Request,
-  claim_id: String,
+  claim_id: id.ClaimId,
   to: claim_row.Status,
 ) -> Response {
   let body = reason_only(req)
@@ -1289,7 +1291,7 @@ pub fn suspend_or_revoke(
 }
 
 /// `POST /admin/verification/claims/:id/reinstate`.
-pub fn reinstate(ctx: Ctx, req: Request, claim_id: String) -> Response {
+pub fn reinstate(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
   let body = reason_only(req)
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -1503,7 +1505,7 @@ pub fn decide_domain(ctx: Ctx, req: Request, id: String) -> Response {
                     ..core.blank_claim(
                       claim_id,
                       claim_row.Org,
-                      o.id,
+                      id.org_to_string(o.id),
                       claim_type.OrganisationDomain,
                       now,
                     ),
@@ -1546,7 +1548,9 @@ pub fn decide_domain(ctx: Ctx, req: Request, id: String) -> Response {
                 core.About(
                   ..core.nothing,
                   org_id: Some(r.org_id),
-                  detail: records.detail([], [#("domainRequest", Some(r.id))]),
+                  detail: records.detail([], [
+                    #("domainRequest", Some(id.domain_request_to_string(r.id))),
+                  ]),
                   reason: Some(reason),
                 ),
                 now,
@@ -1770,7 +1774,7 @@ fn resolving(
     type_: "verification",
     text: "Your verification dispute was resolved: "
       <> input.utf16_take(resolution, 140),
-    ref_id: Some(d.claim_id),
+    ref_id: Some(id.claim_to_string(d.claim_id)),
     at: now,
   ))
   use claim_json <- result.try(case claim {
@@ -1820,7 +1824,8 @@ pub fn flag_authority(ctx: Ctx, req: Request, user_id: String) -> Response {
       "suspendClaimIds",
       input.nullish(input.list_of(input.id(), 500)),
     )
-    input.done(#(reason, option.unwrap(ids, [])))
+    // From the request body.
+    input.done(#(reason, option.unwrap(ids, []) |> list.map(id.claim)))
   }
   let parsed = http.parse_body(req, shape, [])
   let now = clock.now_ms()
@@ -1899,7 +1904,7 @@ pub fn flag_authority(ctx: Ctx, req: Request, user_id: String) -> Response {
 
 /// `POST /admin/verification/orgs/:id/revoke`: verification-specific revocation (suspension is the ordinary one).
 /// Staff claims verified through the organisation stop displaying at once; their history stays.
-pub fn revoke_org(ctx: Ctx, req: Request, org_id: String) -> Response {
+pub fn revoke_org(ctx: Ctx, req: Request, org_id: id.OrgId) -> Response {
   let body = reason_only(req)
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -1913,10 +1918,14 @@ pub fn revoke_org(ctx: Ctx, req: Request, org_id: String) -> Response {
         store.run(
           tx,
           "UPDATE orgs SET verification_revoked_at = ? WHERE id = ?",
-          [sqlight.int(now), sqlight.text(org.id)],
+          [sqlight.int(now), id.org_sql(org.id)],
         ),
       )
-      use theirs <- result.try(records.claims_for(read, claim_row.Org, org.id))
+      use theirs <- result.try(records.claims_for(
+        read,
+        claim_row.Org,
+        id.org_to_string(org.id),
+      ))
       use _ <- result.try(
         list.try_each(
           list.filter(theirs, fn(c) { c.status == claim_row.Verified }),
@@ -1950,7 +1959,7 @@ pub fn revoke_org(ctx: Ctx, req: Request, org_id: String) -> Response {
       reply(http.json(
         200,
         json.object([
-          #("orgId", json.string(org.id)),
+          #("orgId", id.org_json(org.id)),
           #("status", json.string(claims.org_status_code(status))),
           #(
             "note",
@@ -1970,7 +1979,7 @@ pub fn revoke_org(ctx: Ctx, req: Request, org_id: String) -> Response {
 /// provenance, inside its unit.
 pub fn sync_legacy_toggle(
   tx: store.Tx,
-  org_id: String,
+  org_id: id.OrgId,
   verified: Option(Bool),
   now: Int,
 ) -> Result(Nil, store.Fail(e)) {
@@ -1981,7 +1990,11 @@ pub fn sync_legacy_toggle(
       kind: event_row.TrustSafety,
       name: Some("Trust & Safety"),
     )
-  use theirs <- result.try(records.claims_for(read, claim_row.Org, org_id))
+  use theirs <- result.try(records.claims_for(
+    read,
+    claim_row.Org,
+    id.org_to_string(org_id),
+  ))
   let existing =
     list.find(theirs, fn(c) { c.claim_type == claim_type.OrganisationIdentity })
     |> option.from_result
@@ -2016,7 +2029,7 @@ pub fn sync_legacy_toggle(
                 ..core.blank_claim(
                   id,
                   claim_row.Org,
-                  org_id,
+                  id.org_to_string(org_id),
                   claim_type.OrganisationIdentity,
                   now,
                 ),
@@ -2039,7 +2052,7 @@ pub fn sync_legacy_toggle(
       store.run(
         tx,
         "UPDATE orgs SET verification_revoked_at = NULL WHERE id = ?",
-        [sqlight.text(org_id)],
+        [id.org_sql(org_id)],
       )
     }
     Some(False), Some(c) if c.status == claim_row.Verified ->

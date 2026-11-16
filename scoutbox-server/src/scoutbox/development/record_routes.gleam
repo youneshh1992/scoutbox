@@ -19,6 +19,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Tx}
+import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
 import scoutbox/rules/time_zones
@@ -137,7 +138,7 @@ pub fn academy_plus(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   )
 }
 
-fn share(ctx: Ctx, req: Request, id: String) -> Response {
+fn share(ctx: Ctx, req: Request, id: id.PlayerId) -> Response {
   use on <- http.body(req, enabled_shape("shared"), [])
   act(ctx, players.set_switch(_, id, players.MedicalShared, on), fn(s) {
     json.object([#("shared", json.bool(s.row.medical_shared))])
@@ -476,7 +477,7 @@ fn save_prefs(ctx: Ctx, p: Player, body: PrefsInput) -> Response {
 pub fn own_child(
   ctx: Ctx,
   g: Guardian,
-  id: String,
+  id: id.PlayerId,
   next: fn(Player) -> Response,
 ) -> Response {
   case list.contains(g.child_ids, id) {
@@ -495,7 +496,7 @@ pub fn child_availability(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.PlayerId,
 ) -> Response {
   use child <- own_child(ctx, g, id)
   let shape = {
@@ -529,7 +530,7 @@ pub fn child_medical_share(
   ctx: Ctx,
   req: Request,
   g: Guardian,
-  id: String,
+  id: id.PlayerId,
 ) -> Response {
   use child <- own_child(ctx, g, id)
   share(ctx, req, child.row.id)

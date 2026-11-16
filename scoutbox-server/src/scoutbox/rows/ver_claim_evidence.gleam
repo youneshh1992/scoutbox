@@ -4,6 +4,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ver_claim_evidence"
@@ -23,23 +24,23 @@ pub fn qualified(alias: String) -> String {
 }
 
 pub type Row {
-  Row(claim_id: String, position: Int, evidence_id: String)
+  Row(claim_id: id.ClaimId, position: Int, evidence_id: id.EvidenceId)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  claim_id claim_id: String,
+  claim_id claim_id: id.ClaimId,
   position position: Int,
-  evidence_id evidence_id: String,
+  evidence_id evidence_id: id.EvidenceId,
 ) -> Row {
   Row(claim_id:, position:, evidence_id:)
 }
 
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
-  use claim_id <- decode.field(0, decode.string)
+  use claim_id <- decode.field(0, id.claim_decoder())
   use position <- decode.field(1, decode.int)
-  use evidence_id <- decode.field(2, decode.string)
+  use evidence_id <- decode.field(2, id.evidence_decoder())
   decode.success(Row(claim_id:, position:, evidence_id:))
 }
 
@@ -49,9 +50,9 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
-    sqlight.text(row.claim_id),
+    id.claim_sql(row.claim_id),
     sqlight.int(row.position),
-    sqlight.text(row.evidence_id),
+    id.evidence_sql(row.evidence_id),
   ]
 }
 

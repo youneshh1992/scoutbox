@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/rows/id
 import sqlight
 
 pub const table = "ops_events"
@@ -88,48 +89,48 @@ pub fn kind_decoder() -> decode.Decoder(Kind) {
 pub type Row {
   Row(
     seq: Int,
-    id: String,
+    id: id.OpsEventId,
     occurred_at: Int,
     kind: Kind,
-    detail_org_id: Option(String),
-    detail_user_id: Option(String),
+    detail_org_id: Option(id.OrgId),
+    detail_user_id: Option(id.OrgUserId),
     detail_by: Option(String),
     detail_dir: Option(String),
     detail_files: Option(Int),
     detail_queued_for_removal: Option(Int),
     detail_error: Option(String),
     detail_conflict_count: Option(Int),
-    detail_dispatch_id: Option(String),
+    detail_dispatch_id: Option(id.DispatchId),
     detail_channel: Option(String),
-    detail_delivery_id: Option(String),
-    detail_endpoint_id: Option(String),
+    detail_delivery_id: Option(id.WebhookDeliveryId),
+    detail_endpoint_id: Option(id.WebhookEndpointId),
   )
 }
 
 /// A row to insert: `Row` without the columns SQLite fills itself.
 pub type New {
   New(
-    id: String,
+    id: id.OpsEventId,
     occurred_at: Int,
     kind: Kind,
-    detail_org_id: Option(String),
-    detail_user_id: Option(String),
+    detail_org_id: Option(id.OrgId),
+    detail_user_id: Option(id.OrgUserId),
     detail_by: Option(String),
     detail_dir: Option(String),
     detail_files: Option(Int),
     detail_queued_for_removal: Option(Int),
     detail_error: Option(String),
     detail_conflict_count: Option(Int),
-    detail_dispatch_id: Option(String),
+    detail_dispatch_id: Option(id.DispatchId),
     detail_channel: Option(String),
-    detail_delivery_id: Option(String),
-    detail_endpoint_id: Option(String),
+    detail_delivery_id: Option(id.WebhookDeliveryId),
+    detail_endpoint_id: Option(id.WebhookEndpointId),
   )
 }
 
 /// A `New` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
-  id id: String,
+  id id: id.OpsEventId,
   occurred_at occurred_at: Int,
   kind kind: Kind,
 ) -> New {
@@ -155,21 +156,30 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
+  use id <- decode.field(1, id.ops_event_decoder())
   use occurred_at <- decode.field(2, decode.int)
   use kind <- decode.field(3, kind_decoder())
-  use detail_org_id <- decode.field(4, decode.optional(decode.string))
-  use detail_user_id <- decode.field(5, decode.optional(decode.string))
+  use detail_org_id <- decode.field(4, decode.optional(id.org_decoder()))
+  use detail_user_id <- decode.field(5, decode.optional(id.org_user_decoder()))
   use detail_by <- decode.field(6, decode.optional(decode.string))
   use detail_dir <- decode.field(7, decode.optional(decode.string))
   use detail_files <- decode.field(8, decode.optional(decode.int))
   use detail_queued_for_removal <- decode.field(9, decode.optional(decode.int))
   use detail_error <- decode.field(10, decode.optional(decode.string))
   use detail_conflict_count <- decode.field(11, decode.optional(decode.int))
-  use detail_dispatch_id <- decode.field(12, decode.optional(decode.string))
+  use detail_dispatch_id <- decode.field(
+    12,
+    decode.optional(id.dispatch_decoder()),
+  )
   use detail_channel <- decode.field(13, decode.optional(decode.string))
-  use detail_delivery_id <- decode.field(14, decode.optional(decode.string))
-  use detail_endpoint_id <- decode.field(15, decode.optional(decode.string))
+  use detail_delivery_id <- decode.field(
+    14,
+    decode.optional(id.webhook_delivery_decoder()),
+  )
+  use detail_endpoint_id <- decode.field(
+    15,
+    decode.optional(id.webhook_endpoint_decoder()),
+  )
   decode.success(Row(
     seq:,
     id:,
@@ -196,21 +206,21 @@ pub const insert_sql =
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
   [
-    sqlight.text(row.id),
+    id.ops_event_sql(row.id),
     sqlight.int(row.occurred_at),
     sqlight.text(kind_to_string(row.kind)),
-    sqlight.nullable(sqlight.text, row.detail_org_id),
-    sqlight.nullable(sqlight.text, row.detail_user_id),
+    sqlight.nullable(id.org_sql, row.detail_org_id),
+    sqlight.nullable(id.org_user_sql, row.detail_user_id),
     sqlight.nullable(sqlight.text, row.detail_by),
     sqlight.nullable(sqlight.text, row.detail_dir),
     sqlight.nullable(sqlight.int, row.detail_files),
     sqlight.nullable(sqlight.int, row.detail_queued_for_removal),
     sqlight.nullable(sqlight.text, row.detail_error),
     sqlight.nullable(sqlight.int, row.detail_conflict_count),
-    sqlight.nullable(sqlight.text, row.detail_dispatch_id),
+    sqlight.nullable(id.dispatch_sql, row.detail_dispatch_id),
     sqlight.nullable(sqlight.text, row.detail_channel),
-    sqlight.nullable(sqlight.text, row.detail_delivery_id),
-    sqlight.nullable(sqlight.text, row.detail_endpoint_id),
+    sqlight.nullable(id.webhook_delivery_sql, row.detail_delivery_id),
+    sqlight.nullable(id.webhook_endpoint_sql, row.detail_endpoint_id),
   ]
 }
 
