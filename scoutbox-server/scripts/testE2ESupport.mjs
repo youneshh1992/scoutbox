@@ -14,6 +14,7 @@ import { totp as supportTotp } from '../e2e/support/totp.mjs';
 import * as serverTotp from '../domains/identity/totp.mjs';
 import { boundaryReport } from './e2eBoundary.mjs';
 import { undocumented } from './e2eContract.mjs';
+import { checkCount, ledgerProblems, serverImports } from './e2eLedger.mjs';
 import { notData, specProblems } from './specSnapshot.mjs';
 import { openLayer, plantCase as plantViaLayer, legacyMoves as movesViaLayer } from './dataLayerFixture.mjs';
 import {
@@ -91,6 +92,41 @@ assert.deepEqual(
   'every setting, development route and header a battery uses is in e2e/support/CONTRACT.md',
 );
 console.log('✓ e2e/support/CONTRACT.md names everything the batteries need from a server');
+
+// ---------------------------------------------------------------- the ledger's accounting
+{
+  const battery = [
+    'const ok = (cond, msg) => {',
+    '  if (cond) passed++;',
+    '};',
+    'const neg = (cond, msg) => {',
+    '  negatives++;',
+    '  ok(cond, `[neg] ${msg}`);',
+    '};',
+    'const G = (n, cond, msg) =>',
+    '  ok(cond, `G${n} — ${msg}`);',
+    '// ok(commented out)',
+    '/* neg(nor this) */',
+    "ok(res.ok, 'one');",
+    "neg(r.ok(), 'two');",
+    "G(1, true, 'three');",
+    "if (x) ok(y, 'four');",
+  ].join('\n');
+  assert.equal(
+    checkCount(battery),
+    4,
+    "ok, neg and a one-line helper count where they're written, not inside each other",
+  );
+  assert.deepEqual(
+    serverImports(
+      "import { a } from '../../domain.ts';\nimport b from '../support/x.mjs';\nawait import('../../scripts/y.mjs');",
+      'platform/z.mjs',
+    ),
+    ['domain.ts', 'scripts/y.mjs'],
+  );
+  assert.deepEqual(ledgerProblems(), [], "every battery's checks are accounted for: see scripts/e2eLedger.mjs");
+  console.log("✓ every battery's checks are in the battery, its rules suite, or a note saying where they went");
+}
 
 // ---------------------------------------------------------------- the row reader
 {

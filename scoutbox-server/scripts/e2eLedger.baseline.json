@@ -1,0 +1,563 @@
+{
+  "rev": "3c843bb2",
+  "batteries": {
+    "agents/adversarial": {
+      "checks": 174,
+      "modules": [
+        "adapters.mjs",
+        "domain.ts",
+        "domains/agents/compliance/conflict.mjs",
+        "domains/agents/compliance/policy.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/agents/integration/integration.mjs",
+        "domains/agents/transactions/transaction.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/compliance": {
+      "checks": 342,
+      "modules": [
+        "domains/agents/compliance/audit.mjs",
+        "domains/agents/compliance/conflict.mjs",
+        "domains/agents/compliance/errors.mjs",
+        "domains/agents/compliance/policy.mjs",
+        "domains/agents/compliance/policyVersions.mjs",
+        "domains/agents/compliance/provider.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/compliancePolicies.mjs",
+        "repositories/complianceRecords.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/compliancePersistence": {
+      "checks": 76,
+      "modules": [
+        "domains/agents/compliance/conflict.mjs",
+        "domains/agents/compliance/policy.mjs",
+        "domains/agents/compliance/policyVersions.mjs",
+        "domains/agents/core/shared.mjs",
+        "repositories/compliancePolicies.mjs",
+        "repositories/complianceRecords.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/core": {
+      "checks": 353,
+      "modules": [
+        "domains/agents/core/audit.mjs",
+        "domains/agents/core/errors.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/agentCore.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/corePersistence": {
+      "checks": 47,
+      "modules": [
+        "domains/agents/core/shared.mjs",
+        "repositories/agentCore.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/crossApp": {
+      "checks": 380,
+      "modules": [
+        "domains/agents/compliance/policy.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/agents/integration/integration.mjs",
+        "domains/agents/transactions/errors.mjs",
+        "domains/agents/transactions/transaction.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/contact.mjs",
+        "domains/recruitment/lifecycle/errors.mjs",
+        "domains/recruitment/lifecycle/trial.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/crossAppAdversarial": {
+      "checks": 94,
+      "modules": ["domains/agents/core/shared.mjs", "domains/platform/eventRegistry.mjs"]
+    },
+    "agents/transactions": {
+      "checks": 370,
+      "modules": [
+        "domains/agents/compliance/conflict.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/agents/transactions/audit.mjs",
+        "domains/agents/transactions/errors.mjs",
+        "domains/agents/transactions/transaction.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/agentTransactions.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "agents/transactionsPersistence": {
+      "checks": 58,
+      "modules": [
+        "domains/agents/transactions/transaction.mjs",
+        "repositories/agentTransactions.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "development/boxCam": {
+      "checks": 150,
+      "modules": [
+        "domains/development/boxcam/cv/eligibility.mjs",
+        "domains/development/boxcam/drills.mjs",
+        "domains/development/boxcam/shared.mjs"
+      ]
+    },
+    "development/boxCamCvProvider": {
+      "checks": 89,
+      "modules": [
+        "domains/development/boxcam/cv/eligibility.mjs",
+        "domains/development/boxcam/cv/frames.mjs",
+        "domains/development/boxcam/cv/policy.mjs",
+        "domains/development/boxcam/cv/provider.mjs",
+        "domains/development/boxcam/cv/scenes.mjs",
+        "repositories/boxCam.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "development/boxCamCvRobustness": {
+      "checks": 48,
+      "modules": [
+        "domains/development/boxcam/cv/engine.mjs",
+        "domains/development/boxcam/cv/frames.mjs",
+        "domains/development/boxcam/cv/gate.mjs",
+        "domains/development/boxcam/cv/policy.mjs",
+        "domains/development/boxcam/cv/protocol.mjs",
+        "domains/development/boxcam/cv/quality.mjs",
+        "domains/development/boxcam/cv/scenes.mjs",
+        "domains/development/boxcam/cv/session.mjs"
+      ]
+    },
+    "development/combine": {
+      "checks": 92,
+      "modules": ["domains/development/boxcam/combineShared.mjs", "domains/development/boxcam/drills.mjs"]
+    },
+    "development/combineProductionGate": {
+      "checks": 58,
+      "modules": [
+        "domains/development/boxcam/combineShared.mjs",
+        "domains/development/boxcam/cv/eligibility.mjs",
+        "domains/development/boxcam/cv/frames.mjs",
+        "domains/development/boxcam/cv/policy.mjs",
+        "domains/development/boxcam/cv/provider.mjs",
+        "domains/development/boxcam/cv/scenes.mjs",
+        "domains/development/boxcam/cv/validation.mjs",
+        "domains/development/boxcam/drills.mjs",
+        "domains/discovery/matching/match.mjs"
+      ]
+    },
+    "development/hub": {
+      "checks": 180,
+      "modules": [
+        "domains/development/boxcam/combineShared.mjs",
+        "domains/development/boxcam/drills.mjs",
+        "domains/development/hub/evidence.mjs",
+        "domains/development/hub/index.mjs",
+        "domains/development/hub/permissions.mjs",
+        "domains/development/hub/plan.mjs",
+        "domains/development/hub/reviews.mjs",
+        "domains/development/hub/shared.mjs",
+        "domains/development/hub/targets.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/paging.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/development.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "discovery/exposureCalibrationAndCoverage": {
+      "checks": 86,
+      "modules": []
+    },
+    "discovery/matchingAndWatchlists": {
+      "checks": 152,
+      "modules": [
+        "domain.ts",
+        "domains/discovery/matching/criteria.mjs",
+        "domains/discovery/matching/index.mjs",
+        "domains/discovery/matching/match.mjs",
+        "domains/discovery/matching/watchlists.mjs",
+        "domains/discovery/shared.mjs",
+        "domains/platform/eventAudience.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/discovery.mjs",
+        "repositories/index.mjs"
+      ]
+    },
+    "discovery/secondLookAndNobodyMissed": {
+      "checks": 251,
+      "modules": ["domains/discovery/matching/match.mjs", "domains/discovery/shared.mjs"]
+    },
+    "operations/clubOperations": {
+      "checks": 273,
+      "modules": [
+        "domain.ts",
+        "domains/identity/totp.mjs",
+        "domains/integrations/webhooks.mjs",
+        "domains/recruitment/budgets.mjs",
+        "domains/recruitment/money.mjs",
+        "domains/scouting/slots.mjs"
+      ]
+    },
+    "passport/passport": {
+      "checks": 215,
+      "modules": ["domains/passport/shared.mjs"]
+    },
+    "passport/trustScore": {
+      "checks": 148,
+      "modules": ["domains/agents/core/shared.mjs", "domains/passport/trust/shared.mjs"]
+    },
+    "platform/api": {
+      "checks": 198,
+      "modules": []
+    },
+    "platform/connectedMode": {
+      "checks": 63,
+      "modules": []
+    },
+    "platform/contracts": {
+      "checks": 173,
+      "modules": [
+        "domain.ts",
+        "domains/discovery/shared.mjs",
+        "domains/passport/shared.mjs",
+        "domains/platform/capabilities.mjs",
+        "domains/platform/eventAudience.mjs",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/faults.mjs",
+        "domains/platform/integrity.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/public.mjs",
+        "repositories/database.ts",
+        "repositories/discovery.mjs",
+        "repositories/index.mjs",
+        "repositories/notifications.ts",
+        "store.ts"
+      ]
+    },
+    "platform/dates": {
+      "checks": 230,
+      "modules": [
+        "domain.ts",
+        "domains/agents/compliance/conflict.mjs",
+        "domains/agents/compliance/policy.mjs",
+        "domains/agents/core/shared.mjs",
+        "domains/agents/integration/integration.mjs",
+        "domains/development/hub/shared.mjs",
+        "domains/discovery/shared.mjs",
+        "domains/passport/shared.mjs",
+        "domains/recruitment/analytics/metrics.mjs",
+        "domains/recruitment/lifecycle/contact.mjs",
+        "domains/recruitment/lifecycle/trial.mjs",
+        "domains/verification/claims/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "temporal.ts"
+      ]
+    },
+    "platform/delivery": {
+      "checks": 39,
+      "modules": []
+    },
+    "platform/messaging": {
+      "checks": 56,
+      "modules": []
+    },
+    "platform/notifications": {
+      "checks": 52,
+      "modules": []
+    },
+    "platform/playersAndGuardians": {
+      "checks": 45,
+      "modules": []
+    },
+    "platform/productionHardening": {
+      "checks": 204,
+      "modules": [
+        "domains/discovery/shared.mjs",
+        "domains/passport/shared.mjs",
+        "domains/platform/capabilities.mjs",
+        "domains/platform/concurrency.mjs",
+        "domains/platform/eventAudience.mjs",
+        "domains/platform/rateLimit.mjs"
+      ]
+    },
+    "platform/safeguarding": {
+      "checks": 52,
+      "modules": []
+    },
+    "platform/sessionsAndPorts": {
+      "checks": 40,
+      "modules": ["domains/platform/asyncErrors.mjs"]
+    },
+    "platform/staff": {
+      "checks": 23,
+      "modules": []
+    },
+    "platform/storeGuarantees": {
+      "checks": 32,
+      "modules": [
+        "catalogue.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/counters.ts",
+        "repositories/index.mjs",
+        "repositories/orgs.ts",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/analytics": {
+      "checks": 104,
+      "modules": [
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/analytics/cohorts.mjs",
+        "domains/recruitment/analytics/dashboard.mjs",
+        "domains/recruitment/analytics/funnels.mjs",
+        "domains/recruitment/analytics/index.mjs",
+        "domains/recruitment/analytics/metrics.mjs",
+        "domains/recruitment/analytics/timeSeries.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/contacts": {
+      "checks": 366,
+      "modules": [
+        "domain.ts",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/contact.mjs",
+        "domains/recruitment/lifecycle/errors.mjs",
+        "domains/recruitment/lifecycle/journey.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/contactsPersistence": {
+      "checks": 47,
+      "modules": [
+        "domains/platform/integrity.mjs",
+        "domains/recruitment/lifecycle/contact.mjs",
+        "domains/recruitment/public.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/decisions": {
+      "checks": 249,
+      "modules": [
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/decision.mjs",
+        "domains/recruitment/lifecycle/decisionRoutes.mjs",
+        "domains/recruitment/lifecycle/errors.mjs",
+        "domains/recruitment/lifecycle/evidence.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/decisionsPersistence": {
+      "checks": 48,
+      "modules": [
+        "domains/recruitment/lifecycle/decision.mjs",
+        "domains/recruitment/lifecycle/journey.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "recruitment/journey": {
+      "checks": 155,
+      "modules": [
+        "domains/recruitment/lifecycle/journey.mjs",
+        "domains/recruitment/lifecycle/journeyModel.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/journeyAdversarial": {
+      "checks": 217,
+      "modules": [
+        "domain.ts",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/analytics/funnels.mjs",
+        "domains/recruitment/lifecycle/journeyModel.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "recruitment/journeyPersistence": {
+      "checks": 65,
+      "modules": ["repositories/index.mjs", "scripts/dataLayerFixture.mjs"]
+    },
+    "recruitment/lifecycle": {
+      "checks": 307,
+      "modules": [
+        "domains/recruitment/analytics/funnels.mjs",
+        "domains/recruitment/lifecycle/contactRoutes.mjs",
+        "domains/recruitment/lifecycle/decisionRoutes.mjs",
+        "domains/recruitment/lifecycle/errors.mjs",
+        "domains/recruitment/lifecycle/index.mjs",
+        "domains/recruitment/lifecycle/journey.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/lifecycle/trialRoutes.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/offers": {
+      "checks": 354,
+      "modules": [
+        "domain.ts",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/evidence.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/offers/errors.mjs",
+        "domains/recruitment/offers/offer.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/recruitmentReadsFixture.mjs",
+        "temporal.ts"
+      ]
+    },
+    "recruitment/offersAdversarial": {
+      "checks": 206,
+      "modules": [
+        "domain.ts",
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/lifecycle.mjs",
+        "domains/recruitment/offers/errors.mjs",
+        "domains/recruitment/offers/offer.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs",
+        "temporal.ts"
+      ]
+    },
+    "recruitment/offersPersistence": {
+      "checks": 72,
+      "modules": ["domains/recruitment/offers/offer.mjs", "repositories/index.mjs", "scripts/dataLayerFixture.mjs"]
+    },
+    "recruitment/rooms": {
+      "checks": 371,
+      "modules": ["domains/recruitment/rooms/shared.mjs"]
+    },
+    "recruitment/signings": {
+      "checks": 245,
+      "modules": [
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/signings/errors.mjs",
+        "domains/recruitment/signings/signing.mjs",
+        "repositories/index.mjs"
+      ]
+    },
+    "recruitment/signingsAdversarial": {
+      "checks": 212,
+      "modules": [
+        "domain.ts",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/signings/signing.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "recruitment/signingsPersistence": {
+      "checks": 78,
+      "modules": ["domains/recruitment/signings/signing.mjs", "repositories/index.mjs", "scripts/dataLayerFixture.mjs"]
+    },
+    "recruitment/trialDatesMinorsAndErasure": {
+      "checks": 243,
+      "modules": [
+        "domain.ts",
+        "domains/platform/notificationPrefs.mjs",
+        "domains/platform/rateLimit.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs"
+      ]
+    },
+    "recruitment/trials": {
+      "checks": 388,
+      "modules": [
+        "domains/platform/eventRegistry.mjs",
+        "domains/platform/rateLimit.mjs",
+        "domains/recruitment/lifecycle/errors.mjs",
+        "domains/recruitment/lifecycle/evidence.mjs",
+        "domains/recruitment/lifecycle/trial.mjs",
+        "domains/recruitment/rooms/shared.mjs",
+        "repositories/index.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "recruitment/trialsPersistence": {
+      "checks": 36,
+      "modules": [
+        "domains/recruitment/lifecycle/journey.mjs",
+        "domains/recruitment/lifecycle/trial.mjs",
+        "repositories/index.mjs",
+        "scripts/dataLayerFixture.mjs",
+        "scripts/recruitmentReadsFixture.mjs"
+      ]
+    },
+    "scouting/clubWorkflows": {
+      "checks": 264,
+      "modules": []
+    },
+    "verification/organisationsAndStaff": {
+      "checks": 231,
+      "modules": ["domains/verification/claims/shared.mjs"]
+    },
+    "verification/organisationsAndStaffAdversarial": {
+      "checks": 99,
+      "modules": ["domains/verification/claims/shared.mjs"]
+    }
+  }
+}
