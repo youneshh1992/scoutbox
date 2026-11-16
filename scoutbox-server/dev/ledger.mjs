@@ -44,6 +44,9 @@ const ACCEPTED = {
   'platform/contracts → scripts/testDiscovery.mjs': {
     none: "These test the TypeScript discovery repository's own typing (typeBrief, typeSecondLookItem) and its DDL text. This server has no such layer: its tables are the TypeScript migrations verbatim (migrations:check), and the two facts the battery depends on stay in it as schema checks (§11b).",
   },
+  'recruitment/trialsPersistence → scripts/testRecruitment.mjs': {
+    none: "These test the TypeScript recruitment repository's writing of its own record shapes (the legacy trial's neutral containers, a workflow trial stored as written, the fixture left untouched) and its refusal of entries that have no row form. This server has no record-shaped writer: its fixtures are the tables' rows, which the battery writes and reads back column for column, and the schema's refusals stay in the battery as plain-SQL writes (§3c).",
+  },
   'platform/sessionsAndPorts → scripts/testPlatformHelpers.mjs': {
     none: "These test installAsyncErrorForwarding, a patch to Express's async handlers. This server has no Express; a crashing handler is a 500 by router.rescue, and the battery keeps the outcome over HTTP (A4–A5).",
   },

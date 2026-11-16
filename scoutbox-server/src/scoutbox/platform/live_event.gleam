@@ -51,6 +51,8 @@ pub type Event {
     offer_id: String,
     status: Option(String),
   )
+  /// A scout submitted an assessment. Private to the club.
+  AssessmentSubmitted(org_id: String, assessment_id: String)
   /// A club sent a trial invitation from a Room. Private to the club.
   TrialInvited(org_id: String, room_id: String, request_id: String)
   /// The recipient accepted a trial invitation. Private to the club.
@@ -155,6 +157,7 @@ pub fn name(event: Event) -> String {
         OfferWithdrawn -> "offer_withdrawn"
       }
     OfferResponded(..) -> "offer_responded"
+    AssessmentSubmitted(..) -> "assessment_submitted"
     TrialInvited(..) -> "trial_invited"
     TrialAccepted(..) -> "trial_accepted"
     TrialDeclined(..) -> "trial_declined"
@@ -191,6 +194,7 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewRequested(org_id:, ..)
     | OfferChanged(org_id:, ..)
     | OfferResponded(org_id:, ..)
+    | AssessmentSubmitted(org_id:, ..)
     | TrialInvited(org_id:, ..)
     | TrialAccepted(org_id:, ..)
     | TrialDeclined(org_id:, ..)
@@ -255,6 +259,10 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("offerId", json.string(offer_id)),
       #("status", json.nullable(status, json.string)),
     ]
+    AssessmentSubmitted(org_id:, assessment_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("assessmentId", json.string(assessment_id)),
+    ]
     TrialInvited(org_id:, room_id:, request_id:)
     | TrialDeclined(org_id:, room_id:, request_id:) -> [
       #("orgId", json.string(org_id)),
@@ -308,7 +316,8 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
 /// Whether a reconnect replays it (the registry's `replayPolicy`).
 pub fn replays(event: Event) -> Bool {
   case event {
-    Messages(..) | Notify(..) | OfferResponded(..) -> True
+    Messages(..) | Notify(..) | OfferResponded(..) | AssessmentSubmitted(..) ->
+      True
     OfferChanged(change:, ..) -> change != OfferDraftUpdated
     _ -> False
   }

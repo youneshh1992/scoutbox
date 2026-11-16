@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 9 | 6 | 441 / 716 | 15 / 110 | 17 to go |
+| recruitment | 19 | 9 | 7 | 441 / 716 | 15 / 110 | 16 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -85,8 +85,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsPersistence` | not yet neutral | 3 → 3 | 78 | 78 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  |  | 0 / 106 | 0 / 6 | not answered; 106 cases pending; 6 hand-port calls |
-| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  |  | 3 / 167 | 0 / 35 | not answered; 167 cases pending; 35 hand-port calls |
-| `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | 1 TypeScript-only move unreviewed |
+| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
+| `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 264 |  |  |  |  |  | not answered |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
@@ -103,7 +103,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/contracts` | 7 | `scripts/testPlatformHelpers.mjs` | §12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43) | `test/scoutbox/faults_test.gleam` |
 | `platform/sessionsAndPorts` | 3 | `scripts/testPlatformHelpers.mjs` | A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP | none: These test installAsyncErrorForwarding, a patch to Express's async handlers. This server has no Express; a crashing handler is a 500 by router.rescue, and the battery keeps the outcome over HTTP (A4–A5). |
 | `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | `test/scoutbox/ids_test.gleam` |
-| `recruitment/trialsPersistence` | 6 | `scripts/testRecruitment.mjs` | §1 wrote the battery's record shapes through the repository and read them back (the legacy trial as legacy_accepted with empty containers and its report and trial day kept, sound by the integrity rule; the workflow trial stored as written), and §3b fed the repository entries that are not records; those are unit checks of the repository. The battery writes and reads stored rows, keeps the schema's refusals as plain-SQL writes (§3c) and the typed table as a schema check (§1) | not yet reviewed |
+| `recruitment/trialsPersistence` | 6 | `scripts/testRecruitment.mjs` | §1 wrote the battery's record shapes through the repository and read them back (the legacy trial as legacy_accepted with empty containers and its report and trial day kept, sound by the integrity rule; the workflow trial stored as written), and §3b fed the repository entries that are not records; those are unit checks of the repository. The battery writes and reads stored rows, keeps the schema's refusals as plain-SQL writes (§3c) and the typed table as a schema check (§1) | none: These test the TypeScript recruitment repository's writing of its own record shapes (the legacy trial's neutral containers, a workflow trial stored as written, the fixture left untouched) and its refusal of entries that have no row form. This server has no record-shaped writer: its fixtures are the tables' rows, which the battery writes and reads back column for column, and the schema's refusals stay in the battery as plain-SQL writes (§3c). |
 
 ## Checks added while untangling
 

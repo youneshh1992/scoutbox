@@ -89,6 +89,7 @@ const samples = [
   ),
   live_event.OfferChanged(live_event.OfferWithdrawn, "org-1", "case-1", "rof-1"),
   live_event.OfferResponded("org-1", "case-1", "rof-1", None),
+  live_event.AssessmentSubmitted("org-1", "ass-1"),
   live_event.TrialInvited("org-1", "case-1", "req-1"),
   live_event.TrialAccepted("org-1", "case-1", "trial-1", "req-1"),
   live_event.TrialDeclined("org-1", "case-1", "req-1"),

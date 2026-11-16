@@ -2,8 +2,8 @@
 //// other domains' histories. Entries say what happened and who did it, never content. Reason codes are the
 //// organisation's own structured vocabulary, so they are shown; the free text beside them is not.
 ////
-//// Not ported yet: the Contact, Trial, recruitment brief, dynamic watchlist and development plan sources, whose
-//// domains are not ported. Every source here is read whole, not paged in SQL.
+//// Not ported yet: the Contact, recruitment brief, dynamic watchlist and development plan sources, whose domains
+//// are not ported. Every source here is read whole, not paged in SQL.
 
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -28,7 +28,9 @@ import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/trial_history as trial_history_row
 import scoutbox/vocab/org_type
+import scoutbox/vocab/trial_actor_kind
 import wisp.{type Request, type Response}
 
 /// Room activity worth an administrator's attention. Chatter is not.
@@ -147,6 +149,73 @@ fn room_rows(
   })
 }
 
+/// A trial's operational acts. Unlinking evidence is included; reads are not.
+const trial_actions = [
+  "trial_accepted", "trial_schedule_proposed", "trial_rescheduled",
+  "trial_schedule_confirmed", "trial_schedule_declined",
+  "trial_attendance_recorded", "trial_cancelled", "trial_completed",
+  "trial_evidence_linked", "trial_evidence_unlinked",
+]
+
+fn trial_rows(
+  read: Read,
+  org: Org,
+  now: Int,
+) -> Result(List(agent_audit.Row), Fail(e)) {
+  use rows <- result.try(
+    store.query(
+      read,
+      "SELECT "
+        <> trial_history_row.qualified("h")
+        <> ", t.case_id, t.player_id FROM trial_history h JOIN trials t ON t.id = h.trial_id
+       WHERE t.org_id = ? ORDER BY h.at DESC, h.id DESC",
+      [id.org_sql(org.id)],
+      {
+        use h <- decode.then(trial_history_row.decoder())
+        use case_id <- decode.field(
+          trial_history_row.width,
+          decode.optional(id.recruitment_case_decoder()),
+        )
+        use player <- decode.field(
+          trial_history_row.width + 1,
+          id.player_decoder(),
+        )
+        decode.success(#(h, case_id, player))
+      },
+    ),
+  )
+  rows
+  |> list.filter(fn(r) { list.contains(trial_actions, { r.0 }.action) })
+  |> list.try_map(fn(r) {
+    let #(h, case_id, player) = r
+    use who <- result.map(subject(read, org, player, now))
+    agent_audit.Row(id.trial_event_to_string(h.id), h.at, [
+      #("id", id.trial_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", json.string(h.action)),
+      #("domain", json.string("recruitment_trial")),
+      #("actor", case h.by_kind {
+        Some(trial_actor_kind.Org) ->
+          json.object([
+            #("userId", json.nullable(h.by_user_id, json.string)),
+            #("name", json.nullable(h.by_name, json.string)),
+          ])
+        _ -> json.null()
+      }),
+      #(
+        "target",
+        json.object([
+          #("type", json.string("trial")),
+          #("id", id.trial_json(h.trial_id)),
+          #("roomId", json.nullable(case_id, id.recruitment_case_json)),
+          ..who
+        ]),
+      ),
+      #("detail", safe_detail(h.detail_json)),
+    ])
+  })
+}
+
 fn ledger_rows(read: Read, org: Org) -> Result(List(agent_audit.Row), Fail(e)) {
   use rows <- result.map(store.query(
     read,
@@ -249,12 +318,13 @@ pub fn feed(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       case
         store.read(ctx.store, fn(r) {
           use rooms <- result.try(room_rows(r, a.org, now))
+          use trials <- result.try(trial_rows(r, a.org, now))
           use ledger <- result.try(ledger_rows(r, a.org))
           use agency <- result.map(case a.org.type_ {
             org_type.Agency -> agent_audit.rows(r, a.org, now)
             _ -> Ok([])
           })
-          list.flatten([rooms, agency, ledger])
+          list.flatten([rooms, trials, agency, ledger])
         })
       {
         Error(failure) -> http.internal(failure)

@@ -11,6 +11,7 @@ import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
 import scoutbox/agents/transaction_routes
 import scoutbox/app.{type Ctx}
+import scoutbox/development/box_prefs
 import scoutbox/development/combine
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
@@ -66,6 +67,7 @@ import scoutbox/rows/ver_claims as claim_row
 import scoutbox/safety/admin
 import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
+import scoutbox/scouting/assessments
 import scoutbox/scouting/board_routes
 import scoutbox/scouting/evidence
 import scoutbox/verification/applications
@@ -247,6 +249,21 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["players", id, "trust-profile"] ->
           only(req, Get, fn() { trust.org_view(ctx, org, id.player(id)) })
+        ["players", pid, "assessment-compare"] ->
+          only(req, Get, fn() { assessments.compare(ctx, org, pid) })
+        ["assessments"] ->
+          case req.method {
+            Get -> assessments.list_for(ctx, req, org)
+            Post -> assessments.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["assessments", aid] ->
+          only(req, Put, fn() {
+            use req <- contract.rerun_on_stale(req)
+            assessments.edit(ctx, req, org, aid)
+          })
+        ["assessments", aid, "submit"] ->
+          only(req, Post, fn() { assessments.submit(ctx, org, aid) })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
@@ -347,6 +364,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
+        ["box-cam", "prefs"] ->
+          case req.method {
+            Get -> box_prefs.show(ctx, player)
+            Patch -> box_prefs.update(ctx, req, player)
+            _ -> not_found()
+          }
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->

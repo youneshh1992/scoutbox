@@ -9,8 +9,10 @@
 //// An invitation is not a trial; an acceptance is not a schedule; a schedule is not attendance; attendance is not
 //// completion; completion is not an assessment; an assessment is not a decision.
 ////
-//// Not ported yet: Box Cam's results (a linked session's observation reads `no_cv_result`), and Box Cam's test
-//// provider (`BOX_CAM_TEST_PROVIDER`): a `local_test` session is never citable here.
+//// A linked Box Cam session's observation is its latest recorded CV result, read live (Box Cam's analysis records
+//// it; it is moving to a service of its own).
+////
+//// Not ported yet: Box Cam's test provider (`BOX_CAM_TEST_PROVIDER`): a `local_test` session is never citable here.
 
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
@@ -55,6 +57,7 @@ import scoutbox/recruitment/trial_rules.{
 }
 import scoutbox/recruitment/trials
 import scoutbox/rows/assessments as assessment_row
+import scoutbox/rows/box_cam_cv_results as cv_row
 import scoutbox/rows/box_sessions as box_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
@@ -2455,7 +2458,11 @@ fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
   |> list.flat_map(fn(s) { list.map(s.evidence, fn(e) { #(s, e) }) })
   |> list.try_map(fn(pair) {
     let #(s, e) = pair
-    use found <- result.map(box_session(
+    use found <- result.try(box_session(
+      rd,
+      id.box_session_to_string(e.box_session_id),
+    ))
+    use cv <- result.map(latest_cv(
       rd,
       id.box_session_to_string(e.box_session_id),
     ))
@@ -2529,27 +2536,112 @@ fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
         json.object(
           list.append(base, [
             #("session", session),
-            #("observation", case invalidated {
-              True ->
+            #("observation", case invalidated, cv {
+              True, _ ->
                 observation(
                   "evidence_withdrawn",
                   "This Box Cam session was withdrawn after review; no observation is available.",
                 )
-              // Not ported yet: Box Cam's results.
-              False ->
+              False, None ->
                 observation(
                   "no_cv_result",
                   "No reliable observation available for this session.",
                 )
+              False, Some(r) -> cv_observation(r)
             }),
-            #("providerVersion", json.int(b.provider_version)),
-            #("engineVersion", json.null()),
-            #("cvPolicyVersion", json.null()),
+            #("providerVersion", case invalidated, cv {
+              False, Some(r) -> json.int(r.provider_version)
+              _, _ -> json.int(b.provider_version)
+            }),
+            #("engineVersion", case invalidated, cv {
+              False, Some(r) -> json.int(r.engine_version)
+              _, _ -> json.null()
+            }),
+            #("cvPolicyVersion", case invalidated, cv {
+              False, Some(r) -> json.int(r.cv_policy_version)
+              _, _ -> json.null()
+            }),
           ]),
         )
       }
     }
   })
+}
+
+/// The latest CV result recorded for a Box Cam session (Box Cam's analysis records it; it is read here, never
+/// written).
+fn latest_cv(rd: Read, sid: String) -> Result(Option(cv_row.Row), Fail(e)) {
+  store.one(
+    rd,
+    "SELECT "
+      <> cv_row.columns
+      <> " FROM box_cam_cv_results WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
+    [sqlight.text(sid)],
+    cv_row.decoder(),
+  )
+  |> result.map(option.from_result)
+}
+
+/// The player-facing sentence for a CV refusal, under a neutral state: a refusal means no reliable observation,
+/// never poor performance.
+fn refusal_copy(reason: String) -> String {
+  case reason {
+    "accepted" -> "This attempt was observed and measured."
+    "insufficient_confidence" ->
+      "Could not verify this attempt — not enough visual confidence in what was observed."
+    "insufficient_visibility" ->
+      "Could not verify this attempt — the lighting was too low to track the ball reliably."
+    "ball_not_detected" ->
+      "Could not verify this attempt — the ball was not visible for enough of the attempt."
+    "person_not_detected" ->
+      "Could not verify this attempt — no player was visible in the capture area."
+    "protocol_violation" ->
+      "Could not verify this attempt — the capture did not follow the standardised protocol."
+    "liveness_failed" ->
+      "Could not verify this attempt — the live-session check did not pass."
+    "provider_unavailable" ->
+      "Production observation is not available right now, so this attempt was not verified."
+    "unsupported_protocol" ->
+      "Production observation is not available for this test on this device."
+    "unsupported_event_cadence" ->
+      "Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced."
+    _ -> ""
+  }
+}
+
+fn cv_observation(r: cv_row.Row) -> Json {
+  let quality = json.nullable(r.oq_state, cv_row.oq_state_to_json)
+  case r.outcome {
+    cv_row.Accepted ->
+      json.object([
+        #("state", json.string("accepted")),
+        #("copy", json.string("This session was observed by Box Cam.")),
+        #("qualityState", quality),
+        #(
+          "experimental",
+          json.object([
+            #(
+              "status",
+              cv_row.experimental_status_to_json(r.experimental_status),
+            ),
+          ]),
+        ),
+      ])
+    cv_row.Refused -> {
+      let reason = option.unwrap(r.refusal_reason, "unknown")
+      json.object([
+        #("state", json.string(reason)),
+        #(
+          "copy",
+          json.string(string.trim(
+            "No reliable observation available. " <> refusal_copy(reason),
+          )),
+        ),
+        #("qualityState", quality),
+        #("experimental", json.null()),
+      ])
+    }
+  }
 }
 
 /// `GET /org/rooms/:id/trials/:tid/evidence`.

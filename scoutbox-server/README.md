@@ -12,12 +12,15 @@ evidence, missing-evidence suggestions and Combine requests they read), the recr
 actions and formal decision, Offers, the agent core (profiles and verification facets, agency membership,
 representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
 items it opens), the organisation audit and a player's erasure, and the start of an agent's transaction workspace
-(opening one from a club's handoff, its notes and the readiness an Offer reads). It answers seventeen of the
-TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
+(opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
+schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
+calendar export and the mandatory report), structured assessments, and the Football Passport's trial timeline. It
+answers nineteen of the TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
 `platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`,
 `platform/delivery`, `platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
 `verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence`,
-`recruitment/offers`, `recruitment/offersAdversarial`, `recruitment/offersPersistence` and `agents/core`.
+`recruitment/offers`, `recruitment/offersAdversarial`, `recruitment/offersPersistence`, `recruitment/trials`,
+`recruitment/trialsPersistence` and `agents/core`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -74,18 +77,20 @@ Every route below is exercised by a battery, except where marked.
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
-| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox`; `GET /org/trials`, `/org/signings` (empty pages: no route here creates either) |
+| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (an empty page: no route here creates one) |
+| Trials | `GET`/`POST /org/rooms/:id/trials`, `GET …/trials/:tid`, `POST …/schedule`, `…/reschedule`, `…/cancel`, `…/complete`, `…/sessions/:sid/attendance`, `…/sessions/:sid/evidence`, `…/evidence/:eid/unlink`, `GET …/evidence`, `…/evidence/candidates`, `GET /org/recruitment/trial-policy`; `GET /org/trials`, `/org/trials/:id/day`, `/org/trials/:id/ics`, `POST /org/trials/:id/staff`, `/arrival`, `/cancel`, `/postpone`, `/checkin`, `/report`; `GET /player/trials`, `POST /player/trials/:id/confirm-schedule`, `/decline-schedule`, `/cancel`, `/consent`, `/emergency-contact`, `GET …/safety-pack`, and the guardian's `/guardian/trials…` |
+| Assessments | `GET`/`POST /org/assessments`, `PUT /org/assessments/:id`, `POST …/submit`, `GET /org/players/:id/assessment-compare` |
 | Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
 | Case | `GET /org/rooms/:id/journey` (the club's projection), `POST /org/rooms/:id/lifecycle` (a named action, gated by the evidence provider); `GET /org/rooms/:id/decision`, `POST`/`PATCH`/`DELETE …/decision/draft`, `POST …/decision/finalize`, `…/decision/supersede` |
 | Offers | `GET`/`POST /org/rooms/:id/offers`, `GET /org/offers/:id`, `…/history`, `PATCH …/draft`, `POST …/issue`, `…/withdraw`, `…/revise`, `GET /org/recruitment/offer-policy`; `GET /player/offers`, `/player/offers/:id`, `…/documents/:docId`, `POST …/accept`, `…/decline`, `…/share-agent`; the guardian's `/guardian/offers…` |
 | Agents | `GET /org/agent/me`, `/home`, `GET`/`POST /org/agent/profile`, `POST …/profile/facets/:facet/submit`; `GET /org/agent/agency`, `GET`/`POST …/agency/team`, `PATCH …/agency/team/:userId`, `POST …/team/:userId/end`, `PATCH …/agency/settings`, `GET …/agency/compliance`, `…/agency/audit`; `GET /org/agent/players`, `/clients`, `POST /org/agent/clients/request`, `GET /org/agent/clients/:id`, `POST …/terminate`, `GET …/opportunities`, `…/offers`; `GET /org/agent/opportunities`, `/inbox`; `GET /player/agent/relationships`, `POST …/:id/confirm`, `/decline`, `/terminate`, `/dispute`, `PATCH …/:id/sharing`; `GET /admin/agent/relationships`, `/admin/agent/profiles` (read only); `POST /org/agent/transactions`, `POST /org/agent/transactions/:id/notes`; `POST /org/rooms/:id/transaction-handoff` |
 | Audit and erasure | `GET /org/audit` (Room, agency and ledger rows); `DELETE /player/account` |
 | Opportunity board | `GET /player/opportunity-board` (open days only: club opportunities are not ported) |
-| Passport | `GET /player/trust-profile`, `/org/players/:id/trust-profile` (the Trust Score, from its sources' records); `POST /org/players/:id/evidence` (a club's own claim); `GET /org/players/:id/evidence-gaps` |
+| Passport | `GET /player/football-passport` (the trial and assessment timeline only), `GET /player/trust-profile`, `/org/players/:id/trust-profile` (the Trust Score, from its sources' records); `POST /org/players/:id/evidence` (a club's own claim); `GET /org/players/:id/evidence-gaps` |
 | Combine | `GET /org/combine/protocols` (the registry, recorded from the TypeScript server by `dev/combine_protocols.mjs`), `/org/combine/players/:id` (results: none, until Box Cam's service hands them over) |
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
-| Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
+| Player | `GET /player/me`, `/player/export`, `GET`/`PATCH /player/box-cam/prefs`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
@@ -97,7 +102,7 @@ Every route below is exercised by a battery, except where marked.
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: trials and trial requests, signings, the similarity engine ("more like this"),
+The largest: signings, the similarity engine ("more like this"),
 insights, coach vouches, club setup, staff SSO, the Expo push transport, process metrics, and password sign-in
 for players and guardians (a new player account stores a hash no password matches). `dev/shape_diff.mjs` lists where responses differ because of them.
 

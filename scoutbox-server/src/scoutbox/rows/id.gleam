@@ -197,6 +197,43 @@ pub fn assessment_decoder() -> decode.Decoder(AssessmentId) {
   decode.map(decode.string, AssessmentId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_assessment(tx: Tx) -> Result(AssessmentId, Fail(e)) {
+  ids.next(tx, "ass") |> result.map(AssessmentId)
+}
+
+/// An id of `assessment_history`.
+pub opaque type AssessmentEventId {
+  AssessmentEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn assessment_event(text: String) -> AssessmentEventId {
+  AssessmentEventId(text)
+}
+
+pub fn assessment_event_to_string(id: AssessmentEventId) -> String {
+  let AssessmentEventId(text) = id
+  text
+}
+
+pub fn assessment_event_sql(id: AssessmentEventId) -> sqlight.Value {
+  sqlight.text(assessment_event_to_string(id))
+}
+
+pub fn assessment_event_json(id: AssessmentEventId) -> Json {
+  json.string(assessment_event_to_string(id))
+}
+
+pub fn assessment_event_decoder() -> decode.Decoder(AssessmentEventId) {
+  decode.map(decode.string, AssessmentEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_assessment_event(tx: Tx) -> Result(AssessmentEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(AssessmentEventId)
+}
+
 /// An id of `case_assignments`.
 pub opaque type AssignmentId {
   AssignmentId(String)

@@ -19,4 +19,5 @@ export const BATTERIES = [
   'recruitment/offers',
   'agents/core',
   'recruitment/trialsPersistence',
+  'recruitment/trials',
 ];
