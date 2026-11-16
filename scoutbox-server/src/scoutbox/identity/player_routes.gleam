@@ -39,7 +39,7 @@ const password_min = 8
 
 const password_max = 256
 
-/// Not ported yet: password hashing (scrypt) is out of this slice's scope. A new account's hash is this marker,
+/// Not ported yet: storing a new player's password (`identity/passwords` hashes one). A new account's hash is this marker,
 /// which no password verifies, so the account can't be signed in to by password, and isn't mistaken for a
 /// passwordless demo identity either.
 const unhashed = "!unported:scrypt"
@@ -460,7 +460,7 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
       limits.login_failed(ctx.limits, tried, now)
       http.error(404, "PLAYER_NOT_FOUND")
     }
-    // Not ported yet: password-protected players need scrypt (out of this slice's scope).
+    // Not ported yet: signing a player in with a password (`identity/passwords` checks one).
     Ok(Some(p)) ->
       case p.row.password_hash, ctx.config.dev_logins {
         Some(_), _ ->

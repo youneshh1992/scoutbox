@@ -83,7 +83,7 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
 
 fn signing_in(ctx: Ctx, g: Guardian, now: Int) -> Response {
   case g.row.password_hash, ctx.config.dev_logins {
-    // Not ported yet: password-protected guardians need scrypt (out of this slice's scope). No guardian this
+    // Not ported yet: signing a guardian in with a password (`identity/passwords` checks one). No guardian this
     // server can hold has a password.
     Some(_), _ ->
       http.error_message(

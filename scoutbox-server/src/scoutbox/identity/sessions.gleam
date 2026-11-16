@@ -118,6 +118,11 @@ fn live(found: Result(row.Row, Nil), now: Int) -> Option(Session) {
   }
 }
 
+/// Ends one session: a sign-out. Its event-stream tickets and media links stop working with it.
+pub fn revoke_sid(tx: Tx, sid: String) -> Result(Nil, Fail(e)) {
+  store.run(tx, "DELETE FROM sessions WHERE sid = ?", [sqlight.text(sid)])
+}
+
 /// Ends every session of a staff member.
 pub fn revoke_org_user(tx: Tx, user_id: id.OrgUserId) -> Result(Nil, Fail(e)) {
   store.run(tx, "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ?", [

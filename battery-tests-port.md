@@ -377,6 +377,30 @@ would mean porting most of the product under the heading "platform". So:
    So a password sign-in costs about half a second, and the server handles about 13 of them a second at most.
    That's usable for sign-in, but slower than the TypeScript server. If it matters, the choices are a NIF (C
    scrypt or Argon2id) or PBKDF2 from OTP's crypto, on both servers together.
+
+   **Signed media links and the rest of `connectedMode` [done].** The battery passes unchanged (62 checks). It was
+   mutation-checked twice: dropping the block test from media access, and letting the administrator bootstrap
+   happen twice. As built:
+   - **Media links are signed in one middleware** (`media/links`), as the TypeScript server signs every
+     `res.json`. After the handler runs, every JSON string value that is exactly `/media/<id>` becomes
+     `?e=…&s=…&v=<sid>`: HMAC-SHA256 with `MEDIA_SECRET`, valid for 15 minutes. One regex over gleam_json's compact
+     output finds them. A quote right after `:`, `,` or `[` must open a value, because quotes inside strings are
+     escaped. A required `,`, `]` or `}` after the closing quote leaves keys alone. The session is looked up again
+     only when a body has a match. Threading a typed link through every view was the alternative. It was rejected
+     because every view that emits media would need the viewer's sid, and a missed one is a broken link.
+   - **`GET /media/:id` checks standing on every fetch**: the media is not queued for deletion, then the owner,
+     their guardian, or an unsuspended organisation that may see the owner (`players.for_org`) and isn't blocked.
+     So a block, logout or suspension kills old links, and lifting the block restores them.
+   - **`MEDIA_SECRET`** is a random key per boot in development, and production refuses to boot without one of 32+
+     characters. The demo seed copies the three sample clips (`priv/sample_clips/`) to the paths its rows name.
+   - **Passwords are hashed and checked before the unit**, because a unit holds the only writer and a hash takes
+     about half a second. This covers organisation sign-in (`BAD_PASSWORD`; the one-time administrator bootstrap
+     with its `staff_bootstrapped` ops event; `STAFF_NOT_PROVISIONED`; `roleNote`), grassroots registration, and
+     provisioned credentials.
+   - **Also ported:** `/auth/logout`, placed before the auth limiter; it also ends the session's event-stream
+     tickets.
+   - **Ported only as far as the battery reaches, and marked `Not ported yet:`:** `/org/tactical` (the lead gate),
+     SSO (the production refusal), and the `orgs` live event on registration.
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open

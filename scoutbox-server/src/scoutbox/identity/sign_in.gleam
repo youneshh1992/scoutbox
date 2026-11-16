@@ -5,8 +5,10 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/orgs.{type Org}
+import scoutbox/identity/passwords
 import scoutbox/identity/roles
 import scoutbox/identity/sessions
 import scoutbox/identity/staff.{type Staff}
@@ -19,6 +21,8 @@ import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/platform/vocabulary
 import scoutbox/rows/id
+import scoutbox/rows/ops_events as ops_row
+import scoutbox/rows/org_users as user_row
 import scoutbox/rows/orgs as org_row
 import scoutbox/vocab/org_type
 import wisp.{type Request, type Response}
@@ -82,6 +86,8 @@ type Refusal {
   MfaLocked
   MfaRequired
   MfaCodeWrong
+  /// A credentialed organisation has staff, and none by this name.
+  StaffNotProvisioned
   /// The staff repository refused a write this route should never ask for.
   StaffRefused(staff.StaffError)
 }
@@ -170,22 +176,8 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
         "SCOUT_NAME_REQUIRED",
         "Every session is attributed to a named individual.",
       )
-    Some(_) if org.password_hash != None ->
-      // Not ported yet: signing in with a password (`identity/passwords` checks one), and the routes that
-      // set one (grassroots registration, provisioned credentials). No organisation this server can hold has
-      // one.
-      http.error_message(
-        501,
-        "NOT_PORTED",
-        "Password-protected organisations are not supported by this server yet.",
-      )
-    Some(_) if !ctx.config.dev_logins ->
-      http.error_message(
-        403,
-        "DEV_LOGIN_DISABLED",
-        "Passwordless demo logins are disabled outside development. Use a credentialed account.",
-      )
     Some(name) -> {
+      use credentialed <- password_checked(ctx, org, body, now)
       let raw_name = option.unwrap(body.scout_name, name)
       let outcome =
         store.unit(ctx.store, fn(tx) {
@@ -195,14 +187,22 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
             Some(user) if user.removed_at != None -> Ok(Removed)
             _ -> {
               use user <- result.try(second_factor(ctx, tx, user, body, now))
-              use user <- result.try(provision(tx, org, user, name, body, now))
+              use #(user, role_note) <- result.try(provision(
+                tx,
+                org,
+                user,
+                name,
+                body,
+                credentialed,
+                now,
+              ))
               use token <- result.try(sessions.create(
                 tx,
                 sessions.OrgStaff(org.id, user.id),
                 now,
               ))
               use certified <- result.try(orgs.safeguarding_certified(read, org))
-              Ok(SignedIn(user, token, certified))
+              Ok(SignedIn(user, token, certified, role_note))
             }
           }
         })
@@ -213,8 +213,14 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
             "USER_REMOVED",
             "This staff member's access was removed by the organisation.",
           )
-        Ok(SignedIn(user, token, certified)) ->
-          signed_in(org, user, token, certified)
+        Ok(SignedIn(user, token, certified, role_note)) ->
+          signed_in(org, user, token, certified, role_note)
+        Error(store.Refused(StaffNotProvisioned)) ->
+          http.error_message(
+            403,
+            "STAFF_NOT_PROVISIONED",
+            "No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.",
+          )
         Error(store.Refused(MfaLocked)) ->
           http.error_message(
             429,
@@ -237,7 +243,44 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
 
 type Outcome {
   Removed
-  SignedIn(Staff, String, Bool)
+  SignedIn(Staff, String, Bool, Option(String))
+}
+
+/// A credentialed organisation's password, checked before the unit: a hash takes about half a second, and a unit
+/// holds the database's only writer. An organisation without one is a demo organisation, which signs in without a
+/// password in development only. `next` is told whether the organisation is credentialed.
+fn password_checked(
+  ctx: Ctx,
+  org: Org,
+  body: Login,
+  now: Int,
+  next: fn(Bool) -> Response,
+) -> Response {
+  case org.password_hash {
+    Some(stored) ->
+      case passwords.verify(option.unwrap(body.password, ""), stored) {
+        True -> next(True)
+        False -> {
+          limits.login_failed(
+            ctx.limits,
+            "org:" <> id.org_to_string(org.id),
+            now,
+          )
+          http.error_message(
+            401,
+            "BAD_PASSWORD",
+            "This organisation is password-protected.",
+          )
+        }
+      }
+    None if !ctx.config.dev_logins ->
+      http.error_message(
+        403,
+        "DEV_LOGIN_DISABLED",
+        "Passwordless demo logins are disabled outside development. Use a credentialed account.",
+      )
+    None -> next(False)
+  }
 }
 
 /// With MFA enabled the name alone never gets a session. A recovery code works once: only the call that deleted
@@ -295,19 +338,67 @@ fn guard_unit(
   }
 }
 
-/// A demo organisation (no password) lets a sign-in create its account and name its role: the development
-/// shortcut, refused outside development before this point.
+/// Who signs in, and a note when the role sent was ignored. A credentialed organisation gets staff accounts only
+/// through server-controlled flows: the registering administrator, a lead's invitation, or, once, the first sign-in
+/// with the organisation password, which makes a lead-tier administrator. The role sent with a sign-in never
+/// changes a stored one there, so nobody with the shared password can make themselves staff or promote themselves.
+/// A demo organisation lets a sign-in create its account and name its role: the development shortcut, refused
+/// outside development before this point.
 fn provision(
   tx: store.Tx,
   org: Org,
   user: Option(Staff),
   name: String,
   body: Login,
+  credentialed: Bool,
   now: Int,
-) -> Result(Staff, store.Fail(Refusal)) {
+) -> Result(#(Staff, Option(String)), store.Fail(Refusal)) {
   let role = input.filled(body.role)
-  case user, role {
-    None, _ ->
+  case user, role, credentialed {
+    None, _, True -> {
+      use first <- result.try(staff.first_active(
+        store.reading(tx),
+        id.org_to_string(org.id),
+      ))
+      use <- guard_unit(first != None, StaffNotProvisioned)
+      let role = case role {
+        Some(r) -> roles.is_lead_role(r)
+        None -> False
+      }
+      use created <- result.try(
+        staff.create(
+          tx,
+          staff.NewStaff(
+            org_id: org.id,
+            name:,
+            role: case role, body.role {
+              True, Some(r) -> string.trim(r)
+              _, _ -> "Manager"
+            },
+            email: None,
+            provenance: Some(user_row.OrgPasswordBootstrap),
+            created_at: now,
+          ),
+        )
+        |> store.map_refusal(StaffRefused),
+      )
+      use ops_id <- result.try(id.next_ops_event(tx))
+      use _ <- result.map(ops_row.insert(
+        tx,
+        ops_row.New(
+          ..ops_row.new(
+            id: ops_id,
+            occurred_at: now,
+            kind: ops_row.StaffBootstrapped,
+          ),
+          detail_org_id: Some(org.id),
+          detail_user_id: Some(created.id),
+          detail_by: Some(created.name),
+        ),
+      ))
+      #(created, None)
+    }
+    None, _, False ->
       staff.create(
         tx,
         staff.NewStaff(
@@ -320,9 +411,19 @@ fn provision(
         ),
       )
       |> store.map_refusal(StaffRefused)
-    Some(user), Some(role) if role != user.role ->
-      staff.set_role(tx, user.id, role) |> store.map_refusal(StaffRefused)
-    Some(user), _ -> Ok(user)
+      |> result.map(fn(u) { #(u, None) })
+    Some(user), Some(role), True if role != user.role ->
+      Ok(#(
+        user,
+        Some(
+          "Roles are assigned by your organisation; the role entered at sign-in was not applied.",
+        ),
+      ))
+    Some(user), Some(role), False if role != user.role ->
+      staff.set_role(tx, user.id, role)
+      |> store.map_refusal(StaffRefused)
+      |> result.map(fn(u) { #(u, None) })
+    Some(user), _, _ -> Ok(#(user, None))
   }
 }
 
@@ -331,6 +432,7 @@ fn signed_in(
   user: Staff,
   token: String,
   certified: Bool,
+  role_note: Option(String),
 ) -> Response {
   let mfa_setup_required =
     org.mfa_required_for_leads
@@ -358,7 +460,13 @@ fn signed_in(
         ),
       ),
       #("token", json.string(token)),
-      ..nudge
+      ..list.append(
+        case role_note {
+          Some(note) -> [#("roleNote", json.string(note))]
+          None -> []
+        },
+        nudge,
+      )
     ]),
   )
 }

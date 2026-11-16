@@ -22,7 +22,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 1 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 7 | 0 / 2372 | 0 / 179 | 7 to go |
+| platform | 13 | 13 | 8 | 0 / 2372 | 0 / 179 | 6 to go |
 | recruitment | 19 | 1 | 0 | 0 / 196 | 0 / 6 | 19 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -56,7 +56,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `passport/passport` | not yet neutral | 1 → 1 | 215 | 215 |  |  |  |  |  | not untangled; not answered |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
-| `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  |  |  |  | not answered |
+| `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 0 / 2253 | 0 / 135 | not answered; 2253 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |

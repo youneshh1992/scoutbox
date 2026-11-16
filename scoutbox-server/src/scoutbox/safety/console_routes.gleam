@@ -10,6 +10,7 @@ import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
+import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/messaging/channels
 import scoutbox/messaging/dispatches
@@ -260,12 +261,10 @@ fn with_org(ctx: Ctx, id: id.OrgId, next: fn(Org) -> Response) -> Response {
   }
 }
 
-/// `POST /admin/clubs/:id/credentials`: how real clubs sign in when the demo sign-ins are off.
-///
-/// Not ported yet: storing the password needs scrypt, which OTP's crypto lacks (see sign-in). The input is
-/// checked as the TypeScript server checks it; a valid password is refused as not supported.
+/// `POST /admin/clubs/:id/credentials`: how real clubs sign in when the demo sign-ins are off. The hash is made
+/// before the unit, which holds the only writer.
 pub fn credentials(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
-  use _org <- with_org(ctx, id)
+  use org <- with_org(ctx, id)
   let shape = {
     use password <- input.field(
       "password",
@@ -277,12 +276,25 @@ pub fn credentials(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   case password {
     Some(p) ->
       case input.utf16_length(p) >= 8 {
-        True ->
-          http.error_message(
-            501,
-            "NOT_PORTED",
-            "Provisioning club passwords is not supported by this server yet.",
-          )
+        True -> {
+          let hash = passwords.hash(p)
+          case store.unit(ctx.store, orgs.set_password_hash(_, org.id, hash)) {
+            Error(failure) -> http.internal(failure)
+            Ok(Nil) ->
+              http.json(
+                200,
+                json.object([
+                  #("ok", json.bool(True)),
+                  #(
+                    "note",
+                    json.string(
+                      "Credentials provisioned — the organisation signs in with this password from now on.",
+                    ),
+                  ),
+                ]),
+              )
+          }
+        }
         False -> too_short()
       }
     None -> too_short()

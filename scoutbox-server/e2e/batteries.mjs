@@ -10,4 +10,5 @@ export const BATTERIES = [
   'platform/delivery',
   'verification/organisationsAndStaff',
   'verification/organisationsAndStaffAdversarial',
+  'platform/connectedMode',
 ];

@@ -5,6 +5,7 @@ import gleam/http.{Get, Post, Put}
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/development/record_routes as record
@@ -19,6 +20,8 @@ import scoutbox/identity/mfa_routes
 import scoutbox/identity/orgs
 import scoutbox/identity/player_routes
 import scoutbox/identity/players
+import scoutbox/identity/register_routes
+import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
 import scoutbox/insight/review_queue
@@ -81,10 +84,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       only(req, Post, fn() { feed_routes.register_device(ctx, req) })
     ["callbacks", "delivery"] ->
       only(req, Post, fn() { delivery.callback(ctx, req) })
+    // Before the /auth limiter, so a sign-out is never limited.
+    ["auth", "logout"] -> only(req, Post, fn() { logout(ctx, req) })
     ["auth", ..rest] -> {
       use <- auth_limit(ctx, req)
       case rest {
         ["org", "login"] -> only(req, Post, fn() { sign_in.login(ctx, req) })
+        ["org", "register-grassroots"] ->
+          only(req, Post, fn() { register_routes.register(ctx, req) })
         ["org", "accept-invite"] ->
           only(req, Post, fn() { invite_routes.accept(ctx, req) })
         ["org", "verification", "apply"] ->
@@ -103,6 +110,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { player_routes.signup(ctx, req) })
         ["guardian", "login"] ->
           only(req, Post, fn() { guardian_routes.login(ctx, req) })
+        ["sso", "start"] -> only(req, Post, fn() { sso(ctx) })
+        ["sso", "callback"] -> only(req, Post, fn() { sso(ctx) })
         _ -> not_found()
       }
     }
@@ -114,6 +123,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["audit", "export"] ->
           only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
+        ["tactical"] -> only(req, Post, fn() { tactical(org) })
         ["staff", user_id, "remove"] ->
           only(req, Post, fn() {
             staff_routes.remove(ctx, org, id.org_user(user_id))
@@ -755,6 +765,59 @@ fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
           #("retryAfterMs", json.int(retry_after)),
         ]),
       )
+  }
+}
+
+/// `POST /auth/sso/start` and `/callback`. The only identity provider is the local test one, so outside
+/// development both refuse before reading anything. Not ported yet: the test provider and the relying party behind
+/// it (enterprise SSO).
+fn sso(ctx: Ctx) -> Response {
+  case ctx.config.dev_logins {
+    False ->
+      contract.error_message(
+        403,
+        "SSO_PROVIDER_UNAVAILABLE",
+        "Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.",
+      )
+    True -> not_ported("Staff SSO is")
+  }
+}
+
+/// `POST /org/tactical`: a lead's tactical setup. Not ported yet: the setup itself (club setup, scouting), and
+/// `GET /org/tactical`. Only the lead gate is here.
+fn tactical(org: access.OrgAccess) -> Response {
+  use <- access.require_lead(org)
+  not_ported("Tactical setups are")
+}
+
+fn not_ported(subject: String) -> Response {
+  contract.error_message(
+    501,
+    "NOT_PORTED",
+    subject <> " not supported by this server yet.",
+  )
+}
+
+/// `POST /auth/logout`: ends the presented session, if there is one.
+fn logout(ctx: Ctx, req: Request) -> Response {
+  let ended = case contract.bearer(req) {
+    Error(Nil) -> Ok(Nil)
+    Ok(token) ->
+      store.unit(ctx.store, fn(tx) {
+        use session <- result.try(sessions.by_token(
+          store.reading(tx),
+          token,
+          clock.now_ms(),
+        ))
+        case session {
+          Some(s) -> sessions.revoke_sid(tx, s.sid)
+          None -> Ok(Nil)
+        }
+      })
+  }
+  case ended {
+    Ok(Nil) -> contract.json(200, json.object([#("ok", json.bool(True))]))
+    Error(failure) -> contract.internal(failure)
   }
 }
 

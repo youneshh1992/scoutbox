@@ -160,6 +160,18 @@ pub fn suspend(tx: Tx, org_id: id.OrgId) -> Result(Nil, Fail(e)) {
   ])
 }
 
+/// `hash` is `passwords.hash`'s stored form.
+pub fn set_password_hash(
+  tx: Tx,
+  org_id: id.OrgId,
+  hash: String,
+) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE orgs SET password_hash = ? WHERE id = ?", [
+    sqlight.text(hash),
+    id.org_sql(org_id),
+  ])
+}
+
 /// The standing switches Trust & Safety sets. `None` leaves a field as it is; a verified domain of
 /// `Some(None)` clears it.
 pub type Standing {
