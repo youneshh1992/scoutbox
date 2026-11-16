@@ -12,24 +12,66 @@
 //   4  a corrupt Offer row is named and refused, never repaired, never
 //      fabricated, and never lets the lifecycle move; its neighbours are fine
 //
-// Nothing is rewritten, re-ordered or "repaired" on boot.
+// Nothing is rewritten, re-ordered or "repaired" on boot. Fixtures are planted and read back as stored rows; a row
+// the schema refuses is planted with plain SQL and expected to throw (the repository's own refusals are its unit
+// suite's, scripts/testRecruitmentContactsOffers.mjs).
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
+import { openFixture } from '../support/sqlFixture.mjs';
+import { readRows, rows } from '../support/sqlRows.mjs';
 import { pickPort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
-const LATEST_SCHEMA = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
+
+// The table migrations a new database records, as the migrated schema lists them.
+const MIGRATIONS = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23op-schema-')));
+  try {
+    return R.rows('data_migrations').map((r) => r.id);
+  } finally {
+    R.close();
+  }
+})();
+const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
+
+// The tables an Offer is stored in.
+const OFFER_TABLES = [
+  'recruitment_offers',
+  'offer_revisions',
+  'offer_revision_documents',
+  'offer_responses',
+  'offer_read_receipts',
+  'offer_history',
+  'offer_keys',
+];
+/** What a stopped server left: the Offer's tables, the cases and the signings, as stored rows. */
+const stored = (dir) => {
+  const R = readRows(dir);
+  try {
+    return Object.fromEntries([...OFFER_TABLES, 'recruitment_cases', 'signings'].map((t) => [t, R.rows(t)]));
+  } finally {
+    R.close();
+  }
+};
+/** Every Offer row of every Offer table, as text to compare. */
+const offerRows = (dir) => {
+  const s = stored(dir);
+  return JSON.stringify(OFFER_TABLES.map((t) => s[t]));
+};
+/** Plant `[table, rows]` in order, in one transaction whose references are checked at its end. */
+const plant = (dir, tables) => {
+  const F = openFixture(dir);
+  try {
+    F.transaction(() => {
+      F.sql.exec('PRAGMA defer_foreign_keys = ON'); // a revision and its response name each other
+      for (const [table, rs] of tables) for (const r of rs) F.insert(table, r);
+    });
+  } finally {
+    F.close();
+  }
+};
 
 let passed = 0;
 let negatives = 0;
@@ -117,7 +159,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -136,25 +178,17 @@ const S_NOTE = 'PRIVATE_NOTE_PERSISTS_9911';
 
 // ------------------------------------------------------------- 1 — schema
 const ledger = (dir) => {
-  const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
-  try {
-    return JSON.stringify(st.prepare('SELECT id, applied_at FROM data_migrations ORDER BY id').all());
-  } finally {
-    st.close();
-  }
+  return JSON.stringify(rows(dir, 'data_migrations').map(({ id, applied_at }) => ({ id, applied_at })));
 };
 section(
   '1 — no Offer migration of its own: the latest schema, the offers are their tables, a file with none boots empty',
 );
 {
   ok(
-    DATA_MIGRATIONS.length === LATEST_SCHEMA &&
-      DATA_MIGRATIONS.filter((m) => /offer/i.test(m.id))
-        .map((m) => m.id)
-        .join() === '0017_recruitment_contacts_offers',
+    MIGRATIONS.length === LATEST_SCHEMA &&
+      MIGRATIONS.filter((id) => /offer/i.test(id)).join() === '0017_recruitment_contacts_offers',
     '1.1 every table migration; the only one naming an Offer is 0017 (contacts and offers)',
   );
-  ok(TABLE_BACKED.includes('recruitmentOffers'), '1.2 the offers are their tables, read through SQL');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23op-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up, '1.3 a fresh store boots');
@@ -162,12 +196,24 @@ section(
   ok(h.schemaVersion === LATEST_SCHEMA, `1.4 and reports schema ${h.schemaVersion}`);
   const db1 = await s1.stop();
   const L1 = ledger(DIR);
-  ok(Array.isArray(db1.recruitmentOffers) && db1.recruitmentOffers.length === 0, '1.5 the stopped file holds no Offer');
+  const tables = (() => {
+    const R1 = readRows(DIR);
+    try {
+      return R1.tables();
+    } finally {
+      R1.close();
+    }
+  })();
+  ok(
+    ['recruitment_offers', 'offer_revisions', 'offer_responses'].every((t) => tables.includes(t)),
+    '1.2 the offers are their tables, read through SQL',
+  );
+  ok(db1.recruitment_offers.length === 0, '1.5 the stopped file holds no Offer');
   // A file with no Offers: boot must reinterpret nothing.
-  const casesBefore = JSON.stringify(db1.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
+  const casesBefore = JSON.stringify(db1.recruitment_cases.map((c) => [c.id, c.room_status]));
   const s2 = await bootOn(DIR, PORT);
   ok(
-    s2.up && ledger(DIR) === L1 && JSON.parse(L1).length === DATA_MIGRATIONS.length,
+    s2.up && ledger(DIR) === L1 && JSON.parse(L1).length === MIGRATIONS.length,
     '1.6 the file boots with no migration applied (the ledger is unchanged)',
   );
   const maria = (
@@ -186,9 +232,8 @@ section(
   );
   const db2 = await s2.stop();
   neg(
-    Array.isArray(db2.recruitmentOffers) &&
-      db2.recruitmentOffers.length === 0 &&
-      JSON.stringify(db2.recruitmentCases.filter((c) => c.id !== RID).map((c) => [c.id, c.room?.status ?? null])) ===
+    db2.recruitment_offers.length === 0 &&
+      JSON.stringify(db2.recruitment_cases.filter((c) => c.id !== RID).map((c) => [c.id, c.room_status])) ===
         casesBefore,
     '1.8 after the boot: an empty store, and every pre-existing case exactly where it was',
   );
@@ -342,37 +387,35 @@ const R = {};
   );
 
   const db = await s.stop();
-  ok(
-    Array.isArray(db.recruitmentOffers) && db.recruitmentOffers.length === 5,
-    '2.7 SIGTERM: the file holds five Offers',
-  );
+  ok(db.recruitment_offers.length === 5, '2.7 SIGTERM: the file holds five Offers');
   neg(
-    (db.signings ?? []).every((x) => x.playerId !== 'pl-kim'),
+    db.signings.every((x) => x.player_id !== 'pl-kim'),
     '2.8 and no signing for the player who accepted',
   );
-  neg(!db.recruitmentCases.some((c) => c.room?.status === 'signed'), '2.9 no case is signed');
-  const stored = Object.fromEntries(db.recruitmentOffers.map((o) => [o.id, o]));
+  neg(!db.recruitment_cases.some((c) => c.room_status === 'signed'), '2.9 no case is signed');
+  const status = Object.fromEntries(db.recruitment_offers.map((o) => [o.id, o.status]));
+  const of = (table, id) => db[table].filter((r) => r.offer_id === id);
   ok(
-    stored[R.kola.OID].status === 'DRAFT' &&
-      stored[R.kim.OID].status === 'ACCEPTED' &&
-      stored[R.chi.OID].status === 'DECLINED' &&
-      stored[R.sven.OID].status === 'WITHDRAWN' &&
-      stored[R.tan.OID].status === 'ISSUED',
+    status[R.kola.OID] === 'DRAFT' &&
+      status[R.kim.OID] === 'ACCEPTED' &&
+      status[R.chi.OID] === 'DECLINED' &&
+      status[R.sven.OID] === 'WITHDRAWN' &&
+      status[R.tan.OID] === 'ISSUED',
     '2.10 stored statuses: DRAFT, ACCEPTED, DECLINED, WITHDRAWN, ISSUED',
   );
   ok(
-    stored[R.kim.OID].responses.length === 1 &&
-      stored[R.kim.OID].responses[0].clientKey === 'P-accept-kim' &&
-      stored[R.kim.OID].readReceipts.length === 1 &&
-      stored[R.tan.OID].revisions.length === 2 &&
-      stored[R.tan.OID].keys.issue.length === 2,
+    of('offer_responses', R.kim.OID).length === 1 &&
+      of('offer_responses', R.kim.OID)[0].client_key === 'P-accept-kim' &&
+      of('offer_read_receipts', R.kim.OID).length === 1 &&
+      of('offer_revisions', R.tan.OID).length === 2 &&
+      of('offer_keys', R.tan.OID).filter((k) => k.act === 'issue').length === 2,
     '2.11 responses, receipts, revisions and idempotency keys are on the rows',
   );
+  // The server judges a row's integrity on every read, and a row that fails it reads 500 OFFER_STATE_UNKNOWN.
   ok(
-    db.recruitmentOffers.every((o) => offerIntegrity(o).length === 0),
-    '2.12 every stored row passes the integrity rules',
+    ['kola', 'kim', 'chi', 'sven', 'tan'].every((who) => R.before[who]?.id === R[who].OID),
+    '2.12 every stored row passes the integrity rules: the club read each one',
   );
-  R.snapshot = JSON.stringify(db.recruitmentOffers);
 }
 
 // ------------------------------------------------------------- 3 — reboot
@@ -547,10 +590,13 @@ section('3 — after the reboot: identical views, keys replay, immutability and 
     a.body.signing?.created === false && (await journey(R.tan.RID)).outcome.signing === null,
     '3.18 and still no signing',
   );
+  const sound = [];
+  for (const who of ['kola', 'kim', 'chi', 'sven', 'tan'])
+    sound.push((await j('GET', `/org/offers/${R[who].OID}`, undefined, maria.token, at(T0 + 3 * H))).status === 200);
   const db = await s.stop();
   ok(
-    db.recruitmentOffers.length === 5 && db.recruitmentOffers.every((o) => offerIntegrity(o).length === 0),
-    '3.19 five sound rows after the second stop',
+    db.recruitment_offers.length === 5 && sound.every(Boolean),
+    '3.19 five sound rows after the second stop (the club read each one before it)',
   );
   R.db = db;
 }
@@ -559,70 +605,74 @@ section('3 — after the reboot: identical views, keys replay, immutability and 
 section('4 — a corrupt Offer row is named and refused, never repaired, and never moves a case');
 {
   const db = R.db;
-  // An Offer with no revision is a row the tables cannot hold. Its create REFUSES it, naming the
-  // row, and writes nothing — the directory keeps the five sound rows. An ACCEPTED row with no response is a typed row
-  // (every field valid) whose states disagree: it is still planted, and still judged on read.
+  const offerRow = (id) => db.recruitment_offers.find((o) => o.id === id);
+  // An Offer with no revision is a row the tables cannot hold: the schema REFUSES it (its current revision must be
+  // one of its revisions) and nothing is written — the directory keeps the five sound rows. An ACCEPTED row with no
+  // response is a typed row (every column valid) whose states disagree: it is still planted, and still judged on read.
   const corrupt = {
-    ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)),
+    ...offerRow(R.sven.OID),
     id: 'rof-corrupt',
-    revisions: [],
-    responses: [],
-    readReceipts: [],
-    history: [],
-    keys: { create: null, issue: [], withdraw: [], revise: [] },
-    currentRevisionId: 'rofr-none',
+    create_key: null,
+    create_fp: null,
+    current_revision_id: 'rofr-none',
     status: 'ISSUED',
   };
-  const stored = JSON.stringify(readRecords(DIR).recruitmentOffers);
+  const offersBefore = offerRows(DIR);
   let refused = null;
   try {
-    writeFixture(DIR, { recruitmentOffers: [corrupt] });
+    plant(DIR, [['recruitment_offers', [corrupt]]]);
   } catch (e) {
     refused = e;
   }
   neg(
-    refused?.code === 'CONTACTS_OFFERS_INPUT_INVALID' &&
-      /recruitment_offers rof-corrupt currentRevisionId: rofr-none is not a revision of this offer/.test(
-        refused.message,
-      ) &&
-      JSON.stringify(readRecords(DIR).recruitmentOffers) === stored,
-    `4.2 an Offer with no revision cannot be stored: its create refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`,
+    /FOREIGN KEY constraint failed/.test(refused?.message) && offerRows(DIR) === offersBefore,
+    `4.2 an Offer with no revision cannot be stored: the schema refuses it, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`,
   );
-  const kolaOffer = db.recruitmentOffers.find((o) => o.id === R.kola.OID);
-  const { discardedByResponseId: _d, ...kolaRev } = structuredClone(kolaOffer.revisions[0]);
   const fake = {
-    ...structuredClone(kolaOffer),
+    ...offerRow(R.kola.OID),
     id: 'rof-fake-accepted',
     status: 'ACCEPTED',
-    currentRevisionId: 'rofr-f1',
-    revisions: [
-      {
-        ...kolaRev,
-        id: 'rofr-f1',
-        revisionNumber: 1,
-        status: 'ACCEPTED',
-        documents: [],
-        issuedAt: T0,
-        expiresAt: T0 + DAY,
-        respondedAt: null,
-        response: null,
-        supersedesRevisionId: null,
-        supersededByRevisionId: null,
-        supersededAt: null,
-      },
-    ],
-    responses: [],
-    readReceipts: [],
-    history: [],
-    keys: { create: null, issue: [], withdraw: [], revise: [] },
-    agentShare: null,
-    lifecycle: null,
-    createdAt: T0,
+    current_revision_id: 'rofr-f1',
+    create_key: null,
+    create_fp: null,
+    agent_share_user_id: null,
+    agent_share_agreement_id: null,
+    agent_share_at: null,
+    agent_share_by_kind: null,
+    agent_share_by_id: null,
+    lifecycle_applied: null,
+    lifecycle_action: null,
+    lifecycle_reason: null,
+    lifecycle_message: null,
+    lifecycle_allowed_json: null,
+    lifecycle_from: null,
+    lifecycle_to: null,
+    lifecycle_at: null,
+    created_at: T0,
     rev: 1,
   };
-  const kolaCase = db.recruitmentCases.find((c) => c.id === R.kola.RID);
-  const kolaStage = kolaCase.room.status;
-  writeFixture(DIR, { recruitmentOffers: [fake] }); // additive: the five sound rows stay as the server left them
+  const fakeRevision = {
+    ...db.offer_revisions.find((r) => r.offer_id === R.kola.OID && r.position === 0),
+    id: 'rofr-f1',
+    offer_id: 'rof-fake-accepted',
+    position: 0,
+    revision_number: 1,
+    status: 'ACCEPTED',
+    issued_at: T0,
+    expires_at: T0 + DAY,
+    responded_at: null,
+    response_id: null,
+    supersedes_revision_id: null,
+    superseded_by_revision_id: null,
+    superseded_at: null,
+    discarded_by_response_id: null,
+  };
+  const kolaStage = db.recruitment_cases.find((c) => c.id === R.kola.RID).room_status;
+  // additive: the five sound rows stay as the server left them
+  plant(DIR, [
+    ['recruitment_offers', [fake]],
+    ['offer_revisions', [fakeRevision]],
+  ]);
   const s = await bootOn(DIR, PORT);
   ok(s.up, '4.1 the server boots with a corrupt row present — corruption is not fatal to the process');
   const { j } = s;
@@ -668,9 +718,9 @@ section('4 — a corrupt Offer row is named and refused, never repaired, and nev
   );
   const db2 = await s.stop();
   neg(
-    db2.recruitmentOffers.length === 6 &&
-      db2.recruitmentOffers.find((o) => o.id === 'rof-fake-accepted').responses.length === 0 &&
-      db2.recruitmentOffers.find((o) => o.id === 'rof-fake-accepted').status === 'ACCEPTED',
+    db2.recruitment_offers.length === 6 &&
+      db2.offer_responses.filter((r) => r.offer_id === 'rof-fake-accepted').length === 0 &&
+      db2.recruitment_offers.find((o) => o.id === 'rof-fake-accepted').status === 'ACCEPTED',
     '4.8 nothing was repaired or dropped on boot or on stop',
   );
   R.db2 = db2;
@@ -682,166 +732,123 @@ section(
 );
 {
   const db = R.db2;
-  const fresh = (base, id, patch) => ({
-    ...structuredClone(base),
-    id,
-    keys: { create: null, issue: [], withdraw: [], revise: [] },
-    responses: [],
-    readReceipts: [],
-    history: [],
+  const issuedRow = db.recruitment_offers.find((o) => o.id === R.chi.OID); // an ISSUED→DECLINED shape to clone from
+  const issuedRevision = db.offer_revisions.find((r) => r.offer_id === R.chi.OID && r.position === 0);
+  // A planted Offer: its row, its revisions in order, and its responses. No keys, receipts or history.
+  const fresh = (id, patch, revisions, responses = []) => ({
+    offer: { ...issuedRow, id, create_key: null, create_fp: null, ...patch },
+    revisions: revisions.map((r, position) => ({ ...r, offer_id: id, position })),
+    responses: responses.map((r, position) => ({ ...r, offer_id: id, position })),
+  });
+  const rev = ({ rid, ...patch }) => ({
+    ...issuedRevision,
+    id: `rofr-${rid}`,
+    revision_number: 1,
+    status: 'ISSUED',
+    responded_at: null,
+    response_id: null,
+    supersedes_revision_id: null,
+    superseded_by_revision_id: null,
+    superseded_at: null,
+    discarded_by_response_id: null,
     ...patch,
   });
-  const issuedRow = db.recruitmentOffers.find((o) => o.id === R.chi.OID); // an ISSUED→DECLINED shape to clone from
-  const rev = ({ rid, ...patch }) => {
-    const { discardedByResponseId: _d, ...base } = structuredClone(issuedRow.revisions[0]);
-    return {
-      ...base,
-      id: `rofr-${rid}`,
-      revisionNumber: 1,
-      status: 'ISSUED',
-      documents: [],
-      respondedAt: null,
-      response: null,
-      supersedesRevisionId: null,
-      supersededByRevisionId: null,
-      supersededAt: null,
-      ...patch,
-    };
-  };
-  // A typed response (m28 respondHandler's literal) by Chi.
+  // A typed response by Chi.
   const answer = (id, revisionId, responseType, occurredAt) => ({
     id,
-    revisionId,
-    responseType,
-    actorType: 'player',
-    actorId: 'pl-okafor',
-    actorName: null,
-    forPlayerId: issuedRow.playerId,
-    occurredAt,
+    revision_id: revisionId,
+    response_type: responseType,
+    actor_type: 'player',
+    actor_id: 'pl-okafor',
+    actor_name: null,
+    for_player_id: issuedRow.player_id,
+    occurred_at: occurredAt,
     reason: null,
-    clientKey: null,
+    client_key: null,
   });
   // a) an ISSUED row whose expiry has passed at the read instant: stored ISSUED, read EXPIRED, never rewritten
-  const svenCase = db.recruitmentCases.find((c) => c.id === R.sven.RID);
-  const lazy = fresh(issuedRow, 'rof-lazy', {
-    caseId: R.sven.RID,
-    playerId: 'pl-svensson',
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-lazy',
-    revisions: [
-      rev({
-        rid: 'lazy',
-        createdAt: T0,
-        issuedAt: T0,
-        expiresAt: T0 + 2 * H,
-        recipientSnapshot: { ...issuedRow.revisions[0].recipientSnapshot, playerId: 'pl-svensson' },
-      }),
-    ],
-  });
+  const svenCase = db.recruitment_cases.find((c) => c.id === R.sven.RID);
+  const lazy = fresh(
+    'rof-lazy',
+    { case_id: R.sven.RID, player_id: 'pl-svensson', status: 'ISSUED', current_revision_id: 'rofr-lazy' },
+    [rev({ rid: 'lazy', created_at: T0, issued_at: T0, expires_at: T0 + 2 * H, recipient_player_id: 'pl-svensson' })],
+  );
   // b) temporal corruption: issued before created; responded before issued; expiry beyond the bound; a future issue instant
-  const tIssuedBeforeCreated = fresh(issuedRow, 'rof-t1', {
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-t1',
-    revisions: [rev({ rid: 't1', createdAt: T0 + H, issuedAt: T0, expiresAt: T0 + DAY })],
-  });
-  const tExpiryBound = fresh(issuedRow, 'rof-t2', {
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-t2',
-    revisions: [rev({ rid: 't2', createdAt: T0, issuedAt: T0, expiresAt: T0 + 400 * DAY })],
-  });
-  const tRespondedBeforeIssued = fresh(issuedRow, 'rof-t3', {
-    status: 'DECLINED',
-    currentRevisionId: 'rofr-t3',
-    revisions: [
+  const tIssuedBeforeCreated = fresh('rof-t1', { status: 'ISSUED', current_revision_id: 'rofr-t1' }, [
+    rev({ rid: 't1', created_at: T0 + H, issued_at: T0, expires_at: T0 + DAY }),
+  ]);
+  const tExpiryBound = fresh('rof-t2', { status: 'ISSUED', current_revision_id: 'rofr-t2' }, [
+    rev({ rid: 't2', created_at: T0, issued_at: T0, expires_at: T0 + 400 * DAY }),
+  ]);
+  const tRespondedBeforeIssued = fresh(
+    'rof-t3',
+    { status: 'DECLINED', current_revision_id: 'rofr-t3' },
+    [
       rev({
         rid: 't3',
-        createdAt: T0,
-        issuedAt: T0 + H,
-        expiresAt: T0 + DAY,
+        created_at: T0,
+        issued_at: T0 + H,
+        expires_at: T0 + DAY,
         status: 'DECLINED',
-        respondedAt: T0,
-        response: { id: 'rsp-t3' },
+        responded_at: T0,
+        response_id: 'rsp-t3',
       }),
     ],
-    responses: [answer('rsp-t3', 'rofr-t3', 'declined', T0)],
-  });
-  const tUnknownStatus = fresh(issuedRow, 'rof-t4', {
-    status: 'SIGNED',
-    currentRevisionId: 'rofr-t4',
-    revisions: [rev({ rid: 't4', status: 'SIGNED' })],
-  });
-  const tRevisionUnknown = fresh(issuedRow, 'rof-t5', {
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-t5',
-    revisions: [rev({ rid: 't5', status: 'countersigned' })],
-  });
-  const tPointer = fresh(issuedRow, 'rof-t6', {
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-t6a',
-    revisions: [
-      rev({ rid: 't6a', revisionNumber: 1, status: 'SUPERSEDED', supersededByRevisionId: 'rofr-t6b' }),
-      rev({ rid: 't6b', revisionNumber: 2, status: 'ISSUED', supersedesRevisionId: 'rofr-t6a' }),
-    ],
-  }); // pointer at a non-latest revision
-  const tNegativeNumber = fresh(issuedRow, 'rof-t7', {
-    status: 'ISSUED',
-    currentRevisionId: 'rofr-t7',
-    revisions: [rev({ rid: 't7', revisionNumber: 0 })],
-  });
+    [answer('rsp-t3', 'rofr-t3', 'declined', T0)],
+  );
+  const tUnknownStatus = fresh('rof-t4', { status: 'SIGNED', current_revision_id: 'rofr-t4' }, [
+    rev({ rid: 't4', status: 'SIGNED' }),
+  ]);
+  const tRevisionUnknown = fresh('rof-t5', { status: 'ISSUED', current_revision_id: 'rofr-t5' }, [
+    rev({ rid: 't5', status: 'countersigned' }),
+  ]);
+  const tPointer = fresh('rof-t6', { status: 'ISSUED', current_revision_id: 'rofr-t6a' }, [
+    rev({ rid: 't6a', revision_number: 1, status: 'SUPERSEDED', superseded_by_revision_id: 'rofr-t6b' }),
+    rev({ rid: 't6b', revision_number: 2, status: 'ISSUED', supersedes_revision_id: 'rofr-t6a' }),
+  ]); // pointer at a non-latest revision
+  const tNegativeNumber = fresh('rof-t7', { status: 'ISSUED', current_revision_id: 'rofr-t7' }, [
+    rev({ rid: 't7', revision_number: 0 }),
+  ]);
   // c) case/Offer disagreement: an ACCEPTED Offer on a case the lifecycle says declined
-  const chiCase = db.recruitmentCases.find((c) => c.id === R.chi.RID);
-  const disagree = fresh(issuedRow, 'rof-t8', {
-    status: 'ACCEPTED',
-    currentRevisionId: 'rofr-t8',
-    revisions: [rev({ rid: 't8', status: 'ACCEPTED', respondedAt: T0 + 2 * H, response: { id: 'rsp-t8' } })],
-    responses: [answer('rsp-t8', 'rofr-t8', 'accepted', T0 + 2 * H)],
-  });
+  const disagree = fresh(
+    'rof-t8',
+    { status: 'ACCEPTED', current_revision_id: 'rofr-t8' },
+    [rev({ rid: 't8', status: 'ACCEPTED', responded_at: T0 + 2 * H, response_id: 'rsp-t8' })],
+    [answer('rsp-t8', 'rofr-t8', 'accepted', T0 + 2 * H)],
+  );
   // d) a legacy row: a case at offer_made with no Offer row at all (a lifecycle written by the legacy status writer)
-  const legacyCase = db.recruitmentCases.find((c) => c.id === R.kim.RID);
-  void legacyCase;
-  const martinCase = {
-    ...structuredClone(svenCase),
-    id: 'case-legacy-made',
-    playerId: 'pl-martin',
-    room: { ...structuredClone(svenCase.room), status: 'offer_made' },
-    history: [],
-    decisionDraft: null,
-    transactionHandoff: null,
-  };
-  // An unknown Offer status, an unknown revision status and a revision number below 1 are
-  // values the columns cannot hold — each create is REFUSED, naming the row, and the directory is unchanged. The other
-  // planted rows are typed rows whose values disagree (time order, bounds, pointers, the case): judged on read.
-  const storedNow = JSON.stringify(readRecords(DIR).recruitmentOffers);
-  for (const [row, pattern, why] of [
-    [tUnknownStatus, /recruitment_offers rof-t4 row: CHECK constraint failed: status/, 'an unknown Offer status'],
-    [
-      tRevisionUnknown,
-      /recruitment_offers rof-t5 revision rofr-t5: CHECK constraint failed: status/,
-      'an unknown revision status',
-    ],
-    [
-      tNegativeNumber,
-      /recruitment_offers rof-t7 revision rofr-t7: CHECK constraint failed: revision_number >= 1/,
-      'a revision number below 1',
-    ],
+  const martinCase = { ...svenCase, id: 'case-legacy-made', player_id: 'pl-martin', room_status: 'offer_made' };
+  const tablesOf = (offers) => [
+    ['recruitment_offers', offers.map((o) => o.offer)],
+    ['offer_revisions', offers.flatMap((o) => o.revisions)],
+    ['offer_responses', offers.flatMap((o) => o.responses)],
+  ];
+  // An unknown Offer status, an unknown revision status and a revision number below 1 are values the columns cannot
+  // hold — the schema REFUSES each, and the directory is unchanged. The other planted rows are typed rows whose
+  // values disagree (time order, bounds, pointers, the case): judged on read.
+  const storedNow = offerRows(DIR);
+  for (const [planted, pattern, why] of [
+    [tUnknownStatus, /CHECK constraint failed: status/, 'an unknown Offer status'],
+    [tRevisionUnknown, /CHECK constraint failed: status/, 'an unknown revision status'],
+    [tNegativeNumber, /CHECK constraint failed: revision_number >= 1/, 'a revision number below 1'],
   ]) {
     let refusal = null;
     try {
-      writeFixture(DIR, { recruitmentOffers: [row] });
+      plant(DIR, tablesOf([planted]));
     } catch (e) {
       refusal = e;
     }
     neg(
-      refusal?.code === 'CONTACTS_OFFERS_INPUT_INVALID' &&
-        pattern.test(refusal.message) &&
-        JSON.stringify(readRecords(DIR).recruitmentOffers) === storedNow,
-      `5.0 ${row.id} (${why}) cannot be stored: its create refuses it, naming the row, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`,
+      pattern.test(refusal?.message) && offerRows(DIR) === storedNow,
+      `5.0 ${planted.offer.id} (${why}) cannot be stored: the schema refuses it, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`,
     );
   }
-  const plantedRows = [lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree];
-  const rowsBefore = JSON.stringify([...db.recruitmentOffers, ...plantedRows]);
-  const casesBefore = JSON.stringify([...db.recruitmentCases, martinCase].map((c) => [c.id, c.room?.status ?? null]));
-  writeFixture(DIR, { recruitmentCases: [martinCase], recruitmentOffers: plantedRows }); // additive, one unit
+  plant(DIR, [
+    ['recruitment_cases', [martinCase]],
+    ...tablesOf([lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree]),
+  ]); // additive, one transaction
+  const afterPlant = stored(DIR);
+  const casesBefore = JSON.stringify(afterPlant.recruitment_cases.map((c) => [c.id, c.room_status]));
   const s = await bootOn(DIR, PORT);
   ok(
     s.up && !/applied/.test(s.log()),
@@ -1037,28 +1044,21 @@ section(
     '5.21 and Bea still gets NOT FOUND after the restart',
   );
   const db4 = await s2.stop();
-  // A record read from the tables need not keep its keys in the order they were planted, so the comparison is
-  // key-order-insensitive; the ids, every value, the list order of the planted rows and their presence are compared.
-  const canon = (v) =>
-    Array.isArray(v)
-      ? v.map(canon)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.keys(v)
-              .sort()
-              .map((k) => [k, canon(v[k])]),
-          )
-        : v;
-  const planted = (rows) => JSON.stringify(canon(rows.filter((o) => /^rof-(lazy|t\d)$/.test(o.id))));
+  // Every row of every Offer table that belongs to a planted Offer, every column compared.
+  const isPlanted = (id) => /^rofr?-(lazy|t\d)/.test(id);
+  const planted = (db) =>
+    JSON.stringify(
+      OFFER_TABLES.map((t) =>
+        db[t].filter((r) => isPlanted(t === 'recruitment_offers' ? r.id : (r.offer_id ?? r.revision_id))),
+      ),
+    );
   neg(
-    planted(db4.recruitmentOffers) === planted(db3.recruitmentOffers) &&
-      planted(db4.recruitmentOffers) === planted(JSON.parse(rowsBefore)),
-    '5.22 none of the planted rows was repaired, reordered or dropped by two boots and two stops (every key and value compared, key order aside)',
+    planted(db4) === planted(db3) && planted(db4) === planted(afterPlant),
+    '5.22 none of the planted rows was repaired, reordered or dropped by two boots and two stops (every column compared)',
   );
   neg(
-    JSON.stringify(
-      db4.recruitmentCases.filter((c) => c.id !== R.kim.RID).map((c) => [c.id, c.room?.status ?? null]),
-    ) === JSON.stringify(JSON.parse(casesBefore).filter(([id]) => id !== R.kim.RID)),
+    JSON.stringify(db4.recruitment_cases.filter((c) => c.id !== R.kim.RID).map((c) => [c.id, c.room_status])) ===
+      JSON.stringify(JSON.parse(casesBefore).filter(([id]) => id !== R.kim.RID)),
     '5.23 no case moved because of a planted row',
   );
 }
