@@ -60,6 +60,14 @@ export const NOTES = {
       },
     ],
   },
+  'recruitment/decisionsPersistence': {
+    added: [
+      {
+        checks: 1,
+        why: "§4's \"no legacy row is read as formal\" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite",
+      },
+    ],
+  },
   'platform/sessionsAndPorts': {
     moved: [
       {

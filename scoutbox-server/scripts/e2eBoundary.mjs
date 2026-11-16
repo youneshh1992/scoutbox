@@ -42,7 +42,6 @@ export const NOT_YET_NEUTRAL = [
   'recruitment/contacts',
   'recruitment/contactsPersistence',
   'recruitment/decisions',
-  'recruitment/decisionsPersistence',
   'recruitment/journeyAdversarial',
   'recruitment/journeyPersistence',
   'recruitment/lifecycle',

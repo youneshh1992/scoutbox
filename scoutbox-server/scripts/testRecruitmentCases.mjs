@@ -261,7 +261,7 @@ test("[fixtures][typed] every writer shape — the room case (the facet with its
   rm(d);
 });
 
-test("[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, the integration `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room's snapshot", () => {
+test("[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, the integration `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room's snapshot, a decision entry that is not a record, a decision's reasons or references that are not a list", () => {
   const fix = ROOM_CASES_FIX();
   const withCase = (over) => ({ recruitmentCases: [roomCase(over), ...fix.recruitmentCases.slice(1)] });
   refusedSave(
@@ -342,6 +342,26 @@ test("[fixtures][typed] a write STOPS with the ids on a record the tables cannot
       roomSnapshots: [snapshot({ roomId: 'case-other' }), trustedSnapshot()],
     },
     /room_decisions rdec-1 row: FOREIGN KEY constraint failed/,
+  );
+  for (const [alien, what] of [
+    [null, 'null'],
+    ['string', 'string'],
+    [42, 'number'],
+  ])
+    refusedSave(
+      `alien ${what}`,
+      { roomDecisions: [...fix.roomDecisions, alien] },
+      new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions: a record must be an object \\(got ${what}\\)`),
+    );
+  refusedSave(
+    'reason codes',
+    { roomDecisions: [fix.roomDecisions[0], formalDecision({ reasonCodes: 'strong_evidence' })] },
+    /RECRUITMENT_CASES_INPUT_INVALID: room_decisions rdec-2 reasonCodes: must be a list \(got string\)/,
+  );
+  refusedSave(
+    'evidence refs',
+    { roomDecisions: [fix.roomDecisions[0], formalDecision({ evidenceRefs: {} })] },
+    /RECRUITMENT_CASES_INPUT_INVALID: room_decisions rdec-2 evidenceRefs: must be a list \(got an object\)/,
   );
 });
 
