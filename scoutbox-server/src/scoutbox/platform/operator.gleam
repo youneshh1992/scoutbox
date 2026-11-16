@@ -11,6 +11,7 @@ import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/platform/clock
 import scoutbox/platform/http
+import scoutbox/platform/migrations
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/vocab/position
 import wisp.{type Response}
@@ -308,10 +309,7 @@ fn read_report(read: Read, ctx: Ctx) -> Result(#(Json, Json), Fail(e)) {
       #("expected", json.int(ctx.schema_version)),
       #("migrationsApplied", json.int(applied_count)),
       #("migrationsKnown", json.int(known_count)),
-      #(
-        "upToDate",
-        json.bool(version == ctx.schema_version && applied_count == known_count),
-      ),
+      #("upToDate", json.bool(migrations.up_to_date(applied, known))),
     ])
   let assert [#(queued, conflicts)] = deletions
   let data_layer =

@@ -70,12 +70,29 @@ fn directory() -> Result(String, String) {
   |> result.map(fn(priv) { priv <> "/migrations" })
 }
 
+/// Whether every known migration is recorded and the latest recorded is the latest known. The latest id
+/// recorded without the rest is not up to date.
+pub fn up_to_date(applied: List(String), known: List(String)) -> Bool {
+  version(list.sort(applied, string.compare)) == version(known)
+  && list.length(list.filter(known, list.contains(applied, _)))
+  == list.length(known)
+}
+
 /// Applies every migration not yet recorded. Returns the ids applied now.
 pub fn run(
   store: Store(effect),
   session_ttl_ms session_ttl_ms: Int,
 ) -> Result(List(String), String) {
   use dir <- result.try(directory())
+  run_from(store, dir, session_ttl_ms:)
+}
+
+/// `run`, with the migrations read from `dir`.
+pub fn run_from(
+  store: Store(effect),
+  dir: String,
+  session_ttl_ms session_ttl_ms: Int,
+) -> Result(List(String), String) {
   use files <- result.try(
     simplifile.read_directory(dir) |> result.map_error(string.inspect),
   )
@@ -138,7 +155,11 @@ pub fn run(
           }
         }
       })
-      |> result.map_error(fn(e) { id <> ": " <> string.inspect(e) })
+      |> result.map_error(fn(e) {
+        id
+        <> " failed and was rolled back; the database was not modified by it: "
+        <> string.inspect(e)
+      })
     use _ <- result.try(case fk_off {
       True -> store.writer_pragma(store, "PRAGMA foreign_keys = ON")
       False -> Ok(Nil)

@@ -35,6 +35,18 @@ const REPORT = path.join(HERE, 'battery_cases', 'report.json');
  */
 const ACCEPTED = {
   'platform/storeGuarantees → scripts/testDataLayer.mjs': { gleam: 'test/scoutbox/ids_test.gleam' },
+  // The runner's order, idempotence, single records and rollback of a failing migration, and the latest id alone
+  // not counting as up to date.
+  'platform/contracts → scripts/testDataLayer.mjs': { gleam: 'test/scoutbox/migrations_test.gleam' },
+  // Parsing, refusals, production inertness and how rules count. The production boot's refusal of SCOUTBOX_FAULTS
+  // stays in the battery (§43).
+  'platform/contracts → scripts/testPlatformHelpers.mjs': { gleam: 'test/scoutbox/faults_test.gleam' },
+  'platform/contracts → scripts/testDiscovery.mjs': {
+    none: "These test the TypeScript discovery repository's own typing (typeBrief, typeSecondLookItem) and its DDL text. This server has no such layer: its tables are the TypeScript migrations verbatim (migrations:check), and the two facts the battery depends on stay in it as schema checks (§11b).",
+  },
+  'platform/sessionsAndPorts → scripts/testPlatformHelpers.mjs': {
+    none: "These test installAsyncErrorForwarding, a patch to Express's async handlers. This server has no Express; a crashing handler is a 500 by router.rescue, and the battery keeps the outcome over HTTP (A4–A5).",
+  },
 };
 
 const { ledgerRows, BASELINE_REV } = await import(pathToFileURL(path.join(TS_SERVER, 'scripts', 'e2eLedger.mjs')).href);

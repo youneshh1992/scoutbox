@@ -57,7 +57,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  |  |  |  | not answered |
-| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls; 3 TypeScript-only moves unreviewed |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 0 / 2253 | 0 / 135 | not answered; 2253 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  |  |  |  | not answered |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  |  |  |  | not answered |
@@ -65,7 +65,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
 | `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 0 / 39 | 0 / 12 | not answered; 39 cases pending; 12 hand-port calls |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
-| `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved |  |  |  | not answered; 1 TypeScript-only move unreviewed |
+| `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved |  |  |  | not answered |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 0 / 18 | 0 / 19 | 18 cases pending; 19 hand-port calls |
 | `recruitment/analytics` | not yet neutral | 13 → 13 | 104 | 104 |  |  |  |  |  | not untangled; not answered |
@@ -98,10 +98,10 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 
 | Battery | Checks | Now in | Why | Here |
 |---|---|---|---|---|
-| `platform/contracts` | 11 | `scripts/testDataLayer.mjs` | §10 ran the migration runner (runDataMigrations, dataSchemaReport, migrationApplied) on in-memory databases in the battery's process; that is a unit check of the runner. The battery keeps the migrations over HTTP (§20, §41) | not yet reviewed |
-| `platform/contracts` | 3 | `scripts/testDiscovery.mjs` | §11's discovery checks read the repository's DDL and called its typeBrief/typeSecondLookItem; those are unit checks of the repository. The battery keeps the two table facts as schema checks (§11b) | not yet reviewed |
-| `platform/contracts` | 7 | `scripts/testPlatformHelpers.mjs` | §12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43) | not yet reviewed |
-| `platform/sessionsAndPorts` | 3 | `scripts/testPlatformHelpers.mjs` | A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP | not yet reviewed |
+| `platform/contracts` | 11 | `scripts/testDataLayer.mjs` | §10 ran the migration runner (runDataMigrations, dataSchemaReport, migrationApplied) on in-memory databases in the battery's process; that is a unit check of the runner. The battery keeps the migrations over HTTP (§20, §41) | `test/scoutbox/migrations_test.gleam` |
+| `platform/contracts` | 3 | `scripts/testDiscovery.mjs` | §11's discovery checks read the repository's DDL and called its typeBrief/typeSecondLookItem; those are unit checks of the repository. The battery keeps the two table facts as schema checks (§11b) | none: These test the TypeScript discovery repository's own typing (typeBrief, typeSecondLookItem) and its DDL text. This server has no such layer: its tables are the TypeScript migrations verbatim (migrations:check), and the two facts the battery depends on stay in it as schema checks (§11b). |
+| `platform/contracts` | 7 | `scripts/testPlatformHelpers.mjs` | §12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43) | `test/scoutbox/faults_test.gleam` |
+| `platform/sessionsAndPorts` | 3 | `scripts/testPlatformHelpers.mjs` | A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP | none: These test installAsyncErrorForwarding, a patch to Express's async handlers. This server has no Express; a crashing handler is a 500 by router.rescue, and the battery keeps the outcome over HTTP (A4–A5). |
 | `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | `test/scoutbox/ids_test.gleam` |
 
 ## Checks added while untangling
