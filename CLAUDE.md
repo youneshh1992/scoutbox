@@ -50,6 +50,8 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   ported rule to its Gleam and generates a gleeunit test per call into `test/scoutbox/battery/` (never edit those).
   `dev/battery_cases/report.json` lists each function's cases (generated or pending) and the calls to port by hand,
   which go in `test/scoutbox/<domain>/`. `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
+- `LEDGER.md` (`npm run ledger`, checked by `e2e:check`) says, per TypeScript battery, where its checks went and what
+  is left, and which domains are ported. Record a hand port in `HAND_PORTED` (`dev/battery_cases/map.mjs`).
 
 ## Server rules (as in the TypeScript server, enforced by types where possible)
 

@@ -269,3 +269,14 @@ export const MAP = {
     },
   },
 };
+
+/**
+ * The calls the recorder can't keep (report.json's `handPort`), by function: the Gleam test file that ports the
+ * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
+ */
+export const HAND_PORTED = {
+  [`${SHARED}#arrayTokenStore`]: 'test/scoutbox/verification/tokens_test.gleam',
+  [`${SHARED}#mintToken`]: 'test/scoutbox/verification/tokens_test.gleam',
+  [`${SHARED}#peekToken`]: 'test/scoutbox/verification/tokens_test.gleam',
+  [`${SHARED}#consumeToken`]: 'test/scoutbox/verification/tokens_test.gleam',
+};

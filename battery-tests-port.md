@@ -323,6 +323,27 @@ hand-ported tests exist. Generate the import columns with the same counting this
 with no recorded call pending; every hand-port row is done; and every row marked "TypeScript implementation only" has a
 reason a reviewer has accepted.
 
+**[done]** Built in two halves, because the TypeScript tree mustn't read the port:
+
+- **TypeScript tree: the accounting.** `scripts/e2eLedger.mjs` counts each battery's checks where they are written
+  (`ok`, `neg`, and one-line helpers built on them such as `G`, `P`, `expect`, `bad`), and the server modules it
+  imports. It compares them with `scripts/e2eLedger.baseline.json`, frozen from `3c843bb2` (after the launcher
+  codemod, before any check moved). The rule is baseline = battery + rules suite + moved − added, where `NOTES`
+  records each move to a unit suite and each added check, with the reason. `testE2ESupport` fails when a battery
+  doesn't reconcile. All 56 reconcile today. Counting the helpers matters: `verification/organisationsAndStaff` has 10 `bad(…)`
+  checks that the step-3 grep missed. Mutation-checked: deleting one rules-suite check fails it. A battery that
+  gains checks for product reasons before it is untangled needs a note too.
+- **Gleam repository: the ledger.** `dev/ledger.mjs` writes `scoutbox-server/LEDGER.md`, not `e2e/support/LEDGER.md`,
+  from the TypeScript rows, `BATTERIES`, `report.json`, `HAND_PORTED` (new, in `map.mjs`: the hand-ported function →
+  its test file) and `ACCEPTED`, the reviewer's sign-off on moves to TypeScript unit suites (empty). It has a
+  domain summary with a ported verdict, then per battery: modules then → now, checks then → battery + rules suite,
+  answered, cases generated/pending, hand-port done/total, and what's left. Sections list the moves, additions,
+  hand-port calls and pending functions. `e2e:check` runs `ledger --check`, and stale `HAND_PORTED`/`ACCEPTED`
+  entries are refused. **Verification comes out ported**, the first domain to do so. The one TypeScript-only move,
+  `storeGuarantees`' `createIdCounter` check into `testDataLayer`, awaits review.
+- **Not checked statically:** that the batteries *pass*. The ledger can only say a battery is answered (in
+  `BATTERIES`, kept identical by `e2e:check`); `npm run e2e` is the proof.
+
 ### 6. Gleam side, alongside step 4
 
 - `sync.mjs` copies `e2e/support/spec/*.json`. Add one Gleam test per table proving it equals the snapshot.

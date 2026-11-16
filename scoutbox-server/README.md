@@ -14,9 +14,10 @@ gleam test             # unit tests, the generator's snapshots, and the rules pr
 gleam run              # the server on PORT (default 4000), data in DATA_DIR (default ./data)
 npm run e2e            # build the Erlang release, then run the batteries against it
 npm run e2e:sync       # re-copy the batteries from ../../scoutbox/scoutbox-server/e2e
-npm run e2e:check      # fail if a copied battery or a generated rule test differs from its source
+npm run e2e:check      # fail if a copied battery, a generated rule test or LEDGER.md differs from its source
 npm run cases          # record the TypeScript rules suites' calls; write dev/battery_cases/report.json and the
                        # generated tests in test/scoutbox/battery/ (mapping: dev/battery_cases/map.mjs)
+npm run ledger         # write LEDGER.md: every TypeScript battery, where its checks went, which domains are ported
 npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
 npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
 ```
