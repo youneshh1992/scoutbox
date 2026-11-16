@@ -288,8 +288,57 @@ minutes: `platform/storeGuarantees` 5, `recruitment/journey` 3, `agents/core` 3,
 
 Untangle each battery when its domain is next in line for the Gleam port, not all at once. Each untangling is
 then checked straight away by a real port, and the TypeScript batteries change in small, reviewable steps.
-Order: the remaining `platform/*` batteries first (the pilot's domain, and `contracts`/`dates`/
-`productionHardening` carry the shared tables and date rules), then domain by domain in port order.
+
+**Port order.** Domain by domain, with the cross-domain batteries last. The `platform/*` batteries aren't one
+slice. Run against the TypeScript server with each matched route logged, the ten left after the pilot hit 135
+routes the Gleam server doesn't have, and most of those belong to other domains. Porting them in battery order
+would mean porting most of the product under the heading "platform". So:
+
+1. **Messaging:** `platform/notifications`, `platform/messaging`, `platform/delivery`. These cover message
+   threads, the feed and its preferences, the delivery centre (in-app and e-mail dispatches, sweeps, provider
+   callbacks), the push log, support tickets and webhooks. They also need answering a request
+   (`/player|guardian/requests/:id/respond`) and the transition packs (`/player/transitions…`). Each battery
+   adds 10–16 routes.
+2. **Sessions and live events:** `platform/sessionsAndPorts`, `platform/connectedMode`. These need sign-out,
+   grassroots registration, guardian sign-up, staff SSO, the event stream and its tickets (SSE), the session
+   lifetime (`SESSION_TTL_DAYS`) and the production boot refusals (`ADMIN_KEY_UNSAFE`,
+   `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION`). SSE was outside the pilot's scope, so give it
+   its short check first.
+3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
+   batteries are untangled just ahead of its port.
+4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
+   trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`
+   (Rooms, briefs, second look, "nobody missed", the Passport) and `platform/dates` (trials, open trials,
+   friendlies, matchdays, development plans, compliance policies). Each is an integration check over several
+   domains, so it should come almost free once those domains are ported. `dates`' rules suite alone records
+   2,253 rule calls over 52 functions, which are proved as their rules are ported.
+
+`contracts`, `dates`, `productionHardening` and `sessionsAndPorts` are already untangled (see below). Untangling
+ahead of the port was cheap, so it needn't wait for its domain.
+
+**Platform so far [in progress].**
+
+- **The schema is the TypeScript server's.** `dev/migrations_sql.mjs` records its 40 migrations as SQL, one file
+  per migration id, into `priv/migrations/`. A first boot of either server therefore creates the same file, and a
+  directory `sqlFixture.mjs` wrote is one the Gleam server recognises. `e2e:check` fails if the files drift. The
+  row generator takes an allowlist of the tables this server uses (`tables` in `dev/scoutbox_dev.gleam`), so the
+  other 300-odd tables exist without generated modules. The demo seed is dumped for every table. It loads only
+  while `meta.orgsInit` is `pending`, and it obeys `SCOUTBOX_SEED_DEMO`.
+- **`platform/storeGuarantees` passes unchanged.** It needed `/meta`, `/capabilities` (with the integrity check
+  run at boot), the refusal to boot without the id counter, the response headers (`X-ScoutBox-Schema`, the
+  hardening headers, `X-ScoutBox-Retry`), the lifecycle vocabulary, and the review queue with exposure recorded on
+  profile views. Its rules suite's 18 cases and 19 hand-port calls are still pending.
+- **Process contract:** the fault layer (`SCOUTBOX_FAULTS`, `/__faults`, the route faults, and named seams inside
+  a unit, including the `unit.sqlite_commit` failure) is ported. The test clock is not yet.
+- **Wall-clock time in IANA zones** (`platform/zones`) is ported for push deferral and the date rules. OTP has no
+  zone database, so `dev/zone_offsets.mjs` records every zone's offsets from 1800 to 2200 from Node's ICU into
+  `priv/zone_offsets.json`. `zones_test` checks 8,945 cases from `temporal.ts`.
+- **Undecided:** `productionHardening` boots with `BOX_CAM_TEST_PROVIDER=1` and expects `/capabilities` to report
+  `production_cv` as configured. This server reports it not configured, because Box Cam's analysis is going to a
+  service of its own. That needs deciding before the battery is ported.
+- **Waiting on a reviewer:** the moves to TypeScript unit suites made while untangling `sessionsAndPorts` and
+  `contracts` (async error forwarding, the migration runner, the discovery repository's typing, the fault layer)
+  have no verdict in `ACCEPTED` yet.
 
 The two batteries that never start a server, `development/boxCamCvRobustness` and
 `development/combineProductionGate`, move into `scripts/rules/` whole and come off the e2e list. They reach
