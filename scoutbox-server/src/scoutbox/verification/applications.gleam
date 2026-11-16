@@ -156,9 +156,9 @@ pub fn record(read: Read, a: Application) -> Result(Json, Fail(e)) {
   let text = fn(v) { json.nullable(v, json.string) }
   json.object([
     #("id", json.string(a.id)),
-    #("status", json.string(row.status_to_string(a.status))),
+    #("status", row.status_to_json(a.status)),
     #("orgName", json.string(a.org_name)),
-    #("orgType", json.string(ver_org_type.to_string(a.org_type))),
+    #("orgType", ver_org_type.to_json(a.org_type)),
     #("country", json.string(a.country)),
     #("federation", text(a.federation)),
     #("website", json.string(a.website)),
@@ -180,51 +180,30 @@ pub fn record(read: Read, a: Application) -> Result(Json, Fail(e)) {
     #("decidedById", text(a.decided_by_id)),
     #(
       "decisionAttribution",
-      json.nullable(a.decision_attribution, fn(x) {
-        json.string(attribution.to_string(x))
-      }),
+      json.nullable(a.decision_attribution, attribution.to_json),
     ),
     #("decisionReason", text(a.decision_reason)),
     #("resultOrgId", text(a.result_org_id)),
     #("resultUserId", text(a.result_user_id)),
-    #(
-      "identityLink",
-      json.nullable(a.identity_link, fn(l) {
-        json.string(identity_link.to_string(l))
-      }),
-    ),
-    #(
-      "reviewReasons",
-      json.array(reasons, fn(c) { json.string(ver_code.to_string(c)) }),
-    ),
-    #(
-      "riskFlags",
-      json.array(flags, fn(c) { json.string(ver_code.to_string(c)) }),
-    ),
+    #("identityLink", json.nullable(a.identity_link, identity_link.to_json)),
+    #("reviewReasons", json.array(reasons, ver_code.to_json)),
+    #("riskFlags", json.array(flags, ver_code.to_json)),
     #("evidenceIds", json.array(evidence, json.string)),
   ])
 }
 
 fn checks_json(a: Application) -> Json {
-  let outcome = fn(o) { json.string(check_outcome.to_string(o)) }
+  let outcome = check_outcome.to_json
   json.object([
-    #(
-      "emailSyntax",
-      json.string(row.check_email_syntax_to_string(a.check_email_syntax)),
-    ),
+    #("emailSyntax", row.check_email_syntax_to_json(a.check_email_syntax)),
     #(
       "emailDomainAlignment",
-      json.string(row.check_email_domain_alignment_to_string(
-        a.check_email_domain_alignment,
-      )),
+      row.check_email_domain_alignment_to_json(a.check_email_domain_alignment),
     ),
     #("freeEmailProvider", outcome(a.check_free_email_provider)),
     #("disposableEmail", outcome(a.check_disposable_email)),
     #("domainNormalized", json.string(a.check_domain_normalized)),
-    #(
-      "dnsOwnership",
-      json.string(row.check_dns_ownership_to_string(a.check_dns_ownership)),
-    ),
+    #("dnsOwnership", row.check_dns_ownership_to_json(a.check_dns_ownership)),
     #("duplicateOrganisation", outcome(a.check_duplicate_organisation)),
     #("duplicateRequest", outcome(a.check_duplicate_request)),
     #(
@@ -233,9 +212,7 @@ fn checks_json(a: Application) -> Json {
     ),
     #(
       "evidenceCompleteness",
-      json.string(row.check_evidence_completeness_to_string(
-        a.check_evidence_completeness,
-      )),
+      row.check_evidence_completeness_to_json(a.check_evidence_completeness),
     ),
   ])
 }
@@ -819,12 +796,7 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
         200,
         json.object([
           #("status", json.string("requires_human_review")),
-          #(
-            "reasons",
-            json.array(review.reasons, fn(c) {
-              json.string(ver_code.to_string(c))
-            }),
-          ),
+          #("reasons", json.array(review.reasons, ver_code.to_json)),
           #(
             "explanation",
             json.string(
@@ -856,12 +828,9 @@ pub fn status(ctx: Ctx, req: Request, id: String) -> Response {
         200,
         json.object([
           #("id", json.string(a.id)),
-          #("status", json.string(row.status_to_string(a.status))),
+          #("status", row.status_to_json(a.status)),
           #("checks", checks_json(a)),
-          #(
-            "reviewReasons",
-            json.array(reasons, fn(c) { json.string(ver_code.to_string(c)) }),
-          ),
+          #("reviewReasons", json.array(reasons, ver_code.to_json)),
           #("decisionReason", json.nullable(a.decision_reason, json.string)),
           #("resultOrgId", json.nullable(a.result_org_id, json.string)),
         ]),
@@ -1294,7 +1263,7 @@ fn approving(
       #("request", request),
       #("orgId", json.string(org.id)),
       #("rootAdminUserId", json.string(user.id)),
-      #("identityLink", json.string(identity_link.to_string(link))),
+      #("identityLink", identity_link.to_json(link)),
       #(
         "note",
         json.string(

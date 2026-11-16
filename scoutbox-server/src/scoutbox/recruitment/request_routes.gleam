@@ -222,7 +222,7 @@ fn contact(
           #("ok", json.bool(True)),
           #("requestId", json.string(r.id)),
           #("status", json.string("pending")),
-          #("routedTo", json.string(party.to_string(r.routed_to))),
+          #("routedTo", party.to_json(r.routed_to)),
         ]),
       )
     Error(store.Refused(Pending(request_id))) ->

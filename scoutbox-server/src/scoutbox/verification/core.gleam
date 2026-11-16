@@ -557,17 +557,12 @@ pub fn evidence_checks(ev: Evidence) -> Json {
       [
         #(
           "malwareScan",
-          json.string(evidence_row.check_malware_scan_to_string(
-            ev.check_malware_scan,
-          )),
+          evidence_row.check_malware_scan_to_json(ev.check_malware_scan),
         ),
       ],
       case ev.check_content_signature {
         Some(s) -> [
-          #(
-            "contentSignature",
-            json.string(evidence_row.check_content_signature_to_string(s)),
-          ),
+          #("contentSignature", evidence_row.check_content_signature_to_json(s)),
         ]
         None -> []
       },
@@ -904,12 +899,12 @@ pub fn subject_claim_view(
   let eff = claims.effective_status(claim, org:, subject_removed: False, now:)
   json.object([
     #("id", json.string(claim.id)),
-    #("claimType", json.string(claim_type.to_string(claim.claim_type))),
-    #("status", json.string(claim_row.status_to_string(claim.status))),
+    #("claimType", claim_type.to_json(claim.claim_type)),
+    #("status", claim_row.status_to_json(claim.status)),
     #(
       "effective",
       json.object([
-        #("status", json.string(claim_row.status_to_string(eff.status))),
+        #("status", claim_row.status_to_json(eff.status)),
         #("current", json.bool(eff.current)),
         #("historical", json.bool(eff.historical)),
       ]),
@@ -926,9 +921,7 @@ pub fn subject_claim_view(
     #("current", json.bool(claim.current)),
     #(
       "verificationMethod",
-      json.nullable(claim.verification_method, fn(m) {
-        json.string(verification_method.to_string(m))
-      }),
+      json.nullable(claim.verification_method, verification_method.to_json),
     ),
     #("verifiedAt", nullable_int(claim.verified_at)),
     #("provenance", case claim.status {
@@ -939,10 +932,7 @@ pub fn subject_claim_view(
         ))
       _ -> json.null()
     }),
-    #(
-      "reviewReasons",
-      json.array(reasons, fn(c) { json.string(ver_code.to_string(c)) }),
-    ),
+    #("reviewReasons", json.array(reasons, ver_code.to_json)),
     #("createdAt", json.int(claim.created_at)),
     #("updatedAt", json.int(claim.updated_at)),
     #("revocationReason", json.nullable(claim.revocation_reason, json.string)),
@@ -952,7 +942,7 @@ pub fn subject_claim_view(
       json.array(evidence, fn(e) {
         json.object([
           #("id", json.string(e.id)),
-          #("type", json.string(evidence_row.type_to_string(e.type_))),
+          #("type", evidence_row.type_to_json(e.type_)),
           #("receivedAt", json.int(e.received_at)),
           #("filename", json.nullable(e.filename, json.string)),
           #("checks", evidence_checks(e)),

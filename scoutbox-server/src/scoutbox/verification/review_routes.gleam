@@ -447,7 +447,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 fn licence_view(c: records.Claim) -> json.Json {
   json.object([
     #("id", json.string(c.id)),
-    #("status", json.string(claim_row.status_to_string(c.status))),
+    #("status", claim_row.status_to_json(c.status)),
     #("display", json.nullable(c.display, json.string)),
   ])
 }
@@ -951,10 +951,7 @@ pub fn case_view(ctx: Ctx, claim_id: String) -> Response {
           #("priorClaims", json.preprocessed_array(prior)),
           #("conflicts", json.array(conflicts, conflicts.record)),
           #("disputes", json.array(disputes, personal.dispute_json)),
-          #(
-            "whyHumanReview",
-            json.array(reasons, fn(r) { json.string(ver_code.to_string(r)) }),
-          ),
+          #("whyHumanReview", json.array(reasons, ver_code.to_json)),
           // Chronological: events are only appended.
           #("events", json.array(events, views.event_record)),
         ]),
@@ -980,13 +977,10 @@ fn reason_body(
     use method <- input.field(
       "method",
       input.optional(
-        input.one_of([
-          #("scoutbox_manual_review", verification_method.ScoutboxManualReview),
-          #(
-            "federation_confirmation",
-            verification_method.FederationConfirmation,
-          ),
-          #("authoritative_registry", verification_method.AuthoritativeRegistry),
+        input.one_of_these(verification_method.pairs, [
+          verification_method.ScoutboxManualReview,
+          verification_method.FederationConfirmation,
+          verification_method.AuthoritativeRegistry,
         ]),
       ),
     )
@@ -1351,10 +1345,10 @@ pub fn queue(ctx: Ctx, req: Request) -> Response {
     use status <- input.field(
       "status",
       input.optional(
-        input.one_of([
-          #("requires_human_review", claim_row.RequiresHumanReview),
-          #("disputed", claim_row.Disputed),
-          #("suspended", claim_row.Suspended),
+        input.one_of_these(claim_row.status_pairs, [
+          claim_row.RequiresHumanReview,
+          claim_row.Disputed,
+          claim_row.Suspended,
         ]),
       ),
     )

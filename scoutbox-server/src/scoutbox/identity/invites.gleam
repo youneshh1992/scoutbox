@@ -122,7 +122,7 @@ pub fn view(i: Invite) -> Json {
     #("email", json.string(i.email)),
     #("name", json.string(i.name)),
     #("role", json.string(i.role)),
-    #("status", json.string(row.status_to_string(i.status))),
+    #("status", row.status_to_json(i.status)),
     #("invitedBy", json.nullable(i.invited_by_name, json.string)),
     #("createdAt", json.int(i.created_at)),
     #("expiresAt", json.int(i.expires_at)),

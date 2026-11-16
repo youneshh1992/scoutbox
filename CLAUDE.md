@@ -66,8 +66,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
 - Request input is read with `platform/input` shapes. It is valid as sent or refused in the shared refusal
   format; never coerce.
+  A vocabulary's accepted values come from its generated `pairs` (`input.one_of(v.pairs)`, or
+  `input.one_of_these(v.pairs, [...])` for some of them); never type a value's text by hand.
 - Responses are explicit `json.object` allowlists in the TypeScript server's key order. Batteries compare key
-  order.
+  order. A vocabulary value is written with its generated `to_json` (`claim_row.status_to_json`).
 - Tables come from numbered migrations in `scoutbox-server/priv/migrations/`, copied from the TypeScript
   server's schema.
 - Behaviour that depends on a domain not yet ported is marked `Not ported yet:` in a comment. Grep for it.

@@ -972,10 +972,7 @@ pub fn public_profile_fields(
           let badge =
             json.object([
               #("kind", json.string(badge_kind(claim.claim_type))),
-              #(
-                "claimType",
-                json.string(claim_type.to_string(claim.claim_type)),
-              ),
+              #("claimType", claim_type.to_json(claim.claim_type)),
               #("label", json.string(badge_label(claim, org, eff))),
               #(
                 "organisation",
@@ -1019,10 +1016,7 @@ pub fn public_profile_fields(
     })
   // identityVerified is for existing clients; `identity` is the full representation.
   [
-    #(
-      "subjectType",
-      json.string(ver_claims.subject_kind_to_string(subject_kind)),
-    ),
+    #("subjectType", ver_claims.subject_kind_to_json(subject_kind)),
     #("subjectId", json.string(subject_id)),
     #("identityVerified", json.bool(identity != None)),
     #("identity", option.unwrap(identity, json.null())),

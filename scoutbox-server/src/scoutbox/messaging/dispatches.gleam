@@ -287,15 +287,15 @@ pub fn view(d: Dispatch) -> Json {
     #(
       "audience",
       json.object([
-        #("kind", json.string(audience.to_string(r.audience_kind))),
+        #("kind", audience.to_json(r.audience_kind)),
         #("id", json.string(r.audience_id)),
       ]),
     ),
     #("orgId", opt_s(r.org_id)),
-    #("channel", json.string(row.channel_to_string(r.channel))),
+    #("channel", row.channel_to_json(r.channel)),
     #("to", opt_s(r.to_address)),
-    #("provider", json.string(row.provider_to_string(r.provider))),
-    #("status", json.string(row.status_to_string(r.status))),
+    #("provider", row.provider_to_json(r.provider)),
+    #("status", row.status_to_json(r.status)),
     #("skipReason", opt_s(r.skip_reason)),
     #("providerMessageId", opt_s(r.provider_message_id)),
     #(

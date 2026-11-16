@@ -554,6 +554,18 @@ fn all_digits(graphemes: List(String)) -> Bool {
 }
 
 /// One of a fixed vocabulary. Its refusal lists the values as `allowed`.
+/// `one_of` for some of a vocabulary's values, in the order given, each with the text its generated `pairs` give
+/// it, so a value's text is never typed by hand.
+pub fn one_of_these(pairs: List(#(String, a)), values: List(a)) -> Check(a) {
+  values
+  |> list.map(fn(v) {
+    let assert Ok(pair) = list.find(pairs, fn(p) { p.1 == v })
+      as "a vocabulary's pairs hold every value"
+    pair
+  })
+  |> one_of
+}
+
 pub fn one_of(values: List(#(String, a))) -> Check(a) {
   let names = list.map(values, fn(pair) { pair.0 })
   fn(v) {

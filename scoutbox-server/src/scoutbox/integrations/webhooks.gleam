@@ -207,10 +207,7 @@ fn endpoint_view(e: endpoint_row.Row, events: List(WebhookEvent)) -> Json {
     #("active", json.bool(e.active)),
     #("createdBy", json.nullable(e.created_by_name, json.string)),
     #("createdAt", json.int(e.created_at)),
-    #(
-      "events",
-      json.array(events, fn(ev) { json.string(webhook_event.to_string(ev)) }),
-    ),
+    #("events", json.array(events, webhook_event.to_json)),
   ])
 }
 
@@ -441,7 +438,7 @@ fn payload(d: delivery_row.Row) -> Json {
   }
   json.object([
     #("eventId", json.string(d.event_id)),
-    #("type", json.string(webhook_event.to_string(d.type_))),
+    #("type", webhook_event.to_json(d.type_)),
     #("createdAt", json.int(d.created_at)),
     #("data", json.object(data)),
   ])

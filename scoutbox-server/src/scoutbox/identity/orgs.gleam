@@ -81,12 +81,12 @@ pub fn view(org: Org) -> List(#(String, Json)) {
   [
     #("id", json.string(org.id)),
     #("name", json.string(org.name)),
-    #("type", json.string(org_type.to_string(org.type_))),
+    #("type", org_type.to_json(org.type_)),
     #(
       "level",
       json.nullable(option.map(org.level, row.level_to_string), json.string),
     ),
-    #("plan", json.string(row.plan_to_string(org.plan))),
+    #("plan", row.plan_to_json(org.plan)),
     #("country", opt_string(org.country)),
     #(
       "location",

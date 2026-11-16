@@ -141,10 +141,7 @@ pub fn me(ctx: Ctx, access: OrgAccess) -> Response {
     200,
     json.object([
       #("claims", json.preprocessed_array(views)),
-      #(
-        "verificationLevel",
-        json.nullable(level, fn(l) { json.string(ver_level.to_string(l)) }),
-      ),
+      #("verificationLevel", json.nullable(level, ver_level.to_json)),
       #("organisationStatus", json.string(claims.org_status_code(status))),
       #(
         "steps",
@@ -426,9 +423,7 @@ pub fn submit(
                   #("error", json.string("EVIDENCE_INCOMPLETE")),
                   #(
                     "missing",
-                    json.array(completeness.missing, fn(t) {
-                      json.string(evidence_row.type_to_string(t))
-                    }),
+                    json.array(completeness.missing, evidence_row.type_to_json),
                   ),
                 ]),
               ))
@@ -1091,11 +1086,11 @@ pub fn dispute_fields(d: records.Dispute) -> List(#(String, json.Json)) {
   [
     #("id", json.string(d.id)),
     #("claimId", json.string(d.claim_id)),
-    #("byKind", json.string(dispute_row.by_kind_to_string(d.by_kind))),
+    #("byKind", dispute_row.by_kind_to_json(d.by_kind)),
     #("byId", json.string(d.by_id)),
     #("byName", json.nullable(d.by_name, json.string)),
     #("reason", json.string(d.reason)),
-    #("status", json.string(dispute_row.status_to_string(d.status))),
+    #("status", dispute_row.status_to_json(d.status)),
     #("resolution", json.nullable(d.resolution, json.string)),
     #("createdAt", json.int(d.created_at)),
     #("resolvedAt", json.nullable(d.resolved_at, json.int)),

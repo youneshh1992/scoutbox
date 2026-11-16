@@ -211,13 +211,10 @@ pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         ),
         fn(s) {
           json.object([
-            #(
-              "availability",
-              json.string(row.availability_to_string(s.row.availability)),
-            ),
+            #("availability", row.availability_to_json(s.row.availability)),
             #(
               "contractStatus",
-              json.string(row.contract_status_to_string(s.row.contract_status)),
+              row.contract_status_to_json(s.row.contract_status),
             ),
           ])
         },
@@ -505,10 +502,10 @@ pub fn child_availability(
     use availability <- input.field(
       "availability",
       input.required(
-        input.one_of([
-          #("available_now", row.AvailableNow),
-          #("end_of_season", row.EndOfSeason),
-          #("not_seeking", row.NotSeeking),
+        input.one_of_these(row.availability_pairs, [
+          row.AvailableNow,
+          row.EndOfSeason,
+          row.NotSeeking,
         ]),
       ),
     )
@@ -522,10 +519,7 @@ pub fn child_availability(
     players.set_availability(_, child.row.id, Some(availability), None),
     fn(s) {
       json.object([
-        #(
-          "availability",
-          json.string(row.availability_to_string(s.row.availability)),
-        ),
+        #("availability", row.availability_to_json(s.row.availability)),
       ])
     },
   )

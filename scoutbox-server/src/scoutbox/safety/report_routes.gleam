@@ -154,7 +154,7 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
             201,
             json.object([
               #("reportId", json.string(report.id)),
-              #("status", json.string(reports.status_to_string(report.status))),
+              #("status", reports.status_to_json(report.status)),
               #("suspended", json.bool(suspend)),
             ]),
           )

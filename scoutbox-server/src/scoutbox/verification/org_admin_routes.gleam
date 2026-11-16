@@ -90,21 +90,13 @@ pub fn request_record(read: Read, r: DomainRequest) -> Result(Json, Fail(e)) {
     #("orgId", json.string(r.org_id)),
     #("domain", json.string(r.domain)),
     #("requestedBy", json.string(r.requested_by)),
-    #("status", json.string(request_row.status_to_string(r.status))),
-    #(
-      "method",
-      json.nullable(r.method, fn(m) {
-        json.string(request_row.method_to_string(m))
-      }),
-    ),
+    #("status", request_row.status_to_json(r.status)),
+    #("method", json.nullable(r.method, request_row.method_to_json)),
     #("createdAt", json.int(r.created_at)),
     #("decidedAt", json.nullable(r.decided_at, json.int)),
     #("decidedBy", json.nullable(r.decided_by_name, json.string)),
     #("decidedById", json.nullable(r.decided_by_id, json.string)),
-    #(
-      "reviewReasons",
-      json.array(reasons, fn(c) { json.string(ver_code.to_string(c)) }),
-    ),
+    #("reviewReasons", json.array(reasons, ver_code.to_json)),
   ])
 }
 
@@ -135,8 +127,8 @@ pub fn update_request(
 pub fn domain_record(d: domain_row.Row) -> Json {
   json.object([
     #("domain", json.string(d.domain)),
-    #("status", json.string(domain_row.status_to_string(d.status))),
-    #("method", json.string(domain_row.method_to_string(d.method))),
+    #("status", domain_row.status_to_json(d.status)),
+    #("method", domain_row.method_to_json(d.method)),
     #("verifiedAt", json.int(d.verified_at)),
     #("addedBy", json.string(d.added_by)),
   ])
@@ -147,8 +139,8 @@ pub fn admin_record(a: admin_row.Row) -> List(#(String, Json)) {
     #("id", json.string(a.id)),
     #("orgId", json.string(a.org_id)),
     #("userId", json.string(a.user_id)),
-    #("level", json.string(ver_level.to_string(a.level))),
-    #("status", json.string(admin_row.status_to_string(a.status))),
+    #("level", ver_level.to_json(a.level)),
+    #("status", admin_row.status_to_json(a.status)),
     #("invitedBy", json.string(a.invited_by)),
     #("createdAt", json.int(a.created_at)),
     #("acceptedAt", json.nullable(a.accepted_at, json.int)),
@@ -163,7 +155,7 @@ fn transfer_record(t: transfer_row.Row) -> Json {
     #("orgId", json.string(t.org_id)),
     #("toUserId", json.string(t.to_user_id)),
     #("proposedBy", json.string(t.proposed_by)),
-    #("status", json.string(transfer_row.status_to_string(t.status))),
+    #("status", transfer_row.status_to_json(t.status)),
     #("createdAt", json.int(t.created_at)),
     #("approvedBy", json.nullable(t.approved_by, json.string)),
     #("approvedAt", json.nullable(t.approved_at, json.int)),

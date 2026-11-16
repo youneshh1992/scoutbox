@@ -195,7 +195,7 @@ fn view(e: Effective) -> Json {
       "categories",
       json.array(categories, fn(c) {
         json.object([
-          #("id", json.string(notification_category.to_string(c.id))),
+          #("id", notification_category.to_json(c.id)),
           #("label", json.string(c.label)),
           #(
             "enabled",
@@ -311,7 +311,7 @@ pub fn update(ctx: Ctx, req: Request, kind: Audience, id: String) -> Response {
             400,
             json.object([
               #("error", json.string("PREF_CATEGORY_MANDATORY")),
-              #("category", json.string(notification_category.to_string(c))),
+              #("category", notification_category.to_json(c)),
               #(
                 "message",
                 json.string(

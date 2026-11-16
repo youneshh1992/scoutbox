@@ -49,7 +49,7 @@ pub fn record(i: Invite) -> Json {
     #("byName", json.nullable(i.by_name, json.string)),
     #("name", json.string(i.invitee_name)),
     #("squad", json.string(i.squad)),
-    #("status", json.string(row.status_to_string(i.status))),
+    #("status", row.status_to_json(i.status)),
     #("playerId", json.nullable(i.player_id, json.string)),
     #("targetPlayerId", json.nullable(i.target_player_id, json.string)),
     #("guardianApproved", case i.guardian_approved_id, i.guardian_approved_at {

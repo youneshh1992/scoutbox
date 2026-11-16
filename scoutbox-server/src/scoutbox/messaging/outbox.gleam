@@ -105,7 +105,7 @@ pub fn view(m: Mail) -> Json {
           "providerMessageId",
           json.string(option.unwrap(m.provider_message_id, "")),
         ),
-        #("provider", json.string(row.transport_to_string(m.transport))),
+        #("provider", row.transport_to_json(m.transport)),
       ])
   }
 }
@@ -117,7 +117,7 @@ fn mail_view(m: Mail) -> Json {
     #("to", json.string(m.to_address)),
     #("subject", json.string(option.unwrap(m.subject, ""))),
     #("text", json.string(m.text)),
-    #("transport", json.string(row.transport_to_string(m.transport))),
+    #("transport", row.transport_to_json(m.transport)),
     #("delivered", json.bool(option.unwrap(m.delivered, False))),
   ])
 }

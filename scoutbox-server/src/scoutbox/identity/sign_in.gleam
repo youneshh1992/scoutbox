@@ -396,14 +396,9 @@ pub fn org_list(ctx: Ctx, req: Request) -> Response {
             [
               #("id", json.string(o.id)),
               #("name", json.string(o.name)),
-              #("type", json.string(org_type.to_string(o.type_))),
-              #(
-                "level",
-                json.nullable(o.level, fn(l) {
-                  json.string(org_row.level_to_string(l))
-                }),
-              ),
-              #("plan", json.string(org_row.plan_to_string(o.plan))),
+              #("type", org_type.to_json(o.type_)),
+              #("level", json.nullable(o.level, org_row.level_to_json)),
+              #("plan", org_row.plan_to_json(o.plan)),
               #("trustedPartner", json.bool(o.trusted_partner)),
               #("verified", json.bool(o.verified)),
               #("safeguardingCertified", json.bool(certified)),

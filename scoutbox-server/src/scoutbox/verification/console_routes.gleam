@@ -148,7 +148,7 @@ fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
     list.find(theirs, fn(c) { c.claim_type == claim_type.PersonIdentity })
   json.object([
     #("claimId", json.string(claim.id)),
-    #("claimType", json.string(claim_type.to_string(claim.claim_type))),
+    #("claimType", claim_type.to_json(claim.claim_type)),
     #("pairId", json.nullable(claim.pair_id, json.string)),
     #(
       "person",
@@ -184,11 +184,8 @@ fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
         None, _ -> "not_proved"
       }),
     ),
-    #(
-      "riskFlags",
-      json.array(flags, fn(f) { json.string(ver_code.to_string(f)) }),
-    ),
-    #("status", json.string(claim_row.status_to_string(claim.status))),
+    #("riskFlags", json.array(flags, ver_code.to_json)),
+    #("status", claim_row.status_to_json(claim.status)),
     #("requestedAt", json.int(claim.created_at)),
     #(
       "priorClaims",
@@ -198,7 +195,7 @@ fn request_row(read: Read, claim: Claim) -> Result(json.Json, Fail(e)) {
         }),
         fn(c) {
           json.object([
-            #("claimType", json.string(claim_type.to_string(c.claim_type))),
+            #("claimType", claim_type.to_json(c.claim_type)),
             #("organisationId", json.nullable(c.organisation_id, json.string)),
             #("role", json.nullable(c.role, json.string)),
             #("current", json.bool(c.current)),
@@ -688,18 +685,16 @@ pub fn staff_register(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             None -> []
           }),
         ),
-        #("claimType", json.string(claim_type.to_string(c.claim_type))),
+        #("claimType", claim_type.to_json(c.claim_type)),
         #("role", json.nullable(c.role, json.string)),
-        #("status", json.string(claim_row.status_to_string(c.status))),
+        #("status", claim_row.status_to_json(c.status)),
         #("effective", effective_json(eff)),
         #("current", json.bool(c.current)),
         #("validFrom", json.nullable(c.valid_from, json.int)),
         #("validUntil", json.nullable(c.valid_until, json.int)),
         #(
           "verificationMethod",
-          json.nullable(c.verification_method, fn(m) {
-            json.string(verification_method.to_string(m))
-          }),
+          json.nullable(c.verification_method, verification_method.to_json),
         ),
         #("verifiedAt", json.nullable(c.verified_at, json.int)),
       ])
@@ -710,7 +705,7 @@ pub fn staff_register(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 
 pub fn effective_json(eff: claims.Effective) -> json.Json {
   json.object([
-    #("status", json.string(claim_row.status_to_string(eff.status))),
+    #("status", claim_row.status_to_json(eff.status)),
     #("displayable", json.bool(eff.displayable)),
     #("current", json.bool(eff.current)),
     #("historical", json.bool(eff.historical)),

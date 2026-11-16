@@ -82,7 +82,7 @@ pub fn record(c: Conflict) -> Json {
     #("id", json.string(c.id)),
     #("userId", json.string(c.user_id)),
     #("orgId", json.string(c.org_id)),
-    #("kind", json.string(row.kind_to_string(c.kind))),
+    #("kind", row.kind_to_json(c.kind)),
     #("subject", json.string(c.subject)),
     #("note", json.string(c.note)),
     #("createdAt", json.int(c.created_at)),

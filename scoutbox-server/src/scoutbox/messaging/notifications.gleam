@@ -431,7 +431,7 @@ pub fn view(item: FeedItem) -> Json {
         #(
           "audience",
           json.object([
-            #("kind", json.string(audience.to_string(n.audience_kind))),
+            #("kind", audience.to_json(n.audience_kind)),
             #("id", json.string(n.audience_id)),
           ]),
         ),

@@ -279,7 +279,7 @@ fn render_shared(s: Shared) -> String {
   string.concat([
     header,
     "\n",
-    "import gleam/dynamic/decode\n\n",
+    "import gleam/dynamic/decode\nimport gleam/json.{type Json}\n\n",
     render_enum(type_name, constructors, ""),
   ])
 }
@@ -321,6 +321,14 @@ fn render_enum(
       "    " <> quote(c.0) <> " -> Ok(" <> c.1 <> ")\n"
     }),
     "    _ -> Error(Nil)\n  }\n}\n\n",
+    "/// The text the column stores, as JSON.\n",
+    "pub fn ",
+    prefix,
+    "to_json(value: ",
+    type_name,
+    ") -> Json {\n  json.string(",
+    prefix,
+    "to_string(value))\n}\n\n",
     "/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.\n",
     "pub fn ",
     prefix,
@@ -364,7 +372,12 @@ fn render_table(table: String, columns: List(Column)) -> String {
   }
   let imports =
     list.flatten([
-      ["gleam/dynamic/decode", "gleam/list"],
+      ["gleam/dynamic/decode"],
+      case locals {
+        [] -> []
+        _ -> ["gleam/json.{type Json}"]
+      },
+      ["gleam/list"],
       case
         list.any(columns, fn(c) { c.nullable }),
         list.any(written, fn(c) { c.nullable && c.default == None }),

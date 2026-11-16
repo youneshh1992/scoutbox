@@ -465,7 +465,7 @@ pub fn message_view(m: Message) -> Json {
         #(
           "sender",
           json.object([
-            #("kind", json.string(audience.to_string(r.sender_kind))),
+            #("kind", audience.to_json(r.sender_kind)),
             #("id", json.string(sender_id)),
             #("name", json.nullable(r.sender_name, json.string)),
           ]),
@@ -525,7 +525,7 @@ pub fn view_fields(t: Thread, viewer: Viewer) -> List(#(String, Json)) {
       #("orgVerified", json.nullable(c.org_verified, json.bool)),
       #("scoutName", opt(c.scout_name)),
       #("scoutRole", opt(c.scout_role)),
-      #("counterparty", json.string(party.to_string(c.counterparty))),
+      #("counterparty", party.to_json(c.counterparty)),
       #("createdAt", json.int(c.created_at)),
       #("lastActivityAt", json.int(c.last_activity_at)),
       #("messages", json.array(t.messages, message_view)),

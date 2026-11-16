@@ -378,7 +378,7 @@ pub fn metrics(ctx: Ctx) -> Response {
             json.object([
               #("id", json.string(e.id)),
               #("at", json.int(e.occurred_at)),
-              #("kind", json.string(ops_events.kind_to_string(e.kind))),
+              #("kind", ops_events.kind_to_json(e.kind)),
               #("detail", json.null()),
             ])
           }),

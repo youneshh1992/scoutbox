@@ -754,12 +754,9 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     #("agentName", opt_string(r.agent_name)),
     #("academyPlus", json.bool(r.academy_plus)),
     #("firstTeamSeeker", json.bool(r.first_team_seeker)),
-    #("availability", json.string(row.availability_to_string(r.availability))),
-    #(
-      "contractStatus",
-      json.string(row.contract_status_to_string(r.contract_status)),
-    ),
-    #("level", json.string(playing_level.to_string(r.level))),
+    #("availability", row.availability_to_json(r.availability)),
+    #("contractStatus", row.contract_status_to_json(r.contract_status)),
+    #("level", playing_level.to_json(r.level)),
     #("footballCategory", opt_string(r.football_category)),
     #("identityVerified", json.bool(r.identity_verified)),
     #("guardianId", opt_string(r.guardian_id)),
@@ -857,12 +854,9 @@ pub fn org_fields(
         True -> json.string("")
         False -> opt_string(r.city)
       }),
-      #("level", json.string(playing_level.to_string(r.level))),
-      #("availability", json.string(row.availability_to_string(r.availability))),
-      #(
-        "contractStatus",
-        json.string(row.contract_status_to_string(r.contract_status)),
-      ),
+      #("level", playing_level.to_json(r.level)),
+      #("availability", row.availability_to_json(r.availability)),
+      #("contractStatus", row.contract_status_to_json(r.contract_status)),
       #("identityVerified", json.bool(r.identity_verified)),
       #("footballCategory", opt_string(r.football_category)),
       #("squadNumber", opt_int(r.squad_number)),

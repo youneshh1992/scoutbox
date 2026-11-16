@@ -148,7 +148,7 @@ pub fn block_view(b: Block) -> Json {
     #("id", json.string(b.id)),
     #("playerId", json.string(b.player_id)),
     #("orgId", json.string(b.org_id)),
-    #("by", json.string(party.to_string(b.by_kind))),
+    #("by", party.to_json(b.by_kind)),
     #("reason", json.string(b.reason)),
     #("ts", json.int(b.created_at)),
   ])
@@ -329,19 +329,16 @@ pub fn report_view(r: Report) -> Json {
   json.object([
     #("id", json.string(r.id)),
     #("ts", json.int(r.created_at)),
-    #("by", json.string(report_row.by_kind_to_string(r.by_kind))),
+    #("by", report_row.by_kind_to_json(r.by_kind)),
     #("byId", json.string(r.by_id)),
     #("byOrgId", opt(r.by_org_id)),
-    #(
-      "targetKind",
-      json.string(report_row.target_kind_to_string(r.target_kind)),
-    ),
+    #("targetKind", report_row.target_kind_to_json(r.target_kind)),
     #("targetOrgId", opt(r.target_org_id)),
     #("targetScoutName", opt(r.target_scout_name)),
     #("targetPlayerId", opt(r.target_player_id)),
     #("reason", json.string(r.reason)),
     #("urgent", json.bool(r.urgent)),
-    #("status", json.string(report_row.status_to_string(r.status))),
+    #("status", report_row.status_to_json(r.status)),
     #("outcome", opt(r.outcome)),
     #("resolvedAt", json.nullable(r.resolved_at, json.int)),
   ])
@@ -483,11 +480,8 @@ pub fn moderation_view(m: ModerationEntry) -> Json {
         ]),
       ),
     ),
-    #(
-      "flags",
-      json.array(m.flags, fn(f) { json.string(flag_row.flag_to_string(f)) }),
-    ),
-    #("severity", json.string(moderation_row.severity_to_string(r.severity))),
+    #("flags", json.array(m.flags, flag_row.flag_to_json)),
+    #("severity", moderation_row.severity_to_json(r.severity)),
     #("excerpt", json.string(r.excerpt)),
   ])
 }

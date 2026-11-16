@@ -58,7 +58,7 @@ fn by(kind: Option(actor_kind.ActorKind), id: Option(String)) -> Json {
   case kind {
     Some(k) ->
       json.object([
-        #("kind", json.string(actor_kind.to_string(k))),
+        #("kind", actor_kind.to_json(k)),
         #("id", text(id)),
       ])
     None -> json.null()
@@ -77,15 +77,11 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
           #("provider", Some(json.string(provider))),
           #(
             "state",
-            option.map(c.registry_state, fn(s) {
-              json.string(claim_row.registry_state_to_string(s))
-            }),
+            option.map(c.registry_state, claim_row.registry_state_to_json),
           ),
           #(
             "result",
-            option.map(c.registry_result, fn(r) {
-              json.string(claim_row.registry_result_to_string(r))
-            }),
+            option.map(c.registry_result, claim_row.registry_result_to_json),
           ),
           #("checkedAt", Some(json.int(at))),
           #("reference", some_text(c.registry_reference)),
@@ -95,29 +91,22 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
   }
   json.object([
     #("id", json.string(c.id)),
-    #(
-      "subjectType",
-      json.string(claim_row.subject_kind_to_string(c.subject_kind)),
-    ),
+    #("subjectType", claim_row.subject_kind_to_json(c.subject_kind)),
     #("subjectId", json.string(c.subject_id)),
-    #("claimType", json.string(claim_type.to_string(c.claim_type))),
+    #("claimType", claim_type.to_json(c.claim_type)),
     #("organisationId", text(c.organisation_id)),
     #("role", text(c.role)),
-    #("status", json.string(claim_row.status_to_string(c.status))),
+    #("status", claim_row.status_to_json(c.status)),
     #("validFrom", int(c.valid_from)),
     #("validUntil", int(c.valid_until)),
     #("current", json.bool(c.current)),
     #(
       "verificationMethod",
-      json.nullable(c.verification_method, fn(m) {
-        json.string(verification_method.to_string(m))
-      }),
+      json.nullable(c.verification_method, verification_method.to_json),
     ),
     #(
       "authorityType",
-      json.nullable(c.authority_kind, fn(k) {
-        json.string(claim_row.authority_kind_to_string(k))
-      }),
+      json.nullable(c.authority_kind, claim_row.authority_kind_to_json),
     ),
     #("authorityId", text(c.authority_id)),
     #("createdAt", json.int(c.created_at)),
@@ -140,9 +129,7 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
         #("workEmail", some_text(c.work_email)),
         #(
           "domainControl",
-          option.map(c.domain_control, fn(d) {
-            json.string(claim_row.domain_control_to_string(d))
-          }),
+          option.map(c.domain_control, claim_row.domain_control_to_json),
         ),
         #("domainCoveredByOrg", option.map(c.domain_covered_by_org, json.bool)),
         #("domain", some_text(c.domain)),
@@ -153,25 +140,10 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
         #("display", some_text(c.display)),
         #("registry", registry),
         #("rootRequest", some_text(c.root_request_id)),
-        #(
-          "orgType",
-          option.map(c.org_type, fn(t) {
-            json.string(ver_org_type.to_string(t))
-          }),
-        ),
+        #("orgType", option.map(c.org_type, ver_org_type.to_json)),
         #("website", some_text(c.website)),
-        #(
-          "level",
-          option.map(c.admin_level, fn(l) {
-            json.string(ver_level.to_string(l))
-          }),
-        ),
-        #(
-          "identityLink",
-          option.map(c.identity_link, fn(l) {
-            json.string(identity_link.to_string(l))
-          }),
-        ),
+        #("level", option.map(c.admin_level, ver_level.to_json)),
+        #("identityLink", option.map(c.identity_link, identity_link.to_json)),
         #("appointedReason", some_text(c.appointed_reason)),
         #("via", some_text(c.via)),
         #("flaggedForReview", case c.flagged_at, c.flagged_reason {
@@ -199,7 +171,7 @@ pub fn claim_record(read: Read, c: Claim) -> Result(Json, Fail(e)) {
 }
 
 fn codes(cs: List(ver_code.VerCode)) -> Json {
-  json.array(cs, fn(c) { json.string(ver_code.to_string(c)) })
+  json.array(cs, ver_code.to_json)
 }
 
 /// An evidence record as the repository decodes it, with the claims it is linked to.
@@ -225,11 +197,11 @@ pub fn evidence_fields(
   list.flatten([
     [
       #("id", json.string(e.id)),
-      #("type", json.string(evidence_row.type_to_string(e.type_))),
+      #("type", evidence_row.type_to_json(e.type_)),
       #("source", json.string(e.source)),
       #(
         "suppliedByKind",
-        json.string(evidence_row.supplied_by_kind_to_string(e.supplied_by_kind)),
+        evidence_row.supplied_by_kind_to_json(e.supplied_by_kind),
       ),
       #("suppliedById", text(e.supplied_by_id)),
       #("orgId", text(e.org_id)),
@@ -241,12 +213,7 @@ pub fn evidence_fields(
     },
     [
       #("sha256", text(e.sha256)),
-      #(
-        "mime",
-        json.nullable(e.mime, fn(m) {
-          json.string(evidence_row.mime_to_string(m))
-        }),
-      ),
+      #("mime", json.nullable(e.mime, evidence_row.mime_to_json)),
       #("bytes", int(e.bytes)),
       #("filename", text(e.filename)),
       #(
@@ -266,19 +233,17 @@ pub fn evidence_fields(
           #("signingPackageId", some_text(e.signing_package_id)),
           #(
             "signingDocumentKind",
-            option.map(e.signing_document_kind, fn(k) {
-              json.string(evidence_row.signing_document_kind_to_string(k))
-            }),
+            option.map(
+              e.signing_document_kind,
+              evidence_row.signing_document_kind_to_json,
+            ),
           ),
           #("label", some_text(e.label)),
         ]),
       ),
       #("checks", core.evidence_checks(e)),
-      #("retention", json.string(evidence_row.retention_to_string(e.retention))),
-      #(
-        "visibility",
-        json.string(evidence_row.visibility_to_string(e.visibility)),
-      ),
+      #("retention", evidence_row.retention_to_json(e.retention)),
+      #("visibility", evidence_row.visibility_to_json(e.visibility)),
       #("expiresAt", int(e.expires_at)),
     ],
   ])
@@ -288,18 +253,13 @@ pub fn event_record(e: event_row.Row) -> Json {
   json.object([
     #("id", json.string(e.id)),
     #("ts", json.int(e.occurred_at)),
-    #("type", json.string(event_row.type_to_string(e.type_))),
-    #("actorKind", json.string(event_row.actor_kind_to_string(e.actor_kind))),
+    #("type", event_row.type_to_json(e.type_)),
+    #("actorKind", event_row.actor_kind_to_json(e.actor_kind)),
     #("actorId", text(e.actor_id)),
     #("actorName", text(e.actor_name)),
     #("actorOrgId", text(e.actor_org_id)),
     #("requestId", text(e.request_id)),
-    #(
-      "attribution",
-      json.nullable(e.attribution, fn(a) {
-        json.string(attribution.to_string(a))
-      }),
-    ),
+    #("attribution", json.nullable(e.attribution, attribution.to_json)),
     #("claimId", text(e.claim_id)),
     #("subjectId", text(e.subject_id)),
     #("orgId", text(e.org_id)),
@@ -330,13 +290,13 @@ pub fn admin_claim_row(read: Read, c: Claim) -> Result(Json, Fail(e)) {
   use flags <- result.map(records.codes(read, c.id, records.RiskFlags))
   json.object([
     #("id", json.string(c.id)),
-    #("claimType", json.string(claim_type.to_string(c.claim_type))),
-    #("status", json.string(claim_row.status_to_string(c.status))),
+    #("claimType", claim_type.to_json(c.claim_type)),
+    #("status", claim_row.status_to_json(c.status)),
     #("role", text(c.role)),
     #(
       "subject",
       json.object([
-        #("type", json.string(claim_row.subject_kind_to_string(c.subject_kind))),
+        #("type", claim_row.subject_kind_to_json(c.subject_kind)),
         #("id", json.string(c.subject_id)),
         #("name", json.string(option.unwrap(name, "(unknown)"))),
       ]),

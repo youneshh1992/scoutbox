@@ -68,13 +68,13 @@ fn view(t: Ticket) -> Json {
     #("byName", json.nullable(r.by_name, json.string)),
     #("subject", json.string(r.subject)),
     #("body", json.string(r.body)),
-    #("status", json.string(row.status_to_string(r.status))),
+    #("status", row.status_to_json(r.status)),
     #("createdAt", json.int(r.created_at)),
     #(
       "refs",
       json.array(t.refs, fn(x) {
         json.object([
-          #("kind", json.string(ref_row.kind_to_string(x.kind))),
+          #("kind", ref_row.kind_to_json(x.kind)),
           #("id", json.string(x.ref_id)),
         ])
       }),

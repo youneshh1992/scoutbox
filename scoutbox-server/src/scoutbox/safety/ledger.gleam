@@ -160,7 +160,7 @@ pub fn view(l: row.Row) -> Json {
   json.object([
     #("id", json.string(l.id)),
     #("ts", json.int(l.occurred_at)),
-    #("type", json.string(row.type_to_string(l.type_))),
+    #("type", row.type_to_json(l.type_)),
     #("playerId", opt(l.player_id)),
     #("orgId", opt(l.org_id)),
     #("orgName", opt(l.org_name)),

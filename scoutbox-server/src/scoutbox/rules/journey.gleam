@@ -125,7 +125,7 @@ pub fn pathway(p: Player) -> Json {
         ])
       }
       json.object([
-        #("level", json.string(playing_level.to_string(level))),
+        #("level", playing_level.to_json(level)),
         #(
           "steps",
           json.preprocessed_array([

@@ -160,7 +160,7 @@ fn case_view(c: Case) -> Json {
   let opt = json.nullable(_, json.string)
   let started =
     json.object([
-      #("kind", json.string(party.to_string(t.started_by_kind))),
+      #("kind", party.to_json(t.started_by_kind)),
       #("id", json.string(t.started_by_id)),
       #("name", opt(t.started_by_name)),
     ])
@@ -186,7 +186,7 @@ fn case_view(c: Case) -> Json {
     ),
     #("periodEndsAt", json.int(t.period_ends_at)),
     #("recipients", json.array(c.recipients, recipient_view)),
-    #("status", json.string(row.status_to_string(t.status))),
+    #("status", row.status_to_json(t.status)),
     #("placement", case t.placement_org_id, t.placement_at {
       Some(org_id), Some(at) ->
         json.object([
@@ -212,10 +212,10 @@ fn case_view(c: Case) -> Json {
         json.object([
           #("id", json.string(h.id)),
           #("at", json.int(h.at)),
-          #("byKind", json.string(history_row.by_kind_to_string(h.by_kind))),
+          #("byKind", history_row.by_kind_to_json(h.by_kind)),
           #("byId", json.string(h.by_id)),
           #("byName", opt(h.by_name)),
-          #("action", json.string(history_row.action_to_string(h.action))),
+          #("action", history_row.action_to_json(h.action)),
           #("detail", case h.detail_items, h.detail_org_id {
             Some(n), _ -> json.object([#("items", json.int(n))])
             None, Some(org_id) -> json.object([#("orgId", json.string(org_id))])

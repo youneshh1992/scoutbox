@@ -267,6 +267,6 @@ pub fn idv_view(q: idv_row.Row) -> Json {
     #("provider", json.string(q.provider)),
     #("reference", json.string(q.reference)),
     #("ts", json.int(q.created_at)),
-    #("status", json.string(idv_row.status_to_string(q.status))),
+    #("status", idv_row.status_to_json(q.status)),
   ])
 }

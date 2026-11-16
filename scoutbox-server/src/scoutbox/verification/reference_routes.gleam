@@ -69,19 +69,11 @@ pub fn record(r: Reference) -> Json {
       "provenanceSnapshot",
       json.object([
         #("claimId", json.string(r.provenance_claim_id)),
-        #(
-          "claimType",
-          json.string(claim_type.to_string(r.provenance_claim_type)),
-        ),
-        #(
-          "status",
-          json.string(row.provenance_status_to_string(r.provenance_status)),
-        ),
+        #("claimType", claim_type.to_json(r.provenance_claim_type)),
+        #("status", row.provenance_status_to_json(r.provenance_status)),
         #(
           "method",
-          json.nullable(r.provenance_method, fn(m) {
-            json.string(verification_method.to_string(m))
-          }),
+          json.nullable(r.provenance_method, verification_method.to_json),
         ),
         #("verifiedAt", json.nullable(r.provenance_verified_at, json.int)),
         #("snapshotAt", json.int(r.provenance_snapshot_at)),
@@ -92,7 +84,7 @@ pub fn record(r: Reference) -> Json {
     #("fromYear", json.nullable(r.from_year, json.int)),
     #("toYear", json.nullable(r.to_year, json.int)),
     #("structured", structured(r)),
-    #("status", json.string(row.status_to_string(r.status))),
+    #("status", row.status_to_json(r.status)),
     #("withdrawnAt", json.nullable(r.withdrawn_at, json.int)),
     #("withdrawReason", json.nullable(r.withdraw_reason, json.string)),
     #("createdAt", json.int(r.created_at)),
@@ -520,7 +512,7 @@ fn player_view(read: Read, r: Reference, now: Int) -> Result(Json, Fail(e)) {
     #("fromYear", json.nullable(r.from_year, json.int)),
     #("toYear", json.nullable(r.to_year, json.int)),
     #("structured", structured(r)),
-    #("status", json.string(row.status_to_string(r.status))),
+    #("status", row.status_to_json(r.status)),
     #("createdAt", json.int(r.created_at)),
     #(
       "provenance",

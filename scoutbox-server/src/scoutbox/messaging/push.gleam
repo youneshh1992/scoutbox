@@ -83,13 +83,13 @@ pub fn view(p: row.Row) -> Json {
     #(
       "audience",
       json.object([
-        #("kind", json.string(audience.to_string(p.audience_kind))),
+        #("kind", audience.to_json(p.audience_kind)),
         #("id", json.string(p.audience_id)),
       ]),
     ),
     #("title", json.string(p.title)),
     #("body", json.string(p.body)),
-    #("transport", json.string(row.transport_to_string(p.transport))),
+    #("transport", row.transport_to_json(p.transport)),
   ])
 }
 
