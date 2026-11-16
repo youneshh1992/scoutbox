@@ -3,29 +3,19 @@
 // Every domain lives in its own tables: the table migrations create every table before any module registers, and a
 // boot on a database that holds nothing but one organisation must answer its first requests. This battery checks:
 //
-//   part 1  the file — the table migrations, the counter, no blob, the catalogue constants, and every lifecycle
-//           state projecting as itself;
+//   part 1  the file — what a first boot on an empty directory creates (the table migrations, the counter, no blob),
+//           a server that refuses to start without its id counter, and the catalogue plans;
 //   part 2  the server — composition order (every module registers before the socket opens), the first requests on
 //           a bare database, and a restart that changes nothing.
+//
+// The archetype count and every lifecycle state projecting as itself are checked in scripts/rules/platform/storeGuarantees.mjs.
 import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PLANS, ARCHETYPES } from '../../catalogue.mjs';
-import { ORG_PLANS } from '../../repositories/orgs.ts';
-import { DatabaseSync } from 'node:sqlite';
-import { openLayer, writeFixture } from '../../scripts/dataLayerFixture.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { createIdCounter } from '../../repositories/counters.ts';
-import {
-  ROOM_STATUSES,
-  ROOM_STATUS_LABELS,
-  TERMINAL_ROOM_STATUSES,
-  stageForRoomStatus,
-} from '../../domains/recruitment/rooms/shared.mjs';
-import { NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { buildRecruitmentJourney } from '../../scripts/recruitmentReadsFixture.mjs';
+import { openFixture, writeFixture } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 let passed = 0;
@@ -71,17 +61,16 @@ process.on('exit', () => {
   }
 });
 
-const LATEST = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-);
-const tableNames = (sqlite) =>
-  sqlite
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
-    .all()
-    .map((r) => r.name);
+// The table migrations a new database records, as the migrated schema lists them.
+const MIGRATIONS = (() => {
+  const R = readRows(tempDir('schema'));
+  try {
+    return R.rows('data_migrations').map((r) => r.id);
+  } finally {
+    R.close();
+  }
+})();
+const LATEST = Number(MIGRATIONS.at(-1).slice(0, 4));
 
 /** One organisation and one player: a database, not a demo. */
 const LEGACY_ORG = {
@@ -90,181 +79,21 @@ const LEGACY_ORG = {
   type: 'club',
   level: 'academy',
   plan: 'Grassroots',
-  verified: true,
+  verified: 1,
+  created_at: Date.UTC(2026, 0, 5),
 };
-const LEGACY_PLAYER = { id: 'pl-legacy', name: 'Legacy Player', dob: '2000-05-05', country: 'GB', city: 'London' };
-
-// ===================================================================== part 1
-
-section('§1 — a new database file: every table migration, no blob');
-{
-  const dir = tempDir('fresh');
-  const store = openLayer(dir); // server mode migrates the file as it opens it, exactly as a boot would
-  const tables = tableNames(store.sqlite);
-  neg(!tables.includes('collections'), 'there is no `collections` table: the blob store is retired');
-  const applied = store.sqlite
-    .prepare('SELECT id FROM data_migrations ORDER BY id')
-    .all()
-    .map((r) => r.id);
-  ok(
-    applied.length === DATA_MIGRATIONS.length &&
-      applied.join() ===
-        DATA_MIGRATIONS.map((m) => m.id)
-          .sort()
-          .join(),
-    `all ${DATA_MIGRATIONS.length} table migrations are recorded, once each`,
-  );
-  ok(LATEST === 39 || LATEST > 39, `the schema version is the latest migration's number (${LATEST})`);
-  const counter = store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value;
-  ok(Number(counter) >= 1000, `the id counter is a row of counters, starting at the floor (${counter})`);
-  neg(
-    !store.sqlite.prepare("SELECT 1 FROM meta WHERE key IN ('idCounter', 'savedAt', 'saveSeq')").get(),
-    'and meta carries no snapshot bookkeeping',
-  );
-  store.sqlite.close();
-}
-
-section('§2 — the records are table rows and the id counter is a row of counters');
-{
-  const dir = tempDir('save');
-  writeFixture(dir, { orgs: [LEGACY_ORG], players: [], guardians: [] }, { idCounter: 4200 });
-  const store = openLayer(dir);
-  ok(
-    store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value === 4200 &&
-      store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n === 1,
-    'the organisation is a row and the id counter is written to counters',
-  );
-  store.sqlite.prepare("DELETE FROM counters WHERE name = 'id'").run();
-  let missing = null;
-  try {
-    createIdCounter({ sqlite: store.sqlite });
-  } catch (err) {
-    missing = err;
-  }
-  neg(
-    /COUNTER_MISSING/.test(missing?.message ?? ''),
-    'without its counter row the server refuses to mint ids it could not store',
-  );
-  ok(
-    TABLE_BACKED.includes('blocks') && TABLE_BACKED.includes('assessments') && TABLE_BACKED.includes('reputationSeed'),
-    'the safeguarding blocks, the assessments and the demo reputation rows are tables',
-  );
-  store.sqlite.close();
-}
-
-section('§3 — the plans and archetypes are constants and cannot be emptied');
-{
-  ok(
-    PLANS.Grassroots?.attributionWindowMonths === 12,
-    'a Grassroots organisation keeps its 12-month attribution window',
-  );
-  neg(
-    PLANS.Grassroots?.attributionWindowMonths !== 18,
-    'it is NOT 18 — no plan lookup falls through to a default and silently changes billing',
-  );
-  ok(
-    Object.keys(PLANS).length === 4 && ORG_PLANS.every((p) => PLANS[p]),
-    'all 4 plans are present, and every plan an organisation can be on has its catalogue entry',
-  );
-  ok(ARCHETYPES.length === 5, 'the archetypes are the 5 catalogue entries');
-}
-
-section('§4 — every lifecycle state projects as itself');
-{
-  // A state that cannot be read back is a state a club can be trapped in. Driven off ROOM_STATUSES, so a new state is
-  // covered the day it is added.
-  const db = {
-    recruitmentCases: ROOM_STATUSES.map((st, i) => ({
-      id: `case-${st}`,
-      orgId: 'org-legacy',
-      playerId: 'pl-legacy',
-      stage: stageForRoomStatus(st, 'academy'),
-      createdAt: 1000 + i,
-      room: { status: st, rev: 1, priority: 'normal' },
-      history: [{ action: 'room_created', at: 1000 + i, detail: { status: st } }],
-    })),
-    roomDecisions: [],
-    requests: [],
-    trials: [],
-    assessments: [],
-    signings: [],
-    recruitmentContacts: [],
-  };
-  const VIEWER = { kind: 'org_staff', orgId: 'org-legacy', role: 'recruitment_admin' };
-  const OPTS = { now: 2000, evidence: NULL_EVIDENCE_PROVIDER };
-  let projected = 0;
-  const problems = [];
-  for (const st of ROOM_STATUSES) {
-    let out;
-    try {
-      out = buildRecruitmentJourney(db, `case-${st}`, VIEWER, OPTS);
-    } catch (e) {
-      problems.push(`${st}: threw ${e.message}`);
-      continue;
-    }
-    if (!out.ok) {
-      problems.push(`${st}: refused ${out.error}`);
-      continue;
-    }
-    if (out.lifecycle.currentStage !== st) {
-      problems.push(`${st}: read back as ${out.lifecycle.currentStage}`);
-      continue;
-    }
-    if (out.lifecycle.label !== ROOM_STATUS_LABELS[st]) {
-      problems.push(`${st}: label drifted`);
-      continue;
-    }
-    if (out.lifecycle.terminal !== TERMINAL_ROOM_STATUSES.includes(st)) {
-      problems.push(`${st}: terminality drifted`);
-      continue;
-    }
-    projected += 1;
-  }
-  for (const p of problems) console.error(`   ${p}`);
-  ok(
-    projected === ROOM_STATUSES.length,
-    `all ${ROOM_STATUSES.length} lifecycle states project with their own status, label and terminality`,
-  );
-  neg(problems.length === 0, 'and none of them is silently rewritten to a neighbouring state');
-
-  // A signed case with two real history entries: projected as signed, nothing invented.
-  const signed = {
-    recruitmentCases: [
-      {
-        id: 'old-signed',
-        orgId: 'org-legacy',
-        playerId: 'pl-legacy',
-        stage: 'review',
-        createdAt: 1000,
-        room: { status: 'signed', rev: 2 },
-        history: [
-          { action: 'room_created', at: 1000, detail: { status: 'watching' } },
-          { action: 'room_status_changed', at: 1100, detail: { from: 'watching', to: 'signed' } },
-        ],
-      },
-    ],
-    roomDecisions: [],
-    requests: [],
-    trials: [],
-    assessments: [],
-    signings: [],
-    recruitmentContacts: [],
-  };
-  const out = buildRecruitmentJourney(
-    signed,
-    'old-signed',
-    { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
-    { now: 3000, evidence: NULL_EVIDENCE_PROVIDER },
-  );
-  ok(
-    out.ok === true && out.lifecycle?.currentStage === 'signed',
-    'a signed case projects through the journey as signed',
-  );
-  neg(out.outcome?.signing === null, 'with no signing invented to justify the status it was already in');
-  ok(out.history?.entries.length === 2, 'and its two real history entries, neither more nor fewer');
-}
-
-// ===================================================================== part 2
+const LEGACY_PLAYER = {
+  id: 'pl-legacy',
+  name: 'Legacy Player',
+  birth_date: '2000-05-05',
+  country: 'GB',
+  city: 'London',
+  availability: 'not_seeking',
+  contract_status: 'unknown',
+  level: 'amateur',
+  medical_condition_status: 'unknown',
+  profile_signal: 30,
+};
 
 /** Boot the real server on a directory, optionally probe it, then stop it with SIGTERM. */
 async function bootOnce(dataDir, { port, probe = null } = {}) {
@@ -284,7 +113,7 @@ async function bootOnce(dataDir, { port, probe = null } = {}) {
   });
   let up = false;
   for (let i = 0; i < 160 && !up; i += 1) {
-    if (proc.exitCode != null) return { up: false, log };
+    if (proc.exitCode != null) return { up: false, exited: proc.exitCode, log };
     try {
       up = (await fetch(`${base}/healthz`)).ok;
     } catch {
@@ -300,9 +129,10 @@ async function bootOnce(dataDir, { port, probe = null } = {}) {
   const health = await (await fetch(`${base}/healthz`)).json();
   const header = (await fetch(`${base}/healthz`)).headers.get('x-scoutbox-schema');
   const caps = await (await fetch(`${base}/capabilities`)).json();
+  const meta = await (await fetch(`${base}/meta`)).json();
   proc.kill('SIGTERM');
   for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-  return { up: true, log, probe: probeResult, health, header, caps };
+  return { up: true, log, probe: probeResult, health, header, caps, meta };
 }
 
 /**
@@ -337,30 +167,89 @@ const firstRequestProbe = async (base) => {
   };
 };
 
-const readOnly = (dir) => new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
 const tableContent = (dir) => {
-  const sqlite = readOnly(dir);
+  const R = readRows(dir);
   try {
-    const out = {};
-    for (const t of tableNames(sqlite).sort()) {
-      if (t === 'sessions' || t === 'counters') continue; // a login writes a session and mints ids
-      out[t] = sqlite
-        .prepare(`SELECT * FROM "${t}" ORDER BY rowid`)
-        .all()
-        .map((r) => ({ ...r }));
-    }
-    return {
-      json: JSON.stringify(out),
-      counter: Number(sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value),
-    };
+    const { sessions, counters, ...tables } = R.all(); // a login writes a session and mints ids
+    return { json: JSON.stringify(tables), counter: Number(R.row('counters', { name: 'id' }).value) };
   } finally {
-    sqlite.close();
+    R.close();
   }
 };
 
-const PORT_BASE = pickPort(5200, 300, [0, 1]);
 const BARE_DIR = tempDir('bare');
-writeFixture(BARE_DIR, { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER], guardians: [] }, { idCounter: 400 });
+writeFixture(BARE_DIR, { rows: { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER] } }, { idCounter: 400 });
+
+// ===================================================================== part 1
+
+const PORT_BASE = pickPort(5200, 300, [0, 1, 2, 3]);
+
+section('§1 — a new database file: every table migration, no blob');
+const EMPTY_DIR = tempDir('fresh');
+const created = await bootOnce(EMPTY_DIR, { port: PORT_BASE + 2 });
+{
+  ok(created.up, `the server boots on an empty directory${created.up ? '' : `:\n${created.log.slice(-900)}`}`);
+  const R = readRows(EMPTY_DIR);
+  const tables = R.tables();
+  neg(!tables.includes('collections'), 'there is no `collections` table: the blob store is retired');
+  const applied = R.rows('data_migrations').map((r) => r.id);
+  ok(applied.join() === MIGRATIONS.join(), `all ${MIGRATIONS.length} table migrations are recorded, once each`);
+  ok(LATEST >= 39, `the schema version is the latest migration's number (${LATEST})`);
+  const counter = R.row('counters', { name: 'id' })?.value;
+  ok(Number(counter) >= 1000, `the id counter is a row of counters, starting at the floor (${counter})`);
+  neg(R.count('meta', { key: ['idCounter', 'savedAt', 'saveSeq'] }) === 0, 'and meta carries no snapshot bookkeeping');
+  ok(
+    ['blocks', 'assessments', 'reputation_seed'].every((t) => tables.includes(t)),
+    'the safeguarding blocks, the assessments and the demo reputation rows are tables',
+  );
+  R.close();
+}
+
+section('§2 — the records are table rows and the id counter is a row of counters');
+{
+  const dir = tempDir('save');
+  writeFixture(dir, { rows: { orgs: [LEGACY_ORG] } }, { idCounter: 4200 });
+  const R = readRows(dir);
+  ok(
+    R.row('counters', { name: 'id' }).value === 4200 && R.count('orgs') === 1,
+    'the organisation is a row and the id counter is written to counters',
+  );
+  R.close();
+  const F = openFixture(dir);
+  F.sql.prepare("DELETE FROM counters WHERE name = 'id'").run();
+  F.close();
+  const without = await bootOnce(dir, { port: PORT_BASE + 3 });
+  neg(
+    !without.up && without.exited != null && without.exited !== 0,
+    'without its counter row the server refuses to start rather than mint ids it could not store',
+  );
+}
+
+section('§3 — the plans are constants and cannot be emptied');
+{
+  const plans = created.meta?.plans ?? {};
+  ok(
+    plans.Grassroots?.attributionWindowMonths === 12,
+    'a Grassroots organisation keeps its 12-month attribution window',
+  );
+  neg(
+    plans.Grassroots?.attributionWindowMonths !== 18,
+    'it is NOT 18 — no plan lookup falls through to a default and silently changes billing',
+  );
+  // The plans an organisation can be on are the ones its table's CHECK allows.
+  const R = readRows(EMPTY_DIR);
+  const orgsSql = R.sql.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orgs'").get().sql;
+  R.close();
+  const allowed = [...(orgsSql.match(/CHECK \(plan IN \(([^)]*)\)\)/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(
+    (m) => m[1],
+  );
+  ok(
+    Object.keys(plans).length === 4 && allowed.length > 0 && allowed.every((p) => plans[p]),
+    'all 4 plans are present, and every plan an organisation can be on has its catalogue entry',
+  );
+}
+
+// ===================================================================== part 2
 
 section('§7 — a bare database: the first requests answer');
 const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestProbe });
@@ -390,16 +279,16 @@ const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestPro
     `/healthz and X-ScoutBox-Schema state schema ${LATEST}`,
   );
   ok(
-    first.caps?.schema?.upToDate === true && first.caps.schema.migrationsApplied === DATA_MIGRATIONS.length,
+    first.caps?.schema?.upToDate === true && first.caps.schema.migrationsApplied === MIGRATIONS.length,
     'and /capabilities reports every table migration applied',
   );
   neg(
     first.caps?.integrity?.ok === true && !('stores' in (first.caps?.integrity ?? {})),
     'integrity is clean, and there is no store inventory left to report',
   );
-  const s = readOnly(BARE_DIR);
-  neg(!tableNames(s).includes('collections'), 'and the file the server wrote has no blob table');
-  s.close();
+  const R = readRows(BARE_DIR);
+  neg(!R.tables().includes('collections'), 'and the file the server wrote has no blob table');
+  R.close();
 }
 
 section('§8 — a restart changes nothing');
@@ -413,8 +302,8 @@ section('§8 — a restart changes nothing');
   neg(after.json === before.json, 'and booting changed no table (sessions and the counter aside)');
   neg(after.counter >= before.counter, `and the id counter never goes back (${before.counter} → ${after.counter})`);
   neg(
-    again.caps?.schema?.migrationsApplied === DATA_MIGRATIONS.length,
-    `all ${DATA_MIGRATIONS.length} migrations stay recorded exactly once — no churn`,
+    again.caps?.schema?.migrationsApplied === MIGRATIONS.length,
+    `all ${MIGRATIONS.length} migrations stay recorded exactly once — no churn`,
   );
 }
 

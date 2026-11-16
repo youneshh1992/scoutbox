@@ -16,6 +16,7 @@ import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.ts';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.ts';
 import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.ts';
 import { openStore } from '../store.ts';
+import { createIdCounter } from '../repositories/counters.ts';
 import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
@@ -1033,6 +1034,17 @@ test('store: a fixture written into a new directory is written into the tables, 
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
   assert.equal(layer.report().identity.initState, 'done');
   server.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('id counter: without its counters row the store refuses to mint ids it could not store', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbx-counter-'));
+  writeFixture(dir, { orgs: [ORG_O] }, { idCounter: 4200 });
+  const store = openLayer(dir);
+  assert.equal(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get().value, 4200);
+  store.sqlite.prepare("DELETE FROM counters WHERE name = 'id'").run();
+  assert.throws(() => createIdCounter({ sqlite: store.sqlite }), /COUNTER_MISSING/);
+  store.sqlite.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
