@@ -1,0 +1,305 @@
+[
+  {
+    "battery": "agents/core",
+    "functions": [
+      {
+        "function": "domains/agents/core/errors.mjs#publicErrorBody",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#affiliationActive",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#affiliationChangeProblem",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agentTransitionAllowed",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementForAgent",
+        "calls": 4,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementForClient",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementSummaryForStaff",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#can",
+        "calls": 213,
+        "cases": 121,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#capabilitiesOf",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#clientTransitionAllowed",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveFacetState",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#evaluateSubmission",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#newFacets",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#normaliseScope",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#normaliseTiers",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#requestConflict",
+        "calls": 8,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#requiredFacetsFor",
+        "calls": 7,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#termEndAt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#termMonthsOf",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#tiersOf",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#verificationGap",
+        "calls": 11,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "platform/storeGuarantees",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney",
+        "calls": 19,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.contacts.byId is a function": 19
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#stageForRoomStatus",
+        "calls": 18,
+        "cases": 18,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/journey",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 4,
+        "cases": 0,
+        "handPort": {
+          "args[].contacts.byId is a function": 4
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.contacts.byId is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor",
+        "calls": 251,
+        "cases": 147,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#playerNextActionFor",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  }
+]

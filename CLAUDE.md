@@ -42,6 +42,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
 - A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
   TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
+- A battery's checks of the rules themselves live in the TypeScript tree's `scripts/rules/<domain>/<battery>.mjs`.
+  `npm run cases` records their calls to the rules; `dev/battery_cases/report.json` lists each function's cases still
+  to be generated and the calls to port by hand (`npm run cases:check` fails when it is stale).
 
 ## Server rules (as in the TypeScript server, enforced by types where possible)
 

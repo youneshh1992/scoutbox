@@ -11,6 +11,8 @@
     "e2e:sync": "node e2e/sync.mjs",
     "e2e:check": "node e2e/sync.mjs --check",
     "codegen": "gleam dev && gleam format src/scoutbox/rows src/scoutbox/vocab",
-    "codegen:check": "rm -rf build/codegen-check && gleam dev build/codegen-check && gleam format build/codegen-check && diff -r build/codegen-check/scoutbox/rows src/scoutbox/rows && diff -r build/codegen-check/scoutbox/vocab src/scoutbox/vocab"
+    "codegen:check": "rm -rf build/codegen-check && gleam dev build/codegen-check && gleam format build/codegen-check && diff -r build/codegen-check/scoutbox/rows src/scoutbox/rows && diff -r build/codegen-check/scoutbox/vocab src/scoutbox/vocab",
+    "cases": "node dev/battery_cases.mjs",
+    "cases:check": "node dev/battery_cases.mjs --check"
   }
 }

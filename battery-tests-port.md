@@ -243,6 +243,47 @@ session. Its rules suite passes, and `dev/battery_cases.mjs` records its calls a
 three times to replace the estimate below. If a battery goes well over half a session, stop and write down why
 before going on.
 
+**[done]** All three pass, keep the boundary, and are off `NOT_YET_NEUTRAL` (40 left). By the clock, each took a few
+minutes: `platform/storeGuarantees` 5, `recruitment/journey` 3, `agents/core` 3, and the recorder about 15. As built:
+
+- **Rules suites.** `scripts/rulesSuite.mjs` gives a suite the battery's `ok`/`neg`/`section` (and is the one place the
+  recorder hooks). The pure sections moved verbatim into `scripts/rules/agents/core.mjs` (A–D, T1),
+  `scripts/rules/recruitment/journey.mjs` (A) and `scripts/rules/platform/storeGuarantees.mjs` (the archetype count,
+  and §4's projection over arrays). Each battery's header says where they went.
+- **Check counts reconcile.** Real `ok`/`neg` checks, battery + rules suite: storeGuarantees 30 → 25 + 7 (one new
+  check, and the plan count is now in both), journey 153 → 115 + 38, agents/core 351 → 248 + 103. A raw grep counts
+  the three helper definitions too; the ledger script must leave them out.
+- **What the HTTP sections needed.** Very little: none of the three used a rule as an oracle. The work was readback
+  and fixtures.
+  - `storeGuarantees` §1 now boots the server on an empty directory and checks the file it creates against
+    `schema.sql`'s migration rows, instead of opening the repository layer. §2's `COUNTER_MISSING` became "the
+    server refuses to start without its counter row", and the `createIdCounter` unit check went to
+    `testDataLayer`. §3 reads the plans from `/meta`, and the plans the `orgs.plan` CHECK allows.
+  - `journey`'s offline plants are SQL: `plantCase`/`legacyMoves` from `sqlFixture.mjs`, a legacy `signings` row, and
+    a Second Look item's three rows. These were copied from what the repository wrote in a probe run.
+  - `agents/core`'s readback is rows. `readRecords` hid two things that raw rows show: a deleted player is a
+    tombstone row (`deleted_at` set), not an absent one; and S3 and S5 were vacuous, because they read collections
+    `readRecords` doesn't have (`representations`, `claims`). They now check that there is no `representations` table,
+    and search `ver_claims`.
+- **Mutation checks**, one or two per battery, all caught: Grassroots' attribution window set to 18; the journey's legacy
+  signing row removed, and its Second Look item removed; the erasure no longer clearing `dispute_reason`. A first
+  try, unlinking the legacy signing from its case, wasn't caught. The projection finds the signing by club and
+  player, so the original battery wouldn't have caught it either.
+- **Recorder.** `dev/battery_cases.mjs` (`npm run cases`, `cases:check`) runs each rules suite twice under
+  `dev/battery_cases/preload.mjs`.
+  - In-process module hooks put a wrapper between `scripts/` and each rule module (`domains/**` minus Box Cam
+    analysis, `domain.ts`, `temporal.ts`, `roles.ts`), and wrap `rulesSuite`'s `ok`/`neg`.
+  - The second run moves `Date` on by 400 days. That is a patch in the suite's process, not `SCOUTBOX_TEST_CLOCK`,
+    which only the server reads.
+  - `dev/battery_cases/report.json` lists, per battery and function, the calls, the distinct cases, and the
+    hand-port calls by reason. Today: 430 cases pending over 40 functions, and 26 calls to port by hand.
+    `buildRecruitmentJourney` and `createEvidenceProvider` take query closures; one `can` call has an `undefined` in
+    the middle of its arguments.
+  - No recorded call depends on the clock. A scratch fake tree proved the detection works, along with coded
+    refusals, callbacks and re-exports.
+  - The mapping, printers and generator wait for the first ported rule (step 6): nothing these suites call is
+    ported yet.
+
 ### 4. The rest, just ahead of each domain's port
 
 Untangle each battery when its domain is next in line for the Gleam port, not all at once. Each untangling is
@@ -289,7 +330,13 @@ This replaces the evaluation's "6 to 23 sessions" for 23 batteries, which underc
 | **Total** | 43 | | **about 13–26** |
 
 Moving pure-engine sections is mostly cut and paste, so the spread comes from the HTTP sections' oracle calls
-and the readback rewrites. Step 3's calibration will narrow it. The hand-port rows are counted with each domain's
+and the readback rewrites.
+
+**After step 3:** the three heavy batteries took minutes each, not half a session, so the per-battery column above
+is several times too high. A fair estimate for the remaining 40 is about **2–4 sessions**, plus the generator and
+printers. The time goes on readback semantics (what a repository's records hid: tombstones, vacuous collections)
+and on fixture rows copied from a probe run, not on moving sections. Batteries with rule oracles in their HTTP
+sections, which these three didn't have, may be slower. The hand-port rows are counted with each domain's
 port, not here. So are the mapping entries and printers, which grow with the ported rules.
 
 ## Risks
