@@ -1659,6 +1659,81 @@
     ]
   },
   {
+    "battery": "recruitment/journeyAdversarial",
+    "functions": [
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#lifecycleTargetFor",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "recruitment/lifecycle",
     "functions": [
       {

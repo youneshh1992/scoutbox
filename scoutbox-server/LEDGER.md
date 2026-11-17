@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 40 / 2320 | 0 / 191 | 5 to go |
-| recruitment | 19 | 19 | 17 | 519 / 4128 | 28 / 295 | 13 to go |
+| recruitment | 19 | 19 | 17 | 519 / 4158 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -74,7 +74,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
-| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved |  | 0 / 0 |  | not answered; rules suite not recorded; 2 TypeScript-only moves unreviewed |
+| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved |  | 0 / 30 |  | not answered; 30 cases pending; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 16 / 2927 | 2 / 95 | 2927 cases pending; 93 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 8 / 151 | 6 / 31 | 151 cases pending; 25 hand-port calls |
@@ -350,6 +350,16 @@ mapped, then `npm run cases`.
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
+| `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 10 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel` | 3 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase` | 2 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase` | 2 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase` | 2 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 4 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase` | 2 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#lifecycleTargetFor` | 2 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 21 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#publicErrorBody` | 1 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#availableActions` | 78 |
