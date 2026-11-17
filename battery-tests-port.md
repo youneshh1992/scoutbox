@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 31 batteries pass unchanged]
+### Porting, domain by domain [in progress: 32 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -115,7 +115,7 @@ of the product, so they aren't one slice.
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics | 18 | `recruitment/journey`: everything but Z1 (matching and watchlists) passes |
-| Discovery: Second Look and Nobody Missed | 1 | **ported**: every ledger row closed |
+| Discovery: Second Look and Nobody Missed, exposure, calibration and coverage | 2 | `matchingAndWatchlists` to go |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -146,7 +146,10 @@ are for surprising facts or points that later work depends on, not implementatio
    1. `discovery/secondLookAndNobodyMissed` [**done**]. Nobody Missed reads the stored match facts, which the store
       re-derives inside every unit just before COMMIT (`store.with_before_commit`), as the TypeScript keeper does:
       matching and the watchlists can use them as they are.
-   2. `discovery/exposureCalibrationAndCoverage`. It is already neutral and self-contained.
+   2. `discovery/exposureCalibrationAndCoverage` [**done**: the insight domain, bar its sweep]. The type → category
+      table for notifications was only partly ported, so types such as `evidence_request`, `calibration` and
+      `recruitment_room` escaped their category's mute. It is now whole, and its test requires equality with the
+      snapshot.
    3. `discovery/matchingAndWatchlists`, once its Box Cam results come from `sqlFixture.mjs` rows.
 3. **Agents**: the other 8 batteries. Clear `agents/core`'s pending cases too. `journeyAdversarial` and
    `operations` also call `/org/agent`.
@@ -154,6 +157,11 @@ are for surprising facts or points that later work depends on, not implementatio
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
+8. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
+   `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
+   loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible
+   (sets and dicts for membership and de-duplication, a length taken once), and move the hot call sites onto it.
+   Measure before and after with `dev/perf.mjs`.
 
 Throughout the port, map the `dates` rule cases (2,253 pending) as the date rules are ported, since every domain
 uses them.

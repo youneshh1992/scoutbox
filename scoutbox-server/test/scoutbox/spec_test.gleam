@@ -50,11 +50,12 @@ pub fn notification_type_categories_test() {
       "platform/notificationPrefs.json",
       decode.at(["TYPE_CATEGORY"], decode.dict(decode.string, decode.string)),
     )
-  list.each(notification_prefs.type_category, fn(entry) {
-    let #(type_, category) = entry
-    assert dict.get(type_category, type_)
-      == Ok(notification_category.to_string(category))
-  })
+  let ported =
+    list.map(notification_prefs.type_category, fn(entry) {
+      #(entry.0, notification_category.to_string(entry.1))
+    })
+  assert dict.from_list(ported) == type_category
+  assert list.length(ported) == dict.size(type_category)
 }
 
 /// CATEGORIES, entry by entry, and the `notifications.category` CHECK (from the migrations) in the same order.

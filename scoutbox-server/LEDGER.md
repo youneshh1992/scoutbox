@@ -19,7 +19,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 |---|---|---|---|---|---|---|
 | agents | 9 | 1 | 1 | 0 / 216 | 0 / 1 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
-| discovery | 3 | 2 | 1 | 135 / 0 | 1 / 1 | 2 to go |
+| discovery | 3 | 2 | 2 | 135 / 0 | 1 / 1 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 40 / 2320 | 0 / 191 | 5 to go |
@@ -49,7 +49,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/combine` | not yet neutral | 2 → 2 | 92 | 92 |  |  |  |  |  | not untangled; not answered |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
-| `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  |  |  |  | not answered |
+| `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | not yet neutral | 13 → 13 | 152 | 152 |  |  |  |  |  | not untangled; not answered |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |

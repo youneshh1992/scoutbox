@@ -534,6 +534,40 @@ pub fn budget_scenario_decoder() -> decode.Decoder(BudgetScenarioId) {
   decode.map(decode.string, BudgetScenarioId)
 }
 
+/// An id of `calibration_sessions`.
+pub opaque type CalibrationSessionId {
+  CalibrationSessionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn calibration_session(text: String) -> CalibrationSessionId {
+  CalibrationSessionId(text)
+}
+
+pub fn calibration_session_to_string(id: CalibrationSessionId) -> String {
+  let CalibrationSessionId(text) = id
+  text
+}
+
+pub fn calibration_session_sql(id: CalibrationSessionId) -> sqlight.Value {
+  sqlight.text(calibration_session_to_string(id))
+}
+
+pub fn calibration_session_json(id: CalibrationSessionId) -> Json {
+  json.string(calibration_session_to_string(id))
+}
+
+pub fn calibration_session_decoder() -> decode.Decoder(CalibrationSessionId) {
+  decode.map(decode.string, CalibrationSessionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_calibration_session(
+  tx: Tx,
+) -> Result(CalibrationSessionId, Fail(e)) {
+  ids.next(tx, "cal") |> result.map(CalibrationSessionId)
+}
+
 /// An id of `passport_career_entries`.
 pub opaque type CareerEntryId {
   CareerEntryId(String)
@@ -876,6 +910,72 @@ pub fn next_context_event(tx: Tx) -> Result(ContextEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(ContextEventId)
 }
 
+/// An id of `coverage_assignments`.
+pub opaque type CoverageAssignmentId {
+  CoverageAssignmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn coverage_assignment(text: String) -> CoverageAssignmentId {
+  CoverageAssignmentId(text)
+}
+
+pub fn coverage_assignment_to_string(id: CoverageAssignmentId) -> String {
+  let CoverageAssignmentId(text) = id
+  text
+}
+
+pub fn coverage_assignment_sql(id: CoverageAssignmentId) -> sqlight.Value {
+  sqlight.text(coverage_assignment_to_string(id))
+}
+
+pub fn coverage_assignment_json(id: CoverageAssignmentId) -> Json {
+  json.string(coverage_assignment_to_string(id))
+}
+
+pub fn coverage_assignment_decoder() -> decode.Decoder(CoverageAssignmentId) {
+  decode.map(decode.string, CoverageAssignmentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_coverage_assignment(
+  tx: Tx,
+) -> Result(CoverageAssignmentId, Fail(e)) {
+  ids.next(tx, "cva") |> result.map(CoverageAssignmentId)
+}
+
+/// An id of `coverage_plans`.
+pub opaque type CoveragePlanId {
+  CoveragePlanId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn coverage_plan(text: String) -> CoveragePlanId {
+  CoveragePlanId(text)
+}
+
+pub fn coverage_plan_to_string(id: CoveragePlanId) -> String {
+  let CoveragePlanId(text) = id
+  text
+}
+
+pub fn coverage_plan_sql(id: CoveragePlanId) -> sqlight.Value {
+  sqlight.text(coverage_plan_to_string(id))
+}
+
+pub fn coverage_plan_json(id: CoveragePlanId) -> Json {
+  json.string(coverage_plan_to_string(id))
+}
+
+pub fn coverage_plan_decoder() -> decode.Decoder(CoveragePlanId) {
+  decode.map(decode.string, CoveragePlanId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_coverage_plan(tx: Tx) -> Result(CoveragePlanId, Fail(e)) {
+  ids.next(tx, "cvp") |> result.map(CoveragePlanId)
+}
+
 /// An id of `case_decision_drafts`.
 pub opaque type DecisionDraftId {
   DecisionDraftId(String)
@@ -906,6 +1006,38 @@ pub fn decision_draft_decoder() -> decode.Decoder(DecisionDraftId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_decision_draft(tx: Tx) -> Result(DecisionDraftId, Fail(e)) {
   ids.next(tx, "rdraft") |> result.map(DecisionDraftId)
+}
+
+/// An id of `review_later`.
+pub opaque type DeferralId {
+  DeferralId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn deferral(text: String) -> DeferralId {
+  DeferralId(text)
+}
+
+pub fn deferral_to_string(id: DeferralId) -> String {
+  let DeferralId(text) = id
+  text
+}
+
+pub fn deferral_sql(id: DeferralId) -> sqlight.Value {
+  sqlight.text(deferral_to_string(id))
+}
+
+pub fn deferral_json(id: DeferralId) -> Json {
+  json.string(deferral_to_string(id))
+}
+
+pub fn deferral_decoder() -> decode.Decoder(DeferralId) {
+  decode.map(decode.string, DeferralId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_deferral(tx: Tx) -> Result(DeferralId, Fail(e)) {
+  ids.next(tx, "rvl") |> result.map(DeferralId)
 }
 
 /// An id of `dispatches`.
@@ -1181,6 +1313,38 @@ pub fn next_evidence_suggestion(
   tx: Tx,
 ) -> Result(EvidenceSuggestionId, Fail(e)) {
   ids.next(tx, "gap") |> result.map(EvidenceSuggestionId)
+}
+
+/// An id of `fixtures`.
+pub opaque type FixtureId {
+  FixtureId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn fixture(text: String) -> FixtureId {
+  FixtureId(text)
+}
+
+pub fn fixture_to_string(id: FixtureId) -> String {
+  let FixtureId(text) = id
+  text
+}
+
+pub fn fixture_sql(id: FixtureId) -> sqlight.Value {
+  sqlight.text(fixture_to_string(id))
+}
+
+pub fn fixture_json(id: FixtureId) -> Json {
+  json.string(fixture_to_string(id))
+}
+
+pub fn fixture_decoder() -> decode.Decoder(FixtureId) {
+  decode.map(decode.string, FixtureId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_fixture(tx: Tx) -> Result(FixtureId, Fail(e)) {
+  ids.next(tx, "fix") |> result.map(FixtureId)
 }
 
 /// An id of `friendlies`.

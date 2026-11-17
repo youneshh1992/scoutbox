@@ -15,7 +15,8 @@ items it opens), the organisation audit and a player's erasure, and the start of
 (opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
 schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
 calendar export and the mandatory report), structured assessments, the Football Passport's trial timeline, and
-Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query). It
+Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query), and
+the club's insight: exposure, the review queue, calibration sessions, the decision review and coverage planning. It
 answers every battery in `e2e/batteries.mjs` unchanged.
 
 ```sh
@@ -89,6 +90,7 @@ Every route below is exercised by a battery, except where marked.
 | Watchlists | `GET /org/watchlists` (the list only: no route here creates one) |
 | Second Look | `GET /org/second-look` (reconciled with the source records on every read), `/org/second-look/:id`, `/org/second-look/:id/changes`; `POST /org/second-look/:id/review`, `/dismiss`, `/reopen-room` (through the Rooms' own reopen path) |
 | Nobody Missed | `GET`/`POST /org/recruitment-briefs`, `GET`/`PATCH /org/recruitment-briefs/:id`, `GET /org/nobody-missed` (over the stored match facts, by cursor), `GET /org/evaluation-coverage`; `POST /org/nobody-missed/add-to-room`, `/review` and `/dismiss` (no battery) |
+| Insight | `POST /org/exposure/impressions`, `GET /org/exposure/report`, `/org/review-queue`, `POST /org/review-queue/:id/later`, `GET /org/discovery-rotation`, `/org/decision-review`, `/player/exposure`; `GET /org/players/:id/evidence-gaps`, `POST /org/evidence-gaps/:id/request`, `/dismiss` and `/reviewed` (no battery); `GET`/`POST /org/calibration`, `GET /org/calibration/:id`, `POST …/submit`, `…/close` (no battery), `…/notes`; `GET /org/assessment-templates` (the list only); `GET`/`POST /org/coverage/fixtures`, `/org/coverage-plans`, `/org/coverage/assignments`, `POST …/assignments/:id/complete`, `…/cancel` (no battery), `GET /org/coverage/suggestions`; not the sweep (review reminders, pruning old exposure) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
 | Recruitment | `POST /org/players/:id/request` (a contact, or a direct trial request with its days, venue and notes; refused while a trial report is outstanding), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/requests`, `/org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (newest first, by cursor), `GET /org/invoices` (the success fees), `POST /org/players/:id/signing` (the legacy recorder, refused when the workflow owns the signing); `GET /org/recruitment-analytics` (the Director Dashboard: every family, the window, filters and trend), `/org/recruitment-analytics/catalogue`, `/org/recruitment-analytics/rows` (the drill-down); `GET /org/feed`; `GET /orgs/directory` (no Grassroots pathway record) |
 | Contacts | `GET`/`POST /org/rooms/:id/contacts`, `GET`/`PATCH …/contacts/:cid`, `POST …/contacts/:cid/cancel`, `…/contacts/:cid/send` (the in-app request, the guardian's email copy, the agent beside the player when their authority holds), `POST …/contacts/external`, `GET /org/recruitment/contact-policy`; a recipient's answer lands on the contact through the respond route; `GET /player/insights`; `GET /player/journeys`, `GET /guardian/children/:id/journeys` (what was shared with the recipient), `GET /org/agent/clients/:id/journey` (what the client routed or shared to the agent, as far as the agent's basis, scope and licence open it), signing packages included |
@@ -118,7 +120,7 @@ Every route below is exercised by a battery, except where marked.
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
 The largest: the similarity engine ("more like this"),
-insights, coach vouches, club setup, staff SSO, the Expo push transport, process metrics, and password sign-in
+the insight sweep, coach vouches, club setup, staff SSO, the Expo push transport, process metrics, and password sign-in
 for players and guardians (a new player account stores a hash no password matches). `dev/shape_diff.mjs` lists where responses differ because of them.
 
 ## Known differences from the TypeScript server

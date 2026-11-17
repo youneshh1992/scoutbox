@@ -4,7 +4,7 @@
 //// uses it too), with its anti-pestering window and guardian routing.
 ////
 //// Not ported yet: `attribute_never_observed` and `assessment_disagreement`, which read an assessment's ratings and
-//// rubric (the scouting assessments domain); the direct request, dismiss and review routes.
+//// rubric (the scouting assessments domain).
 
 import gleam/dynamic/decode
 import gleam/int
@@ -27,7 +27,7 @@ import scoutbox/rows/orgs
 import scoutbox/vocab/audience
 import scoutbox/vocab/party
 import sqlight
-import wisp.{type Response}
+import wisp.{type Request, type Response}
 
 const rules_version = 1
 
@@ -548,4 +548,80 @@ pub fn players_with_status(
     [id.org_sql(org_id), sqlight.text(row.status_to_string(status))],
     decode.at([0], id.player_decoder()),
   )
+}
+
+/// `POST /org/evidence-gaps/:id/request`.
+pub fn request_route(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  suggestion_id: id.EvidenceSuggestionId,
+) -> Response {
+  use _ <- http.body(req, input.nothing(), [])
+  let now = clock.now_ms()
+  let out =
+    store.unit(ctx.store, fn(tx) {
+      request(tx, a.org, suggestion_id, None, now)
+    })
+  case out {
+    Ok(Ok(#(s, _))) -> http.json(200, json.object([#("suggestion", view(s))]))
+    Ok(Error(refusal)) -> refusal_response(refusal)
+    Error(e) -> http.internal(e)
+  }
+}
+
+/// `POST /org/evidence-gaps/:id/dismiss` and `…/reviewed`: a gap is marked reviewed only once it shows as
+/// supplied.
+pub fn set_status_route(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  suggestion_id: id.EvidenceSuggestionId,
+  status: row.Status,
+) -> Response {
+  use _ <- http.body(req, input.nothing(), [])
+  let now = clock.now_ms()
+  let out =
+    store.unit(ctx.store, fn(tx) {
+      let read = store.reading(tx)
+      use found <- result.try(store.one(
+        read,
+        "SELECT "
+          <> row.columns
+          <> " FROM evidence_suggestions WHERE id = ? AND org_id = ?",
+        [id.evidence_suggestion_sql(suggestion_id), id.org_sql(a.org.id)],
+        row.decoder(),
+      ))
+      case found {
+        Error(Nil) -> Ok(http.error(404, "SUGGESTION_NOT_FOUND"))
+        Ok(s) if status == row.Reviewed && s.status != row.Supplied ->
+          Ok(http.error_message(
+            409,
+            "NOT_SUPPLIED",
+            "Mark reviewed once the gap shows as supplied.",
+          ))
+        Ok(s) -> {
+          use _ <- result.try(
+            store.run(
+              tx,
+              "UPDATE evidence_suggestions SET status = ?, updated_at = ? WHERE id = ?",
+              [
+                sqlight.text(row.status_to_string(status)),
+                sqlight.int(now),
+                id.evidence_suggestion_sql(s.id),
+              ],
+            ),
+          )
+          use fresh <- result.map(with_records(
+            read,
+            row.Row(..s, status:, updated_at: now),
+          ))
+          http.json(200, json.object([#("suggestion", view(fresh))]))
+        }
+      }
+    })
+  case out {
+    Ok(response) -> response
+    Error(e) -> http.internal(e)
+  }
 }

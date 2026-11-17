@@ -39,7 +39,10 @@ import scoutbox/identity/register_routes
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
+import scoutbox/insight/calibration
+import scoutbox/insight/coverage
 import scoutbox/insight/evidence_gaps
+import scoutbox/insight/exposure
 import scoutbox/insight/review_queue
 import scoutbox/integrations/webhooks
 import scoutbox/media/links
@@ -73,6 +76,7 @@ import scoutbox/recruitment/signing_routes
 import scoutbox/recruitment/signings
 import scoutbox/recruitment/trial_day
 import scoutbox/recruitment/trial_routes
+import scoutbox/rows/evidence_suggestions as suggestion_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
@@ -451,6 +455,99 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
+        ["review-queue", pid, "later"] ->
+          only(req, Post, fn() {
+            review_queue.defer(ctx, req, org, id.player(pid))
+          })
+        ["exposure", "impressions"] ->
+          only(req, Post, fn() { exposure.impressions(ctx, req, org) })
+        ["exposure", "report"] ->
+          only(req, Get, fn() { exposure.report(ctx, org) })
+        ["discovery-rotation"] ->
+          only(req, Get, fn() { exposure.rotation(ctx, org) })
+        ["decision-review"] ->
+          only(req, Get, fn() { exposure.decision_review(ctx, org) })
+        ["assessment-templates"] ->
+          only(req, Get, fn() { assessments.templates(ctx) })
+        ["calibration"] ->
+          case req.method {
+            Get -> calibration.list_for(ctx, req, org)
+            Post -> calibration.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["calibration", cid] ->
+          only(req, Get, fn() {
+            calibration.get(ctx, org, id.calibration_session(cid))
+          })
+        ["calibration", cid, "submit"] ->
+          only(req, Post, fn() {
+            calibration.submit(ctx, req, org, id.calibration_session(cid))
+          })
+        ["calibration", cid, "close"] ->
+          only(req, Post, fn() {
+            calibration.close(ctx, req, org, id.calibration_session(cid))
+          })
+        ["calibration", cid, "notes"] ->
+          only(req, Post, fn() {
+            calibration.add_note(ctx, req, org, id.calibration_session(cid))
+          })
+        ["evidence-gaps", gid, "request"] ->
+          only(req, Post, fn() {
+            evidence_gaps.request_route(
+              ctx,
+              req,
+              org,
+              id.evidence_suggestion(gid),
+            )
+          })
+        ["evidence-gaps", gid, "dismiss"] ->
+          only(req, Post, fn() {
+            evidence_gaps.set_status_route(
+              ctx,
+              req,
+              org,
+              id.evidence_suggestion(gid),
+              suggestion_row.Dismissed,
+            )
+          })
+        ["evidence-gaps", gid, "reviewed"] ->
+          only(req, Post, fn() {
+            evidence_gaps.set_status_route(
+              ctx,
+              req,
+              org,
+              id.evidence_suggestion(gid),
+              suggestion_row.Reviewed,
+            )
+          })
+        ["coverage", "fixtures"] ->
+          case req.method {
+            Get -> coverage.list_fixtures(ctx, req, org)
+            Post -> coverage.create_fixture(ctx, req, org)
+            _ -> not_found()
+          }
+        ["coverage-plans"] ->
+          case req.method {
+            Get -> coverage.list_plans(ctx, org)
+            Post -> coverage.create_plan(ctx, req, org)
+            _ -> not_found()
+          }
+        ["coverage", "assignments"] ->
+          case req.method {
+            Get -> coverage.list_assignments(ctx, req, org)
+            Post -> coverage.create_assignment(ctx, req, org)
+            _ -> not_found()
+          }
+        ["coverage", "assignments", aid, "complete"] ->
+          only(req, Post, fn() {
+            coverage.complete(ctx, req, org, id.coverage_assignment(aid))
+          })
+        ["coverage", "assignments", aid, "cancel"] ->
+          only(req, Post, fn() {
+            coverage.cancel(ctx, req, org, id.coverage_assignment(aid))
+          })
+        ["coverage", "suggestions"] ->
+          only(req, Get, fn() { coverage.suggestions(ctx, org) })
         ["recruitment", "lifecycle"] ->
           only(req, Get, fn() { lifecycle.vocabulary(ctx) })
         ["players"] ->
@@ -550,6 +647,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
         ["insights"] -> only(req, Get, fn() { insights.show(ctx, player) })
+        ["exposure"] ->
+          only(req, Get, fn() { exposure.player_view(ctx, player) })
         ["journeys"] ->
           only(req, Get, fn() { case_routes.player_journeys(ctx, req, player) })
         ["signings"] ->

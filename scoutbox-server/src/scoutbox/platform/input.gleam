@@ -343,6 +343,45 @@ pub fn day_or_blank() -> Check(Option(String)) {
   }
 }
 
+/// A calendar day `YYYY-MM-DD` (schemas.mjs `dateOnly`): anything else, "" included, is DATE_INVALID.
+pub fn date_only() -> Check(String) {
+  fn(v) {
+    let why = case decode.run(v, decode.string) {
+      Ok(s) -> temporal.date_only(s)
+      Error(_) -> Error("not text")
+    }
+    case why {
+      Ok(s) -> Ok(s)
+      Error(why) ->
+        Error(
+          Issue(
+            ..issue(
+              NotADate,
+              "must be a calendar day written YYYY-MM-DD (" <> why <> ")",
+            ),
+            expected: Some("YYYY-MM-DD"),
+            code: Some("DATE_INVALID"),
+          ),
+        )
+    }
+  }
+}
+
+/// At most `max` ids, none named twice (schemas.mjs `idsOnce`): `what` names one in the refusal ("player").
+pub fn ids_once(max: Int, what: String) -> Check(List(String)) {
+  let all = items_between(id(), 0, max)
+  fn(v) {
+    case all(v) {
+      Error(e) -> Error(e)
+      Ok(ids) ->
+        case list.length(list.unique(ids)) == list.length(ids) {
+          True -> Ok(ids)
+          False -> Error(issue(Invalid, "must not name a " <> what <> " twice"))
+        }
+    }
+  }
+}
+
 /// `?ids=a,b,c` for a batch read (schemas.mjs `idsText`): at most `max` ids of at most 80 characters each. More
 /// are refused rather than dropped. Empty entries are skipped.
 pub fn ids_text(max: Int) -> Check(List(String)) {

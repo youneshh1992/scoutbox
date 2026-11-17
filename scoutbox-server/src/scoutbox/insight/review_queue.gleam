@@ -14,10 +14,12 @@ import scoutbox/identity/players
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/ids
-import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/input
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
+import scoutbox/rows/review_later
 import sqlight
-import wisp.{type Response}
+import wisp.{type Request, type Response}
 
 const window_days = 90
 
@@ -48,42 +50,50 @@ pub fn record_exposure(
   kind: Kind,
 ) -> Nil {
   let at = clock.now_ms()
-  let _ =
-    store.unit(ctx.store, fn(tx) {
-      use seen <- result.try(store.query(
-        store.reading(tx),
-        "SELECT 1 FROM exposure_events WHERE org_id = ? AND player_id = ? AND kind = ? AND day_index = ?",
-        [
-          id.org_sql(org_id),
-          id.player_sql(player_id),
-          sqlight.text(kind_text(kind)),
-          sqlight.int(at / day_ms),
-        ],
-        decode.success(Nil),
-      ))
-      case seen {
-        [_] -> Ok(Nil)
-        _ -> {
-          use id <- result.try(ids.next(tx, "exp"))
-          use _ <- result.map(
-            store.run(
-              tx,
-              "INSERT INTO exposure_events (id, org_id, player_id, kind, day_index, at) VALUES (?, ?, ?, ?, ?, ?)",
-              [
-                sqlight.text(id),
-                id.org_sql(org_id),
-                id.player_sql(player_id),
-                sqlight.text(kind_text(kind)),
-                sqlight.int(at / day_ms),
-                sqlight.int(at),
-              ],
-            ),
-          )
-          Nil
-        }
-      }
-    })
+  let _ = store.unit(ctx.store, record(_, org_id, player_id, kind, at))
   Nil
+}
+
+/// Records the event inside the caller's unit: `False` when the day already has it.
+pub fn record(
+  tx: Tx,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
+  kind: Kind,
+  at: Int,
+) -> Result(Bool, Fail(e)) {
+  use seen <- result.try(store.query(
+    store.reading(tx),
+    "SELECT 1 FROM exposure_events WHERE org_id = ? AND player_id = ? AND kind = ? AND day_index = ?",
+    [
+      id.org_sql(org_id),
+      id.player_sql(player_id),
+      sqlight.text(kind_text(kind)),
+      sqlight.int(at / day_ms),
+    ],
+    decode.success(Nil),
+  ))
+  case seen {
+    [_] -> Ok(False)
+    _ -> {
+      use id <- result.try(ids.next(tx, "exp"))
+      use _ <- result.map(
+        store.run(
+          tx,
+          "INSERT INTO exposure_events (id, org_id, player_id, kind, day_index, at) VALUES (?, ?, ?, ?, ?, ?)",
+          [
+            sqlight.text(id),
+            id.org_sql(org_id),
+            id.player_sql(player_id),
+            sqlight.text(kind_text(kind)),
+            sqlight.int(at / day_ms),
+            sqlight.int(at),
+          ],
+        ),
+      )
+      True
+    }
+  }
 }
 
 /// `GET /org/review-queue`.
@@ -227,4 +237,80 @@ fn stale_item(player_id: id.PlayerId, name: Option(String), at: Int) -> Json {
     #("lastAssessedAt", json.int(at)),
     #("note", json.string("last assessed over 180 days ago")),
   ])
+}
+
+/// How many players sit in the not-yet-assessed queue, deferred ones included: the exposure report's
+/// "not yet reviewed".
+pub fn not_yet_reviewed(
+  read: Read,
+  a: OrgAccess,
+  now: Int,
+) -> Result(Int, Fail(e)) {
+  use #(queue, deferred, _) <- result.map(read_queue(read, a, now))
+  list.length(queue) + list.length(deferred)
+}
+
+const later_min = 1
+
+const later_max = 60
+
+const later_default = 7
+
+fn later_shape() -> input.Shape(Option(Int)) {
+  use days <- input.field(
+    "days",
+    input.nullish(input.whole_number(later_min, later_max)),
+  )
+  input.done(days)
+}
+
+/// `POST /org/review-queue/:playerId/later`: only a player the club can see now can be deferred. Deferring again
+/// replaces the earlier deferral.
+pub fn defer(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  player_id: id.PlayerId,
+) -> Response {
+  use days <- http.body(req, later_shape(), [])
+  let days = option.unwrap(days, later_default)
+  let now = clock.now_ms()
+  let deferred =
+    store.unit(ctx.store, fn(tx) {
+      use found <- result.try(players.for_org(
+        store.reading(tx),
+        player_id,
+        a.org,
+        now,
+      ))
+      case found {
+        Some(#(p, access)) if access.visible && !access.blocked -> {
+          use _ <- result.try(
+            store.run(
+              tx,
+              "DELETE FROM review_later WHERE org_id = ? AND player_id = ?",
+              [id.org_sql(a.org.id), id.player_sql(p.row.id)],
+            ),
+          )
+          use deferral_id <- result.try(id.next_deferral(tx))
+          review_later.insert(
+            tx,
+            review_later.new(
+              id: deferral_id,
+              org_id: a.org.id,
+              player_id: p.row.id,
+              by_user_id: a.user.id,
+              due_at: now + days * day_ms,
+            ),
+          )
+          |> result.replace(True)
+        }
+        _ -> Ok(False)
+      }
+    })
+  case deferred {
+    Ok(True) -> http.json(200, json.object([#("deferredDays", json.int(days))]))
+    Ok(False) -> http.error(403, "NOT_VISIBLE")
+    Error(e) -> http.internal(e)
+  }
 }

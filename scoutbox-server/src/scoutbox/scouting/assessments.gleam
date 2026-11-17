@@ -201,7 +201,7 @@ fn number(f: Float) -> Json {
   }
 }
 
-fn attribute_json(x: attribute_row.Row) -> Json {
+pub fn attribute_json(x: attribute_row.Row) -> Json {
   json.object([
     #("id", json.string(x.attr_id)),
     #("label", json.string(x.label)),
@@ -250,7 +250,7 @@ pub fn context_json(r: row.Row) -> Json {
   ])
 }
 
-fn recommendation_json(r: row.Row) -> Json {
+pub fn recommendation_json(r: row.Row) -> Json {
   case r.recommendation_verdict {
     Some(v) ->
       json.object([
@@ -1461,5 +1461,82 @@ pub fn compare(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
           )
         }
       }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- templates
+
+/// A template version's attributes, in rubric order: the rubric a calibration session pins.
+pub fn template_attributes(
+  read: Read,
+  template_id: String,
+  version: Int,
+) -> Result(List(attribute_row.Row), Fail(e)) {
+  attributes_of(read, template_id, version)
+}
+
+/// The newest version of template `template_id`.
+pub fn current_template_by_id(
+  read: Read,
+  template_id: String,
+) -> Result(Option(template_row.Row), Fail(e)) {
+  store.one(
+    read,
+    "SELECT "
+      <> template_row.columns
+      <> " FROM assessment_templates WHERE id = ? ORDER BY version DESC LIMIT 1",
+    [sqlight.text(template_id)],
+    template_row.decoder(),
+  )
+  |> result.map(option.from_result)
+}
+
+/// `GET /org/assessment-templates`: every version of every template, in the order they were published.
+pub fn templates(ctx: Ctx) -> Response {
+  let found =
+    store.read(ctx.store, fn(read) {
+      use rows <- result.try(store.query(
+        read,
+        "SELECT "
+          <> template_row.columns
+          <> " FROM assessment_templates ORDER BY rowid",
+        [],
+        template_row.decoder(),
+      ))
+      list.try_map(rows, fn(t) {
+        attributes_of(read, t.id, t.version) |> result.map(fn(xs) { #(t, xs) })
+      })
+    })
+  case found {
+    Error(e) -> http.internal(e)
+    Ok(templates) ->
+      http.json(
+        200,
+        json.object([
+          #(
+            "templates",
+            json.array(templates, fn(x) {
+              let #(t, attributes) = x
+              json.object([
+                #("id", json.string(t.id)),
+                #(
+                  "positionGroup",
+                  template_row.position_group_to_json(t.position_group),
+                ),
+                #("version", json.int(t.version)),
+                #("createdAt", json.int(t.created_at)),
+                #("createdBy", json.string(t.created_by_name)),
+                #("attributes", json.array(attributes, attribute_json)),
+              ])
+            }),
+          ),
+          #(
+            "note",
+            json.string(
+              "New versions never alter historical reports — every assessment snapshots its template at creation.",
+            ),
+          ),
+        ]),
+      )
   }
 }
