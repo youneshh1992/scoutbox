@@ -9,11 +9,17 @@
 ////   them up, so nothing can drop one. A `Read` has no collector: a read cannot ask for an effect.
 //// - Each unit runs in a fresh process the writer monitors. If the work crashes (a `panic`, a failed
 ////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit.
+//// - Queries go through `scoutbox_store_ffi`, not sqlight's `query`: each connection's statements are prepared once
+////   and kept, and run on a normal scheduler unless one has taken over a millisecond (see that module, and
+////   `vendor/esqlite.patch`). Statements without parameters (`exec`: BEGIN, COMMIT, migrations) go through sqlight,
+////   on a dirty scheduler, so a COMMIT's fsync never holds a normal one.
 
+import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -23,6 +29,7 @@ import sqlight
 pub opaque type Tx {
   Tx(
     conn: sqlight.Connection,
+    cache: Cache,
     should_fail: fn(String) -> Bool,
     /// The unit's effects, in the order asked for. Owned by the unit's process, which drains it on success.
     effects: Subject(Effect),
@@ -35,8 +42,11 @@ pub fn emit(tx: Tx, effect: Effect) -> Nil {
 }
 
 pub opaque type Read {
-  Read(conn: sqlight.Connection)
+  Read(conn: sqlight.Connection, cache: Cache)
 }
+
+/// The prepared statements of every connection of one store (an ETS table, owned by the writer's process).
+type Cache
 
 /// Why an operation inside a unit (or a read) did not finish: the storage refused it, or the act did.
 pub type Fail(e) {
@@ -93,7 +103,7 @@ pub opaque type Store {
 }
 
 type Job {
-  Job(run: fn(sqlight.Connection) -> Nil)
+  Job(run: fn(sqlight.Connection, Cache) -> Nil)
 }
 
 /// Opens the database file at `path`: one writer and `readers` read-only connections. `dispatch` sends an effect
@@ -103,11 +113,19 @@ pub fn open(
   readers readers: Int,
   dispatch dispatch: fn(Effect) -> Nil,
 ) -> Result(Store, String) {
-  use #(writer_pid, writer) <- result.try(start_connection("file:" <> path))
+  // The writer's process owns the cache, so it lives as long as the store.
+  use #(writer_pid, writer, cache) <- result.try(start_connection(
+    "file:" <> path,
+    5000,
+    None,
+  ))
   use readers <- result.try(
     list.repeat(Nil, readers)
     |> list.try_map(fn(_) {
-      start_connection("file:" <> path <> "?mode=ro")
+      // A reader never waits for a lock inside SQLite: on a normal scheduler that would hold the scheduler. It
+      // answers BUSY at once and the query retries in Erlang. With one writer and WAL, readers meet a lock only
+      // in edge cases (recovery after a crash). The writer waits only in BEGIN and COMMIT, on a dirty scheduler.
+      start_connection("file:" <> path <> "?mode=ro", 0, Some(cache))
       |> result.map(fn(started) { started.1 })
     }),
   )
@@ -128,27 +146,84 @@ pub fn with_dispatch(store: Store, dispatch: fn(Effect) -> Nil) -> Store {
   Store(..store, dispatch:)
 }
 
-fn start_connection(uri: String) -> Result(#(Pid, Subject(Job)), String) {
+/// A connection in its own process. With no `cache`, the process makes one and owns it.
+fn start_connection(
+  uri: String,
+  busy_timeout_ms: Int,
+  cache: Option(Cache),
+) -> Result(#(Pid, Subject(Job), Cache), String) {
   actor.new_with_initialiser(5000, fn(subject) {
     use conn <- result.try(
       sqlight.open(uri) |> result.map_error(string.inspect),
     )
     use _ <- result.try(
       sqlight.exec(
-        "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+        "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = "
+          <> int.to_string(busy_timeout_ms)
+          <> ";",
         conn,
       )
       |> result.map_error(string.inspect),
     )
-    actor.initialised(conn) |> actor.returning(subject) |> Ok
+    let cache = option.lazy_unwrap(cache, new_cache)
+    actor.initialised(#(conn, cache))
+    |> actor.returning(#(subject, cache))
+    |> Ok
   })
-  |> actor.on_message(fn(conn, job: Job) {
-    job.run(conn)
-    actor.continue(conn)
+  |> actor.on_message(fn(state, job: Job) {
+    job.run(state.0, state.1)
+    actor.continue(state)
   })
   |> actor.start
-  |> result.map(fn(started) { #(started.pid, started.data) })
+  |> result.map(fn(started) {
+    #(started.pid, { started.data }.0, { started.data }.1)
+  })
   |> result.map_error(string.inspect)
+}
+
+@external(erlang, "scoutbox_store_ffi", "new_cache")
+fn new_cache() -> Cache
+
+@external(erlang, "scoutbox_store_ffi", "query")
+fn cached_query(
+  cache: Cache,
+  conn: sqlight.Connection,
+  sql: String,
+  args: List(sqlight.Value),
+) -> Result(List(Dynamic), sqlight.Error)
+
+@external(erlang, "scoutbox_store_ffi", "runs_dirty")
+fn ffi_runs_dirty(cache: Cache, conn: sqlight.Connection, sql: String) -> Bool
+
+/// sqlight's `query` through the cache, with sqlight's own decode error.
+fn run_query(
+  cache: Cache,
+  conn: sqlight.Connection,
+  sql: String,
+  args: List(sqlight.Value),
+  decoder: Decoder(a),
+) -> Result(List(a), sqlight.Error) {
+  use rows <- result.try(cached_query(cache, conn, sql, args))
+  list.try_map(rows, decode.run(_, decoder))
+  |> result.map_error(fn(errors) {
+    let assert [decode.DecodeError(expected, found, path), ..] = errors
+    sqlight.SqlightError(
+      sqlight.GenericError,
+      "Decoder failed, expected "
+        <> expected
+        <> ", got "
+        <> found
+        <> " in "
+        <> string.join(path, "."),
+      -1,
+    )
+  })
+}
+
+/// For tests: whether `sql` now runs on a dirty scheduler on this read's connection, having once taken over a
+/// millisecond on a normal one.
+pub fn runs_dirty(read: Read, sql: String) -> Bool {
+  ffi_runs_dirty(read.cache, read.conn, sql)
 }
 
 /// The same store with the fault layer's seams: `should_fail(step)` says whether a named step inside a unit
@@ -207,8 +282,8 @@ fn attempt(
   let reply = process.new_subject()
   process.send(
     store.writer,
-    Job(fn(conn) {
-      process.send(reply, supervise_unit(conn, store.should_fail, work))
+    Job(fn(conn, cache) {
+      process.send(reply, supervise_unit(conn, cache, store.should_fail, work))
     }),
   )
   case process.receive(reply, store.timeout) {
@@ -221,13 +296,14 @@ fn attempt(
 /// one has committed or rolled back.
 fn supervise_unit(
   conn: sqlight.Connection,
+  cache: Cache,
   should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(#(a, List(Effect)), UnitError(e)) {
   let done = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
-      process.send(done, run_unit(conn, should_fail, work))
+      process.send(done, run_unit(conn, cache, should_fail, work))
     })
   let monitor = process.monitor(pid)
   let outcome =
@@ -249,6 +325,7 @@ fn supervise_unit(
 
 fn run_unit(
   conn: sqlight.Connection,
+  cache: Cache,
   should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(#(a, List(Effect)), UnitError(e)) {
@@ -256,7 +333,7 @@ fn run_unit(
     sqlight.exec("BEGIN IMMEDIATE", conn) |> result.map_error(Database),
   )
   let effects = process.new_subject()
-  let outcome = case work(Tx(conn, should_fail, effects)) {
+  let outcome = case work(Tx(conn, cache, should_fail, effects)) {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
     Error(Stale(what)) -> Error(Lost(what))
@@ -304,7 +381,10 @@ pub fn read(store: Store, f: fn(Read) -> a) -> a {
   let index = int.random(list.length(store.readers))
   let assert Ok(reader) = store.readers |> list.drop(index) |> list.first
   let reply = process.new_subject()
-  process.send(reader, Job(fn(conn) { process.send(reply, f(Read(conn))) }))
+  process.send(
+    reader,
+    Job(fn(conn, cache) { process.send(reply, f(Read(conn, cache))) }),
+  )
   let assert Ok(value) = process.receive(reply, store.timeout)
     as "a read did not answer in time"
   value
@@ -312,7 +392,7 @@ pub fn read(store: Store, f: fn(Read) -> a) -> a {
 
 /// A unit's reads see its own writes.
 pub fn reading(tx: Tx) -> Read {
-  Read(tx.conn)
+  Read(tx.conn, tx.cache)
 }
 
 /// The rows `sql` returns, each decoded. A row that does not decode is an error, never a guess.
@@ -322,7 +402,7 @@ pub fn query(
   args: List(sqlight.Value),
   decoder: Decoder(a),
 ) -> Result(List(a), Fail(e)) {
-  sqlight.query(sql, on: read.conn, with: args, expecting: decoder)
+  run_query(read.cache, read.conn, sql, args, decoder)
   |> result.map_error(Storage)
 }
 
@@ -343,7 +423,7 @@ pub fn write(
   args: List(sqlight.Value),
   decoder: Decoder(a),
 ) -> Result(List(a), Fail(e)) {
-  sqlight.query(sql, on: tx.conn, with: args, expecting: decoder)
+  run_query(tx.cache, tx.conn, sql, args, decoder)
   |> result.map_error(Storage)
 }
 
@@ -367,7 +447,7 @@ pub fn writer_pragma(store: Store, sql: String) -> Result(Nil, String) {
   let reply = process.new_subject()
   process.send(
     store.writer,
-    Job(fn(conn) {
+    Job(fn(conn, _) {
       process.send(
         reply,
         sqlight.exec(sql, conn) |> result.map_error(string.inspect),

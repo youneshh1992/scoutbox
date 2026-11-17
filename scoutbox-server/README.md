@@ -24,6 +24,7 @@ answers twenty-two of the TypeScript server's e2e batteries unchanged: `platform
 `recruitment/contactsPersistence` and `agents/core`.
 
 ```sh
+npm run esqlite        # once after cloning (Gleam can't resolve the project without it): the patched esqlite
 gleam check            # type-check (fast)
 gleam test             # unit tests, the generator's snapshots, and the rules proved against domain.ts
 gleam run              # the server on PORT (default 4000), data in DATA_DIR (default ./data)
@@ -60,6 +61,13 @@ required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake pro
 - `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`,
   `verification/`, `enterprise/`: the domains. `verification/claims` holds the pure rules, proved by the generated
   tests in `test/scoutbox/battery/verification/`.
+- `vendor/esqlite.patch`: our change to esqlite, the NIF under sqlight. `npm run esqlite` (`dev/esqlite.mjs`)
+  fetches the pinned Hex tarball, checks it, applies the patch and compiles the NIF into `vendor/esqlite/` (not
+  committed), which `gleam.toml` takes as a path dependency in place of the Hex copy. The patch adds `fetchall`
+  (every row in one call, on a normal scheduler) and `fetchall_dirty`; `platform/scoutbox_store_ffi.erl` caches
+  each connection's statements and runs one on the dirty scheduler once it has taken over a millisecond. Stock
+  esqlite runs every row's `step` on the dirty schedulers, which made reads several times slower than Node and
+  stopped them scaling. An upgrade is a new pin and checksum in `dev/esqlite.mjs` and the patch reapplied.
 - `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
   seed, dumped by `dev/seed_sql.mjs`.
 - `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,

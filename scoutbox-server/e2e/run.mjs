@@ -21,6 +21,13 @@ if (unknown.length) {
 }
 const queue = BATTERIES.filter((b) => !requested.length || requested.some((r) => b === r || b.startsWith(`${r}/`)));
 
+// The patched esqlite first (nothing to do when it is current): the release links its NIF.
+const esqlite = spawnSync(process.execPath, [path.join(SERVER_DIR, 'dev/esqlite.mjs')], { cwd: SERVER_DIR, encoding: 'utf8' });
+if (esqlite.status !== 0) {
+  console.error(esqlite.stdout, esqlite.stderr);
+  console.error('e2e: the patched esqlite did not build');
+  process.exit(1);
+}
 const build = spawnSync('gleam', ['export', 'erlang-shipment'], { cwd: SERVER_DIR, encoding: 'utf8' });
 if (build.status !== 0) {
   console.error(build.stdout, build.stderr);

@@ -12,7 +12,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 ## Writing Gleam here
 
 - **Pure Gleam is always preferable.** Use Erlang FFI (`@external`) only when something is impossible in Gleam
-  and no maintained Gleam package covers it. Today `src/` has one: `platform/unicode` (NFC, from OTP's tables).
+  and no maintained Gleam package covers it. Today `src/` has two: `platform/unicode` (NFC, from OTP's tables)
+  and `platform/scoutbox_store_ffi.erl` (the store's statement cache and scheduler choice, on the NIFs
+  `vendor/esqlite.patch` adds; see the README).
   If you must add one: keep it in one small module, document why Gleam can't do it, and test it directly,
   because the type checker can't see across FFI.
 - **`gleam check` is the fast feedback loop.** It type-checks the whole project in well under a second, so run
@@ -26,6 +28,11 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - JavaScript's `length` counts UTF-16 units. Text limits use `input.utf16_length` so they agree with the
     TypeScript server and the apps.
   - `wisp_ewe` is not on Hex. It is vendored and adapted in `platform/wisp_ewe.gleam`.
+  - esqlite is patched (`vendor/esqlite.patch`, built by `npm run esqlite`). After a fresh clone or a change to the
+    patch, run it before any `gleam` command; `npm run e2e` runs it itself. Don't edit `vendor/esqlite/`: it is
+    rebuilt from the patch.
+  - A statement through the store runs on a normal scheduler until it takes over 1 ms. Known long work (a full
+    scan, a sweep over every row) pays that once per connection; it is never wrong, only briefly slow for others.
   - `gleam dev` (the generator) compiles `src/` first, so code that uses a name the generator has not written yet
     blocks the run that would write it. Regenerate before using a new column or table.
   - A panicking `npm run codegen` (an id column it can't decide, say) has already deleted `src/scoutbox/rows` and

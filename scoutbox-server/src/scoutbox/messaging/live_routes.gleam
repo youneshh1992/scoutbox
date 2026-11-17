@@ -291,12 +291,16 @@ pub fn open(
     Ok(#(after, sid)) -> #(int.parse(after) |> result.unwrap(0), sid)
     Error(Nil) -> #(0, "")
   }
+  // Joined before ewe writes the headers (this is the connection's process, which then runs the stream): a client
+  // may act the moment its request is answered, and an event published in between must not be lost. It waits in
+  // `frames` until the stream starts, and is filtered there like any other.
+  let frames = process.new_subject()
+  let joined = live.join(ctx.live, frames, after)
   ewe.sse(
     resp,
     on_init: fn(conn, selector) {
       let now = clock.now_ms()
       let signals = process.new_subject()
-      let frames = process.new_subject()
       let selector =
         selector
         |> process.select(signals)
@@ -307,10 +311,13 @@ pub fn open(
         })
         |> result.unwrap(None)
       case viewer {
-        None -> process.send(signals, Stop)
+        None -> {
+          live.leave(ctx.live)
+          process.send(signals, Stop)
+        }
         Some(viewer) -> {
           let _ = send(conn, live.signal("connected", now))
-          case live.join(ctx.live, frames, after) {
+          case joined {
             live.Fresh -> Nil
             live.Resync -> {
               let _ = send(conn, live.signal("resync", clock.now_ms()))

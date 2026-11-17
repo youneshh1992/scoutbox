@@ -142,6 +142,10 @@ Measured trade-offs to keep in mind:
   most, but it doesn't block other work. If that matters, use a NIF or PBKDF2, on both servers together.
 - **SSE** fan-out is about 8 times faster than TypeScript at 1,000 streams, but uses about twice the memory per
   stream.
+- **Reads** go through a patched esqlite (`vendor/esqlite.patch`): a query's rows in one NIF call on a normal
+  scheduler, with a statement cache. The one-client directory is within 7% of TypeScript, and it runs at 4.6 times
+  TypeScript's throughput at 32 clients. Stock esqlite was 1.9 times slower for one client and stopped scaling
+  past one reader. Details: the evaluation's "Read speed, and the decision".
 
 Open questions:
 

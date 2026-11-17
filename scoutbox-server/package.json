@@ -7,6 +7,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "esqlite": "node dev/esqlite.mjs",
     "e2e": "node e2e/run.mjs",
     "e2e:sync": "node e2e/sync.mjs",
     "e2e:check": "node e2e/sync.mjs --check && node dev/migrations_sql.mjs --check && node dev/battery_cases.mjs --check && node dev/combine_protocols.mjs --check && node dev/ledger.mjs --check",
