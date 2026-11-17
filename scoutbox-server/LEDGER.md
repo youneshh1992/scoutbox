@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 11 | 10 | 444 / 956 | 15 / 159 | 16 to go |
+| recruitment | 19 | 14 | 10 | 444 / 1081 | 15 / 160 | 16 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -81,9 +81,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 0 / 82 | 0 / 23 | 82 cases pending; 23 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
-| `recruitment/signings` | not yet neutral | 5 → 5 | 245 | 245 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/signingsPersistence` | not yet neutral | 3 → 3 | 78 | 78 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  |  | 0 / 82 | 0 / 1 | not answered; 82 cases pending; 1 hand-port calls |
+| `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  |  | 0 / 43 |  | not answered; 43 cases pending |
+| `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  |  |  |  | not answered |
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 0 / 106 | 0 / 6 | 106 cases pending; 6 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
@@ -178,6 +178,7 @@ ported by hand to a gleeunit test.
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 2 | args[].note.toString is a function; Gleam's types can't hold its arguments: cannot print "sign_immediately" as a value of scoutbox/rows/room_decisions.recommendation_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 1 | args[] is undefined | to do |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 1 | args[].toString is a function | to do |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 4 | args[] is a ; args[] is a function; args[] is a symbol; args[] is NaN | to do |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
@@ -358,6 +359,32 @@ mapped, then `npm run cases`.
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
 | `recruitment/offersAdversarial` | `temporal.ts#isExpiredAt` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/errors.mjs#publicErrorBody` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 6 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canStart` | 10 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#cleanText` | 2 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#completionGate` | 7 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 7 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#minorSigningPathwayOpen` | 11 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#payloadFingerprint` | 4 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#requiredPartiesFor` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingAgentView` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingClubView` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingConsistency` | 8 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingCorrupt` | 1 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 10 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingRecipientView` | 2 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateContractDates` | 6 |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 4 |
+| `recruitment/signingsAdversarial` | `domain.ts#isAdult` | 4 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 2 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#canStart` | 3 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#completionGate` | 2 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 1 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#requiredPartiesFor` | 1 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingConsistency` | 1 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingCorrupt` | 1 |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 28 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 16 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#isTrialDate` | 4 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 42 |

@@ -1692,6 +1692,200 @@
     ]
   },
   {
+    "battery": "recruitment/signings",
+    "functions": [
+      {
+        "function": "domains/recruitment/signings/errors.mjs#publicErrorBody",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#canCompleteParty",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#canStart",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#cleanText",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#completionGate",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#effectiveStatus",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#minorSigningPathwayOpen",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#payloadFingerprint",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#requiredPartiesFor",
+        "calls": 28,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingAgentView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingClubView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingConsistency",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingCorrupt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingIntegrity",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingRecipientView",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#validateContractDates",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#validateExpiry",
+        "calls": 5,
+        "cases": 4,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/signingsAdversarial",
+    "functions": [
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#canCompleteParty",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#canStart",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#completionGate",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#effectiveStatus",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#requiredPartiesFor",
+        "calls": 35,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingConsistency",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingCorrupt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/signings/signing.mjs#signingIntegrity",
+        "calls": 30,
+        "cases": 28,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "recruitment/trialDatesMinorsAndErasure",
     "functions": [
       {
