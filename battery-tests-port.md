@@ -118,6 +118,32 @@ of the product, so they aren't one slice.
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
+#### Port order
+
+Work down this list. Mark each item `[**done**]` when it is done, and commit the mark with that work. Notes here
+are for surprising facts or points that later work depends on, not implementation detail.
+
+1. **Finish recruitment.** Untangle each battery first.
+   1. `recruitment/analytics`. `journey` section I waits on it, and `lifecycle` and `journeyAdversarial` use
+      its funnels.
+   2. `recruitment/lifecycle` and `recruitment/decisions`.
+   3. `recruitment/journeyPersistence`.
+   4. `recruitment/journeyAdversarial`. It also reaches into `/org/agent` and `/admin/blocks`.
+2. **Discovery, alongside recruitment.** `decisions`, `lifecycle` and `journey` section H5 all call
+   `/org/second-look`, so recruitment can't close without it.
+   1. `discovery/secondLookAndNobodyMissed`.
+   2. `discovery/exposureCalibrationAndCoverage`. It is already neutral and self-contained.
+   3. `discovery/matchingAndWatchlists`, once its Box Cam results come from `sqlFixture.mjs` rows.
+3. **Agents**: the other 8 batteries. Clear `agents/core`'s pending cases too. `journeyAdversarial` and
+   `operations` also call `/org/agent`.
+4. `scouting/clubWorkflows`. It needs the uploads check first.
+5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
+6. `operations/clubOperations`, then the Box Cam records batteries.
+7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
+
+Throughout the port, map the `dates` rule cases (2,253 pending) as the date rules are ported, since every domain
+uses them.
+
 Patterns established on the way. New domains should reuse them, and `CLAUDE.md` holds the rules:
 
 - **Effects after COMMIT** (`store.emit`) for pushes, mail, live events and webhooks.
