@@ -201,10 +201,15 @@ pub fn explain(c: Criteria) -> Json {
 /// A brief naming a protected characteristic is refused under its own code, whatever else is wrong with it. The
 /// body's keys, folded as `k.toLowerCase().replace(/[^a-z]+/g, '_')`, are matched whole or in part.
 pub fn prohibited(body: Dynamic) -> Option(List(String)) {
-  let keys =
-    decode.run(body, decode.dict(decode.string, decode.dynamic))
-    |> result.map(fn(d) { list.map(dict.keys(d), fold_key) })
-    |> result.unwrap([])
+  decode.run(body, decode.dict(decode.string, decode.dynamic))
+  |> result.map(dict.keys)
+  |> result.unwrap([])
+  |> prohibited_keys
+}
+
+/// The prohibited fields among a body's keys, folded.
+pub fn prohibited_keys(keys: List(String)) -> Option(List(String)) {
+  let keys = list.map(keys, fold_key)
   case
     list.filter(keys, fn(k) {
       list.any(prohibited_fields, fn(p) { k == p || string.contains(k, p) })
@@ -290,6 +295,29 @@ pub fn invalid_json(details: List(Detail)) -> Json {
       json.string("This recruitment brief cannot be saved as written."),
     ),
   ])
+}
+
+pub fn valid_json(v: Valid) -> Json {
+  json.object([
+    #("ok", json.bool(True)),
+    #("title", json.string(v.title)),
+    #("criteria", criteria_json(v.criteria)),
+    #("activeFrom", json.nullable(v.active_from, json.string)),
+    #("activeUntil", json.nullable(v.active_until, json.string)),
+  ])
+}
+
+/// validateRecruitmentBrief whole: a protected criterion is refused under its own code, whatever else is wrong;
+/// then the vocabularies and ranges. `keys` are the body's keys as sent.
+pub fn validate_body(keys: List(String), f: Fields, grassroots: Bool) -> Json {
+  case prohibited_keys(keys) {
+    Some(found) -> prohibited_json(found)
+    None ->
+      case validate(f, grassroots) {
+        Ok(v) -> valid_json(v)
+        Error(details) -> invalid_json(details)
+      }
+  }
 }
 
 pub fn fields_of(b: row.Row, c: Criteria) -> Fields {

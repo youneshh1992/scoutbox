@@ -19,10 +19,10 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 |---|---|---|---|---|---|---|
 | agents | 9 | 1 | 1 | 0 / 216 | 0 / 1 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
-| discovery | 3 | 2 | 1 | 0 / 136 | 0 / 0 | 3 to go |
+| discovery | 3 | 2 | 1 | 135 / 0 | 1 / 1 | 2 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 9 | 25 / 2347 | 0 / 179 | 5 to go |
+| platform | 13 | 13 | 9 | 40 / 2320 | 0 / 191 | 5 to go |
 | recruitment | 19 | 17 | 14 | 519 / 4128 | 28 / 295 | 14 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -51,19 +51,19 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  |  |  |  | not answered |
 | `discovery/matchingAndWatchlists` | not yet neutral | 13 → 13 | 152 | 152 |  |  |  |  |  | not untangled; not answered |
-| `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 0 / 136 |  | 136 cases pending |
+| `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
 | `passport/passport` | not yet neutral | 1 → 1 | 215 | 215 |  |  |  |  |  | not untangled; not answered |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
-| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 7 / 2246 | 0 / 135 | not answered; 2246 cases pending; 135 hand-port calls |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 7 / 43 | 0 / 25 | not answered; 43 cases pending; 25 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 11 / 2242 | 0 / 135 | not answered; 2242 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
-| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 0 / 39 | 0 / 12 | not answered; 39 cases pending; 12 hand-port calls |
+| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 4 / 35 | 0 / 12 | not answered; 35 cases pending; 12 hand-port calls |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
@@ -125,8 +125,11 @@ ported by hand to a gleeunit test.
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
 | `agents/core` | `domains/agents/core/shared.mjs#can` | 1 | args[] is undefined | to do |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
 | `platform/contracts` | `domain.ts#ageOn` | 8 | args[] is a ; result is NaN | to do |
 | `platform/contracts` | `domain.ts#isAdult` | 3 | args[] is a  | to do |
+| `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 | Gleam's types can't hold its arguments: cannot print "established" as a value of scoutbox/vocab/trust_band.pairs | to do |
+| `platform/contracts` | `domains/discovery/shared.mjs#secondLookStatus` | 2 | Gleam's types can't hold its arguments: cannot print "general_update" as a value of scoutbox/discovery/second_look_rules.change_type_pairs | to do |
 | `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | throws Error without a code | to do |
 | `platform/contracts` | `domains/platform/notificationPrefs.mjs#createNotificationPrefs` | 1 | args[].notifications.create is a function | to do |
 | `platform/dates` | `domain.ts#ageOn` | 20 | args[] is a ; args[] is NaN; args[] is undefined | to do |
@@ -239,36 +242,9 @@ mapped, then `npm run cases`.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/matching/match.mjs#playerMatchesBrief` | 8 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildNobodyMissedCandidate` | 3 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 13 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#canBriefTransition` | 3 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#canSecondLookTransition` | 4 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#changeFingerprint` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#changesSinceDecision` | 4 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#clampPage` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#compareToSnapshot` | 2 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#dedupeMaterialChanges` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#evaluationCoverageState` | 5 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#explainBriefCriteria` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#isMeaningfullyEvaluated` | 4 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#normalizeMaterialChange` | 30 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#orderNobodyMissed` | 2 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#orderSecondLook` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#safeM18Projection` | 1 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookExpired` | 2 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookReasonMatch` | 21 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookStatus` | 5 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#trustLevelChanges` | 2 |
-| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 22 |
 | `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
 | `platform/contracts` | `domain.ts#isAdult` | 1 |
 | `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |
-| `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 |
-| `platform/contracts` | `domains/discovery/shared.mjs#orderSecondLook` | 2 |
-| `platform/contracts` | `domains/discovery/shared.mjs#secondLookExpired` | 3 |
-| `platform/contracts` | `domains/discovery/shared.mjs#secondLookStatus` | 3 |
-| `platform/contracts` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 1 |
 | `platform/contracts` | `domains/platform/eventAudience.mjs#audienceFor` | 2 |
 | `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
 | `platform/contracts` | `domains/platform/eventRegistry.mjs#eventFingerprint` | 7 |
@@ -294,7 +270,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 |
 | `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
-| `platform/dates` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 4 |
 | `platform/dates` | `domains/passport/shared.mjs#normWhen` | 7 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
@@ -321,8 +296,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `temporal.ts#utcDayOf` | 1 |
 | `platform/dates` | `temporal.ts#validateIanaZone` | 21 |
 | `platform/dates` | `temporal.ts#zoneOffsetMinutes` | 4 |
-| `platform/productionHardening` | `domains/discovery/shared.mjs#changeFingerprint` | 2 |
-| `platform/productionHardening` | `domains/discovery/shared.mjs#normalizeMaterialChange` | 2 |
 | `platform/productionHardening` | `domains/passport/shared.mjs#passportRevision` | 8 |
 | `platform/productionHardening` | `domains/platform/capabilities.mjs#productionConfigProblems` | 11 |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 |

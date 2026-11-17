@@ -74,6 +74,31 @@ pub const change_types = [
   EvidenceGapClosed,
 ]
 
+/// Each change type with its text.
+pub const change_type_pairs = [
+  #("full_match_added", FullMatchAdded),
+  #("evidence_added", EvidenceAdded),
+  #("evidence_quality_improved", EvidenceQualityImproved),
+  #("evidence_removed", EvidenceRemoved),
+  #("evidence_disputed", EvidenceDisputed),
+  #("verified_reference_added", VerifiedReferenceAdded),
+  #("verified_reference_revoked", VerifiedReferenceRevoked),
+  #("combine_verified_added", CombineVerifiedAdded),
+  #("combine_verified_invalidated", CombineVerifiedInvalidated),
+  #("combine_verified_restored", CombineVerifiedRestored),
+  #("development_evidence_started", DevelopmentEvidenceStarted),
+  #("development_block_completed", DevelopmentBlockCompleted),
+  #("trial_completed", TrialCompleted),
+  #("assessment_submitted", AssessmentSubmitted),
+  #("current_club_confirmed", CurrentClubConfirmed),
+  #("position_changed", PositionChanged),
+  #("evidence_gap_closed", EvidenceGapClosed),
+]
+
+pub fn change_type_from_string(s: String) -> Result(ChangeType, Nil) {
+  list.key_find(change_type_pairs, s)
+}
+
 pub fn change_type_to_string(t: ChangeType) -> String {
   case t {
     FullMatchAdded -> "full_match_added"
@@ -212,11 +237,42 @@ pub fn fingerprint(
   source_system: String,
   source_id: Option(String),
 ) -> String {
-  change_type_to_string(kind)
-  <> ":"
-  <> source_system
-  <> ":"
-  <> option.unwrap(source_id, "none")
+  fingerprint_text(change_type_to_string(kind), source_system, source_id)
+}
+
+/// changeFingerprint over any type's text.
+pub fn fingerprint_text(
+  type_: String,
+  source_system: String,
+  source_id: Option(String),
+) -> String {
+  type_ <> ":" <> source_system <> ":" <> option.unwrap(source_id, "none")
+}
+
+/// normalizeMaterialChange: None for a type outside the vocabulary or a change with no time.
+pub fn normalize(
+  type_: String,
+  source_system: String,
+  source_id: Option(String),
+  occurred_at: Option(Int),
+) -> Option(Change) {
+  case change_type_from_string(type_), occurred_at {
+    Ok(kind), Some(at) -> change(kind, source_system, source_id, at)
+    _, _ -> None
+  }
+}
+
+/// The change as the TypeScript record carries it, without its subject and payload.
+pub fn change_json(c: Change) -> Json {
+  json.object([
+    #("type", json.string(change_type_to_string(c.kind))),
+    #("sourceSystem", json.string(c.source_system)),
+    #("sourceId", json.nullable(c.source_id, json.string)),
+    #("occurredAt", json.int(c.occurred_at)),
+    #("negative", json.bool(is_negative(c.kind))),
+    #("text", json.string(change_copy(c.kind))),
+    #("fingerprint", json.string(c.fingerprint)),
+  ])
 }
 
 /// normalizeMaterialChange: None for a change with no time.
@@ -354,21 +410,24 @@ pub fn movement_json(m: Movement) -> Json {
 /// What a decision-time snapshot recorded, as counts of the references it kept.
 pub type Recorded {
   Recorded(
-    at: Int,
+    at: Option(Int),
     trust: Option(#(Float, String)),
-    evidence: Int,
-    combine: Int,
-    assessments: Int,
-    trials: Int,
+    /// None when the snapshot kept no references of that kind.
+    evidence: Option(Int),
+    combine: Option(Int),
+    assessments: Option(Int),
+    trials: Option(Int),
   )
 }
 
-/// The player's facts now, as the same counts.
+/// The player's facts now, as the same counts. No snapshot records how many references there were, so
+/// `references_at_decision` is None from every route.
 pub type Current {
   Current(
-    trust: Option(#(Int, String)),
+    trust: Option(#(Float, String)),
     evidence: Int,
     references: Int,
+    references_at_decision: Option(Int),
     combine: Int,
     assessments: Int,
     trials: Int,
@@ -394,14 +453,14 @@ fn row(key: String, label: String, was: Option(Json), now: Json) -> Json {
 }
 
 /// compareToSnapshot. `available: false` means the snapshot cannot reconstruct the previous value, not that it
-/// was zero: no snapshot records how many references there were, so that row is never available.
+/// was zero.
 pub fn compare(snapshot: Option(Recorded), current: Current) -> Json {
-  let known = fn(count: fn(Recorded) -> Int) {
-    option.map(snapshot, fn(s) { json.int(count(s)) })
+  let known = fn(count: fn(Recorded) -> Option(Int)) {
+    option.then(snapshot, count) |> option.map(json.int)
   }
   json.object([
     #("available", json.bool(option.is_some(snapshot))),
-    #("at", json.nullable(option.map(snapshot, fn(s) { s.at }), json.int)),
+    #("at", json.nullable(option.then(snapshot, fn(s) { s.at }), json.int)),
     #("note", case snapshot {
       Some(_) -> json.null()
       None -> json.string(no_snapshot_note)
@@ -415,7 +474,8 @@ pub fn compare(snapshot: Option(Recorded), current: Current) -> Json {
           option.then(snapshot, fn(s) { s.trust })
             |> option.map(fn(t) { trust_value_json(json_text.number(t.0), t.1) }),
           case current.trust {
-            Some(#(score, band)) -> trust_value_json(json.int(score), band)
+            Some(#(score, band)) ->
+              trust_value_json(json_text.number(score), band)
             None -> json.null()
           },
         ),
@@ -428,7 +488,7 @@ pub fn compare(snapshot: Option(Recorded), current: Current) -> Json {
         row(
           "references",
           "Verified coach references",
-          None,
+          option.map(current.references_at_decision, json.int),
           json.int(current.references),
         ),
         row(
@@ -504,17 +564,23 @@ pub type Candidate {
   )
 }
 
-/// buildSecondLookCandidate: None (the common case) when the player should not be surfaced. The room has ended
-/// (`archived_status` is archived, closed or withdrawn) and the player is visible: the caller checks both first.
+/// buildSecondLookCandidate: None (the common case) when the player should not be surfaced: they are not
+/// visible, the room has not ended, or nothing material changed since the decision.
 pub fn candidate(
   room_id: id.RecruitmentCaseId,
   player_id: id.PlayerId,
   archived_status: String,
+  visible: Bool,
   decision: Decided,
   changes: List(Change),
   now: Int,
 ) -> Option(Candidate) {
-  let material = since(changes, decision.at, now)
+  let ended =
+    list.contains(["archived", "closed", "withdrawn"], archived_status)
+  let material = case visible && ended {
+    True -> since(changes, decision.at, now)
+    False -> []
+  }
   case material {
     [] -> None
     [latest, ..] -> {
@@ -555,6 +621,42 @@ pub fn candidate(
       )
     }
   }
+}
+
+/// The candidate's facts, in buildSecondLookCandidate's key order (without the ids, trust and copy its views add).
+pub fn candidate_json(c: Candidate) -> Json {
+  json.object([
+    #("decisionAt", json.int(c.decision.at)),
+    #("archivedStatus", json.string(c.archived_status)),
+    #("archiveReasonCodes", json.array(c.decision.reason_codes, json.string)),
+    #("kind", item_row.trigger_type_to_json(c.kind)),
+    #("kindLabel", json.string(kind_label(c.kind))),
+    #(
+      "strength",
+      json.string(case c.direct {
+        True -> "direct"
+        False -> "general"
+      }),
+    ),
+    #(
+      "changes",
+      json.array(c.changes, fn(pair) {
+        json.object([
+          #("fingerprint", json.string({ pair.0 }.fingerprint)),
+          #("relatesTo", json.array(pair.1, json.string)),
+        ])
+      }),
+    ),
+    #("changeCount", json.int(list.length(c.changes))),
+    #("directReasonCodes", json.array(c.direct_reason_codes, json.string)),
+    #(
+      "unresolvedReasonCodes",
+      json.array(c.unresolved_reason_codes, json.string),
+    ),
+    #("changeFingerprints", json.array(c.fingerprints, json.string)),
+    #("latestChangeAt", json.int(c.latest_change_at)),
+    #("summary", json.string(c.summary)),
+  ])
 }
 
 fn summary(
@@ -624,20 +726,47 @@ pub type Verdict {
   /// Do not resurface as open; the item stays in its tab.
   Suppress(reason: String)
   /// Genuinely new evidence opens a handled item again.
-  Reopen
+  Reopen(fresh: List(String))
   /// The item already stands for these changes.
   Unchanged
   /// More changes for an item still open.
-  Update
+  Update(fresh: List(String))
 }
 
-/// Should an item be (re)surfaced, given what this club already did with the same evidence?
-pub fn verdict(existing: Option(Handled), c: Candidate, now: Int) -> Verdict {
+/// The verdict as secondLookStatus answers it.
+pub fn verdict_json(v: Verdict) -> Json {
+  let of = fn(action, reason) {
+    [#("action", json.string(action)), #("reason", json.string(reason))]
+  }
+  json.object(case v {
+    Create -> of("create", "new")
+    Suppress(reason) -> of("suppress", reason)
+    Reopen(fresh) ->
+      list.append(of("reopen", "materially_new_evidence"), [
+        #("fresh", json.array(fresh, json.string)),
+      ])
+    Unchanged -> of("refresh", "unchanged")
+    Update(fresh) ->
+      list.append(of("update", "more_evidence"), [
+        #("fresh", json.array(fresh, json.string)),
+      ])
+  })
+}
+
+/// Should an item be (re)surfaced, given what this club already did with the same evidence? `changes` are the
+/// candidate's, by fingerprint.
+pub fn verdict(
+  existing: Option(Handled),
+  changes: List(#(String, ChangeType)),
+  now: Int,
+) -> Verdict {
   case existing {
     None -> Create
     Some(e) -> {
       let fresh =
-        list.filter(c.fingerprints, fn(f) { !list.contains(e.fingerprints, f) })
+        list.map(changes, fn(c) { c.0 })
+        |> list.sort(string.compare)
+        |> list.filter(fn(f) { !list.contains(e.fingerprints, f) })
       case e.status {
         item_row.Reviewed | item_row.Dismissed | item_row.Expired ->
           case fresh {
@@ -647,13 +776,12 @@ pub fn verdict(existing: Option(Handled), c: Candidate, now: Int) -> Verdict {
                 option.or(e.dismissed_at, e.reviewed_at)
                 |> option.unwrap(e.updated_at)
               let substantial =
-                list.any(c.changes, fn(d) {
-                  list.contains(fresh, { d.0 }.fingerprint)
-                  && is_substantial({ d.0 }.kind)
+                list.any(changes, fn(c) {
+                  list.contains(fresh, c.0) && is_substantial(c.1)
                 })
               case now - handled_at < cooldown_days * day_ms && !substantial {
                 True -> Suppress("within_cooldown")
-                False -> Reopen
+                False -> Reopen(fresh)
               }
             }
           }
@@ -661,7 +789,7 @@ pub fn verdict(existing: Option(Handled), c: Candidate, now: Int) -> Verdict {
         item_row.Open ->
           case fresh {
             [] -> Unchanged
-            _ -> Update
+            _ -> Update(fresh)
           }
       }
     }
@@ -675,6 +803,11 @@ pub fn expired(
   now: Int,
 ) -> Bool {
   status == item_row.Open && now - latest_change_at > expiry_days * day_ms
+}
+
+/// The item's fields without the organisation's id (safeM18Projection): a view never shows whose item it is.
+pub fn safe_projection(fields: List(#(String, Json))) -> List(#(String, Json)) {
+  list.filter(fields, fn(f) { f.0 != "orgId" })
 }
 
 /// The queue's order: by kind, then the newest change, then the id. None of it is a quality rank.

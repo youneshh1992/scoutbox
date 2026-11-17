@@ -175,154 +175,156 @@
         "calls": 8,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#buildNobodyMissedCandidate",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#buildSecondLookCandidate",
         "calls": 13,
-        "cases": 13,
-        "handPort": {},
-        "status": "pending"
+        "cases": 12,
+        "handPort": {
+          "Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id')": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#canBriefTransition",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#canSecondLookTransition",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#changeFingerprint",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#changesSinceDecision",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#clampPage",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#compareToSnapshot",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#dedupeMaterialChanges",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#evaluationCoverageState",
         "calls": 6,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#explainBriefCriteria",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#isMeaningfullyEvaluated",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#normalizeMaterialChange",
         "calls": 40,
         "cases": 30,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#orderNobodyMissed",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#orderSecondLook",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#safeM18Projection",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#secondLookExpired",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#secondLookReasonMatch",
         "calls": 21,
         "cases": 21,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#secondLookStatus",
         "calls": 6,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#trustLevelChanges",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#validateRecruitmentBrief",
         "calls": 22,
         "cases": 22,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -365,37 +367,41 @@
       {
         "function": "domains/discovery/shared.mjs#orderNobodyMissed",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"established\" as a value of scoutbox/vocab/trust_band.pairs": 10
+        },
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#orderSecondLook",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#secondLookExpired",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#secondLookStatus",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"general_update\" as a value of scoutbox/discovery/second_look_rules.change_type_pairs": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#validateRecruitmentBrief",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/eventAudience.mjs#audienceFor",
@@ -660,7 +666,7 @@
         "calls": 5,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/passport/shared.mjs#normWhen",
@@ -928,14 +934,14 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#normalizeMaterialChange",
         "calls": 3,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/passport/shared.mjs#passportRevision",

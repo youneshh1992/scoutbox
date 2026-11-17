@@ -516,6 +516,7 @@ fn project(
               room.row.id,
               pid,
               room_status.to_string(room.status),
+              True,
               decided(decision),
               changes,
               now,
@@ -592,7 +593,11 @@ fn reconcile(
     let lapsed = fn(status) {
       rules.expired(status, refresh.latest_change_at, now)
     }
-    case rules.verdict(option.map(existing, handled), c, now), existing {
+    let changes =
+      list.map(c.changes, fn(pair) {
+        #({ pair.0 }.fingerprint, { pair.0 }.kind)
+      })
+    case rules.verdict(option.map(existing, handled), changes, now), existing {
       // Suppression means "do not resurface as open", not "forget": the item stays in its tab.
       rules.Suppress(_), Some(item) -> Ok(Some(Live(item, p)))
       rules.Suppress(_), None -> Ok(None)
@@ -613,7 +618,7 @@ fn reconcile(
         use _ <- result.map(notify_owner(tx, org, p.room, item, now))
         Some(Live(item, p))
       }
-      rules.Reopen, Some(item) -> {
+      rules.Reopen(_), Some(item) -> {
         use item <- result.try(items.resurface(
           tx,
           item,
@@ -624,7 +629,7 @@ fn reconcile(
         use _ <- result.map(count(tx, "second_look_created"))
         Some(Live(item, p))
       }
-      rules.Update, Some(item) ->
+      rules.Update(_), Some(item) ->
         items.refresh(tx, item, refresh, now, lapsed(item.row.status))
         |> result.map(fn(i) { Some(Live(i, p)) })
       rules.Unchanged, Some(item) ->
@@ -685,7 +690,7 @@ fn change_json(pair: #(Change, List(String))) -> Json {
 fn item_view(l: Live) -> Json {
   let c = l.projected.candidate
   let r = l.item.row
-  json.object([
+  rules.safe_projection([
     #("id", id.second_look_item_json(r.id)),
     #("playerId", id.player_json(r.player_id)),
     #(
@@ -732,6 +737,7 @@ fn item_view(l: Live) -> Json {
     #("reopenedAt", json.nullable(r.reopened_at, json.int)),
     #("disclaimer", json.string(rules.disclaimer)),
   ])
+  |> json.object
 }
 
 // ------------------------------------------------------------------------------------------------------ routes
@@ -943,9 +949,9 @@ pub fn get(ctx: Ctx, a: OrgAccess, item_id: String) -> Response {
 
 fn recorded(d: room_records.Decision) -> Option(rules.Recorded) {
   use s <- option.map(d.snapshot)
-  let refs = fn(kind) { list.count(s.refs, fn(r) { r.kind == kind }) }
+  let refs = fn(kind) { Some(list.count(s.refs, fn(r) { r.kind == kind })) }
   rules.Recorded(
-    at: s.row.at,
+    at: Some(s.row.at),
     trust: case s.row.trust_score, s.row.trust_band, s.row.trust_hash {
       Some(score), Some(band), Some(_) -> Some(#(score, band))
       _, _, _ -> None
@@ -1009,9 +1015,10 @@ fn current_counts(
     ),
   )
   rules.Current(
-    trust: Some(#(profile.score, profile.band.id)),
+    trust: Some(#(int.to_float(profile.score), profile.band.id)),
     evidence:,
     references:,
+    references_at_decision: None,
     combine:,
     assessments:,
     trials:,

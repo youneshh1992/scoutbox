@@ -92,7 +92,8 @@ export function generate(cases, clock) {
   for (const [file, f] of files) {
     const body = f.tests.join('\n\n');
     const unqualified = ['None', 'Some'].filter((c) => new RegExp(`\\b${c}\\b`).test(body));
-    const imports = [...f.imports, ...(unqualified.length ? ['gleam/option'] : [])]
+    // A module a printer used qualified is imported once, with the unqualified constructors when the body has any.
+    const imports = [...new Set([...f.imports, ...(unqualified.length ? ['gleam/option'] : [])])]
       .sort()
       .map((m) => (m === 'gleam/option' && unqualified.length ? `import gleam/option.{${unqualified.join(', ')}}` : `import ${m}`));
     const text = [

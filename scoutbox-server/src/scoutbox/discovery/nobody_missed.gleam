@@ -13,6 +13,7 @@ import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
@@ -277,10 +278,9 @@ pub type Facts {
     distance_km: Option(Float),
     trust_band: Option(TrustBand),
     combine: List(String),
+    /// The evidence requirements the player's record meets (`evidenceFlags`), by key.
+    evidence: List(String),
     last_evidence_at: Option(Int),
-    last_footage_at: Option(Int),
-    coach_reference: Bool,
-    club_confirmed: Bool,
   )
 }
 
@@ -301,8 +301,7 @@ fn evidence_label(key: String) -> String {
 }
 
 /// Does the player satisfy the criterion? Fail closed: a missing fact does not satisfy a criterion about it.
-/// `now` is passed in rather than read, so an explanation is reproducible.
-pub fn evaluate(c: Criterion, f: Facts, now: Int) -> Reason {
+pub fn evaluate(c: Criterion, f: Facts) -> Reason {
   case c {
     PositionIn(values) -> {
       let has = list.append(option_list(f.position), f.secondary)
@@ -374,18 +373,7 @@ pub fn evaluate(c: Criterion, f: Facts, now: Int) -> Reason {
       }
     EvidenceExists(key) -> {
       let label = evidence_label(key)
-      let has = case key {
-        "recent_full_match" ->
-          case f.last_footage_at {
-            Some(at) -> at > now - 180 * day_ms
-            None -> False
-          }
-        "coach_reference" -> f.coach_reference
-        "confirmed_current_club" -> f.club_confirmed
-        "combine_verified" -> f.combine != []
-        _ -> False
-      }
-      case has {
+      case list.contains(f.evidence, key) {
         True -> Reason("evidence:" <> key, True, label)
         False -> Reason("evidence:" <> key, False, label <> " — not on record")
       }
@@ -427,6 +415,151 @@ pub fn evaluate(c: Criterion, f: Facts, now: Int) -> Reason {
             "No " <> protocol <> " Combine Verified result",
           )
       }
+  }
+}
+
+/// playerMatchesBrief: does the player meet every criterion the brief carries, and why (or why not).
+pub fn match_brief(f: Facts, c: Criteria) -> #(Bool, List(Reason)) {
+  let reasons = list.map(canonical(c), evaluate(_, f))
+  #(list.all(reasons, fn(r) { r.met }), reasons)
+}
+
+pub fn match_json(m: #(Bool, List(Reason))) -> Json {
+  json.object([
+    #("matched", json.bool(m.0)),
+    #("reasons", json.array(m.1, reason_json)),
+  ])
+}
+
+/// buildNobodyMissedCandidate: None when the player does not match, or already entered the workflow.
+pub fn card(
+  f: Facts,
+  brief_id: id.BriefId,
+  brief_version: Int,
+  matched: #(Bool, List(Reason)),
+  evaluated: Bool,
+  room_open: Bool,
+) -> Option(List(#(String, Json))) {
+  case matched.0 && !room_open && !evaluated {
+    False -> None
+    True ->
+      Some([
+        #("playerId", id.player_json(f.player_id)),
+        #("briefId", id.brief_json(brief_id)),
+        #("briefVersion", json.int(brief_version)),
+        #("policyVersion", json.int(briefs.coverage_policy_version)),
+        #("name", json.string(f.name)),
+        #("position", json.nullable(f.position, json.string)),
+        #("age", json.nullable(f.age, json.int)),
+        #("trustBand", json.nullable(f.trust_band, trust_band.to_json)),
+        #(
+          "trustNote",
+          json.string("Evidence confidence — not football ability."),
+        ),
+        #(
+          "reasons",
+          json.array(
+            list.append(matched.1, [
+              Reason(
+                "no_room",
+                True,
+                "No Recruitment Room in your organisation",
+              ),
+            ]),
+            reason_json,
+          ),
+        ),
+        #(
+          "note",
+          json.string(
+            "Eligible under your own criteria and not yet evaluated. This is workflow coverage, not a judgement of the player.",
+          ),
+        ),
+      ])
+  }
+}
+
+/// isMeaningfullyEvaluated: which evaluation signals hold, and whether a decision is recent. The routes ask the
+/// same of the database (`evaluated_sql`); passive impressions are never signals.
+pub fn evaluation(
+  signals: List(String),
+  last_decision_at: Option(Int),
+  now: Int,
+) -> Json {
+  let hits =
+    list.filter_map(evaluation_signals, fn(s) {
+      case list.contains(signals, s.0) {
+        True -> Ok(s.0)
+        False -> Error(Nil)
+      }
+    })
+  json.object([
+    #("evaluated", json.bool(hits != [])),
+    #("signals", json.array(hits, json.string)),
+    #(
+      "recentlyDecided",
+      json.bool(case last_decision_at {
+        Some(at) -> now - at < recent_decision_days * day_ms
+        None -> False
+      }),
+    ),
+    #("policyVersion", json.int(briefs.coverage_policy_version)),
+  ])
+}
+
+/// A queue entry, as orderNobodyMissed sorts it.
+pub type Orderable {
+  Orderable(
+    player_id: String,
+    name: Option(String),
+    distance_km: Option(Float),
+    trust_band: Option(TrustBand),
+    last_evidence_at: Option(Int),
+    reviewed_at: Option(Int),
+  )
+}
+
+/// orderNobodyMissed, the order the queue's SQL keys implement: none of them is a quality rank. Ties fall back to
+/// the player id; an unknown band and an unknown distance sort last.
+pub fn order(items: List(Orderable), sort: String) -> List(Orderable) {
+  let by = fn(a: Orderable, b: Orderable) {
+    case sort {
+      "name" ->
+        string.compare(option.unwrap(a.name, ""), option.unwrap(b.name, ""))
+      "distance" ->
+        float.compare(
+          option.unwrap(a.distance_km, 1.0e308),
+          option.unwrap(b.distance_km, 1.0e308),
+        )
+      "evidence_confidence" ->
+        int.compare(
+          option.map(b.trust_band, band_rank) |> option.unwrap(-1),
+          option.map(a.trust_band, band_rank) |> option.unwrap(-1),
+        )
+      "newest_evidence" ->
+        int.compare(
+          option.unwrap(b.last_evidence_at, 0),
+          option.unwrap(a.last_evidence_at, 0),
+        )
+      "last_reviewed" ->
+        int.compare(
+          option.unwrap(a.reviewed_at, 0),
+          option.unwrap(b.reviewed_at, 0),
+        )
+      _ -> order.Eq
+    }
+  }
+  list.sort(items, fn(a, b) {
+    by(a, b)
+    |> order.lazy_break_tie(fn() { string.compare(a.player_id, b.player_id) })
+  })
+}
+
+/// clampPage: a page size within bounds, or the default. The routes refuse a bad limit instead.
+pub fn clamp_page(n: Float, fallback: Int) -> Int {
+  case n >. 0.0 {
+    True -> int.min(float.truncate(float.floor(n)), 100)
+    False -> fallback
   }
 }
 
@@ -527,8 +660,8 @@ fn coverage(
   Coverage(eligible:, evaluated:)
 }
 
-/// evaluationCoverageState. Small groups are suppressed.
-fn coverage_json(c: Coverage) -> Json {
+/// evaluationCoverageState. Groups smaller than `suppress_min` are suppressed.
+pub fn coverage_state(c: Coverage, suppress_min: Int) -> Json {
   let not_yet = int.max(0, c.eligible - c.evaluated)
   case c.eligible > 0 && c.eligible < suppress_min {
     True ->
@@ -758,10 +891,25 @@ fn facts_of(
         |> option.map(fn(t) { int.to_float(t) /. 10.0 }),
       trust_band: r.trust_band,
       combine: of(combine, r.player_id),
+      evidence: list.flatten([
+        case r.last_footage_at {
+          Some(at) if at > now - 180 * day_ms -> ["recent_full_match"]
+          _ -> []
+        },
+        case r.coach_reference {
+          True -> ["coach_reference"]
+          False -> []
+        },
+        case r.club_confirmed {
+          True -> ["confirmed_current_club"]
+          False -> []
+        },
+        case of(combine, r.player_id) {
+          [] -> []
+          _ -> ["combine_verified"]
+        },
+      ]),
       last_evidence_at: r.last_evidence_at,
-      last_footage_at: r.last_footage_at,
-      coach_reference: r.coach_reference,
-      club_confirmed: r.club_confirmed,
     )
   })
 }
@@ -1552,10 +1700,6 @@ fn evaluation_policy() -> Json {
   ])
 }
 
-fn trust_band_text(b: Option(TrustBand)) -> Json {
-  json.nullable(b, trust_band.to_json)
-}
-
 fn number(f: Float) -> Json {
   json_text.number(f)
 }
@@ -1669,63 +1813,37 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         )
         let cards =
           list.filter_map(facts, fn(f) {
-            // Explained at the query's own instant, so it is the same test the query applied.
-            let reasons = list.map(required, evaluate(_, f, now))
-            case list.all(reasons, fn(r) { r.met }) {
-              False -> Error(Nil)
-              True -> {
-                let review =
-                  list.find(reviews, fn(r) { r.row.player_id == f.player_id })
-                Ok(
-                  json.object([
-                    #("playerId", id.player_json(f.player_id)),
-                    #("briefId", id.brief_json(b.row.id)),
-                    #("briefVersion", json.int(b.row.version)),
-                    #("policyVersion", json.int(briefs.coverage_policy_version)),
-                    #("name", json.string(f.name)),
-                    #("position", json.nullable(f.position, json.string)),
-                    #("age", json.nullable(f.age, json.int)),
-                    #("trustBand", trust_band_text(f.trust_band)),
-                    #(
-                      "trustNote",
-                      json.string("Evidence confidence — not football ability."),
-                    ),
-                    #(
-                      "reasons",
-                      json.array(
-                        list.append(reasons, [
-                          Reason(
-                            "no_room",
-                            True,
-                            "No Recruitment Room in your organisation",
-                          ),
-                        ]),
-                        reason_json,
-                      ),
-                    ),
-                    #(
-                      "note",
-                      json.string(
-                        "Eligible under your own criteria and not yet evaluated. This is workflow coverage, not a judgement of the player.",
-                      ),
-                    ),
-                    #("distanceKm", json.nullable(f.distance_km, number)),
-                    #(
-                      "lastEvidenceAt",
-                      json.nullable(f.last_evidence_at, json.int),
-                    ),
-                    #("state", case review {
-                      Ok(r) -> review_state.to_json(r.row.state)
-                      Error(Nil) -> json.string("open")
-                    }),
-                    #("reviewedAt", case review {
-                      Ok(r) -> json.nullable(r.row.reviewed_at, json.int)
-                      Error(Nil) -> json.null()
-                    }),
-                  ]),
-                )
-              }
-            }
+            // Explained from the same facts, at the same instant, as the query that found them.
+            card(
+              f,
+              b.row.id,
+              b.row.version,
+              match_brief(f, b.criteria),
+              False,
+              False,
+            )
+            |> option.map(fn(fields) {
+              let review =
+                list.find(reviews, fn(r) { r.row.player_id == f.player_id })
+              json.object(
+                list.append(fields, [
+                  #("distanceKm", json.nullable(f.distance_km, number)),
+                  #(
+                    "lastEvidenceAt",
+                    json.nullable(f.last_evidence_at, json.int),
+                  ),
+                  #("state", case review {
+                    Ok(r) -> review_state.to_json(r.row.state)
+                    Error(Nil) -> json.string("open")
+                  }),
+                  #("reviewedAt", case review {
+                    Ok(r) -> json.nullable(r.row.reviewed_at, json.int)
+                    Error(Nil) -> json.null()
+                  }),
+                ]),
+              )
+            })
+            |> option.to_result(Nil)
           })
         http.json(
           200,
@@ -1737,7 +1855,7 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             #("nextCursor", json.nullable(next_cursor, json.string)),
             #("total", json.int(cov.eligible - closed_count)),
             #("limit", json.int(page.limit)),
-            #("coverage", coverage_json(cov)),
+            #("coverage", coverage_state(cov, suppress_min)),
             #("sorts", json.array(sorts, json.string)),
             #("sort", json.string(sort)),
             #("evaluationPolicy", evaluation_policy()),
@@ -1949,7 +2067,7 @@ pub fn evaluation_coverage(ctx: Ctx, a: OrgAccess) -> Response {
           #("briefId", id.brief_json(b.row.id)),
           #("title", json.string(b.row.title)),
           #("briefVersion", json.int(b.row.version)),
-          #("coverage", coverage_json(cov)),
+          #("coverage", coverage_state(cov, suppress_min)),
         ])
       })
       |> room_routes.storage,

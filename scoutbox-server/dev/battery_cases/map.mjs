@@ -625,9 +625,310 @@ const ANALYTICS_MAP = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------- discovery
+
+const DISCOVERY = 'domains/discovery/shared.mjs';
+const SL = 'scoutbox/discovery/second_look_rules';
+const BR = 'scoutbox/discovery/briefs';
+const NM = 'scoutbox/discovery/nobody_missed';
+const changeType = vocab(SL, 'change_type_pairs');
+const itemStatus = vocab('scoutbox/rows/second_look_items', 'status_pairs');
+const triggerType = vocab('scoutbox/rows/second_look_items', 'trigger_type_pairs');
+const briefStatus = vocab('scoutbox/vocab/brief_status');
+const playingLevel = vocab('scoutbox/vocab/playing_level');
+const position_ = vocab('scoutbox/vocab/position');
+const band = vocab('scoutbox/vocab/trust_band');
+const briefFoot = vocab('scoutbox/rows/recruitment_briefs', 'foot_pairs');
+
+/** A material change, as the Gleam rules carry it: its subject, copy and payload are not part of it. */
+const change = record({
+  module: SL,
+  constructor: 'Change',
+  fields: {
+    type: ['kind', changeType],
+    sourceSystem: ['source_system', string],
+    sourceId: ['source_id', option(string)],
+    occurredAt: ['occurred_at', int],
+    fingerprint: ['fingerprint', string],
+  },
+  ignore: ['subjectId', 'negative', 'text', 'detail', 'relatesTo'],
+  // A forged change can leave out its source; the rules never read it before discarding the change.
+  defaults: { source_id: 'None', source_system: '""' },
+});
+/** The fields of a recorded change that `change_json` writes, in its order. */
+const changeView = (c) =>
+  c && {
+    type: c.type,
+    sourceSystem: c.sourceSystem,
+    sourceId: c.sourceId ?? null,
+    occurredAt: c.occurredAt,
+    negative: c.negative,
+    text: c.text,
+    fingerprint: c.fingerprint,
+  };
+/** The fields of a recorded candidate that `candidate_json` writes, in its order. */
+const candidateView = (c) =>
+  c && {
+    decisionAt: c.decisionAt,
+    archivedStatus: c.archivedStatus,
+    archiveReasonCodes: c.archiveReasonCodes,
+    kind: c.kind,
+    kindLabel: c.kindLabel,
+    strength: c.strength,
+    changes: c.changes.map((x) => ({ fingerprint: x.fingerprint, relatesTo: x.relatesTo })),
+    changeCount: c.changeCount,
+    directReasonCodes: c.directReasonCodes,
+    unresolvedReasonCodes: c.unresolvedReasonCodes,
+    changeFingerprints: c.changeFingerprints,
+    latestChangeAt: c.latestChangeAt,
+    summary: c.summary,
+  };
+/** `expression` is an `Option(Json)` that encodes to the TypeScript result, or None where it was null. */
+const eqOptionJson = (expression, result, ctx) =>
+  eq(
+    `${ctx.use('gleam/option')}.map(${expression}, ${ctx.use('gleam/json')}.to_string)`,
+    result === null || result === undefined ? 'None' : `Some(${string(JSON.stringify(result))})`,
+  );
+const trustPair = (t) => (t ? `Some(#(${float(t.score)}, ${string(t.band)}))` : 'None');
+/** A brief's criteria as stored; `positionGroups` is derived from the positions. */
+const criteria = record({
+  module: BR,
+  constructor: 'Criteria',
+  fields: {
+    positions: ['positions', list(position_)],
+    minAge: ['min_age', option(int)],
+    maxAge: ['max_age', option(int)],
+    radiusKm: ['radius_km', option(float)],
+    maxLevel: ['max_level', option(playingLevel)],
+    foot: ['foot', option(briefFoot)],
+    availability: ['availability', option(string)],
+    evidenceRequirements: ['evidence_requirements', list(string)],
+    minTrustBand: ['min_trust_band', option(band)],
+    combineProtocols: ['combine_protocols', list(string)],
+  },
+  ignore: ['positionGroups'],
+});
+/** A candidate's facts; the evidence flags are the keys the record meets. */
+const facts = record({
+  module: NM,
+  constructor: 'Facts',
+  fields: {
+    playerId: ['player_id', ident('player')],
+    name: ['name', string],
+    age: ['age', option(int)],
+    position: ['position', option(string)],
+    secondaryPositions: ['secondary', list(string)],
+    level: ['level', option(playingLevel)],
+    foot: ['foot', option(string)],
+    availability: ['availability', option(string)],
+    distanceKm: ['distance_km', option(float)],
+    trustBand: ['trust_band', option(band)],
+    combineProtocols: ['combine', list(string)],
+    evidenceFlags: (v) => [['evidence', list(string)(Object.keys(v).filter((k) => v[k]))]],
+    lastEvidenceAt: ['last_evidence_at', option(int)],
+  },
+  defaults: { last_evidence_at: 'None', secondary: '[]', combine: '[]', evidence: '[]' },
+});
+/** A brief's input fields as `briefs.Fields` reads them; any other key (a prohibited one) is only a key. */
+const briefFields = (input, ctx) => {
+  const f = (k, p) => option(p)(input[k], ctx);
+  return `${ctx.use(BR)}.Fields(title: ${f('title', string)}, positions: ${f('positions', list(string))}, min_age: ${f('minAge', float)}, max_age: ${f('maxAge', float)}, radius_km: ${f('radiusKm', float)}, max_level: ${f('maxLevel', string)}, foot: ${f('foot', string)}, availability: ${f('availability', string)}, evidence_requirements: ${f('evidenceRequirements', list(string))}, min_trust_band: ${f('minTrustBand', string)}, combine_protocols: ${f('combineProtocols', list(string))}, active_from: ${f('activeFrom', string)}, active_until: ${f('activeUntil', string)})`;
+};
+const levelsOf = (components) =>
+  Object.entries(components)
+    .map(([k, v]) => [k, typeof v === 'string' ? v : (v?.level?.id ?? v?.id ?? null)])
+    .filter(([, v]) => typeof v === 'string');
+
+const DISCOVERY_MAP = {
+  [`${DISCOVERY}#normalizeMaterialChange`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const x = c.args[0];
+      return eqOptionJson(
+        `${ctx.use('gleam/option')}.map(${ctx.use(SL)}.normalize(${string(x.type)}, ${string(x.sourceSystem)}, ${option(string)(x.sourceId, ctx)}, ${option(int)(x.occurredAt, ctx)}), ${ctx.use(SL)}.change_json)`,
+        changeView(c.result),
+        ctx,
+      );
+    },
+  },
+  [`${DISCOVERY}#secondLookReasonMatch`]: {
+    module: SL,
+    test: (c, ctx) =>
+      eq(`${ctx.use(SL)}.reason_match(${change(c.args[0], ctx)}, ${list(string)(c.args[1] ?? [], ctx)})`, list(string)(c.result, ctx)),
+  },
+  [`${DISCOVERY}#changeFingerprint`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const x = c.args[0];
+      return eq(`${ctx.use(SL)}.fingerprint_text(${string(x.type)}, ${string(x.sourceSystem)}, ${option(string)(x.sourceId, ctx)})`, string(c.result));
+    },
+  },
+  [`${DISCOVERY}#dedupeMaterialChanges`]: {
+    module: SL,
+    test: (c, ctx) => eq(`${ctx.use(SL)}.dedupe(${list(change)(c.args[0], ctx)})`, list(change)(c.result, ctx)),
+  },
+  [`${DISCOVERY}#changesSinceDecision`]: {
+    module: SL,
+    now: true,
+    test: (c, ctx) =>
+      eq(`${ctx.use(SL)}.since(${list(change)(c.args[0], ctx)}, ${int(c.args[1])}, ${ctx.now})`, list(change)(c.result, ctx)),
+  },
+  [`${DISCOVERY}#buildSecondLookCandidate`]: {
+    module: SL,
+    now: true,
+    test: (c, ctx) => {
+      const { room, decision, changes = [], playerVisible = true, now = ctx.now } = c.args[0];
+      const id = ctx.use('scoutbox/rows/id');
+      const decided = `${ctx.use(SL)}.Decided(id: ${id}.room_decision(${string(decision.id)}), at: ${int(decision.createdAt)}, reason_codes: ${list(string)(decision.reasonCodes ?? [], ctx)})`;
+      return eqOptionJson(
+        `${ctx.use('gleam/option')}.map(${ctx.use(SL)}.candidate(${id}.recruitment_case(${string(room.id)}), ${id}.player(${string(room.playerId)}), ${string(room.room.status)}, ${bool(playerVisible)}, ${decided}, ${list(change)(changes, ctx)}, ${int(now)}), ${ctx.use(SL)}.candidate_json)`,
+        candidateView(c.result),
+        ctx,
+      );
+    },
+  },
+  [`${DISCOVERY}#canSecondLookTransition`]: {
+    module: SL,
+    test: (c, ctx) => eq(`${ctx.use(SL)}.can_transition(${itemStatus(c.args[0], ctx)}, ${itemStatus(c.args[1], ctx)})`, bool(c.result)),
+  },
+  [`${DISCOVERY}#secondLookStatus`]: {
+    module: SL,
+    now: true,
+    test: (c, ctx) => {
+      const { existing, candidate, now = ctx.now } = c.args[0];
+      const handled = (e) =>
+        `${ctx.use(SL)}.Handled(status: ${itemStatus(e.status, ctx)}, fingerprints: ${list(string)(e.changeFingerprints ?? [], ctx)}, dismissed_at: ${option(int)(e.dismissedAt, ctx)}, reviewed_at: ${option(int)(e.reviewedAt, ctx)}, updated_at: ${int(e.updatedAt ?? 0)})`;
+      const changes = `[${(candidate.changes ?? []).map((x) => `#(${string(x.fingerprint)}, ${changeType(x.type, ctx)})`).join(', ')}]`;
+      return eqJson(`${ctx.use(SL)}.verdict_json(${ctx.use(SL)}.verdict(${option(handled)(existing, ctx)}, ${changes}, ${int(now)}))`, c.result, ctx);
+    },
+  },
+  [`${DISCOVERY}#secondLookExpired`]: {
+    module: SL,
+    now: true,
+    test: (c, ctx) => {
+      const [item, now = ctx.now] = c.args;
+      return eq(`${ctx.use(SL)}.expired(${itemStatus(item.status, ctx)}, ${int(item.latestChangeAt ?? item.createdAt)}, ${int(now)})`, bool(c.result));
+    },
+  },
+  [`${DISCOVERY}#orderSecondLook`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const items = `[${c.args[0].map((i) => `#(${triggerType(i.kind, ctx)}, ${int(i.latestChangeAt)}, ${string(String(i.id ?? ''))})`).join(', ')}]`;
+      return eq(
+        `${ctx.use('gleam/list')}.map(${ctx.use('gleam/list')}.sort(${items}, ${ctx.use(SL)}.compare_items), fn(t) { t.2 })`,
+        list(string)(c.result.map((i) => String(i.id ?? '')), ctx),
+      );
+    },
+  },
+  [`${DISCOVERY}#compareToSnapshot`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const [s, cur] = c.args;
+      const n = (xs) => option(int)(Array.isArray(xs) ? xs.length : null, ctx);
+      const recorded = s
+        ? `Some(${ctx.use(SL)}.Recorded(at: ${option(int)(s.at, ctx)}, trust: ${trustPair(s.trust)}, evidence: ${n(s.sourceRefs?.evidenceIds)}, combine: ${n(s.sourceRefs?.combineResults)}, assessments: ${n(s.sourceRefs?.assessmentIds)}, trials: ${n(s.sourceRefs?.trialIds)}))`
+        : 'None';
+      const len = (xs) => int((xs ?? []).length);
+      const current = `${ctx.use(SL)}.Current(trust: ${trustPair(cur.trust)}, evidence: ${len(cur.evidenceIds)}, references: ${int(cur.references ?? 0)}, references_at_decision: ${option(int)(cur.referencesAtDecision, ctx)}, combine: ${len(cur.combineResults)}, assessments: ${len(cur.assessmentIds)}, trials: ${len(cur.trialIds)})`;
+      return eqJson(`${ctx.use(SL)}.compare(${recorded}, ${current})`, c.result, ctx);
+    },
+  },
+  [`${DISCOVERY}#trustLevelChanges`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const [snap, profile] = c.args;
+      const levels = (o) =>
+        o ? `Some([${levelsOf(o).map(([k, v]) => `#(${string(k)}, ${string(v)})`).join(', ')}])` : 'None';
+      const movement = (m) =>
+        `${ctx.use(SL)}.Movement(component: ${string(m.component)}, code: ${string(m.code)}, up: ${bool(m.direction === 'up')})`;
+      return eq(
+        `${ctx.use(SL)}.trust_level_changes(${levels(snap?.componentLevels)}, ${levels(profile?.components)})`,
+        list(movement)(c.result, ctx),
+      );
+    },
+  },
+  [`${DISCOVERY}#isMeaningfullyEvaluated`]: {
+    module: NM,
+    now: true,
+    test: (c, ctx) => {
+      const [signals = {}, { now = ctx.now } = {}] = c.args;
+      const on = Object.keys(signals).filter((k) => k !== 'lastDecisionAt' && signals[k]);
+      return eqJson(`${ctx.use(NM)}.evaluation(${list(string)(on, ctx)}, ${option(int)(signals.lastDecisionAt, ctx)}, ${int(now)})`, c.result, ctx);
+    },
+  },
+  [`${DISCOVERY}#canBriefTransition`]: {
+    module: BR,
+    test: (c, ctx) => eq(`${ctx.use(BR)}.can_transition(${briefStatus(c.args[0], ctx)}, ${briefStatus(c.args[1], ctx)})`, bool(c.result)),
+  },
+  [`${DISCOVERY}#validateRecruitmentBrief`]: {
+    module: BR,
+    test: (c, ctx) => {
+      const [input = {}, { orgLevel = 'pro', protocols = null } = {}] = c.args;
+      if (protocols !== null) throw new Error('validateRecruitmentBrief with a protocol list: the Gleam rule reads the registry');
+      return eqJson(
+        `${ctx.use(BR)}.validate_body(${list(string)(Object.keys(input), ctx)}, ${briefFields(input, ctx)}, ${bool(orgLevel === 'grassroots')})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${DISCOVERY}#explainBriefCriteria`]: {
+    module: BR,
+    test: (c, ctx) => eqJson(`${ctx.use(BR)}.explain(${criteria(c.args[0], ctx)})`, c.result, ctx),
+  },
+  ['domains/discovery/matching/match.mjs#playerMatchesBrief']: {
+    module: NM,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(NM)}.match_json(${ctx.use(NM)}.match_brief(${facts(c.args[0], ctx)}, ${criteria(c.args[1], ctx)}))`, c.result, ctx),
+  },
+  [`${DISCOVERY}#buildNobodyMissedCandidate`]: {
+    module: NM,
+    test: (c, ctx) => {
+      const { facts: f, brief, match, evaluation, roomOpen } = c.args[0];
+      const reasons = `[${match.reasons.map((r) => `${ctx.use(NM)}.Reason(key: ${string(r.key)}, met: ${bool(r.met)}, text: ${string(r.text)})`).join(', ')}]`;
+      return eqOptionJson(
+        `${ctx.use('gleam/option')}.map(${ctx.use(NM)}.card(${facts(f, ctx)}, ${ctx.use('scoutbox/rows/id')}.brief(${string(brief.id)}), ${int(brief.version)}, #(${bool(match.matched)}, ${reasons}), ${bool(!!evaluation?.evaluated)}, ${bool(!!roomOpen)}), ${ctx.use('gleam/json')}.object)`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${DISCOVERY}#evaluationCoverageState`]: {
+    module: NM,
+    test: (c, ctx) => {
+      const { eligible, evaluated, suppressMin = 3 } = c.args[0];
+      return eqJson(`${ctx.use(NM)}.coverage_state(${ctx.use(NM)}.Coverage(eligible: ${int(eligible)}, evaluated: ${int(evaluated)}), ${int(suppressMin)})`, c.result, ctx);
+    },
+  },
+  [`${DISCOVERY}#orderNobodyMissed`]: {
+    module: NM,
+    test: (c, ctx) => {
+      const [items, sort = 'newest_evidence'] = c.args;
+      const one = (i) =>
+        `${ctx.use(NM)}.Orderable(player_id: ${string(i.playerId)}, name: ${option(string)(i.name, ctx)}, distance_km: ${option(float)(i.distanceKm, ctx)}, trust_band: ${option(band)(i.trustBand, ctx)}, last_evidence_at: ${option(int)(i.lastEvidenceAt, ctx)}, reviewed_at: ${option(int)(i.reviewedAt, ctx)})`;
+      return eq(
+        `${ctx.use('gleam/list')}.map(${ctx.use(NM)}.order([${items.map(one).join(', ')}], ${string(sort)}), fn(o) { o.player_id })`,
+        list(string)(c.result.map((i) => i.playerId), ctx),
+      );
+    },
+  },
+  [`${DISCOVERY}#clampPage`]: {
+    module: NM,
+    test: (c, ctx) => eq(`${ctx.use(NM)}.clamp_page(${float(c.args[0])}, ${int(c.args[1] ?? 25)})`, int(c.result)),
+  },
+  [`${DISCOVERY}#safeM18Projection`]: {
+    module: SL,
+    test: (c, ctx) => {
+      const fields = `[${Object.entries(c.args[0]).map(([k, v]) => `#(${string(k)}, ${jsonValue(v, ctx)})`).join(', ')}]`;
+      return eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(SL)}.safe_projection(${fields}))`, c.result, ctx);
+    },
+  },
+};
+
 export const MAP = {
   ...ROOM_MAP,
   ...ANALYTICS_MAP,
+  ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
   [`${SHARED}#applyTransition`]: {
     module: CLAIMS,
@@ -691,6 +992,7 @@ export const MAP = {
  * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
  */
 export const HAND_PORTED = {
+  ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
   ...Object.fromEntries(
     ['dashboard.mjs#buildDashboard', 'dashboard.mjs#buildReportingContext', 'funnels.mjs#stagesReached', 'metrics.mjs#assertMetricRegistry'].map(
       (f) => [`domains/recruitment/analytics/${f}`, 'test/scoutbox/recruitment/analytics_test.gleam'],
