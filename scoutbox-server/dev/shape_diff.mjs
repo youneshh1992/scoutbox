@@ -55,6 +55,7 @@ const requests = [
   ['guardian inbox', (s) => ['GET', '/guardian/inbox', null, s.amara]],
   ['guardian notifications', (s) => ['GET', '/guardian/notifications', null, s.amara]],
   ['guardian log', (s) => ['GET', '/guardian/log', null, s.amara]],
+  ['guardian child journeys', (s) => ['GET', '/guardian/children/pl-guni/journeys', null, s.amara]],
   ['admin clubs', (s) => ['GET', '/admin/clubs?limit=1', null, null, true]],
   ['admin overview', (s) => ['GET', '/admin/overview', null, null, true]],
   ['admin metrics', (s) => ['GET', '/admin/metrics', null, null, true]],

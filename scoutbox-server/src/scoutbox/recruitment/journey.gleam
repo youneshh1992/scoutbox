@@ -14,6 +14,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
 import gleam/string
+import scoutbox/identity/orgs
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases.{type Room}
@@ -30,6 +31,7 @@ import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
 import scoutbox/rows/offer_history as event_row
+import scoutbox/rows/orgs as org_row
 import scoutbox/rows/recruitment_cases as case_row
 import scoutbox/rows/recruitment_contacts as contact_row
 import scoutbox/rows/recruitment_requests as request_row
@@ -207,6 +209,23 @@ pub fn build(
   player_present: Bool,
   now: Int,
 ) -> Result(Json, Fail(e)) {
+  use rec <- result.try(load(read, room, blocked, player_present))
+  use actions <- result.map(case_lifecycle.available(
+    read,
+    room,
+    viewer.role,
+    now,
+  ))
+  club(rec, viewer, paging, actions, now)
+}
+
+/// A Room's records, read once.
+fn load(
+  read: Read,
+  room: Room,
+  blocked: Bool,
+  player_present: Bool,
+) -> Result(Records, Fail(e)) {
   let r = room.row
   use all <- result.try(decisions.all(read, r.id))
   use draft <- result.try(decisions.draft(read, r.id))
@@ -242,28 +261,20 @@ pub fn build(
   ))
   use case_trials <- result.try(trials.for_case(read, r.id))
   use case_contacts <- result.try(contacts.for_case(read, r.id))
-  let rec =
-    Records(
-      room:,
-      decisions: list.filter(all, fn(d) { d.base.row.org_id == r.org_id }),
-      draft:,
-      assessments:,
-      offers: list.filter(case_offers, fn(o) { o.row.org_id == r.org_id }),
-      signings:,
-      requests:,
-      trials: player_trials,
-      case_trials:,
-      contacts: case_contacts,
-      blocked:,
-      player_present:,
-    )
-  use actions <- result.map(case_lifecycle.available(
-    read,
-    room,
-    viewer.role,
-    now,
+  Ok(Records(
+    room:,
+    decisions: list.filter(all, fn(d) { d.base.row.org_id == r.org_id }),
+    draft:,
+    assessments:,
+    offers: list.filter(case_offers, fn(o) { o.row.org_id == r.org_id }),
+    signings:,
+    requests:,
+    trials: player_trials,
+    case_trials:,
+    contacts: case_contacts,
+    blocked:,
+    player_present:,
   ))
-  club(rec, viewer, paging, actions, now)
 }
 
 // --------------------------------------------------------------------------------------------- projection
@@ -1752,6 +1763,37 @@ fn timeline(
   contact_records: List(Contact),
   now: Int,
 ) -> List(Json) {
+  timeline_lines(
+    rec,
+    lines,
+    invitations,
+    case_trials,
+    trial_assessments,
+    offers,
+    contact_records,
+    now,
+  )
+  |> list.map(fn(l) { json.object(l.fields) })
+}
+
+/// The kind a timeline line names.
+fn line_kind(l: Line) -> String {
+  case list.key_find(l.fields, "kind") {
+    Ok(k) -> json.parse(json.to_string(k), decode.string) |> result.unwrap("")
+    Error(Nil) -> ""
+  }
+}
+
+fn timeline_lines(
+  rec: Records,
+  lines: List(DecisionLine),
+  invitations: List(request_row.Row),
+  case_trials: List(Trial),
+  trial_assessments: List(assessment_row.Row),
+  offers: List(Offer),
+  contact_records: List(Contact),
+  now: Int,
+) -> List(Line) {
   let room = rec.room
   let trial_lines =
     list.flat_map(case_trials, fn(t) {
@@ -2079,5 +2121,567 @@ fn timeline(
       other -> other
     }
   })
-  |> list.map(fn(l) { json.object(l.fields) })
+}
+
+// --------------------------------------------------------------------------------------------- audiences
+
+/// Who a timeline line may be shown to (journeyModel.mjs TIMELINE_VISIBILITY). The club sees everything on its own
+/// case; the player, guardian and an authorised agent only events that involved them.
+const timeline_visibility = [
+  #("contact_initiated", ["player", "guardian", "agent"]),
+  #("contact_response_received", ["player", "guardian", "agent"]),
+  #("trial_invited", ["player", "guardian", "agent"]),
+  #("trial_declined", ["player", "guardian", "agent"]),
+  #("trial_accepted", ["player", "guardian", "agent"]),
+  #("trial_schedule_proposed", ["player", "guardian", "agent"]),
+  #("trial_rescheduled", ["player", "guardian", "agent"]),
+  #("trial_schedule_confirmed", ["player", "guardian", "agent"]),
+  #("trial_schedule_declined", ["player", "guardian", "agent"]),
+  #("trial_attendance_recorded", ["player", "guardian"]),
+  #("trial_cancelled", ["player", "guardian", "agent"]),
+  #("trial_completed", ["player", "guardian", "agent"]),
+  #("offer_issued", ["player", "guardian", "agent"]),
+  #("offer_superseded", ["player", "guardian", "agent"]),
+  #("offer_withdrawn", ["player", "guardian", "agent"]),
+  #("offer_accepted", ["player", "guardian", "agent"]),
+  #("offer_declined", ["player", "guardian", "agent"]),
+  #("offer_expired", ["player", "guardian", "agent"]),
+  #("signing_ready", ["player", "guardian", "agent"]),
+  #("signing_party_completed", ["player", "guardian", "agent"]),
+  #("signing_completed", ["player", "guardian", "agent"]),
+  #("signing_cancelled", ["player", "guardian", "agent"]),
+  #("signing_voided", ["player", "guardian", "agent"]),
+  #("signing_superseded", ["player", "guardian", "agent"]),
+]
+
+fn visible_to(kind: String, audience: String) -> Bool {
+  case list.key_find(timeline_visibility, kind) {
+    Ok(audiences) -> list.contains(audiences, audience)
+    Error(Nil) -> False
+  }
+}
+
+/// The timeline for an audience: only the kinds it may see, without the fields named in `drop`.
+fn audience_timeline(
+  lines: List(Line),
+  audience: String,
+  drop: List(String),
+) -> Json {
+  lines
+  |> list.filter(fn(l) { visible_to(line_kind(l), audience) })
+  |> json.array(fn(l) {
+    json.object(list.filter(l.fields, fn(f) { !list.contains(drop, f.0) }))
+  })
+}
+
+/// The person a journey is read for: the player themselves, or a guardian for their child.
+pub type Recipient {
+  PlayerSelf(player_id: id.PlayerId)
+  GuardianOf(player_id: id.PlayerId, guardian_id: id.GuardianId)
+}
+
+fn recipient_audience(r: Recipient) -> String {
+  case r {
+    PlayerSelf(_) -> "player"
+    GuardianOf(..) -> "guardian"
+  }
+}
+
+/// A record the TypeScript server would give to an ended case of this club and player. A row that names its case
+/// belongs to that case. (The TypeScript rule also compares a row's time with each sibling case's span, but a
+/// case record carries no room creation time, so that comparison never holds. Ported as it behaves.)
+fn owned_elsewhere(
+  read: Read,
+  room: Room,
+  case_id: Option(id.RecruitmentCaseId),
+  contact_id: Option(id.ContactId),
+) -> Result(Bool, Fail(e)) {
+  case case_id, contact_id {
+    Some(c), _ -> Ok(c != room.row.id)
+    None, Some(cid) -> {
+      use found <- result.map(contacts.by_id(read, cid))
+      case found {
+        Some(c) -> c.row.case_id != room.row.id
+        None -> False
+      }
+    }
+    None, None -> Ok(False)
+  }
+}
+
+/// What crossed the share boundary to this recipient on one case.
+type Shared {
+  Shared(
+    requests: List(request_row.Row),
+    trials: List(Trial),
+    offers: List(CurrentOffer),
+  )
+}
+
+fn shared_with(
+  read: Read,
+  rec: Records,
+  who: Recipient,
+  now: Int,
+) -> Result(Shared, Fail(e)) {
+  let room = rec.room
+  use requests <- result.try(
+    list.try_fold(rec.requests, [], fn(acc, r) {
+      use elsewhere <- result.map(owned_elsewhere(
+        read,
+        room,
+        r.case_id,
+        r.contact_id,
+      ))
+      let for_them = case who {
+        PlayerSelf(_) -> r.routed_to != party.Guardian
+        GuardianOf(guardian_id:, ..) ->
+          r.routed_to == party.Guardian && r.guardian_id == Some(guardian_id)
+      }
+      case !elsewhere && for_them {
+        True -> [r, ..acc]
+        False -> acc
+      }
+    }),
+  )
+  let trials =
+    list.filter(rec.trials, fn(t) {
+      let r = t.row
+      let elsewhere = case r.case_id {
+        Some(c) -> c != room.row.id
+        None -> False
+      }
+      let accepted_by = fn(p) {
+        case r.recipient_type {
+          Some(_) -> r.recipient_type == Some(p)
+          None -> r.accepted_by == Some(p)
+        }
+      }
+      r.subject_removed_at == None
+      && !elsewhere
+      && case who {
+        PlayerSelf(_) -> accepted_by(party.Player)
+        GuardianOf(guardian_id:, ..) ->
+          case r.recipient_type {
+            Some(_) ->
+              r.recipient_type == Some(party.Guardian)
+              && r.recipient_guardian_id == Some(guardian_id)
+            None -> r.accepted_by == Some(party.Guardian)
+          }
+      }
+    })
+  Ok(Shared(
+    requests: list.reverse(requests),
+    trials:,
+    offers: offers_shared_with(rec, who, now),
+  ))
+}
+
+/// Offers whose live revision's recipient snapshot names this recipient.
+fn offers_shared_with(
+  rec: Records,
+  who: Recipient,
+  now: Int,
+) -> List(CurrentOffer) {
+  let room = rec.room
+  list.filter_map(rec.offers, fn(o) {
+    let sound =
+      o.row.case_id == room.row.id
+      && o.row.org_id == room.row.org_id
+      && o.row.player_id == room.row.player_id
+      && offer_rules.integrity(o, Some(room.row.org_id), Some(room.row.id))
+      == []
+    use <- bool_or(!sound, Error(Nil))
+    case current_offer([o], now) {
+      Some(CurrentOffer(revision: Some(rev), ..) as cur) -> {
+        let r = rev.row
+        let mine = case who {
+          PlayerSelf(player_id:) ->
+            r.recipient_type == Some(party.Player)
+            && r.recipient_player_id == Some(player_id)
+          GuardianOf(guardian_id:, ..) ->
+            r.recipient_type == Some(party.Guardian)
+            && r.recipient_guardian_id == Some(guardian_id)
+        }
+        case option.is_some(r.issued_at) && mine {
+          True -> Ok(cur)
+          False -> Error(Nil)
+        }
+      }
+      _ -> Error(Nil)
+    }
+  })
+}
+
+fn bool_or(condition: Bool, value: a, next: fn() -> a) -> a {
+  case condition {
+    True -> value
+    False -> next()
+  }
+}
+
+fn shared_json(s: Shared, now: Int) -> Json {
+  let requests =
+    list.map(s.requests, fn(r) {
+      json.object([
+        #("kind", json.string("contact_request")),
+        #("id", id.request_json(r.id)),
+        #("type", request_row.type_to_json(r.type_)),
+        #("status", request_row.status_to_json(r.status)),
+        #("at", json.int(r.created_at)),
+      ])
+    })
+  let trials =
+    list.map(s.trials, fn(t) {
+      let m = trial_rules.milestone(t)
+      let field = fn(k) { list.key_find(m, k) |> result.unwrap(json.null()) }
+      json.object([
+        #("kind", json.string("trial")),
+        #("id", id.trial_json(t.row.id)),
+        #("workflowState", field("workflowState")),
+        #("at", json.int(t.row.accepted_at)),
+        #("scheduledAt", field("scheduledAt")),
+        #("revision", field("revision")),
+        #("sessionCount", json.int(list.length(t.sessions))),
+        #("completion", field("completion")),
+      ])
+    })
+  let offers =
+    list.map(s.offers, fn(cur) {
+      let rev = option.map(cur.revision, fn(r) { r.row })
+      json.object([
+        #("kind", json.string("offer")),
+        #("id", id.offer_json(cur.offer.row.id)),
+        #(
+          "revisionId",
+          json.nullable(option.map(rev, fn(r) { r.id }), id.offer_revision_json),
+        ),
+        #(
+          "revisionNumber",
+          json.nullable(option.map(rev, fn(r) { r.revision_number }), json.int),
+        ),
+        #(
+          "status",
+          json.nullable(
+            offer_rules.live_status(cur.offer, now),
+            offer_status.to_json,
+          ),
+        ),
+        #(
+          "at",
+          json.int(
+            option.then(rev, fn(r) { r.issued_at })
+            |> option.unwrap(cur.offer.row.created_at),
+          ),
+        ),
+        #(
+          "respondedAt",
+          json.nullable(option.then(rev, fn(r) { r.responded_at }), json.int),
+        ),
+      ])
+    })
+  // Not ported yet: signing packages, whose presented ones are shared here too.
+  json.preprocessed_array(list.flatten([requests, trials, offers]))
+}
+
+/// The recipient's stage: only stages that involve them, never the club's pipeline. Signing packages are not
+/// ported yet, so `signing` and `signed` are not reached.
+fn player_stage(
+  contact_requests: List(request_row.Row),
+  trial_requests: List(request_row.Row),
+  trials: List(Trial),
+  offer: Option(CurrentOffer),
+  now: Int,
+) -> String {
+  let offer_stage =
+    offer
+    |> option.then(fn(o) { offer_rules.live_status(o.offer, now) })
+    |> option.then(fn(st) {
+      case st {
+        offer_status.Accepted -> Some("offer_accepted")
+        offer_status.Declined -> Some("offer_declined")
+        offer_status.Issued -> Some("offer_received")
+        _ -> None
+      }
+    })
+  let trial_stage =
+    current_trial(trials)
+    |> option.then(fn(t) {
+      case trial_rules.workflow_state(t) {
+        trial_workflow_state.Completed -> Some("trial_completed")
+        trial_workflow_state.Scheduled
+        | trial_workflow_state.Accepted
+        | trial_workflow_state.LegacyAccepted -> Some("trial_scheduled")
+        _ -> None
+      }
+    })
+  let pending = fn(r: request_row.Row) { r.status == request_row.Pending }
+  offer_stage
+  |> option.lazy_or(fn() { trial_stage })
+  |> option.lazy_unwrap(fn() {
+    case list.any(trial_requests, pending), contact_requests {
+      True, _ -> "trial_invited"
+      False, [_, ..] -> "contacted"
+      False, [] -> "none"
+    }
+  })
+}
+
+const player_next_weight = [
+  #("SIGN", 5),
+  #("RESPOND_TO_OFFER", 4),
+  #("CONFIRM_TRIAL_SCHEDULE", 3),
+  #("RESPOND_TO_TRIAL_INVITATION", 2),
+  #("RESPOND_TO_CONTACT", 1),
+  #("NONE", 0),
+]
+
+/// Only what the player or guardian can answer themselves.
+fn player_next(
+  contact_requests: List(request_row.Row),
+  trial_requests: List(request_row.Row),
+  trials: List(Trial),
+  offer: Option(CurrentOffer),
+  now: Int,
+) -> #(String, List(#(String, Json))) {
+  let pending = fn(rows: List(request_row.Row)) {
+    list.find(rows, fn(r) { r.status == request_row.Pending })
+  }
+  let issued = case offer {
+    Some(o) ->
+      case offer_rules.live_status(o.offer, now) {
+        Some(offer_status.Issued) -> Some(o)
+        _ -> None
+      }
+    None -> None
+  }
+  let awaiting =
+    list.find(trials, fn(t) {
+      t.row.schedule_revision != None
+      && t.row.schedule_confirmed_at == None
+      && t.sessions != []
+      && t.row.completion_state == None
+    })
+  case issued, awaiting, pending(trial_requests), pending(contact_requests) {
+    Some(o), _, _, _ -> #("RESPOND_TO_OFFER", [
+      #("offerId", id.offer_json(o.offer.row.id)),
+      #(
+        "offerRevisionId",
+        json.nullable(
+          option.map(o.revision, fn(r) { r.row.id }),
+          id.offer_revision_json,
+        ),
+      ),
+    ])
+    None, Ok(t), _, _ -> #("CONFIRM_TRIAL_SCHEDULE", [
+      #("trialId", id.trial_json(t.row.id)),
+    ])
+    None, Error(Nil), Ok(r), _ -> #("RESPOND_TO_TRIAL_INVITATION", [
+      #("requestId", id.request_json(r.id)),
+    ])
+    None, Error(Nil), Error(Nil), Ok(r) -> #("RESPOND_TO_CONTACT", [
+      #("requestId", id.request_json(r.id)),
+    ])
+    None, Error(Nil), Error(Nil), Error(Nil) -> #("NONE", [])
+  }
+}
+
+/// One case's journey for the player or a guardian, if anything on it was shared with them. No case id,
+/// lifecycle state, priority, decision or note; no club member's name, no Contact record id.
+fn recipient_journey(
+  read: Read,
+  rec: Records,
+  who: Recipient,
+  now: Int,
+) -> Result(Option(#(String, Json, Json)), Fail(e)) {
+  use s <- result.map(shared_with(read, rec, who, now))
+  case s.requests, s.trials, s.offers {
+    [], [], [] -> None
+    _, _, _ -> {
+      let room = rec.room
+      let audience = recipient_audience(who)
+      let contact_requests =
+        list.filter(s.requests, fn(r) { r.type_ == request_row.Contact })
+      let trial_requests =
+        list.filter(s.requests, fn(r) { r.type_ == request_row.Trial })
+      let offer = current_offer(list.map(s.offers, fn(o) { o.offer }), now)
+      let #(code, refs) =
+        player_next(contact_requests, trial_requests, s.trials, offer, now)
+      let wanted = case who {
+        PlayerSelf(_) -> party.Player
+        GuardianOf(..) -> party.Guardian
+      }
+      let contact_records =
+        list.filter(rec.contacts, fn(c) {
+          c.row.case_id == room.row.id
+          && c.row.org_id == room.row.org_id
+          && {
+            c.row.status == contact_row.Delivered
+            || c.row.status == contact_row.Responded
+          }
+          && contact_rules.integrity(
+            c,
+            Some(room.row.org_id),
+            Some(room.row.id),
+          )
+          == []
+          && c.row.recipient_type == Some(wanted)
+        })
+      let invitations =
+        list.filter(rec.requests, fn(r) {
+          r.type_ == request_row.Trial
+          && r.case_id == Some(room.row.id)
+          && list.any(trial_requests, fn(x) { x.id == r.id })
+        })
+      let lines =
+        timeline_lines(
+          rec,
+          [],
+          invitations,
+          s.trials,
+          [],
+          list.map(s.offers, fn(o) { o.offer }),
+          contact_records,
+          now,
+        )
+      let pending_contact =
+        list.find(contact_requests, fn(r) { r.status == request_row.Pending })
+        |> result.lazy_or(fn() { list.last(contact_requests) })
+      let journey =
+        json.object([
+          #("policyVersion", json.int(policy_version)),
+          #(
+            "stage",
+            json.string(player_stage(
+              contact_requests,
+              trial_requests,
+              s.trials,
+              offer,
+              now,
+            )),
+          ),
+          #(
+            "nextAction",
+            json.object([
+              #("code", json.string(code)),
+              #("resources", json.object(refs)),
+            ]),
+          ),
+          #(
+            "resources",
+            json.object([
+              #("contactRequestId", case pending_contact {
+                Ok(r) -> id.request_json(r.id)
+                Error(Nil) -> json.null()
+              }),
+              #(
+                "trialRequestId",
+                case
+                  list.find(trial_requests, fn(r) {
+                    r.status == request_row.Pending
+                  })
+                {
+                  Ok(r) -> id.request_json(r.id)
+                  Error(Nil) -> json.null()
+                },
+              ),
+              #(
+                "trialId",
+                json.nullable(
+                  option.map(current_trial(s.trials), fn(t) { t.row.id }),
+                  id.trial_json,
+                ),
+              ),
+              #(
+                "offerId",
+                json.nullable(
+                  option.map(offer, fn(o) { o.offer.row.id }),
+                  id.offer_json,
+                ),
+              ),
+              #(
+                "offerRevisionId",
+                json.nullable(
+                  option.then(offer, fn(o) {
+                    option.map(o.revision, fn(r) { r.row.id })
+                  }),
+                  id.offer_revision_json,
+                ),
+              ),
+              // Not ported yet: signing packages.
+              #("signingPackageId", json.null()),
+            ]),
+          ),
+          #("timeline", audience_timeline(lines, audience, ["by", "contactId"])),
+        ])
+      Some(#(code, shared_json(s, now), journey))
+    }
+  }
+}
+
+fn club_json(read: Read, org_id: id.OrgId) -> Result(#(String, Json), Fail(e)) {
+  use found <- result.map(orgs.by_id(read, org_id))
+  case found {
+    Some(o) -> #(
+      o.name,
+      json.object([
+        #("id", id.org_json(o.id)),
+        #("name", json.string(o.name)),
+        #("level", json.nullable(o.level, org_row.level_to_json)),
+        #("verified", json.bool(o.verified)),
+      ]),
+    )
+    None -> #(
+      "",
+      json.object([
+        #("id", id.org_json(org_id)),
+        #("name", json.null()),
+        #("level", json.null()),
+        #("verified", json.bool(False)),
+      ]),
+    )
+  }
+}
+
+/// Every case on which something was shared with this recipient, the most consequential pending act first, then
+/// by club name, then by club id.
+pub fn for_recipient(
+  read: Read,
+  who: Recipient,
+  now: Int,
+) -> Result(List(Json), Fail(e)) {
+  use rooms <- result.try(cases.rooms_of_player(read, who.player_id))
+  use found <- result.map(
+    list.try_map(rooms, fn(room) {
+      use rec <- result.try(load(read, room, False, True))
+      use journey <- result.try(recipient_journey(read, rec, who, now))
+      case journey {
+        None -> Ok(None)
+        Some(#(code, shared, journey)) -> {
+          use #(name, club) <- result.map(club_json(read, room.row.org_id))
+          Some(#(
+            code,
+            name,
+            id.org_to_string(room.row.org_id),
+            json.object([
+              #("club", club),
+              #("shared", shared),
+              #("journey", journey),
+            ]),
+          ))
+        }
+      }
+    }),
+  )
+  let weight = fn(code) {
+    list.key_find(player_next_weight, code) |> result.unwrap(0)
+  }
+  found
+  |> option.values
+  |> list.sort(fn(a, b) {
+    int.compare(weight(b.0), weight(a.0))
+    |> order.lazy_break_tie(fn() { string.compare(a.1, b.1) })
+    |> order.lazy_break_tie(fn() { string.compare(a.2, b.2) })
+  })
+  |> list.map(fn(x) { x.3 })
 }

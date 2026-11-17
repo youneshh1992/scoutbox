@@ -12,7 +12,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
-import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players
 import scoutbox/messaging/delivery
 import scoutbox/messaging/notifications
@@ -1972,5 +1973,42 @@ fn keep(value: Option(a), pred: fn(a) -> Bool) -> Option(a) {
         False -> None
       }
     None -> None
+  }
+}
+
+fn recipient_journeys(
+  ctx: Ctx,
+  req: Request,
+  who: journey.Recipient,
+) -> Response {
+  let now = clock.request_ms(ctx.config, req)
+  case store.read(ctx.store, journey.for_recipient(_, who, now)) {
+    Ok(items) ->
+      http.json(
+        200,
+        json.object([
+          #("items", json.preprocessed_array(items)),
+          #("generatedAt", json.int(now)),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /player/journeys`: every club's journey with this player, as far as it was shared with them.
+pub fn player_journeys(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  recipient_journeys(ctx, req, journey.PlayerSelf(p.player.row.id))
+}
+
+/// `GET /guardian/children/:id/journeys`: the journeys shared with this guardian about their child.
+pub fn guardian_journeys(
+  ctx: Ctx,
+  req: Request,
+  g: Guardian,
+  child: id.PlayerId,
+) -> Response {
+  case list.contains(g.child_ids, child) {
+    False -> http.error(404, "CHILD_NOT_FOUND")
+    True -> recipient_journeys(ctx, req, journey.GuardianOf(child, g.row.id))
   }
 }

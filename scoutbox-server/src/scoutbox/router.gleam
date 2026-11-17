@@ -383,6 +383,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
         ["insights"] -> only(req, Get, fn() { insights.show(ctx, player) })
+        ["journeys"] ->
+          only(req, Get, fn() { case_routes.player_journeys(ctx, req, player) })
         ["box-cam", "sessions", sid, "cv", "finalize"] ->
           only(req, Post, fn() { box_prefs.cv_finalize(ctx, player, sid) })
         ["box-cam", "prefs"] ->
@@ -630,6 +632,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid] ->
           only(req, Delete, fn() {
             erasure.delete_child(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "journeys"] ->
+          only(req, Get, fn() {
+            case_routes.guardian_journeys(ctx, req, guardian, id.player(cid))
           })
         ["children", id, "references"] ->
           only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })

@@ -193,6 +193,19 @@ pub fn rooms_for(
   rooms_of(read, found)
 }
 
+/// Every organisation's Rooms for a player, oldest first.
+pub fn rooms_of_player(
+  read: Read,
+  player_id: id.PlayerId,
+) -> Result(List(Room), Fail(e)) {
+  use found <- result.try(
+    rows(read, "player_id = ? AND room_status IS NOT NULL ORDER BY rowid", [
+      id.player_sql(player_id),
+    ]),
+  )
+  rooms_of(read, found)
+}
+
 /// The organisation's open Room for a player: there is at most one.
 pub fn open_room_for(
   read: Read,
