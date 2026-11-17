@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 26 of 53 neutral]
+### Untangling [in progress: 32 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 22 batteries pass unchanged]
+### Porting, domain by domain [in progress: 25 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -114,7 +114,7 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions persistence, trials, contacts | 10 | `recruitment/journey` next (the audience journeys, then signings) |
+| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings | 13 | `recruitment/journey` next (the audience journeys; it stopped at B29, the first signing step) |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -164,7 +164,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 29 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 21 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 3,000 cases pending (2,253 of them in `dates`) and about 300 hand-port calls.
 
