@@ -15,7 +15,7 @@
 // collections are checked in this process by the rules suite (scripts/rules/recruitment/lifecycle.mjs). Here: HTTP
 // against a fresh server, then a restart.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,7 +25,7 @@ import { serverCommand, serverDir } from '../support/server.mjs';
 
 const { RECRUITMENT_LIFECYCLE_POLICY_VERSION, LIFECYCLE_REASON_CODES } = lifecycleSpec;
 
-const PORT = pickPort(5700, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-'));
 

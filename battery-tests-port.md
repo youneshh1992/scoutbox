@@ -205,9 +205,9 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 18 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 17 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
-3,000 cases pending (2,253 of them in `dates`) and about 300 hand-port calls.
+6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 
 ## Risks
 

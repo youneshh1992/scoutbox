@@ -9,7 +9,7 @@
 //
 // The pure engine's sections (U1–U6) are in scripts/rules/recruitment/rooms.mjs; the
 // sections here drive the real routes, including all 48 enumerated abuse cases.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,7 @@ import path from 'node:path';
 import roomsSpec from '../support/spec/recruitment/rooms/shared.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(5400, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m17-'));
 

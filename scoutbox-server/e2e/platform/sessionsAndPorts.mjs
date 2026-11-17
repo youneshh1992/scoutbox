@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openFixture, tokenHash, writeFixture } from '../support/sqlFixture.mjs';
 import { rows } from '../support/sqlRows.mjs';
-import { isFetchBlockedPort, pickPort } from '../support/testPort.mjs';
+import { freePort, isFetchBlockedPort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 let passed = 0;
@@ -42,7 +42,7 @@ const neg = (c, m) => {
 const section = (n) => console.log(`\n— ${n} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 3600 * 1000;
-const PORT = pickPort(7400, 200, [0, 201, 202, 203, 204]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA = mkdtempSync(path.join(tmpdir(), 'sbx-prem24-'));
 const children = [];
@@ -386,7 +386,7 @@ section('P — production refuses to start without its own admin key');
   const p1 = await boot(
     { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef' },
     d2,
-    PORT + 201,
+    await freePort(),
   );
   neg(
     !p1.up && /Refusing to start: .*ADMIN_KEY_UNSAFE/.test(p1.log()),
@@ -395,9 +395,10 @@ section('P — production refuses to start without its own admin key');
   const p2 = await boot(
     { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'scoutbox-admin' },
     d2,
-    PORT + 202,
+    await freePort(),
   );
   neg(!p2.up && /ADMIN_KEY_UNSAFE/.test(p2.log()), 'P2 the development default key is refused too');
+  const P3_PORT = await freePort();
   const p3 = await boot(
     {
       NODE_ENV: 'production',
@@ -405,21 +406,21 @@ section('P — production refuses to start without its own admin key');
       ADMIN_KEY: 'sweep-production-admin-key-0123',
     },
     d2,
-    PORT + 203,
+    P3_PORT,
   );
   ok(p3.up, 'P3 with its own key the production server starts');
   if (p3.up) {
-    const def = await fetch(`http://localhost:${PORT + 203}/admin/reports`, {
+    const def = await fetch(`http://localhost:${P3_PORT}/admin/reports`, {
       headers: { 'x-admin-key': 'scoutbox-admin' },
     });
-    const own = await fetch(`http://localhost:${PORT + 203}/admin/reports`, {
+    const own = await fetch(`http://localhost:${P3_PORT}/admin/reports`, {
       headers: { 'x-admin-key': 'sweep-production-admin-key-0123' },
     });
     neg(
       def.status === 401 && own.status === 200,
       `P4 the public default key is refused (${def.status}); the configured key works (${own.status})`,
     );
-    const dev = await fetch(`http://localhost:${PORT + 203}/auth/org/login`, {
+    const dev = await fetch(`http://localhost:${P3_PORT}/auth/org/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
@@ -435,7 +436,7 @@ section('P — production refuses to start without its own admin key');
       AGENT_VERIFICATION_TEST_PROVIDER: '1',
     },
     d2,
-    PORT + 204,
+    await freePort(),
   );
   neg(
     !p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()),
@@ -455,27 +456,11 @@ section('H — no suite can draw a port that fetch() refuses');
     refused === 'bad port',
     `H1 fetch() refuses port 6000 outright (${refused}) — why a random port there failed a suite mid-way`,
   );
-  // H2 the picker never returns a base whose span touches a refused port (exhaustive over many draws).
+  // H2 the operating system never hands a suite a fetch-refused port (its ephemeral range is clear of them).
   let clean = true;
-  for (const [base, range, offsets] of [
-    [4600, 300, [0, 300]],
-    [4900, 300, [0]],
-    [5800, 200, [0, 1, 2, 3, 4, 5, 6]],
-    [5900, 200, [0]],
-    [5990, 8, [0, 10, 11]],
-    [6400, 200, [0]],
-    [6500, 200, [0, 1, 3]],
-  ]) {
-    for (let i = 0; i < 400; i++) {
-      const p = pickPort(base, range, offsets);
-      if (offsets.some((k) => isFetchBlockedPort(p + k))) clean = false;
-    }
-  }
-  neg(
-    clean,
-    'H2 pickPort never lands a server on a fetch-refused port (2,800 draws over the seven ranges the suites use)',
-  );
-  // Every suite draws its port through pickPort with the offsets it boots on, so H2 covers them all.
+  for (let i = 0; i < 400; i++) if (isFetchBlockedPort(await freePort())) clean = false;
+  neg(clean, 'H2 freePort never hands out a fetch-refused port (400 draws)');
+  // Every suite takes each server's port from freePort, so H2 covers them all.
 }
 
 console.log(`\nplatform/sessionsAndPorts: ${passed} checks passed, ${negatives} negative, ${failures} failed`);

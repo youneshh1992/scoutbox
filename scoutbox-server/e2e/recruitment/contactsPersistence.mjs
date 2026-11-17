@@ -19,7 +19,7 @@
 // refusal of entries that have no row form (an entry that is not a record, a history that is not a list) is in
 // scripts/testRecruitmentContactsOffers.mjs.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -148,7 +148,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5600, 200, [0, 1, 2, 3, 4, 5, 6]);
+const PORT = await freePort();
 const NOW = Date.now(); // when the fixtures are installed: the migrated schema's own rows carry it
 
 // ------------------------------------------------------------- fixtures, as stored rows
@@ -576,14 +576,14 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const req1 = [contactRequest('req-1', 'rct-1')];
   await refusedAtCutover(
     'a duplicated id',
-    PORT + 5,
+    await freePort(),
     [soundContact(), soundContact({ request_id: null }, { attempts: [], history: [] })],
     req1,
     /UNIQUE constraint failed: recruitment_contacts\.id/,
   );
   await refusedAtCutover(
     'a request that is not in the file',
-    PORT + 6,
+    await freePort(),
     [soundContact({ request_id: 'req-ghost' })],
     [],
     /FOREIGN KEY constraint failed/,
@@ -673,7 +673,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 
   write(CORRUPT_DIR, rows);
   const before = contactRows(stored(CORRUPT_DIR));
-  const s = await bootOn(CORRUPT_DIR, PORT + 1);
+  const s = await bootOn(CORRUPT_DIR, await freePort());
   ok(s.up, 'the server boots with six rows, two of them corrupt and one foreign');
   if (!s.up) {
     console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`);
@@ -747,7 +747,7 @@ section('clean boot: empty store, first write, restart');
 const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
 {
   write(CLEAN_DIR, baseRows());
-  const s = await bootOn(CLEAN_DIR, PORT + 2);
+  const s = await bootOn(CLEAN_DIR, await freePort());
   ok(s.up, 'boot on an empty contacts store');
   const owner = (
     await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
@@ -764,7 +764,7 @@ const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
     snap1.recruitment_contacts.length === 1 && snap1.recruitment_contacts[0].status === 'draft',
     'and is on disk as a draft after shutdown',
   );
-  const s2 = await bootOn(CLEAN_DIR, PORT + 3);
+  const s2 = await bootOn(CLEAN_DIR, await freePort());
   const owner2 = (
     await s2.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
   ).body;

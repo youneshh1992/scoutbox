@@ -41,7 +41,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import decisionSpec from '../support/spec/recruitment/lifecycle/decision.json' with { type: 'json' };
 import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 const { DECISION_POLICY_VERSION, DECISION_LIMITS } = decisionSpec;
@@ -49,7 +49,7 @@ const { RATE_LIMIT_POLICY } = rateLimitSpec;
 /** Where each formal outcome moves the case. */
 const OUTCOME_STATUS = { progress: 'offer_consideration', hold: 'on_hold', reject: 'archived' };
 
-const PORT = pickPort(6400, 200, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

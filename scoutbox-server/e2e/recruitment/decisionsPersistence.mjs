@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openFixture } from '../support/sqlFixture.mjs';
 import { readRows } from '../support/sqlRows.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 // The table migrations a new database records, as the migrated schema lists them.
@@ -116,7 +116,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5800, 200, [0, 1, 2, 3, 4, 5, 6]); // never a fetch-blocked port
+const PORT = await freePort();
 const T0 = 1_800_000_000_000;
 const NOW = Date.now(); // when the fixtures are installed: the migrated schema's own rows carry it
 
@@ -609,7 +609,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     fixture([legacyRow({ superseded_by_id: 'rdec-formal-2' }), headRow({ supersedes_id: 'rdec-legacy' }), ...bad]),
   );
   const savedRows = stored(DIR);
-  const s = await bootOn(DIR, PORT + 1);
+  const s = await bootOn(DIR, await freePort());
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with two corrupt formal rows in the store');
   const L = await lead(s);
@@ -666,7 +666,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     ),
   );
   const saved2 = stored(DIR2);
-  const s2 = await bootOn(DIR2, PORT + 2);
+  const s2 = await bootOn(DIR2, await freePort());
   ok(s2.up, 'the server boots with two formal rows both claiming to be current');
   const L2 = await lead(s2);
   const dup = await s2.j('GET', '/org/rooms/case-x/decision', undefined, L2.token);
@@ -709,7 +709,7 @@ section('4 — legacy advisory row read as advisory and keep their chain; P5 jud
     ]),
   );
   const savedLegacy = stored(DIR);
-  const s = await bootOn(DIR, PORT + 3);
+  const s = await bootOn(DIR, await freePort());
   ok(s.up, 'the server boots on a legacy-only decision memory');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
@@ -743,7 +743,7 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-clean-'));
   write(DIR, fixture());
-  const s = await bootOn(DIR, PORT + 4);
+  const s = await bootOn(DIR, await freePort());
   const L = await lead(s);
   const d = await s.j(
     'POST',
@@ -761,7 +761,7 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
       snap0.room_decisions.length === 0,
     'the snapshot holds the draft ON THE CASE with its key, and no decision row',
   );
-  const s2 = await bootOn(DIR, PORT + 5);
+  const s2 = await bootOn(DIR, await freePort());
   const L2 = await lead(s2);
   const replayDraft = await s2.j(
     'POST',
@@ -802,7 +802,7 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
       snap1.tables.filter((t) => /offer/.test(t)).every((t) => t === 'recruitment_offers' || t.startsWith('offer_')),
     'no P5 store appeared beside the decision and draft tables (the P6 Offer tables are the one Offer store)',
   );
-  const s3 = await bootOn(DIR, PORT + 6);
+  const s3 = await bootOn(DIR, await freePort());
   const L3 = await lead(s3);
   const replayFin = await s3.j(
     'POST',

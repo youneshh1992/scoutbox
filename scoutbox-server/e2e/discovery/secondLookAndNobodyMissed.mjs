@@ -9,7 +9,7 @@
 //
 // The real routes, including S1–S8, N1–N8 and the enumerated abuse cases. The
 // pure engine's checks are in scripts/rules/discovery/secondLookAndNobodyMissed.mjs.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,7 +19,7 @@ import { serverCommand, serverDir } from '../support/server.mjs';
 
 const { SECOND_LOOK_POLICY_VERSION, DISMISSAL_REASONS, FORBIDDEN_COPY, LIMITS } = discoverySpec;
 
-const PORT = pickPort(5800, 150, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m18-'));
 
