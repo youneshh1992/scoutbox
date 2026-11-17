@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 33 of 53 neutral]
+### Untangling [in progress: 35 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -128,7 +128,7 @@ are for surprising facts or points that later work depends on, not implementatio
       `journeyAdversarial` use its funnels. A read-only domain can be compared whole by booting both servers on
       copies of a database a TypeScript battery left behind in the temp directory: that exercised every family
       here, which the seed does not.
-   2. `recruitment/lifecycle` and `recruitment/decisions`.
+   2. `recruitment/lifecycle` and `recruitment/decisions`. Both are untangled.
    3. `recruitment/journeyPersistence`.
    4. `recruitment/journeyAdversarial`. It also reaches into `/org/agent` and `/admin/blocks`.
 2. **Discovery, alongside recruitment.** `decisions`, `lifecycle` and `journey` section H5 all call
@@ -199,7 +199,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 21 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 18 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 3,000 cases pending (2,253 of them in `dates`) and about 300 hand-port calls.
 
