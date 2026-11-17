@@ -3,8 +3,8 @@
 //// probability or progress percentage: how far a case has travelled is a fact about a club's process, not a
 //// measurement of a person.
 ////
-//// Not ported yet: contacts, trials and signing packages (no route here records one, so they read as none), and
-//// the player's, guardian's, agent's and Trust & Safety's projections.
+//// Not ported yet: signing packages (no route here records one, so they read as none), and the player's,
+//// guardian's, agent's and Trust & Safety's projections.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -17,6 +17,8 @@ import gleam/string
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases.{type Room}
+import scoutbox/recruitment/contact_rules.{type Contact}
+import scoutbox/recruitment/contacts
 import scoutbox/recruitment/decisions
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_rules.{type Offer}
@@ -29,6 +31,7 @@ import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
 import scoutbox/rows/offer_history as event_row
 import scoutbox/rows/recruitment_cases as case_row
+import scoutbox/rows/recruitment_contacts as contact_row
 import scoutbox/rows/recruitment_requests as request_row
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/signings as signing_row
@@ -178,6 +181,8 @@ type Records {
     /// The organisation's trials of the player, and the trials naming this case.
     trials: List(Trial),
     case_trials: List(Trial),
+    /// The contacts naming this case.
+    contacts: List(Contact),
     blocked: Bool,
     player_present: Bool,
   )
@@ -236,6 +241,7 @@ pub fn build(
     r.player_id,
   ))
   use case_trials <- result.try(trials.for_case(read, r.id))
+  use case_contacts <- result.try(contacts.for_case(read, r.id))
   let rec =
     Records(
       room:,
@@ -247,6 +253,7 @@ pub fn build(
       requests:,
       trials: player_trials,
       case_trials:,
+      contacts: case_contacts,
       blocked:,
       player_present:,
     )
@@ -389,6 +396,26 @@ fn club(
       && t.row.org_id == r.org_id
       && trial_rules.integrity(t, Some(r.org_id), Some(r.id)) != []
     })
+  // Milestones only: never a body, a summary or a reply. A corrupt record is omitted and counted.
+  let #(sound_contacts, contacts_omitted) =
+    list.fold(rec.contacts, #([], 0), fn(acc, c) {
+      case c.row.case_id == r.id && c.row.org_id == r.org_id {
+        False -> acc
+        True ->
+          case contact_rules.integrity(c, Some(r.org_id), Some(r.id)) {
+            [] -> #([c, ..acc.0], acc.1)
+            _ -> #(acc.0, acc.1 + 1)
+          }
+      }
+    })
+  let sound_contacts = list.reverse(sound_contacts)
+  let contact_records =
+    list.sort(sound_contacts, fn(a, b) {
+      string.compare(
+        id.contact_to_string(a.row.id),
+        id.contact_to_string(b.row.id),
+      )
+    })
   let signing = supporting_signing(rec)
   let assessed =
     list.any(rec.assessments, fn(a) { a.state != assessment_row.Draft })
@@ -400,6 +427,7 @@ fn club(
       trial_rows,
       trial_assessments,
       sound_offers,
+      contact_records,
       now,
     )
   let limit =
@@ -512,8 +540,10 @@ fn club(
         status,
         sound_offers,
         trial_requests,
+        trial_rows,
+        sound_contacts,
         signing,
-        corrupt_offers + corrupt_trials,
+        corrupt_offers + corrupt_trials + contacts_omitted,
         assessed,
         now,
       ),
@@ -533,9 +563,8 @@ fn club(
             ])
           }),
         ),
-        // Not ported yet: Contact records.
-        #("contacts", json.preprocessed_array([])),
-        #("omitted", json.int(0)),
+        #("contacts", json.array(contact_records, contact_rules.milestone)),
+        #("omitted", json.int(contacts_omitted)),
       ]),
     ),
     #(
@@ -732,6 +761,62 @@ fn current_offer(offers: List(Offer), now: Int) -> Option(CurrentOffer) {
   )
 }
 
+/// The current Contact, newest first within each tier: delivered and awaiting a response, then responded or
+/// recorded, then a draft, then failed. Cancelled is never current.
+fn current_contact(rows: List(Contact)) -> Option(Contact) {
+  let key = fn(c: Contact) { id.contact_to_string(c.row.id) }
+  let tier = fn(pred, at) { newest(list.filter(rows, pred), at, key) }
+  let st = fn(c: Contact) { c.row.status }
+  tier(fn(c) { st(c) == contact_row.Delivered }, fn(c) {
+    option.unwrap(c.row.delivered_at, c.row.created_at)
+  })
+  |> option.lazy_or(fn() {
+    tier(
+      fn(c) { st(c) == contact_row.Responded || st(c) == contact_row.Recorded },
+      fn(c) {
+        c.row.responded_at
+        |> option.or(c.row.occurred_at)
+        |> option.or(c.row.recorded_at)
+        |> option.or(c.row.delivered_at)
+        |> option.unwrap(c.row.created_at)
+      },
+    )
+  })
+  |> option.lazy_or(fn() {
+    tier(fn(c) { st(c) == contact_row.Draft }, fn(c) { c.row.updated_at })
+  })
+  |> option.lazy_or(fn() {
+    tier(fn(c) { st(c) == contact_row.StatusFailed }, fn(c) {
+      option.unwrap(c.row.failed_at, c.row.created_at)
+    })
+  })
+}
+
+/// The current Trial: live (accepted or scheduled), then completed, then cancelled, then a legacy acceptance.
+fn current_trial(rows: List(Trial)) -> Option(Trial) {
+  let key = fn(t: Trial) { id.trial_to_string(t.row.id) }
+  let tier = fn(states, at) {
+    newest(
+      list.filter(rows, fn(t) {
+        list.contains(states, trial_rules.workflow_state(t))
+      }),
+      at,
+      key,
+    )
+  }
+  let ended = fn(t: Trial) {
+    option.unwrap(t.row.completion_at, t.row.accepted_at)
+  }
+  tier([trial_workflow_state.Accepted, trial_workflow_state.Scheduled], fn(t) {
+    option.unwrap(t.row.schedule_confirmed_at, t.row.accepted_at)
+  })
+  |> option.lazy_or(fn() { tier([trial_workflow_state.Completed], ended) })
+  |> option.lazy_or(fn() { tier([trial_workflow_state.Cancelled], ended) })
+  |> option.lazy_or(fn() {
+    tier([trial_workflow_state.LegacyAccepted], fn(t) { t.row.accepted_at })
+  })
+}
+
 fn ids(values: List(String)) -> Json {
   json.array(values, json.string)
 }
@@ -742,6 +827,8 @@ fn journey_block(
   status: RoomStatus,
   offers: List(Offer),
   trial_requests: List(request_row.Row),
+  case_trials: List(Trial),
+  case_contacts: List(Contact),
   signing: Option(signing_row.Row),
   corrupt: Int,
   assessed: Bool,
@@ -770,6 +857,8 @@ fn journey_block(
         fn(a) { id.assessment_to_string(a.id) },
       )
     })
+  let contact = current_contact(case_contacts)
+  let trial = current_trial(case_trials)
   let head = current_decision(case_decisions)
   let decision = case head {
     Some(d) if d.base.row.kind == Some(decision_row.Formal) -> Some(d)
@@ -783,6 +872,8 @@ fn journey_block(
       status,
       offers,
       trial_requests,
+      case_trials,
+      case_contacts,
       case_decisions,
       signing,
       corrupt,
@@ -795,6 +886,8 @@ fn journey_block(
       viewer.role,
       rec.blocked,
       subject_removed,
+      contact,
+      trial,
       pending_trial_request,
       assessed,
       decision,
@@ -811,6 +904,8 @@ fn journey_block(
       json.preprocessed_array(completed_stages(
         rec,
         status,
+        case_contacts,
+        case_trials,
         offers,
         case_decisions,
         signing,
@@ -820,7 +915,13 @@ fn journey_block(
     #(
       "resources",
       json.object([
-        #("contactId", json.null()),
+        #(
+          "contactId",
+          json.nullable(
+            option.map(contact, fn(c) { c.row.id }),
+            id.contact_json,
+          ),
+        ),
         #(
           "trialRequestId",
           json.nullable(
@@ -828,7 +929,10 @@ fn journey_block(
             id.request_json,
           ),
         ),
-        #("trialId", json.null()),
+        #(
+          "trialId",
+          json.nullable(option.map(trial, fn(t) { t.row.id }), id.trial_json),
+        ),
         #(
           "assessmentId",
           json.nullable(
@@ -935,6 +1039,8 @@ fn stage_json(
 fn completed_stages(
   rec: Records,
   status: RoomStatus,
+  case_contacts: List(Contact),
+  case_trials: List(Trial),
   offers: List(Offer),
   case_decisions: List(decisions.Decision),
   signing: Option(signing_row.Row),
@@ -957,6 +1063,27 @@ fn completed_stages(
       None -> []
     }
   }
+  let evidence_contact =
+    case_contacts
+    |> list.filter_map(fn(c) {
+      let at =
+        c.row.delivered_at
+        |> option.or(c.row.occurred_at)
+        |> option.or(c.row.recorded_at)
+      case contact_rules.is_evidence(c.row.status), c.row.cancelled_at, at {
+        True, None, Some(at) -> Ok(#(c, at))
+        _, _, _ -> Error(Nil)
+      }
+    })
+    |> newest(fn(x) { x.1 }, fn(x) { id.contact_to_string({ x.0 }.row.id) })
+  let done_trial =
+    newest(
+      list.filter(case_trials, fn(t) {
+        trial_rules.workflow_state(t) == trial_workflow_state.Completed
+      }),
+      fn(t) { option.unwrap(t.row.completion_at, 0) },
+      fn(t) { id.trial_to_string(t.row.id) },
+    )
   let assessed =
     newest(
       list.filter(rec.assessments, fn(a) { a.state != assessment_row.Draft }),
@@ -1010,10 +1137,22 @@ fn completed_stages(
   list.flatten([
     [stage_json("watching", "lifecycle", opened, [])],
     lifecycle_only("review", review_statuses),
-    // Not ported yet: Contact records, so contact is the lifecycle's word alone.
-    lifecycle_only("contact", ["contacted"]),
-    // Not ported yet: Trials.
-    lifecycle_only("trial", ["trial_completed"]),
+    case evidence_contact {
+      Some(#(c, at)) -> [
+        stage_json("contact", "canonical", Some(at), [
+          #("contactId", id.contact_json(c.row.id)),
+        ]),
+      ]
+      None -> lifecycle_only("contact", ["contacted"])
+    },
+    case done_trial {
+      Some(t) -> [
+        stage_json("trial", "canonical", t.row.completion_at, [
+          #("trialId", id.trial_json(t.row.id)),
+        ]),
+      ]
+      None -> lifecycle_only("trial", ["trial_completed"])
+    },
     case assessed {
       Some(a) -> [
         stage_json(
@@ -1074,6 +1213,8 @@ fn validate(
   status: RoomStatus,
   offers: List(Offer),
   trial_requests: List(request_row.Row),
+  case_trials: List(Trial),
+  case_contacts: List(Contact),
   case_decisions: List(decisions.Decision),
   signing: Option(signing_row.Row),
   corrupt: Int,
@@ -1085,6 +1226,9 @@ fn validate(
   let decision_ids =
     list.map(case_decisions, fn(d) { id.room_decision_to_string(d.base.row.id) })
   let offer_ids = list.map(offers, fn(o) { id.offer_to_string(o.row.id) })
+  let contact_ids =
+    list.map(case_contacts, fn(c) { id.contact_to_string(c.row.id) })
+  let trial_ids = list.map(case_trials, fn(t) { id.trial_to_string(t.row.id) })
   let stale = fn(value: Option(String), known: List(String)) {
     case value {
       Some(v) -> !list.contains(known, v)
@@ -1132,8 +1276,8 @@ fn validate(
               None -> reached
             }
             let problems = case
-              option.is_some(d.contact_id)
-              || option.is_some(d.trial_id)
+              stale(d.contact_id, contact_ids)
+              || stale(d.trial_id, trial_ids)
               || stale(d.request_id, request_ids)
               || stale(d.decision_id, decision_ids)
               || stale(d.offer_id, offer_ids)
@@ -1158,10 +1302,33 @@ fn validate(
     })
   }
   let evidence = [
-    #("contacted", False),
-    #("trial_requested", trial_requests != []),
-    #("trial_scheduled", False),
-    #("trial_completed", False),
+    #(
+      "contacted",
+      list.any(case_contacts, fn(c) {
+        contact_rules.is_evidence(c.row.status) && c.row.cancelled_at == None
+      }),
+    ),
+    #("trial_requested", trial_requests != [] || case_trials != []),
+    #(
+      "trial_scheduled",
+      list.any(case_trials, fn(t) {
+        list.contains(
+          [
+            trial_workflow_state.Scheduled,
+            trial_workflow_state.Completed,
+            trial_workflow_state.Cancelled,
+          ],
+          trial_rules.workflow_state(t),
+        )
+        && trial_rules.has_schedule(t)
+      }),
+    ),
+    #(
+      "trial_completed",
+      list.any(case_trials, fn(t) {
+        trial_rules.workflow_state(t) == trial_workflow_state.Completed
+      }),
+    ),
     #(
       "offer_consideration",
       list.any(case_decisions, fn(d) {
@@ -1310,6 +1477,8 @@ fn next_action(
   role: Option(RoomRole),
   blocked: Bool,
   subject_removed: Bool,
+  contact: Option(Contact),
+  trial: Option(Trial),
   trial_request: Option(request_row.Row),
   assessed: Bool,
   decision: Option(decisions.Decision),
@@ -1330,6 +1499,10 @@ fn next_action(
       ),
     ]
   }
+  let trial_ref = #(
+    "trialId",
+    json.nullable(option.map(trial, fn(t) { t.row.id }), id.trial_json),
+  )
   let decision_ref = #(
     "decisionId",
     json.nullable(
@@ -1356,13 +1529,28 @@ fn next_action(
         True -> #("RECORD_DECISION", [])
         False -> #("DECIDE_APPROACH", [])
       }
-    // Not ported yet: Contact records, so there is never a draft or delivered contact to name.
     room_status.ContactPlanned -> #("SEND_CONTACT", [
-      #("contactId", json.null()),
+      #("contactId", case contact {
+        Some(c) if c.row.status == contact_row.Draft -> id.contact_json(c.row.id)
+        _ -> json.null()
+      }),
     ])
-    room_status.Contacted -> #("CONTINUE_EVALUATION", [
-      #("contactId", json.null()),
-    ])
+    room_status.Contacted ->
+      case contact {
+        Some(c) if c.row.status == contact_row.Delivered -> #(
+          "AWAIT_CONTACT_RESPONSE",
+          [#("contactId", id.contact_json(c.row.id))],
+        )
+        _ -> #("CONTINUE_EVALUATION", [
+          #(
+            "contactId",
+            json.nullable(
+              option.map(contact, fn(c) { c.row.id }),
+              id.contact_json,
+            ),
+          ),
+        ])
+      }
     room_status.TrialRequested -> #("AWAIT_TRIAL_RESPONSE", [
       #(
         "trialRequestId",
@@ -1372,16 +1560,25 @@ fn next_action(
         ),
       ),
     ])
-    // Not ported yet: Trials.
-    room_status.TrialScheduled -> #("CONDUCT_TRIAL", [#("trialId", json.null())])
+    room_status.TrialScheduled -> {
+      let last_end = case trial {
+        Some(t) ->
+          list.fold(t.sessions, 0, fn(m, x) { int.max(m, x.row.ends_at) })
+        None -> 0
+      }
+      #(
+        case last_end > 0 && last_end <= now {
+          True -> "COMPLETE_TRIAL"
+          False -> "CONDUCT_TRIAL"
+        },
+        [trial_ref],
+      )
+    }
     room_status.TrialCompleted ->
       case assessed, decision {
-        False, _ -> #("COMPLETE_ASSESSMENT", [#("trialId", json.null())])
-        True, None -> #("RECORD_DECISION", [#("trialId", json.null())])
-        True, Some(_) -> #("RECORD_DECISION", [
-          #("trialId", json.null()),
-          decision_ref,
-        ])
+        False, _ -> #("COMPLETE_ASSESSMENT", [trial_ref])
+        True, None -> #("RECORD_DECISION", [trial_ref])
+        True, Some(_) -> #("RECORD_DECISION", [trial_ref, decision_ref])
       }
     room_status.OfferConsideration ->
       case offer {
@@ -1552,6 +1749,7 @@ fn timeline(
   case_trials: List(Trial),
   trial_assessments: List(assessment_row.Row),
   offers: List(Offer),
+  contact_records: List(Contact),
   now: Int,
 ) -> List(Json) {
   let room = rec.room
@@ -1824,10 +2022,52 @@ fn timeline(
         #("decisionId", id.room_decision_json(d.id)),
       ])
     })
+  // Keyed by the contact id so two in the same millisecond keep a stable order.
+  let contact_lines =
+    list.flat_map(contact_records, fn(c) {
+      let cid = id.contact_to_string(c.row.id)
+      list.flatten([
+        case contact_rules.initiated_at(c.row) {
+          Some(at) -> [
+            Line(at, "contact:" <> cid, [
+              #("kind", json.string("contact_initiated")),
+              #("at", json.int(at)),
+              #("by", json.null()),
+              #("channel", contact_row.channel_to_json(c.row.channel)),
+              #(
+                "recipientType",
+                json.nullable(c.row.recipient_type, party.to_json),
+              ),
+              #("contactId", id.contact_json(c.row.id)),
+            ]),
+          ]
+          None -> []
+        },
+        case c.row.responded_at {
+          Some(at) -> [
+            Line(at, "contact_response:" <> cid, [
+              #("kind", json.string("contact_response_received")),
+              #("at", json.int(at)),
+              #("by", json.null()),
+              #(
+                "responseKind",
+                json.nullable(
+                  c.row.response_kind,
+                  contact_row.response_kind_to_json,
+                ),
+              ),
+              #("contactId", id.contact_json(c.row.id)),
+            ]),
+          ]
+          None -> []
+        },
+      ])
+    })
   list.flatten([
     invited,
     trial_lines,
     assessment_lines,
+    contact_lines,
     offer_lines,
     case_lines,
     handoff_lines,
