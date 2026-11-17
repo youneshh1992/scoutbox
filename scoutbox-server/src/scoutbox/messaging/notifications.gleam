@@ -8,9 +8,7 @@
 ////
 //// A notice written or refreshed publishes the live `notify` event once the unit commits; a muted one doesn't.
 ////
-//// Not ported yet: a staff member's feed `target` (the recruitment Rooms).
 
-import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json.{type Json}
@@ -32,7 +30,6 @@ import scoutbox/rows/players as player_row
 import scoutbox/rules/age
 import scoutbox/vocab/audience.{type Audience}
 import scoutbox/vocab/notification_category
-import scoutbox/vocab/party
 import sqlight
 
 const coalesce_ms = 21_600_000
@@ -310,77 +307,36 @@ pub type FeedItem {
   FeedItem(notification: Notification, target: Option(Json))
 }
 
-/// One audience's feed, newest first, each row with its target.
-pub fn feed(
+/// One audience's rows, newest first.
+pub fn for_audience(
   read: Read,
   kind: Audience,
   id: String,
-) -> Result(List(FeedItem), Fail(e)) {
-  use rows <- result.try(store.query(
+) -> Result(List(Notification), Fail(e)) {
+  store.query(
     read,
     "SELECT "
       <> row.columns
       <> " FROM notifications WHERE audience_kind = ? AND audience_id = ? ORDER BY seq DESC",
     [sqlight.text(audience.to_string(kind)), sqlight.text(id)],
     row.decoder(),
-  ))
-  let request_refs =
-    list.filter_map(rows, fn(n) {
-      case n.ref_id {
-        Some("req-" <> _ as ref) -> Ok(ref)
-        _ -> Error(Nil)
-      }
-    })
-    |> list.unique
-  use requests <- result.map(
-    store.query(
-      read,
-      "SELECT id, player_id, routed_to, guardian_id FROM recruitment_requests WHERE id IN (SELECT value FROM json_each(?))",
-      [json.array(request_refs, json.string) |> json.to_string |> sqlight.text],
-      {
-        // Keyed by the text of the polymorphic `ref_id` it is looked up by.
-        use rid <- decode.field(0, decode.string)
-        use player_id <- decode.field(1, id.player_decoder())
-        use routed_to <- decode.field(2, party.decoder())
-        use guardian_id <- decode.field(
-          3,
-          decode.optional(id.guardian_decoder()),
-        )
-        decode.success(#(rid, #(player_id, routed_to, guardian_id)))
-      },
-    ),
   )
-  let requests = dict.from_list(requests)
-  list.map(rows, fn(n) {
-    let target = case n.ref_id {
-      Some("req-" <> _ as ref) ->
-        case dict.get(requests, ref), kind {
-          Ok(#(player_id, routed_to, _)), audience.Player
-            if routed_to != party.Guardian
-          ->
-            case id.player_to_string(player_id) == id {
-              True -> Some(inbox_target(ref))
-              False -> None
-            }
-          Ok(#(_, _, Some(guardian_id))), audience.Guardian ->
-            case id.guardian_to_string(guardian_id) == id {
-              True -> Some(inbox_target(ref))
-              False -> None
-            }
-          // Not ported yet: a staff member's request leads to its recruitment Room.
-          _, _ -> None
-        }
-      _ -> None
-    }
-    FeedItem(n, target)
-  })
 }
 
-fn inbox_target(request_id: String) -> Json {
-  json.object([
-    #("kind", json.string("inbox")),
-    #("requestId", json.string(request_id)),
-  ])
+/// One audience's feed, newest first, each row with where `target` says it leads. The recruitment domain says
+/// that (`recruitment/notification_targets`), and it depends on this module, so the router hands it in.
+pub fn feed(
+  read: Read,
+  kind: Audience,
+  id: String,
+  target: fn(Read, Audience, String, Option(String)) ->
+    Result(Option(Json), Fail(e)),
+) -> Result(List(FeedItem), Fail(e)) {
+  use rows <- result.try(for_audience(read, kind, id))
+  list.try_map(rows, fn(n) {
+    use t <- result.map(target(read, kind, id, n.ref_id))
+    FeedItem(n, t)
+  })
 }
 
 /// Every unread row of one audience, read.
@@ -443,60 +399,69 @@ pub fn mark_dispatched(
 // ------------------------------------------------------------------------------------------------- views
 
 pub fn view(item: FeedItem) -> Json {
-  let n = item.notification
   json.object(
-    list.flatten([
-      [
-        #("id", id.notification_json(n.id)),
-        #("ts", json.int(n.occurred_at)),
-        #(
-          "audience",
-          json.object([
-            #("kind", audience.to_json(n.audience_kind)),
-            #("id", json.string(n.audience_id)),
-          ]),
-        ),
-        #("type", json.string(n.type_)),
-        #("text", json.string(n.text)),
-        #("refId", json.nullable(n.ref_id, json.string)),
-        #("read", json.bool(n.read)),
-        #("repeatCount", json.int(n.repeat_count)),
-        #(
-          "groupKey",
-          json.nullable(
-            option.map(n.ref_id, fn(r) { n.type_ <> ":" <> r }),
-            json.string,
-          ),
-        ),
-        #(
-          "category",
-          json.nullable(
-            option.map(n.category, notification_category.to_string),
-            json.string,
-          ),
-        ),
-        #("deferredPush", json.bool(n.deferred_push)),
-      ],
-      case n.action_required {
-        False -> []
-        True -> [
-          #(
-            "actionRequired",
-            json.object([
-              #("deadline", json.nullable(n.action_deadline_at, json.int)),
-              #("ackedAt", json.nullable(n.action_acked_at, json.int)),
-              #(
-                "ackedBy",
-                json.nullable(
-                  option.map(n.action_acked_at, fn(_) { n.audience_id }),
-                  json.string,
-                ),
-              ),
-            ]),
-          ),
-        ]
-      },
-      [#("target", option.unwrap(item.target, json.null()))],
+    list.append(fields(item.notification), [
+      #("target", option.unwrap(item.target, json.null())),
     ]),
   )
+}
+
+/// A row without a destination, as the agent inbox lists it.
+pub fn row_view(n: Notification) -> Json {
+  json.object(fields(n))
+}
+
+fn fields(n: Notification) -> List(#(String, Json)) {
+  list.flatten([
+    [
+      #("id", id.notification_json(n.id)),
+      #("ts", json.int(n.occurred_at)),
+      #(
+        "audience",
+        json.object([
+          #("kind", audience.to_json(n.audience_kind)),
+          #("id", json.string(n.audience_id)),
+        ]),
+      ),
+      #("type", json.string(n.type_)),
+      #("text", json.string(n.text)),
+      #("refId", json.nullable(n.ref_id, json.string)),
+      #("read", json.bool(n.read)),
+      #("repeatCount", json.int(n.repeat_count)),
+      #(
+        "groupKey",
+        json.nullable(
+          option.map(n.ref_id, fn(r) { n.type_ <> ":" <> r }),
+          json.string,
+        ),
+      ),
+      #(
+        "category",
+        json.nullable(
+          option.map(n.category, notification_category.to_string),
+          json.string,
+        ),
+      ),
+      #("deferredPush", json.bool(n.deferred_push)),
+    ],
+    case n.action_required {
+      False -> []
+      True -> [
+        #(
+          "actionRequired",
+          json.object([
+            #("deadline", json.nullable(n.action_deadline_at, json.int)),
+            #("ackedAt", json.nullable(n.action_acked_at, json.int)),
+            #(
+              "ackedBy",
+              json.nullable(
+                option.map(n.action_acked_at, fn(_) { n.audience_id }),
+                json.string,
+              ),
+            ),
+          ]),
+        ),
+      ]
+    },
+  ])
 }

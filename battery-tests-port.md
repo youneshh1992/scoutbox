@@ -114,7 +114,7 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings | 13 | `recruitment/journey`: sections B–F, H (bar H5) and Q pass. Left: G (notification targets), H5 (Second Look) and I (the analytics pipeline family) |
+| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings | 13 | `recruitment/journey`: everything but H5 (Second Look) and I (the analytics pipeline family) passes |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 

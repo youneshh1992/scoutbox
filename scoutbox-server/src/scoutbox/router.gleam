@@ -61,6 +61,7 @@ import scoutbox/recruitment/case_routes
 import scoutbox/recruitment/contact_routes
 import scoutbox/recruitment/invoices
 import scoutbox/recruitment/lifecycle
+import scoutbox/recruitment/notification_targets
 import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
 import scoutbox/recruitment/room_routes
@@ -380,6 +381,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               audience.OrgUser,
               id.org_user_to_string(org.user.id),
+              notification_targets.target,
             )
           })
         ["notifications", "read"] ->
@@ -633,6 +635,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               audience.Player,
               id.player_to_string(player.player.row.id),
+              notification_targets.target,
             )
           })
         ["notifications", "read"] ->
@@ -876,6 +879,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               audience.Guardian,
               id.guardian_to_string(guardian.row.id),
+              notification_targets.target,
             )
           })
         ["notifications", "read"] ->

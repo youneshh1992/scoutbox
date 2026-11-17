@@ -845,7 +845,7 @@ fn current_offer(offers: List(Offer), now: Int) -> Option(CurrentOffer) {
 
 /// The current package: a live one, then a completed one, then the newest of any status, so an expired package
 /// never masks a live one.
-fn current_signing(
+pub fn current_signing(
   packages: List(signing_rules.Package),
   now: Int,
 ) -> Option(signing_rules.Package) {

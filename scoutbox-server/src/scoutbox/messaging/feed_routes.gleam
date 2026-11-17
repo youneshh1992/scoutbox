@@ -17,8 +17,15 @@ import scoutbox/vocab/audience.{type Audience}
 import scoutbox/vocab/party
 import wisp.{type Request, type Response}
 
-pub fn feed(ctx: Ctx, kind: Audience, id: String) -> Response {
-  case store.read(ctx.store, notifications.feed(_, kind, id)) {
+/// `target` says where a row leads (`recruitment/notification_targets.target`).
+pub fn feed(
+  ctx: Ctx,
+  kind: Audience,
+  id: String,
+  target: fn(store.Read, Audience, String, option.Option(String)) ->
+    Result(option.Option(json.Json), store.Fail(Nil)),
+) -> Response {
+  case store.read(ctx.store, notifications.feed(_, kind, id, target)) {
     Ok(rows) -> http.json(200, json.array(rows, notifications.view))
     Error(failure) -> http.internal(failure)
   }

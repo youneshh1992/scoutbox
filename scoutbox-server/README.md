@@ -95,7 +95,7 @@ Every route below is exercised by a battery, except where marked.
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
 | Player | `GET /player/me`, `/player/export`, `GET`/`PATCH /player/box-cam/prefs`, `POST /player/box-cam/sessions/:id/cv/finalize` (its rate limit and session check only); `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `DELETE /guardian/children/:id`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
-| Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
+| Notifications | `GET /{org,player,guardian}/notifications` (each row with its `target`: the Room tab, the agent's client, or the recipient's request, Trial, Offer or current signing package it leads to); `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
 | Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |
 | Media | `GET /media/:id`: every `/media/<id>` value in a response leaves signed for the requesting session (`media/links`), and a fetch checks that session's standing each time |
@@ -133,8 +133,7 @@ for players and guardians (a new player account stores a hash no password matche
   missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
 - The journey, the evidence provider and the decision surface see no Contact records or Trials (`Not ported yet:`):
   no route here records one.
-- The journey has no Trust & Safety projection, and a notification's feed `target` leads only to a recipient's
-  inbox request: Rooms, Trials, Contacts, Offers and signing packages lead nowhere yet (`Not ported yet:`).
+- The journey has no Trust & Safety projection (`Not ported yet:`).
 - A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
   COMMIT. Either way a completion that rolls back issues none.
 - A transaction workspace stays at DRAFT: only opening one and its notes are ported, so no party can confirm.

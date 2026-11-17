@@ -22,6 +22,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/store
+import scoutbox/recruitment/notification_targets
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
 import scoutbox/rules/age
@@ -415,6 +416,7 @@ pub fn export(ctx: Ctx, p: PlayerAccess) -> Response {
         read,
         audience.Player,
         id.player_to_string(id),
+        notification_targets.target,
       ))
       use events <- result.map(ledger.for_player(read, id))
       json.object([

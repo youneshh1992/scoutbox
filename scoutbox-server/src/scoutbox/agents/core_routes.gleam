@@ -3327,7 +3327,7 @@ pub fn inbox(ctx: Ctx, a: OrgAccess) -> Response {
   use <- require(m, "inbox.read")
   let now = clock.now_ms()
   use #(feed, pending) <- reading(ctx, fn(r) {
-    use feed <- result.try(notifications.feed(
+    use feed <- result.try(notifications.for_audience(
       r,
       audience.OrgUser,
       id.org_user_to_string(a.user.id),
@@ -3346,7 +3346,7 @@ pub fn inbox(ctx: Ctx, a: OrgAccess) -> Response {
   http.json(
     200,
     json.object([
-      #("notifications", json.array(feed, notifications.view)),
+      #("notifications", json.array(feed, notifications.row_view)),
       #("pending", json.preprocessed_array(pending)),
       #(
         "note",
