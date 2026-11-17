@@ -29,6 +29,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
 import scoutbox/platform/effect
+import scoutbox/platform/faults
 import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
@@ -3314,6 +3315,20 @@ fn respond_write(
     )
   })
   |> room_routes.answer
+  |> after_persist(ctx)
+}
+
+/// `internal:offer.respond.after_persist`: the answer has committed, then the request fails, so a retry with the same
+/// clientKey replays it without a second move or notification. Development only.
+fn after_persist(resp: Response, ctx: Ctx) -> Response {
+  let step = "offer.respond.after_persist"
+  case resp.status == 200 && faults.should_fail(ctx.faults, step) {
+    True ->
+      http.internal(
+        "simulated failure after the answer was persisted (development fault layer)",
+      )
+    False -> resp
+  }
 }
 
 fn org_level(read: Read, room: Room) -> Result(orgs.Level, Fail(e)) {

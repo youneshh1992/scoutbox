@@ -181,6 +181,9 @@ type Records {
     decisions: List(decisions.Decision),
     draft: Option(decisions.Draft),
     assessments: List(assessment_row.Row),
+    /// The assessments the journey counts: never one in the context of another case's Trial (an ended case keeps
+    /// its own, a later case inherits nothing).
+    case_assessments: List(assessment_row.Row),
     offers: List(Offer),
     signings: List(signing_row.Row),
     /// The signing packages opened on this case for its club and player.
@@ -268,11 +271,27 @@ fn load(
   use case_trials <- result.try(trials.for_case(read, r.id))
   use case_contacts <- result.try(contacts.for_case(read, r.id))
   use case_packages <- result.try(signing_packages.for_case(read, r.id))
+  // The TypeScript rule also compares the assessment's time with each sibling case's span, which never holds (see
+  // owned_elsewhere): only a Trial context gives an assessment to another case.
+  let case_assessments =
+    list.filter(assessments, fn(a) {
+      let trial_case =
+        option.then(a.context_trial_id, fn(tid) {
+          list.find(player_trials, fn(t) { id.trial_to_string(t.row.id) == tid })
+          |> option.from_result
+          |> option.then(fn(t) { t.row.case_id })
+        })
+      case trial_case {
+        Some(c) -> c == r.id
+        None -> True
+      }
+    })
   Ok(Records(
     room:,
     decisions: list.filter(all, fn(d) { d.base.row.org_id == r.org_id }),
     draft:,
     assessments:,
+    case_assessments:,
     offers: list.filter(case_offers, fn(o) { o.row.org_id == r.org_id }),
     signings:,
     packages: list.filter(case_packages, fn(p) {
@@ -572,7 +591,8 @@ fn club(
         sound_packages,
         signing,
         corrupt_offers + corrupt_trials + contacts_omitted + packages_corrupt,
-        assessed,
+        // The journey counts this case's assessments only; the workflow fact above counts the player's.
+        list.any(rec.case_assessments, fn(a) { a.state != assessment_row.Draft }),
         now,
       ),
     ),
@@ -949,13 +969,17 @@ fn journey_block(
     |> newest(fn(q) { q.created_at }, fn(q) { id.request_to_string(q.id) })
   let current_assessment =
     newest(
-      list.filter(rec.assessments, fn(a) { a.state != assessment_row.Draft }),
+      list.filter(rec.case_assessments, fn(a) {
+        a.state != assessment_row.Draft
+      }),
       fn(a) { option.unwrap(a.submitted_at, a.created_at) },
       fn(a) { id.assessment_to_string(a.id) },
     )
     |> option.lazy_or(fn() {
       newest(
-        list.filter(rec.assessments, fn(a) { a.state == assessment_row.Draft }),
+        list.filter(rec.case_assessments, fn(a) {
+          a.state == assessment_row.Draft
+        }),
         fn(a) { a.created_at },
         fn(a) { id.assessment_to_string(a.id) },
       )
@@ -1215,7 +1239,9 @@ fn completed_stages(
     )
   let assessed =
     newest(
-      list.filter(rec.assessments, fn(a) { a.state != assessment_row.Draft }),
+      list.filter(rec.case_assessments, fn(a) {
+        a.state != assessment_row.Draft
+      }),
       fn(a) { option.unwrap(a.submitted_at, a.created_at) },
       fn(a) { id.assessment_to_string(a.id) },
     )

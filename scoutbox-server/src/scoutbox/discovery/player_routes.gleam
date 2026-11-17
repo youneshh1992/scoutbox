@@ -2,6 +2,8 @@
 //// shortlist itself (domains/discovery/search.mjs). A player who blocked the organisation reads as absent on every
 //// one of them, and every profile view is on the Discovery Ledger.
 
+import gleam/float
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -13,9 +15,11 @@ import scoutbox/insight/review_queue
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/operator
 import scoutbox/platform/store
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/orgs
 import scoutbox/rules/visibility.{type Access}
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -209,6 +213,78 @@ pub fn mark(
         Error(failure) -> http.internal(failure)
       }
     }
+  }
+}
+
+/// `GET /org/players/:id/morelike`: a player the club may not see, or who blocked it, is absent. Not ported yet: the
+/// ranking itself (the similarity score over the players the club can see).
+pub fn more_like(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
+  use _, access <- with_player(ctx, a, id, clock.now_ms())
+  case access.blocked || !access.visible {
+    True -> not_found()
+    False ->
+      http.error_message(
+        501,
+        "NOT_PORTED",
+        "Similar players are not supported by this server yet.",
+      )
+  }
+}
+
+/// `GET /org/players/:id/proofpack`: the club's Discovery Ledger with the player, and the attribution window its plan
+/// gives from the first event.
+pub fn proof_pack(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
+  let now = clock.now_ms()
+  use p, access <- with_player(ctx, a, id, now)
+  case access.blocked, access.visible {
+    True, _ -> not_found()
+    False, False -> http.error(403, "UNDER_18_WALL")
+    False, True ->
+      case store.read(ctx.store, ledger.for_player_org(_, p.row.id, a.org.id)) {
+        Error(failure) -> http.internal(failure)
+        Ok(events) -> {
+          let plan_name = orgs.plan_to_string(a.org.plan)
+          let assert Ok(plan) =
+            list.find(operator.plans, fn(x) { x.name == plan_name })
+            as "orgs.plan has a CHECK against the catalogue"
+          let months = plan.attribution_window_months
+          let first = list.first(events)
+          // The TypeScript server's arithmetic, in its order: a month is 30.44 days, and the instant is truncated.
+          let ends = case first {
+            Ok(e) -> {
+              let span =
+                int.to_float(months) *. 30.44 *. 24.0 *. 3600.0 *. 1000.0
+              json.string(
+                clock.iso(float.truncate(int.to_float(e.occurred_at) +. span)),
+              )
+            }
+            Error(Nil) -> json.null()
+          }
+          http.json(
+            200,
+            json.object([
+              #("playerId", id.player_json(p.row.id)),
+              #("playerName", json.string(p.row.name)),
+              #(
+                "org",
+                json.object([
+                  #("id", id.org_json(a.org.id)),
+                  #("name", json.string(a.org.name)),
+                  #("plan", json.string(plan_name)),
+                ]),
+              ),
+              #("firstQualifyingInteraction", case first {
+                Ok(e) -> ledger.view(e)
+                Error(Nil) -> json.null()
+              }),
+              #("attributionWindowMonths", json.int(months)),
+              #("attributionWindowEnds", ends),
+              #("eventLog", json.array(events, ledger.view)),
+              #("generatedAt", json.string(clock.iso(now))),
+            ]),
+          )
+        }
+      }
   }
 }
 

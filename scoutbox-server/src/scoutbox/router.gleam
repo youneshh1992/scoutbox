@@ -401,6 +401,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             discovery.add_note(ctx, req, org, id.player(id))
           })
+        ["players", id, "morelike"] ->
+          only(req, Get, fn() { discovery.more_like(ctx, org, id.player(id)) })
+        ["players", id, "proofpack"] ->
+          only(req, Get, fn() { discovery.proof_pack(ctx, org, id.player(id)) })
         ["players", id, "save"] ->
           only(req, Post, fn() {
             discovery.mark(ctx, req, org, id.player(id), ledger_row.Save)

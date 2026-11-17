@@ -109,6 +109,22 @@ pub fn for_player(
   )
 }
 
+/// One player's ledger with one organisation, oldest first: what a Proof Pack lists.
+pub fn for_player_org(
+  read: Read,
+  player_id: id.PlayerId,
+  org_id: id.OrgId,
+) -> Result(List(row.Row), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM ledger WHERE player_id = ? AND org_id = ? ORDER BY seq",
+    [id.player_sql(player_id), id.org_sql(org_id)],
+    row.decoder(),
+  )
+}
+
 /// The players a club shortlisted, in the order it first did.
 pub fn shortlisted_by(
   read: Read,

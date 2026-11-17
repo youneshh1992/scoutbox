@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 37 of 53 neutral]
+### Untangling [in progress: 38 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 30 batteries pass unchanged]
+### Porting, domain by domain [in progress: 31 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -114,7 +114,7 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics | 17 | `recruitment/journey`: everything but Z1 (matching and watchlists) passes |
+| Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics | 18 | `recruitment/journey`: everything but Z1 (matching and watchlists) passes |
 | Discovery: Second Look and Nobody Missed | 1 | **ported**: every ledger row closed |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
@@ -136,7 +136,11 @@ are for surprising facts or points that later work depends on, not implementatio
    3. `recruitment/journeyPersistence` [**done**: it passed on first run, since its routes were all in]. A journey
       finds a legacy signing by player and club, not through the case's `links_signing_id`: a legacy signed case
       planted without its link still passes, in the original battery too.
-   4. `recruitment/journeyAdversarial`. It also reaches into `/org/agent` and `/admin/blocks`.
+   4. `recruitment/journeyAdversarial` [**done**; its rule cases are pending (30)]. A journey counts only the
+      assessments of its own case: one in the context of another case's Trial is that case's. B3 and G6 assumed
+      the single thread's race winner and now accept either. P4 passes only because a restart empties the
+      in-memory event replay first: the player's own ledger frames name `recruitment_room_created`.
+      `/org/players/:id/morelike` has only its guards (501 past them).
 2. **Discovery, alongside recruitment.** `decisions`, `lifecycle` and `journey` section H5 all call
    `/org/second-look`, so recruitment can't close without it.
    1. `discovery/secondLookAndNobodyMissed` [**done**]. Nobody Missed reads the stored match facts, which the store
@@ -207,7 +211,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 16 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 15 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 

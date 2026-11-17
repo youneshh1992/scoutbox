@@ -71,3 +71,19 @@ sends the same text for `compliance_store.NoProfile`, with a comment.
 
 **Fix.** In `agentRoutes.mjs`, keep the gate's own message when it names no facet ("Create your agent profile
 first."), then send that text from `gate_refusal` too. No battery checks this message.
+
+## Revisit these questions
+
+### A close can beat the completion of a fully signed package
+
+Decided 2026-11-17 while porting `recruitment/journeyAdversarial`: the battery was loosened at source
+(`40d1c23f` in the TypeScript tree) so the port isn't held up. G6 had assumed the single thread's winner, which is
+the request sent first. On the BEAM either request can win.
+
+**What it is.** Section B12 completes a package that both parties have signed while a `closeCase` races it, and
+already accepted either outcome. If the close wins, the case closes with both signatures on a READY package and no
+signing row, and B12 reopens it. G6 used to require the completed case's stage, and now accepts `review` when no
+package completed.
+
+**The question.** Should a close be refused while a package has every signature it needs, or while a signing is in
+progress? That is a product rule the single thread hid, since the completion always won there.

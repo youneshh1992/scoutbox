@@ -31,4 +31,5 @@ export const BATTERIES = [
   'recruitment/decisions',
   'recruitment/lifecycle',
   'recruitment/journeyPersistence',
+  'recruitment/journeyAdversarial',
 ];
