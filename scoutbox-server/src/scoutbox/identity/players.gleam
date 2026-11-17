@@ -1044,6 +1044,15 @@ pub fn set_availability(
   )
 }
 
+/// The level a completed signing sets.
+pub fn set_level(
+  tx: Tx,
+  id: id.PlayerId,
+  level: playing_level.PlayingLevel,
+) -> Result(Player, Fail(e)) {
+  update(tx, id, [#("level", sqlight.text(playing_level.to_string(level)))])
+}
+
 pub type Switch {
   FirstTeamSeeker
   AcademyPlus

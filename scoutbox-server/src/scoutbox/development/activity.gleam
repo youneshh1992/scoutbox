@@ -15,6 +15,16 @@ import scoutbox/vocab/playing_level
 /// Logs the activity, then awards each journey badge newly earned, with a notice. Returns the stored record.
 pub fn record(tx: Tx, id: id.PlayerId, now: Int) -> Result(Player, Fail(e)) {
   use _ <- result.try(players.log_activity(tx, id, now))
+  refresh_badges(tx, id, now)
+}
+
+/// Awards each journey badge the stored record has newly earned, with a notice (refreshJourneyBadges). Returns the
+/// stored record.
+pub fn refresh_badges(
+  tx: Tx,
+  id: id.PlayerId,
+  now: Int,
+) -> Result(Player, Fail(e)) {
   use found <- result.try(players.by_id(store.reading(tx), id))
   let assert Some(p) = found as "activity is recorded for a live player"
   case p.row.level {
