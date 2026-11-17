@@ -7,7 +7,9 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/brief_status
 import scoutbox/vocab/playing_level
+import scoutbox/vocab/trust_band
 import sqlight
 
 pub const table = "recruitment_briefs"
@@ -25,58 +27,6 @@ pub fn qualified(alias: String) -> String {
   |> string.split(", ")
   |> list.map(fn(c) { alias <> "." <> c })
   |> string.join(", ")
-}
-
-pub type Status {
-  Draft
-  Active
-  Paused
-  Closed
-  Archived
-}
-
-/// Each value with the text the column stores.
-pub const status_pairs = [
-  #("draft", Draft),
-  #("active", Active),
-  #("paused", Paused),
-  #("closed", Closed),
-  #("archived", Archived),
-]
-
-pub fn status_to_string(value: Status) -> String {
-  case value {
-    Draft -> "draft"
-    Active -> "active"
-    Paused -> "paused"
-    Closed -> "closed"
-    Archived -> "archived"
-  }
-}
-
-pub fn status_from_string(value: String) -> Result(Status, Nil) {
-  case value {
-    "draft" -> Ok(Draft)
-    "active" -> Ok(Active)
-    "paused" -> Ok(Paused)
-    "closed" -> Ok(Closed)
-    "archived" -> Ok(Archived)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn status_to_json(value: Status) -> Json {
-  json.string(status_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn status_decoder() -> decode.Decoder(Status) {
-  use value <- decode.then(decode.string)
-  case status_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Draft, "Status")
-  }
 }
 
 pub type Foot {
@@ -119,65 +69,13 @@ pub fn foot_decoder() -> decode.Decoder(Foot) {
   }
 }
 
-pub type MinTrustBand {
-  LimitedEvidence
-  DevelopingEvidence
-  EstablishedEvidence
-  StrongEvidence
-  VeryStrongEvidence
-}
-
-/// Each value with the text the column stores.
-pub const min_trust_band_pairs = [
-  #("limited_evidence", LimitedEvidence),
-  #("developing_evidence", DevelopingEvidence),
-  #("established_evidence", EstablishedEvidence),
-  #("strong_evidence", StrongEvidence),
-  #("very_strong_evidence", VeryStrongEvidence),
-]
-
-pub fn min_trust_band_to_string(value: MinTrustBand) -> String {
-  case value {
-    LimitedEvidence -> "limited_evidence"
-    DevelopingEvidence -> "developing_evidence"
-    EstablishedEvidence -> "established_evidence"
-    StrongEvidence -> "strong_evidence"
-    VeryStrongEvidence -> "very_strong_evidence"
-  }
-}
-
-pub fn min_trust_band_from_string(value: String) -> Result(MinTrustBand, Nil) {
-  case value {
-    "limited_evidence" -> Ok(LimitedEvidence)
-    "developing_evidence" -> Ok(DevelopingEvidence)
-    "established_evidence" -> Ok(EstablishedEvidence)
-    "strong_evidence" -> Ok(StrongEvidence)
-    "very_strong_evidence" -> Ok(VeryStrongEvidence)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn min_trust_band_to_json(value: MinTrustBand) -> Json {
-  json.string(min_trust_band_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn min_trust_band_decoder() -> decode.Decoder(MinTrustBand) {
-  use value <- decode.then(decode.string)
-  case min_trust_band_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(LimitedEvidence, "MinTrustBand")
-  }
-}
-
 pub type Row {
   Row(
     id: id.BriefId,
     org_id: id.OrgId,
     title: String,
     version: Int,
-    status: Status,
+    status: brief_status.BriefStatus,
     active_from_date: Option(String),
     active_until_date: Option(String),
     role_id: Option(String),
@@ -196,7 +94,7 @@ pub type Row {
     max_level: Option(playing_level.PlayingLevel),
     foot: Option(Foot),
     availability: Option(String),
-    min_trust_band: Option(MinTrustBand),
+    min_trust_band: Option(trust_band.TrustBand),
   )
 }
 
@@ -206,7 +104,7 @@ pub fn new(
   org_id org_id: id.OrgId,
   title title: String,
   version version: Int,
-  status status: Status,
+  status status: brief_status.BriefStatus,
   created_by_user_id created_by_user_id: id.OrgUserId,
   created_at created_at: Int,
   updated_at updated_at: Int,
@@ -246,7 +144,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use org_id <- decode.field(1, id.org_decoder())
   use title <- decode.field(2, decode.string)
   use version <- decode.field(3, decode.int)
-  use status <- decode.field(4, status_decoder())
+  use status <- decode.field(4, brief_status.decoder())
   use active_from_date <- decode.field(5, decode.optional(decode.string))
   use active_until_date <- decode.field(6, decode.optional(decode.string))
   use role_id <- decode.field(7, decode.optional(decode.string))
@@ -265,10 +163,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use max_level <- decode.field(20, decode.optional(playing_level.decoder()))
   use foot <- decode.field(21, decode.optional(foot_decoder()))
   use availability <- decode.field(22, decode.optional(decode.string))
-  use min_trust_band <- decode.field(
-    23,
-    decode.optional(min_trust_band_decoder()),
-  )
+  use min_trust_band <- decode.field(23, decode.optional(trust_band.decoder()))
   decode.success(Row(
     id:,
     org_id:,
@@ -307,7 +202,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.org_sql(row.org_id),
     sqlight.text(row.title),
     sqlight.int(row.version),
-    sqlight.text(status_to_string(row.status)),
+    sqlight.text(brief_status.to_string(row.status)),
     sqlight.nullable(sqlight.text, row.active_from_date),
     sqlight.nullable(sqlight.text, row.active_until_date),
     sqlight.nullable(sqlight.text, row.role_id),
@@ -330,7 +225,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(fn(v) { sqlight.text(foot_to_string(v)) }, row.foot),
     sqlight.nullable(sqlight.text, row.availability),
     sqlight.nullable(
-      fn(v) { sqlight.text(min_trust_band_to_string(v)) },
+      fn(v) { sqlight.text(trust_band.to_string(v)) },
       row.min_trust_band,
     ),
   ]

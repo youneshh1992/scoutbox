@@ -23,3 +23,10 @@ pub fn keeps_compatibility_characters_test() {
   // NFC is canonical only: the "ﬁ" ligature is not split into "fi" (that is NFKC).
   unicode.nfc("\u{FB01}") |> should.equal("\u{FB01}")
 }
+
+pub fn folds_accents_and_case_test() {
+  unicode.fold_name("Émile Ödegaard") |> should.equal("emile odegaard")
+  // Already decomposed, and a spacing mark (U+0903, category Mc) goes too.
+  unicode.fold_name("Cafe\u{0301}\u{0903}") |> should.equal("cafe")
+  unicode.fold_name("ﬁ") |> should.equal("ﬁ")
+}

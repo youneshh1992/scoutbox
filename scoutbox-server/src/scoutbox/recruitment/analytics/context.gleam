@@ -40,8 +40,10 @@ import scoutbox/rows/signings as signing_row
 import scoutbox/rows/trials as trial_row
 import scoutbox/rows/watchlist_membership_events as event_row
 import scoutbox/rules/visibility
+import scoutbox/vocab/brief_status
 import scoutbox/vocab/decision_outcome
 import scoutbox/vocab/offer_status
+import scoutbox/vocab/review_state
 import scoutbox/vocab/room_status
 import scoutbox/vocab/source_context
 import sqlight
@@ -628,13 +630,13 @@ pub fn read(read: Read, org: Org, now: Int) -> Result(Sources, Fail(e)) {
         id: b.id,
         title: b.title,
         version: b.version,
-        status: brief_row.status_to_string(b.status),
+        status: brief_status.to_string(b.status),
         active_from: b.active_from_date,
         active_until: b.active_until_date,
       )
     }),
     reviews: list.map(reviews, fn(r) {
-      Review(brief_id: r.brief_id, state: review_row.state_to_string(r.state))
+      Review(brief_id: r.brief_id, state: review_state.to_string(r.state))
     }),
     second_look: list.map(second_look, fn(i) {
       SecondLook(

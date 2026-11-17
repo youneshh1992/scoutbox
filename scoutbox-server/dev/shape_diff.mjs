@@ -160,6 +160,49 @@ requests.push(
   ['decision (final)', (s) => ['GET', `/org/rooms/${s.case}/decision`, null, s.maria]],
   ['journey (consideration)', (s) => ['GET', `/org/rooms/${s.case}/journey`, null, s.maria]],
 );
+// Second Look and Nobody Missed: an archived Room with new evidence since, then a brief and its queue.
+for (const [k, srv] of [['ts', ts], ['gl', gl]]) {
+  const m = S[k].maria;
+  const r = (await call(srv.base, 'POST', '/org/rooms', { playerId: 'pl-osei' }, m)).body?.room?.roomId;
+  await call(srv.base, 'POST', `/org/rooms/${r}/status`, { status: 'under_review' }, m);
+  await call(srv.base, 'POST', `/org/rooms/${r}/status`, { status: 'archived', reasonCodes: ['insufficient_recent_evidence', 'budget'] }, m);
+  await new Promise((done) => setTimeout(done, 5));
+  await call(srv.base, 'POST', '/org/players/pl-osei/evidence', { claimType: 'footage', label: 'Full match' }, m);
+  const list = (await call(srv.base, 'GET', '/org/second-look', null, m)).body;
+  S[k].slk = list?.items?.[0]?.id ?? 'none';
+  const brief = (await call(srv.base, 'POST', '/org/recruitment-briefs', { title: 'Shape brief', positions: ['ST', 'CF'], minAge: 16, maxAge: 35, evidenceRequirements: ['recent_full_match'], minTrustBand: 'limited_evidence' }, m)).body;
+  S[k].brief = brief?.brief?.id ?? 'none';
+  S[k].briefRev = brief?.brief?.rev ?? 1;
+}
+requests.push(
+  ['second look list', (s) => ['GET', '/org/second-look?status=all', null, s.maria]],
+  ['second look bad tab', (s) => ['GET', '/org/second-look?status=pending', null, s.maria]],
+  ['second look item', (s) => ['GET', `/org/second-look/${s.slk}`, null, s.maria]],
+  ['second look changes', (s) => ['GET', `/org/second-look/${s.slk}/changes`, null, s.maria]],
+  ['second look unknown', (s) => ['GET', '/org/second-look/slk-999999', null, s.maria]],
+  ['second look review', (s) => ['POST', `/org/second-look/${s.slk}/review`, {}, s.maria]],
+  ['second look review again', (s) => ['POST', `/org/second-look/${s.slk}/review`, {}, s.maria]],
+  ['second look bad reason', (s) => ['POST', `/org/second-look/${s.slk}/dismiss`, { reason: 'nationality' }, s.maria]],
+  ['second look reopen', (s) => ['POST', `/org/second-look/${s.slk}/reopen-room`, {}, s.maria]],
+  ['briefs', (s) => ['GET', '/org/recruitment-briefs', null, s.maria]],
+  ['brief', (s) => ['GET', `/org/recruitment-briefs/${s.brief}`, null, s.maria]],
+  ['brief prohibited', (s) => ['POST', '/org/recruitment-briefs', { title: 'x', religion: 'any' }, s.maria]],
+  ['brief invalid', (s) => ['POST', '/org/recruitment-briefs', { title: 'x', minAge: 30, maxAge: 20, positions: ['SWEEPER'] }, s.maria]],
+  ['brief (grassroots)', (s) => ['POST', '/org/recruitment-briefs', { title: 'Local', radiusKm: 80, maxLevel: 'pro' }, s.hackney]],
+  ['brief draft queue', (s) => ['GET', `/org/nobody-missed?briefId=${s.brief}`, null, s.maria]],
+  ['brief activate', (s) => ['PATCH', `/org/recruitment-briefs/${s.brief}`, { status: 'active', expectedRev: s.briefRev }, s.maria]],
+  ['brief stale', (s) => ['PATCH', `/org/recruitment-briefs/${s.brief}`, { title: 'Late', expectedRev: s.briefRev }, s.maria]],
+  ['brief bad transition', (s) => ['PATCH', `/org/recruitment-briefs/${s.brief}`, { status: 'draft' }, s.maria]],
+  ['brief criteria', (s) => ['PATCH', `/org/recruitment-briefs/${s.brief}`, { positions: ['ST'], minAge: null }, s.maria]],
+  ['nobody missed', (s) => ['GET', `/org/nobody-missed?briefId=${s.brief}`, null, s.maria]],
+  ['nobody missed by name', (s) => ['GET', `/org/nobody-missed?briefId=${s.brief}&sort=name&limit=2`, null, s.maria]],
+  ['nobody missed offset', (s) => ['GET', `/org/nobody-missed?briefId=${s.brief}&offset=2`, null, s.maria]],
+  ['nobody missed review', (s) => ['POST', '/org/nobody-missed/review', { briefId: s.brief, playerId: 'pl-adeyemi' }, s.maria]],
+  ['nobody missed dismiss', (s) => ['POST', '/org/nobody-missed/dismiss', { briefId: s.brief, playerId: 'pl-adeyemi', reason: 'timing' }, s.maria]],
+  ['nobody missed add', (s) => ['POST', '/org/nobody-missed/add-to-room', { briefId: s.brief, playerId: 'pl-tanaka' }, s.maria]],
+  ['evaluation coverage', (s) => ['GET', '/org/evaluation-coverage', null, s.maria]],
+  ['admin metrics (second look)', (s) => ['GET', '/admin/metrics', null, null, true]],
+);
 let differing = 0;
 const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []);
 try {
@@ -168,6 +211,14 @@ try {
     if (a.body?.distanceKm !== undefined || b.body?.distanceKm !== undefined) console.log(`      distanceKm ${a.body?.distanceKm} vs ${b.body?.distanceKm}`);
     const score = (x) => x?.trust?.score ?? x?.room?.trust?.score;
     if (score(a.body) !== undefined || score(b.body) !== undefined) console.log(`      trust score ${score(a.body)} vs ${score(b.body)}`);
+    // Nobody Missed's counts and candidates, and Second Look's items, must agree in value, not only in shape.
+    const facts = (x) =>
+      x?.coverage !== undefined
+        ? JSON.stringify({ coverage: x.coverage, total: x.total, items: (x.items ?? []).map((c) => [c.playerId, c.age, c.trustBand, c.reasons?.map((r) => r.text)]) })
+        : x?.counts !== undefined && x?.disclaimer
+          ? JSON.stringify({ counts: x.counts, items: (x.items ?? []).map((i) => [i.kind, i.changeCount, i.summary, i.directReasonCodes, i.unresolvedReasonCodes]) })
+          : null;
+    if (facts(a.body) !== facts(b.body)) console.log(`      values differ:\n        TS    ${facts(a.body)}\n        Gleam ${facts(b.body)}`);
     const sa = shape(a.body), sb = shape(b.body);
     const onlyTs = sa.filter((x) => !sb.includes(x)), onlyGl = sb.filter((x) => !sa.includes(x));
     const order = sa.filter((x) => sb.includes(x)).join() !== sb.filter((x) => sa.includes(x)).join();

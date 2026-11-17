@@ -71,6 +71,9 @@ pub const policy = [
   #("transaction_write", transaction_write_policy),
   #("transaction_note_write", transaction_note_write_policy),
   #("analytics_read", analytics_read_policy),
+  #("brief_write", brief_write_policy),
+  #("second_look_action", second_look_action_policy),
+  #("nobody_missed_action", nobody_missed_action_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -118,6 +121,12 @@ pub type Action {
   TrialInvite
   /// Recruitment analytics reads (the dashboard and its drill-down rows), per organisation.
   AnalyticsRead
+  /// Recruitment Brief creates and edits, per organisation.
+  BriefWrite
+  /// Second Look reviews, dismissals and reopens, per organisation.
+  SecondLookAction
+  /// Nobody Missed reviews, dismissals and add-to-room, per organisation.
+  NobodyMissedAction
   /// Trial schedules proposed, revised or cancelled, per organisation.
   TrialSchedule
   /// Trial schedule confirmations, declines and cancellations, per player or guardian answering.
@@ -186,6 +195,12 @@ const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const analytics_read_policy = Policy(max: 600, window_ms: 3_600_000)
 
+const brief_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const second_look_action_policy = Policy(max: 200, window_ms: 3_600_000)
+
+const nobody_missed_action_policy = Policy(max: 200, window_ms: 3_600_000)
+
 const trial_schedule_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const trial_response_policy = Policy(max: 30, window_ms: 3_600_000)
@@ -216,6 +231,9 @@ fn action_name(action: Action) -> String {
     EmailChallengeRequest -> "email_challenge_request"
     RoomCreate -> "room_create"
     AnalyticsRead -> "analytics_read"
+    BriefWrite -> "brief_write"
+    SecondLookAction -> "second_look_action"
+    NobodyMissedAction -> "nobody_missed_action"
     RoomComment -> "room_comment"
     RoomCombineRequest -> "room_combine_request"
     DecisionDraft -> "decision_draft"
@@ -254,6 +272,9 @@ fn action_policy(action: Action) -> Policy {
     EmailChallengeRequest -> email_challenge_request_policy
     RoomCreate -> room_create_policy
     AnalyticsRead -> analytics_read_policy
+    BriefWrite -> brief_write_policy
+    SecondLookAction -> second_look_action_policy
+    NobodyMissedAction -> nobody_missed_action_policy
     RoomComment -> room_comment_policy
     RoomCombineRequest -> room_combine_request_policy
     DecisionDraft -> decision_draft_policy

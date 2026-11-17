@@ -99,6 +99,8 @@ pub opaque type Store {
     timeout: Int,
     /// The development fault layer's `internal:<step>` rules: whether a named step fails now.
     should_fail: fn(String) -> Bool,
+    /// Runs inside every unit whose work succeeded, just before COMMIT (`with_before_commit`).
+    before_commit: fn(Tx) -> Result(Nil, sqlight.Error),
   )
 }
 
@@ -137,6 +139,7 @@ pub fn open(
       dispatch:,
       timeout: 5000,
       should_fail: fn(_) { False },
+      before_commit: fn(_) { Ok(Nil) },
     ),
   )
 }
@@ -144,6 +147,16 @@ pub fn open(
 /// The same store with effects sent somewhere else: the dispatcher usually needs the store itself.
 pub fn with_dispatch(store: Store, dispatch: fn(Effect) -> Nil) -> Store {
   Store(..store, dispatch:)
+}
+
+/// The same store with `hook` run inside every unit whose work succeeded, just before its COMMIT: for projections
+/// the unit's own writes must leave current (the match facts). The hook writes in the unit, so its writes commit or
+/// roll back with the act's, and a failing hook rolls the whole unit back as a storage error.
+pub fn with_before_commit(
+  store: Store,
+  hook: fn(Tx) -> Result(Nil, sqlight.Error),
+) -> Store {
+  Store(..store, before_commit: hook)
 }
 
 /// A connection in its own process. With no `cache`, the process makes one and owns it.
@@ -283,7 +296,16 @@ fn attempt(
   process.send(
     store.writer,
     Job(fn(conn, cache) {
-      process.send(reply, supervise_unit(conn, cache, store.should_fail, work))
+      process.send(
+        reply,
+        supervise_unit(
+          conn,
+          cache,
+          store.should_fail,
+          store.before_commit,
+          work,
+        ),
+      )
     }),
   )
   case process.receive(reply, store.timeout) {
@@ -298,12 +320,16 @@ fn supervise_unit(
   conn: sqlight.Connection,
   cache: Cache,
   should_fail: fn(String) -> Bool,
+  before_commit: fn(Tx) -> Result(Nil, sqlight.Error),
   work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(#(a, List(Effect)), UnitError(e)) {
   let done = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
-      process.send(done, run_unit(conn, cache, should_fail, work))
+      process.send(
+        done,
+        run_unit(conn, cache, should_fail, before_commit, work),
+      )
     })
   let monitor = process.monitor(pid)
   let outcome =
@@ -327,13 +353,20 @@ fn run_unit(
   conn: sqlight.Connection,
   cache: Cache,
   should_fail: fn(String) -> Bool,
+  before_commit: fn(Tx) -> Result(Nil, sqlight.Error),
   work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(#(a, List(Effect)), UnitError(e)) {
   use _ <- result.try(
     sqlight.exec("BEGIN IMMEDIATE", conn) |> result.map_error(Database),
   )
   let effects = process.new_subject()
-  let outcome = case work(Tx(conn, cache, should_fail, effects)) {
+  let tx = Tx(conn, cache, should_fail, effects)
+  let worked = case work(tx) {
+    Ok(value) ->
+      before_commit(tx) |> result.map_error(Storage) |> result.replace(value)
+    failed -> failed
+  }
+  let outcome = case worked {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
     Error(Stale(what)) -> Error(Lost(what))

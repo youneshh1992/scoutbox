@@ -768,6 +768,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           a,
           p,
           option.unwrap(body.source_context, source_context.Direct),
+          None,
           option.unwrap(body.priority, case_row.Normal),
           option.unwrap(body.restricted, False),
           now,
@@ -810,6 +811,7 @@ fn open_room(
   a: OrgAccess,
   p: players.Player,
   source: source_context.SourceContext,
+  source_ref: Option(#(String, Option(Int))),
   priority: case_row.RoomPriority,
   restricted: Bool,
   now: Int,
@@ -830,7 +832,7 @@ fn open_room(
       priority:,
       lead_scout: a.user.id,
       source_context: source,
-      source_ref: None,
+      source_ref:,
       opened_by: #(a.user.id, a.user.name),
       at: now,
     )
@@ -877,6 +879,247 @@ fn open_room(
       #(case_id, False)
     }
   }
+}
+
+/// A Room the caller may already have opened, as `create_for_player` answers.
+pub type Created {
+  Created(room_id: id.RecruitmentCaseId, existed: Bool, view: Json)
+}
+
+/// The Room creator for other domains (rooms.mjs `createRoomForPlayer`, for Nobody Missed): the same visibility
+/// check and adoption as `POST /org/rooms`, inside the caller's unit. An open Room for the player is answered as it
+/// is, so a double click adds the player once.
+pub fn create_for_player(
+  tx: Tx,
+  a: OrgAccess,
+  player_id: id.PlayerId,
+  source: source_context.SourceContext,
+  source_ref: Option(#(String, Option(Int))),
+  now: Int,
+) -> Result(Created, Fail(Response)) {
+  let read = store.reading(tx)
+  use found <- result.try(storage(players.for_org(read, player_id, a.org, now)))
+  use p <- result.try(case found {
+    Some(#(p, access)) if access.visible && !access.blocked -> Ok(p)
+    _ -> store.refuse(refusal(403, "NOT_VISIBLE", []))
+  })
+  use existing <- result.try(
+    storage(cases.open_room_for(read, a.org.id, p.row.id)),
+  )
+  case existing {
+    Some(r) -> {
+      use view <- result.map(room_body(tx, a, r, now))
+      Created(r.row.id, True, view)
+    }
+    None -> {
+      use #(room_id, _) <- result.try(
+        open_room(tx, a, p, source, source_ref, case_row.Normal, False, now)
+        |> storage,
+      )
+      use _ <- result.try(
+        ledger.append(
+          tx,
+          ledger.Entry(
+            entry_type: ledger_row.RecruitmentRoomCreated,
+            player_id: Some(p.row.id),
+            org_id: Some(a.org.id),
+            org_name: Some(a.org.name),
+            user_id: Some(a.user.id),
+            actor_name: Some(a.user.name),
+          ),
+          now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(count(tx, "recruitment_room_created") |> storage)
+      use room <- result.try(reread(tx, a, room_id))
+      use view <- result.map(room_body(tx, a, room, now))
+      Created(room_id, False, view)
+    }
+  }
+}
+
+/// The body another domain answers when a shared Room act refuses: `{ ok: false, status, error, … }`, as the
+/// TypeScript acts return their refusals and the calling route sends them whole.
+fn refusal(
+  status: Int,
+  error: String,
+  fields: List(#(String, Json)),
+) -> Response {
+  http.json(
+    status,
+    json.object([
+      #("ok", json.bool(False)),
+      #("status", json.int(status)),
+      #("error", json.string(error)),
+      ..fields
+    ]),
+  )
+}
+
+fn source_ref_json(source_ref: Option(#(String, Option(Int)))) -> Json {
+  case source_ref {
+    Some(#(ref_id, version)) ->
+      json.object(
+        list.append([#("id", json.string(ref_id))], case version {
+          Some(v) -> [#("version", json.int(v))]
+          None -> []
+        }),
+      )
+    None -> json.null()
+  }
+}
+
+/// The one reopen path (rooms.mjs `reopenRoom`), shared with Second Look: the same transition table, reason
+/// requirement, evidence gate, snapshot and decision memory as a recruiter's move, inside the caller's unit. The
+/// caller supplies only where the reopen came from. Answers the reopened Room's view.
+pub fn reopen(
+  tx: Tx,
+  a: OrgAccess,
+  room: Room,
+  to: RoomStatus,
+  reason_codes: List(String),
+  source: source_context.SourceContext,
+  source_ref: Option(#(String, Option(Int))),
+  now: Int,
+) -> Result(Json, Fail(Response)) {
+  let from = room.status
+  use _ <- result.try(
+    case room_rules.room_can(room_view.role(a, room), room_rules.Reopen) {
+      True -> Ok(Nil)
+      False -> store.refuse(refusal(403, "ROOM_PERMISSION_REQUIRED", []))
+    },
+  )
+  // Only closed rooms reopen; pulling a live room back under a "reopened" label would rewrite a live case.
+  use _ <- result.try(case list.contains(room_rules.reopened_from, from) {
+    True -> Ok(Nil)
+    False ->
+      store.refuse(
+        refusal(409, "ROOM_NOT_REOPENABLE", [
+          #(
+            "message",
+            json.string(
+              "A room at "
+              <> room_rules.status_label(from)
+              <> " is not closed, so it cannot be reopened.",
+            ),
+          ),
+          #("current", json.object([#("status", room_status.to_json(from))])),
+        ]),
+      )
+  })
+  use codes <- result.try(case room_rules.validate_reason_codes(reason_codes) {
+    Ok(codes) -> Ok(codes)
+    Error(r) ->
+      store.refuse(http.json(
+        400,
+        json.object(
+          list.flat_map(room_rules.reason_refusal_fields(r), fn(f) {
+            case f.0 {
+              "ok" -> [f, #("status", json.int(400))]
+              _ -> [f]
+            }
+          }),
+        ),
+      ))
+  })
+  use check <- result.try(case room_rules.validate_transition(from, to, codes) {
+    Ok(check) -> Ok(check)
+    Error(r) -> {
+      let status = case r {
+        room_rules.Invalid(..) -> 409
+        _ -> 400
+      }
+      store.refuse(http.json(
+        status,
+        json.object([
+          #("ok", json.bool(False)),
+          #("status", json.int(status)),
+          ..room_rules.transition_refusal_fields(r)
+        ]),
+      ))
+    }
+  })
+  use _ <- result.try(case check.requires_evidence {
+    None -> Ok(Nil)
+    Some(kind) ->
+      case
+        storage(case_lifecycle.evidence(store.reading(tx), room, kind, now))
+      {
+        Error(e) -> Error(e)
+        Ok(case_lifecycle.Holds(..)) -> Ok(Nil)
+        Ok(case_lifecycle.Lacks(why)) ->
+          store.refuse(
+            refusal(422, "ROOM_EVIDENCE_REQUIRED", [
+              #("requires", json.string(room_rules.evidence_code(kind))),
+              #("evidenceReason", json.string(why)),
+            ]),
+          )
+      }
+  })
+  use _ <- result.try(case check.snapshot {
+    True ->
+      room_view.capture_snapshot(
+        tx,
+        a.org,
+        room,
+        "status:" <> room_status.to_string(to),
+        now,
+      )
+      |> storage
+      |> result.replace(Nil)
+    False -> Ok(Nil)
+  })
+  let staff_id = Some(id.org_user_to_string(a.user.id))
+  use _ <- result.try(
+    cases.move(
+      tx,
+      room.row.id,
+      room_view.level(a.org),
+      cases.Move(
+        to:,
+        at: now,
+        by_id: staff_id,
+        by_name: Some(a.user.name),
+        resume: False,
+        reopened: Some(cases.Reopened(
+          by_id: staff_id,
+          by_name: Some(a.user.name),
+          from:,
+          reason_codes: codes,
+          source_context: Some(source),
+          source_ref:,
+        )),
+        source_context: Some(source),
+      ),
+    )
+    |> storage,
+  )
+  use _ <- result.try(
+    cases.record(
+      tx,
+      room.row.id,
+      by(a),
+      [
+        cases.entry("room_reopened", [
+          #("from", room_status.to_json(from)),
+          #("to", room_status.to_json(to)),
+          #("reasonCodes", json.array(codes, json.string)),
+          #("sourceContext", source_context.to_json(source)),
+          #("sourceRef", source_ref_json(source_ref)),
+        ]),
+      ],
+      now,
+    )
+    |> storage,
+  )
+  use _ <- result.try(count(tx, "recruitment_room_reopened") |> storage)
+  store.emit(
+    tx,
+    case_lifecycle.moved_event(room.row.org_id, room.row.id, from, to),
+  )
+  use moved <- result.try(reread(tx, a, room.row.id))
+  room_body(tx, a, moved, now)
 }
 
 // ------------------------------------------------------------------------------------------------------- read

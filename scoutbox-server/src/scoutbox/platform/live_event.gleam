@@ -70,6 +70,8 @@ pub type Event {
   /// A Room was filed away (archived, closed or withdrawn). Ids only: Second Look reconciles from the decision row.
   /// Private to the club.
   RecruitmentRoomArchived(org_id: String, room_id: String)
+  /// A club reopened an archived Room from a Second Look item. Private to the club.
+  RoomReopenedFromSecondLook(org_id: String, room_id: String, item_id: String)
   /// A formal decision was recorded on a Room, first or superseding. Private to the club.
   RoomDecisionChanged(
     change: DecisionChange,
@@ -210,6 +212,8 @@ pub fn name(event: Event) -> String {
     AssessmentSubmitted(..) -> "assessment_submitted"
     RecruitmentCaseMoved(..) -> "recruitment_case_moved"
     RecruitmentRoomArchived(..) -> "recruitment_room_archived"
+    RoomReopenedFromSecondLook(..) ->
+      "recruitment_room_reopened_from_second_look"
     RoomDecisionChanged(change:, ..) ->
       case change {
         DecisionFinalized -> "room_decision_finalized"
@@ -255,6 +259,7 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | AssessmentSubmitted(org_id:, ..)
     | RecruitmentCaseMoved(org_id:, ..)
     | RecruitmentRoomArchived(org_id:, ..)
+    | RoomReopenedFromSecondLook(org_id:, ..)
     | RoomDecisionChanged(org_id:, ..)
     | TrialInvited(org_id:, ..)
     | TrialAccepted(org_id:, ..)
@@ -357,6 +362,11 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("orgId", json.string(org_id)),
       #("roomId", json.string(room_id)),
     ]
+    RoomReopenedFromSecondLook(org_id:, room_id:, item_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("itemId", json.string(item_id)),
+    ]
     RoomDecisionChanged(org_id:, room_id:, decision_id:, ..) -> [
       #("orgId", json.string(org_id)),
       #("roomId", json.string(room_id)),
@@ -421,6 +431,7 @@ pub fn replays(event: Event) -> Bool {
     | AssessmentSubmitted(..)
     | RecruitmentCaseMoved(..)
     | RecruitmentRoomArchived(..)
+    | RoomReopenedFromSecondLook(..)
     | SigningChanged(..) -> True
     OfferChanged(change:, ..) -> change != OfferDraftUpdated
     _ -> False

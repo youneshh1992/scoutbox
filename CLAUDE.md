@@ -64,6 +64,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   Every column named `id` or `*_id` must be typed by a foreign key or decided in `id_columns` (`RefersTo` or
   `Untyped` with its reason), or `npm run codegen` refuses it. Polymorphic pairs (`subject_kind` + `subject_id`,
   `audience_*`, `ref_id`, `by_*`) stay `String` for now.
+- The match facts (`player_match_facts`, read by Nobody Missed) are a projection the migration's triggers mark dirty
+  and `discovery/match_facts.drain` re-derives inside every unit, just before COMMIT (`store.with_before_commit`,
+  installed at boot). A new input to the facts needs a trigger in the TypeScript migration, not a call from the act.
+  A store opened in a test has no hook: install it there when the test reads the facts.
 - SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
 - `npm run sql:check` (part of `e2e:check`) prepares every query whose SQL the source spells out against the

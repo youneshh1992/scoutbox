@@ -206,6 +206,28 @@ pub fn rooms_of_player(
   rooms_of(read, found)
 }
 
+/// The organisation's ended Rooms (archived, closed or withdrawn), oldest first: of one player, or of every player.
+pub fn ended_rooms(
+  read: Read,
+  org_id: id.OrgId,
+  player_id: Option(id.PlayerId),
+) -> Result(List(Room), Fail(e)) {
+  let #(player_sql, player_args) = case player_id {
+    Some(p) -> #(" AND player_id = ?", [id.player_sql(p)])
+    None -> #("", [])
+  }
+  use found <- result.try(
+    rows(
+      read,
+      "org_id = ? AND room_status IN ('archived', 'closed', 'withdrawn')"
+        <> player_sql
+        <> " ORDER BY rowid",
+      [id.org_sql(org_id), ..player_args],
+    ),
+  )
+  rooms_of(read, found)
+}
+
 /// The organisation's open Room for a player: there is at most one.
 pub fn open_room_for(
   read: Read,

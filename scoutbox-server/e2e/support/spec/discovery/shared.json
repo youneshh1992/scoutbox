@@ -104,5 +104,35 @@
     "cooldownDays": 30,
     "expiryDays": 120,
     "maxDecisionAgeDays": null
+  },
+  "SECOND_LOOK_POLICY_VERSION": 1,
+  "DISMISSAL_REASONS": [
+    "already_reviewed_elsewhere",
+    "change_not_material",
+    "timing_not_right",
+    "squad_need_changed",
+    "no_action_required",
+    "other"
+  ],
+  "FORBIDDEN_COPY": [
+    "wrong decision",
+    "you were wrong",
+    "mistake",
+    "should sign",
+    "should recruit",
+    "missed talent",
+    "best available",
+    "better than",
+    "probability of success",
+    "potential score",
+    "talent score"
+  ],
+  "LIMITS": {
+    "briefTitle": 120,
+    "briefsPerOrg": 40,
+    "briefWritesPerHour": 60,
+    "reviewActionsPerHour": 300,
+    "pageSize": 25,
+    "maxPageSize": 100
   }
 }

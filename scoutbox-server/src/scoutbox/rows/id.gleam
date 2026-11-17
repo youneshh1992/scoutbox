@@ -384,6 +384,43 @@ pub fn brief_decoder() -> decode.Decoder(BriefId) {
   decode.map(decode.string, BriefId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_brief(tx: Tx) -> Result(BriefId, Fail(e)) {
+  ids.next(tx, "brf") |> result.map(BriefId)
+}
+
+/// An id of `recruitment_brief_history`.
+pub opaque type BriefEventId {
+  BriefEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn brief_event(text: String) -> BriefEventId {
+  BriefEventId(text)
+}
+
+pub fn brief_event_to_string(id: BriefEventId) -> String {
+  let BriefEventId(text) = id
+  text
+}
+
+pub fn brief_event_sql(id: BriefEventId) -> sqlight.Value {
+  sqlight.text(brief_event_to_string(id))
+}
+
+pub fn brief_event_json(id: BriefEventId) -> Json {
+  json.string(brief_event_to_string(id))
+}
+
+pub fn brief_event_decoder() -> decode.Decoder(BriefEventId) {
+  decode.map(decode.string, BriefEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_brief_event(tx: Tx) -> Result(BriefEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(BriefEventId)
+}
+
 /// An id of `passport_career_entries`.
 pub opaque type CareerEntryId {
   CareerEntryId(String)
@@ -1405,6 +1442,13 @@ pub fn nobody_missed_review_json(id: NobodyMissedReviewId) -> Json {
 
 pub fn nobody_missed_review_decoder() -> decode.Decoder(NobodyMissedReviewId) {
   decode.map(decode.string, NobodyMissedReviewId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_nobody_missed_review(
+  tx: Tx,
+) -> Result(NobodyMissedReviewId, Fail(e)) {
+  ids.next(tx, "nmr") |> result.map(NobodyMissedReviewId)
 }
 
 /// An id of `notifications`.
@@ -2480,6 +2524,11 @@ pub fn second_look_item_json(id: SecondLookItemId) -> Json {
 
 pub fn second_look_item_decoder() -> decode.Decoder(SecondLookItemId) {
   decode.map(decode.string, SecondLookItemId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_second_look_item(tx: Tx) -> Result(SecondLookItemId, Fail(e)) {
+  ids.next(tx, "slk") |> result.map(SecondLookItemId)
 }
 
 /// An id of `signings`.

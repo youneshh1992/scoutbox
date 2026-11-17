@@ -14,14 +14,9 @@ representation agreements and the player's My Agent, with the compliance engine'
 items it opens), the organisation audit and a player's erasure, and the start of an agent's transaction workspace
 (opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
 schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
-calendar export and the mandatory report), structured assessments, and the Football Passport's trial timeline. It
-answers twenty-two of the TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
-`platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`,
-`platform/delivery`, `platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
-`verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence`,
-`recruitment/offers`, `recruitment/offersAdversarial`, `recruitment/offersPersistence`, `recruitment/trials`,
-`recruitment/trialsPersistence`, `recruitment/trialDatesMinorsAndErasure`, `recruitment/contacts`,
-`recruitment/contactsPersistence` and `agents/core`.
+calendar export and the mandatory report), structured assessments, the Football Passport's trial timeline, and
+Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query). It
+answers every battery in `e2e/batteries.mjs` unchanged.
 
 ```sh
 npm run esqlite        # once after cloning (Gleam can't resolve the project without it): the patched esqlite
@@ -90,6 +85,8 @@ Every route below is exercised by a battery, except where marked.
 | Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login`; `/auth/sso/start` and `/callback` refuse in production (development: not ported) |
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
+| Second Look | `GET /org/second-look` (reconciled with the source records on every read), `/org/second-look/:id`, `/org/second-look/:id/changes`; `POST /org/second-look/:id/review`, `/dismiss`, `/reopen-room` (through the Rooms' own reopen path) |
+| Nobody Missed | `GET`/`POST /org/recruitment-briefs`, `GET`/`PATCH /org/recruitment-briefs/:id`, `GET /org/nobody-missed` (over the stored match facts, by cursor), `GET /org/evaluation-coverage`; `POST /org/nobody-missed/add-to-room`, `/review` and `/dismiss` (no battery) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
 | Recruitment | `POST /org/players/:id/request` (a contact, or a direct trial request with its days, venue and notes; refused while a trial report is outstanding), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/requests`, `/org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (newest first, by cursor), `GET /org/invoices` (the success fees), `POST /org/players/:id/signing` (the legacy recorder, refused when the workflow owns the signing); `GET /org/recruitment-analytics` (the Director Dashboard: every family, the window, filters and trend), `/org/recruitment-analytics/catalogue`, `/org/recruitment-analytics/rows` (the drill-down); `GET /org/feed`; `GET /orgs/directory` (no Grassroots pathway record) |
 | Contacts | `GET`/`POST /org/rooms/:id/contacts`, `GET`/`PATCH …/contacts/:cid`, `POST …/contacts/:cid/cancel`, `…/contacts/:cid/send` (the in-app request, the guardian's email copy, the agent beside the player when their authority holds), `POST …/contacts/external`, `GET /org/recruitment/contact-policy`; a recipient's answer lands on the contact through the respond route; `GET /player/insights`; `GET /player/journeys`, `GET /guardian/children/:id/journeys` (what was shared with the recipient), `GET /org/agent/clients/:id/journey` (what the client routed or shared to the agent, as far as the agent's basis, scope and licence open it), signing packages included |
@@ -134,6 +131,11 @@ for players and guardians (a new player account stores a hash no password matche
   its dispatch in its own unit, so a dispatch is never sent twice.
 - Distances agree with domain.ts to the last bit except within about 1e-12 km of the 50 km radius or a rounding
   edge, where macOS's `cos` and V8's `x ** 2` differ in the last place (`test/scoutbox/distance_test.gleam`).
+- A Nobody Missed foot criterion lowers ASCII only (SQLite's `lower()`); the TypeScript server's `lower_js` lowers
+  as JavaScript does. Every stored foot is ASCII.
+- Second Look's changes, and its queue, break ties of time and kind by code point; the TypeScript server uses
+  `localeCompare`, which orders punctuation and case differently. Only items changed in the same millisecond can
+  differ.
 - The directory's text search lowers ASCII only (SQLite's `lower()`); the TypeScript server lowers as JavaScript
   does, accented letters included.
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.

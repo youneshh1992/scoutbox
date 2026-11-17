@@ -7,6 +7,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/review_state
 import sqlight
 
 pub const table = "nobody_missed_reviews"
@@ -24,54 +25,6 @@ pub fn qualified(alias: String) -> String {
   |> string.split(", ")
   |> list.map(fn(c) { alias <> "." <> c })
   |> string.join(", ")
-}
-
-pub type State {
-  Open
-  Reviewed
-  AddedToRoom
-  Dismissed
-}
-
-/// Each value with the text the column stores.
-pub const state_pairs = [
-  #("open", Open),
-  #("reviewed", Reviewed),
-  #("added_to_room", AddedToRoom),
-  #("dismissed", Dismissed),
-]
-
-pub fn state_to_string(value: State) -> String {
-  case value {
-    Open -> "open"
-    Reviewed -> "reviewed"
-    AddedToRoom -> "added_to_room"
-    Dismissed -> "dismissed"
-  }
-}
-
-pub fn state_from_string(value: String) -> Result(State, Nil) {
-  case value {
-    "open" -> Ok(Open)
-    "reviewed" -> Ok(Reviewed)
-    "added_to_room" -> Ok(AddedToRoom)
-    "dismissed" -> Ok(Dismissed)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn state_to_json(value: State) -> Json {
-  json.string(state_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn state_decoder() -> decode.Decoder(State) {
-  use value <- decode.then(decode.string)
-  case state_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Open, "State")
-  }
 }
 
 pub type DismissReason {
@@ -137,7 +90,7 @@ pub type Row {
     brief_id: id.BriefId,
     brief_version: Int,
     player_id: id.PlayerId,
-    state: State,
+    state: review_state.ReviewState,
     created_at: Int,
     updated_at: Int,
     reviewed_by_user_id: Option(id.OrgUserId),
@@ -158,7 +111,7 @@ pub fn new(
   brief_id brief_id: id.BriefId,
   brief_version brief_version: Int,
   player_id player_id: id.PlayerId,
-  state state: State,
+  state state: review_state.ReviewState,
   created_at created_at: Int,
   updated_at updated_at: Int,
 ) -> Row {
@@ -189,7 +142,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use brief_id <- decode.field(2, id.brief_decoder())
   use brief_version <- decode.field(3, decode.int)
   use player_id <- decode.field(4, id.player_decoder())
-  use state <- decode.field(5, state_decoder())
+  use state <- decode.field(5, review_state.decoder())
   use created_at <- decode.field(6, decode.int)
   use updated_at <- decode.field(7, decode.int)
   use reviewed_by_user_id <- decode.field(
@@ -243,7 +196,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.brief_sql(row.brief_id),
     sqlight.int(row.brief_version),
     id.player_sql(row.player_id),
-    sqlight.text(state_to_string(row.state)),
+    sqlight.text(review_state.to_string(row.state)),
     sqlight.int(row.created_at),
     sqlight.int(row.updated_at),
     sqlight.nullable(id.org_user_sql, row.reviewed_by_user_id),

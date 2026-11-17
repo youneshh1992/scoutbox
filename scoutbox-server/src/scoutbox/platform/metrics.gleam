@@ -32,6 +32,15 @@ pub fn group(
   group: String,
   names: List(String),
 ) -> Result(Json, Fail(e)) {
+  fields(tx, group, names) |> result.map(json.object)
+}
+
+/// `group`'s fields, for an object that carries more than its counters.
+pub fn fields(
+  tx: Tx,
+  group: String,
+  names: List(String),
+) -> Result(List(#(String, Json)), Fail(e)) {
   use _ <- result.try(store.exec(tx, table))
   use rows <- result.map(
     store.query(
@@ -45,9 +54,7 @@ pub fn group(
       },
     ),
   )
-  json.object(
-    list.map(names, fn(name) {
-      #(name, json.int(list.key_find(rows, name) |> result.unwrap(0)))
-    }),
-  )
+  list.map(names, fn(name) {
+    #(name, json.int(list.key_find(rows, name) |> result.unwrap(0)))
+  })
 }

@@ -17,9 +17,11 @@ import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
 import scoutbox/discovery/insights
+import scoutbox/discovery/nobody_missed
 import scoutbox/discovery/org_feed
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
+import scoutbox/discovery/second_look
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/support
@@ -318,6 +320,43 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["signings"] ->
           only(req, Get, fn() { signings.org_page(ctx, req, org.org.id) })
+        ["recruitment-briefs"] ->
+          case req.method {
+            Get -> nobody_missed.list_briefs(ctx, req, org)
+            Post -> nobody_missed.create_brief(ctx, req, org)
+            _ -> not_found()
+          }
+        ["recruitment-briefs", bid] ->
+          case req.method {
+            Get -> nobody_missed.get_brief(ctx, org, bid)
+            Patch -> {
+              use req <- contract.rerun_on_stale(req)
+              nobody_missed.edit_brief(ctx, req, org, bid)
+            }
+            _ -> not_found()
+          }
+        ["nobody-missed"] ->
+          only(req, Get, fn() { nobody_missed.queue(ctx, req, org) })
+        ["nobody-missed", "review"] ->
+          only(req, Post, fn() { nobody_missed.review(ctx, req, org) })
+        ["nobody-missed", "dismiss"] ->
+          only(req, Post, fn() { nobody_missed.dismiss(ctx, req, org) })
+        ["nobody-missed", "add-to-room"] ->
+          only(req, Post, fn() { nobody_missed.add_to_room(ctx, req, org) })
+        ["evaluation-coverage"] ->
+          only(req, Get, fn() { nobody_missed.evaluation_coverage(ctx, org) })
+        ["second-look"] ->
+          only(req, Get, fn() { second_look.list(ctx, req, org) })
+        ["second-look", sid] ->
+          only(req, Get, fn() { second_look.get(ctx, org, sid) })
+        ["second-look", sid, "changes"] ->
+          only(req, Get, fn() { second_look.changes(ctx, org, sid) })
+        ["second-look", sid, "review"] ->
+          only(req, Post, fn() { second_look.review(ctx, req, org, sid) })
+        ["second-look", sid, "dismiss"] ->
+          only(req, Post, fn() { second_look.dismiss(ctx, req, org, sid) })
+        ["second-look", sid, "reopen-room"] ->
+          only(req, Post, fn() { second_look.reopen_room(ctx, req, org, sid) })
         ["invoices"] ->
           only(req, Get, fn() { invoices.org_page(ctx, req, org.org.id) })
         ["transitions"] ->

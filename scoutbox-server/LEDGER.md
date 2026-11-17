@@ -19,7 +19,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 |---|---|---|---|---|---|---|
 | agents | 9 | 1 | 1 | 0 / 216 | 0 / 1 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
-| discovery | 3 | 1 | 0 | 0 / 0 | 0 / 0 | 3 to go |
+| discovery | 3 | 2 | 1 | 0 / 136 | 0 / 0 | 3 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 25 / 2347 | 0 / 179 | 5 to go |
@@ -51,7 +51,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  |  |  |  | not answered |
 | `discovery/matchingAndWatchlists` | not yet neutral | 13 → 13 | 152 | 152 |  |  |  |  |  | not untangled; not answered |
-| `discovery/secondLookAndNobodyMissed` | not yet neutral | 2 → 2 | 251 | 251 |  |  |  |  |  | not untangled; not answered |
+| `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 0 / 136 |  | 136 cases pending |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
 | `passport/passport` | not yet neutral | 1 → 1 | 215 | 215 |  |  |  |  |  | not untangled; not answered |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
@@ -239,6 +239,28 @@ mapped, then `npm run cases`.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/matching/match.mjs#playerMatchesBrief` | 8 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildNobodyMissedCandidate` | 3 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 13 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#canBriefTransition` | 3 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#canSecondLookTransition` | 4 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#changeFingerprint` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#changesSinceDecision` | 4 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#clampPage` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#compareToSnapshot` | 2 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#dedupeMaterialChanges` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#evaluationCoverageState` | 5 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#explainBriefCriteria` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#isMeaningfullyEvaluated` | 4 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#normalizeMaterialChange` | 30 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#orderNobodyMissed` | 2 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#orderSecondLook` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#safeM18Projection` | 1 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookExpired` | 2 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookReasonMatch` | 21 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#secondLookStatus` | 5 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#trustLevelChanges` | 2 |
+| `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 22 |
 | `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
 | `platform/contracts` | `domain.ts#isAdult` | 1 |
 | `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |

@@ -7,6 +7,7 @@ import gleam/io
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx, Ctx}
+import scoutbox/discovery/match_facts
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/live_routes
@@ -76,6 +77,13 @@ fn boot() -> Result(Nil, String) {
     demo: config.seed_demo,
     data_dir: config.data_dir,
   ))
+  // The match facts are re-derived inside every unit from here on, just before its COMMIT. Not before: until the
+  // migrations have run there is no table to derive them into. The dispatcher's own units see the same store.
+  let store = store.with_before_commit(store, match_facts.drain)
+  let store = store.with_dispatch(store, dispatch(store, hub, _))
+  use _ <- result.try(
+    match_facts.start(store) |> result.map_error(string.inspect),
+  )
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))
   use limits <- result.try(limits.start())
@@ -121,13 +129,14 @@ fn boot() -> Result(Nil, String) {
 }
 
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
-/// warnings, and the trial reminders.
+/// warnings, the trial reminders and the match facts whose time-only change is due.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
   let _ = webhooks.sweep(ctx)
   let _ = verification_review.sweep(ctx)
   let _ = trial_routes.remind(ctx, clock.now_ms())
+  let _ = match_facts.sweep(ctx.store)
   sweeping(ctx)
 }
 
