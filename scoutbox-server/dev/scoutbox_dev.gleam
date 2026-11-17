@@ -366,6 +366,7 @@ pub const tables = [
   "guardian_children",
   "guardians",
   "idempotency_keys",
+  "invoices",
   "idv_queue",
   "jurisdiction_policies",
   "jurisdiction_policy_rule_overrides",
@@ -536,6 +537,7 @@ pub const ided = [
   Ided("assessments", "Assessment", Some("ass")),
   Ided("assessment_history", "AssessmentEvent", Some("aud")),
   Ided("signings", "Signing", None),
+  Ided("invoices", "Invoice", Some("inv")),
   Ided("signing_packages", "SigningPackage", Some("spk")),
   Ided("signing_revisions", "SigningRevision", Some("spr")),
   // Minted as sgd- (the document to sign) or sgx- (the executed copy), so with ids.next.

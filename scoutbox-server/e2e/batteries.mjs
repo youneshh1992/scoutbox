@@ -23,4 +23,7 @@ export const BATTERIES = [
   'recruitment/trialDatesMinorsAndErasure',
   'recruitment/contactsPersistence',
   'recruitment/contacts',
+  'recruitment/signings',
+  'recruitment/signingsAdversarial',
+  'recruitment/signingsPersistence',
 ];

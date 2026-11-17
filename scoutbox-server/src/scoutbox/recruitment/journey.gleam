@@ -25,6 +25,8 @@ import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_rules.{type Offer}
 import scoutbox/recruitment/offers
 import scoutbox/recruitment/room_rules.{type RoomRole}
+import scoutbox/recruitment/signing_packages
+import scoutbox/recruitment/signing_rules
 import scoutbox/recruitment/trial_rules.{type Trial}
 import scoutbox/recruitment/trials
 import scoutbox/rows/assessments as assessment_row
@@ -35,6 +37,7 @@ import scoutbox/rows/recruitment_cases as case_row
 import scoutbox/rows/recruitment_contacts as contact_row
 import scoutbox/rows/recruitment_requests as request_row
 import scoutbox/rows/room_decisions as decision_row
+import scoutbox/rows/signing_packages as signing_pkg_row
 import scoutbox/rows/signings as signing_row
 import scoutbox/rows/trials as trial_row
 import scoutbox/vocab/decision_outcome
@@ -179,6 +182,8 @@ type Records {
     assessments: List(assessment_row.Row),
     offers: List(Offer),
     signings: List(signing_row.Row),
+    /// The signing packages opened on this case for its club and player.
+    packages: List(signing_rules.Package),
     requests: List(request_row.Row),
     /// The organisation's trials of the player, and the trials naming this case.
     trials: List(Trial),
@@ -261,6 +266,7 @@ fn load(
   ))
   use case_trials <- result.try(trials.for_case(read, r.id))
   use case_contacts <- result.try(contacts.for_case(read, r.id))
+  use case_packages <- result.try(signing_packages.for_case(read, r.id))
   Ok(Records(
     room:,
     decisions: list.filter(all, fn(d) { d.base.row.org_id == r.org_id }),
@@ -268,6 +274,9 @@ fn load(
     assessments:,
     offers: list.filter(case_offers, fn(o) { o.row.org_id == r.org_id }),
     signings:,
+    packages: list.filter(case_packages, fn(p) {
+      p.row.org_id == r.org_id && p.row.player_id == r.player_id
+    }),
     requests:,
     trials: player_trials,
     case_trials:,
@@ -665,8 +674,41 @@ fn club(
             ])
           None -> json.null()
         }),
-        // Not ported yet: signing packages.
-        #("signingPackages", json.preprocessed_array([])),
+        // A case at `signed` with no package has none, and none is invented.
+        #(
+          "signingPackages",
+          rec.packages
+            |> list.filter(fn(p) {
+              signing_rules.integrity(p, Some(rec.room.row.org_id)) == []
+            })
+            |> json.array(fn(p) {
+              json.object([
+                #("id", id.signing_package_json(p.row.id)),
+                #(
+                  "status",
+                  json.string(
+                    signing_rules.status_name(signing_rules.effective_status(
+                      p,
+                      now,
+                    )),
+                  ),
+                ),
+                #(
+                  "revisionNumber",
+                  json.nullable(
+                    signing_rules.current_revision(p)
+                      |> option.map(fn(r) { r.row.revision_number }),
+                    json.int,
+                  ),
+                ),
+                #("offerId", id.offer_json(p.row.offer_id)),
+                #(
+                  "signingId",
+                  json.nullable(p.row.completion_signing_id, id.signing_json),
+                ),
+              ])
+            }),
+        ),
       ]),
     ),
     #(
@@ -685,10 +727,27 @@ fn club(
   ])
 }
 
-/// The club's un-packaged signing row for this player. Not ported yet: a completed package naming its row.
+/// The row a completed package of this case wrote and names back, or else the club's un-packaged signing row for
+/// this player (supportingSigningRow).
 fn supporting_signing(rec: Records) -> Option(signing_row.Row) {
-  list.find(rec.signings, fn(s) { s.signing_package_id == None })
-  |> option.from_result
+  let packaged =
+    list.find_map(rec.packages, fn(p) {
+      case p.row.status, p.row.completion_signing_id {
+        signing_pkg_row.Completed, Some(sid) -> {
+          let mine = Some(p.row.id)
+          list.find(rec.signings, fn(s) {
+            s.id == sid && s.signing_package_id == mine
+          })
+        }
+        _, _ -> Error(Nil)
+      }
+    })
+  case packaged {
+    Ok(s) -> Some(s)
+    Error(Nil) ->
+      list.find(rec.signings, fn(s) { s.signing_package_id == None })
+      |> option.from_result
+  }
 }
 
 fn stage_of(status: RoomStatus, assessed: Bool) -> String {

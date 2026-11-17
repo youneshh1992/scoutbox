@@ -1129,6 +1129,38 @@ pub fn idv_case_decoder() -> decode.Decoder(IdvCaseId) {
   decode.map(decode.string, IdvCaseId)
 }
 
+/// An id of `invoices`.
+pub opaque type InvoiceId {
+  InvoiceId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn invoice(text: String) -> InvoiceId {
+  InvoiceId(text)
+}
+
+pub fn invoice_to_string(id: InvoiceId) -> String {
+  let InvoiceId(text) = id
+  text
+}
+
+pub fn invoice_sql(id: InvoiceId) -> sqlight.Value {
+  sqlight.text(invoice_to_string(id))
+}
+
+pub fn invoice_json(id: InvoiceId) -> Json {
+  json.string(invoice_to_string(id))
+}
+
+pub fn invoice_decoder() -> decode.Decoder(InvoiceId) {
+  decode.map(decode.string, InvoiceId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_invoice(tx: Tx) -> Result(InvoiceId, Fail(e)) {
+  ids.next(tx, "inv") |> result.map(InvoiceId)
+}
+
 /// An id of `ledger`.
 pub opaque type LedgerEntryId {
   LedgerEntryId(String)

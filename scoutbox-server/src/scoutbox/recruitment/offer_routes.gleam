@@ -6,8 +6,6 @@
 ////
 //// An Offer may cite the case's transaction workspace (agents/transactions); its readiness is re-read at issue,
 //// never taken from the draft.
-////
-//// Not ported yet: the signing package an accepted Offer opens (`signing` reads null).
 
 import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
@@ -48,6 +46,7 @@ import scoutbox/recruitment/recipients
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/recruitment/signing_reads
 import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
@@ -680,12 +679,34 @@ pub fn surface(
         None -> Ok([])
       })
       use is_blocked <- result.try(blocked(r, room))
-      use removed <- result.map(subject_removed(r, room))
-      #(all, live, draft_blockers, issue_blockers, is_blocked, removed)
+      use removed <- result.try(subject_removed(r, room))
+      use summaries <- result.map(
+        list.try_map(all, fn(o) {
+          signing_reads.summary_for_offer(r, o.row.id, o.row.org_id, now)
+          |> result.map(fn(j) { #(o.row.id, j) })
+        }),
+      )
+      #(
+        all,
+        live,
+        draft_blockers,
+        issue_blockers,
+        is_blocked,
+        removed,
+        summaries,
+      )
     })
   case gathered {
     Error(response) -> response
-    Ok(#(all, live, draft_blockers, issue_blockers, is_blocked, removed)) -> {
+    Ok(#(
+      all,
+      live,
+      draft_blockers,
+      issue_blockers,
+      is_blocked,
+      removed,
+      summaries,
+    )) -> {
       let listed =
         all
         |> list.sort(fn(x, y) {
@@ -693,22 +714,28 @@ pub fn surface(
         })
         |> list.map(fn(o) {
           json.object(
-            list.append(offer_rules.club_view(o, now), [
-              #(
-                "integrity",
-                json.array(
-                  list.append(
-                    offer_rules.integrity(
-                      o,
-                      Some(room.row.org_id),
-                      Some(room.row.id),
-                    ),
-                    offer_rules.case_consistency(o, Some(room.status), now),
-                  ),
-                  json.string,
-                ),
+            list.append(
+              signing_reads.with_signing(
+                offer_rules.club_view(o, now),
+                list.key_find(summaries, o.row.id) |> result.unwrap(json.null()),
               ),
-            ]),
+              [
+                #(
+                  "integrity",
+                  json.array(
+                    list.append(
+                      offer_rules.integrity(
+                        o,
+                        Some(room.row.org_id),
+                        Some(room.row.id),
+                      ),
+                      offer_rules.case_consistency(o, Some(room.status), now),
+                    ),
+                    json.string,
+                  ),
+                ),
+              ],
+            ),
           )
         })
       http.json(
@@ -1184,14 +1211,35 @@ pub fn create(
   }
 }
 
+/// The club's view of an Offer with its signing summary.
+fn club_json(read: Read, o: Offer, now: Int) -> Result(Json, Fail(e)) {
+  use summary <- result.map(signing_reads.summary_for_offer(
+    read,
+    o.row.id,
+    o.row.org_id,
+    now,
+  ))
+  json.object(signing_reads.with_signing(offer_rules.club_view(o, now), summary))
+}
+
+fn club_json_now(
+  ctx: Ctx,
+  o: Offer,
+  now: Int,
+  next: fn(Json) -> Response,
+) -> Response {
+  case read(ctx, club_json(_, o, now)) {
+    Ok(view) -> next(view)
+    Error(response) -> response
+  }
+}
+
 /// `GET /org/offers/:id`.
 pub fn get(ctx: Ctx, req: Request, a: OrgAccess, offer_id: String) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, _, _ <- offer_for(ctx, a, offer_id, room_rules.OfferView, now)
-  http.json(
-    200,
-    json.object([#("offer", json.object(offer_rules.club_view(o, now)))]),
-  )
+  use view <- club_json_now(ctx, o, now)
+  http.json(200, json.object([#("offer", view)]))
 }
 
 /// `GET /org/offers/:id/history`.
@@ -1397,11 +1445,12 @@ fn used_key(
   }
 }
 
-fn replay_json(o: Offer, now: Int) -> Response {
+fn replay_json(ctx: Ctx, o: Offer, now: Int) -> Response {
+  use view <- club_json_now(ctx, o, now)
   http.json(
     200,
     json.object([
-      #("offer", json.object(offer_rules.club_view(o, now))),
+      #("offer", view),
       #("lifecycle", offer_rules.lifecycle_json(o.row)),
       #("idempotent", json.bool(True)),
     ]),
@@ -1431,7 +1480,7 @@ pub fn issue(
   case used_key(o, key_row.Issue, key) {
     Some(used) ->
       case used.revision_id == rev.row.id {
-        True -> replay_json(o, now)
+        True -> replay_json(ctx, o, now)
         False ->
           err(
             "OFFER_IDEMPOTENCY_CONFLICT",
@@ -1979,7 +2028,7 @@ pub fn withdraw(
   case used_key(o, key_row.Withdraw, key) {
     Some(used) ->
       case used.revision_id == current.row.id {
-        True -> replay_json(o, now)
+        True -> replay_json(ctx, o, now)
         False ->
           err(
             "OFFER_IDEMPOTENCY_CONFLICT",
@@ -2190,14 +2239,13 @@ pub fn revise(
     None -> False
   }
   case replayed {
-    True ->
+    True -> {
+      use view <- club_json_now(ctx, o, now)
       http.json(
         200,
-        json.object([
-          #("offer", json.object(offer_rules.club_view(o, now))),
-          #("idempotent", json.bool(True)),
-        ]),
+        json.object([#("offer", view), #("idempotent", json.bool(True))]),
       )
+    }
     False ->
       case offer_rules.can_revise(o, now) {
         Error(r) -> fail(r)
@@ -2567,8 +2615,15 @@ fn recipient_view(
   now: Int,
 ) -> Result(List(#(String, Json)), Fail(e)) {
   use org <- result.try(org_of(read, o.row.org_id))
-  use open <- result.map(case_open(read, o))
+  use open <- result.try(case_open(read, o))
+  use summary <- result.map(signing_reads.summary_for_offer(
+    read,
+    o.row.id,
+    o.row.org_id,
+    now,
+  ))
   offer_rules.recipient_view(o, now, option.map(org, fn(x) { x.name }), open)
+  |> signing_reads.with_signing(summary)
 }
 
 fn receipt_due(o: Offer, r: Recipient) -> Bool {
@@ -3640,12 +3695,20 @@ pub fn agent_offers(
                       )
                     })
                     |> list.try_map(fn(o) {
-                      use org <- result.map(org_of(rd, o.row.org_id))
-                      json.object(offer_rules.agent_view(
+                      use org <- result.try(org_of(rd, o.row.org_id))
+                      use summary <- result.map(signing_reads.summary_for_offer(
+                        rd,
+                        o.row.id,
+                        o.row.org_id,
+                        now,
+                      ))
+                      offer_rules.agent_view(
                         o,
                         now,
                         option.map(org, fn(x) { x.name }),
-                      ))
+                      )
+                      |> signing_reads.with_signing(summary)
+                      |> json.object
                     }),
                   )
                   use seen <- result.map(players.for_org(

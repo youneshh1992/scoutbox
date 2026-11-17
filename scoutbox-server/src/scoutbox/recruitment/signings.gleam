@@ -52,7 +52,7 @@ fn parties(
 }
 
 /// A signing as the repository decodes it.
-fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
+pub fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
   let opt = json.nullable(_, json.string)
   json.object([
     #("id", id.signing_json(s.id)),

@@ -136,17 +136,18 @@ pub fn evidence(
         offer_rules.Unsatisfied(reason) -> Lacks(reason)
       }
     }
-    // A signing of this player with this club, recorded when the case existed. Not ported yet: a row naming a
-    // signing package, which proves only its completed package's case; packages aren't ported, so such a row
-    // proves nothing here.
+    // A signing of this player with this club (signingSupports): a row with no package, recorded when the case
+    // existed; or a row naming a package, which proves the joining only when that package completed with it, for
+    // this club and player, on this case.
     room_rules.ConfirmedJoin ->
       store.query(
         read,
-        "SELECT id FROM signings WHERE org_id = ? AND player_id = ? AND signing_package_id IS NULL AND ts >= ? ORDER BY rowid",
+        "SELECT s.id FROM signings s LEFT JOIN signing_packages p ON p.id = s.signing_package_id WHERE s.org_id = ? AND s.player_id = ? AND ((s.signing_package_id IS NULL AND s.ts >= ?) OR (p.status = 'COMPLETED' AND p.completion_signing_id = s.id AND p.org_id = s.org_id AND p.player_id = s.player_id AND p.case_id = ?)) ORDER BY s.rowid",
         [
           id.org_sql(r.org_id),
           id.player_sql(r.player_id),
           sqlight.int(r.created_at),
+          id.recruitment_case_sql(r.id),
         ],
         decode.at([0], decode.string),
       )

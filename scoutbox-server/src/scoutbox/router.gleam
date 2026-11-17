@@ -59,10 +59,12 @@ import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/case_routes
 import scoutbox/recruitment/contact_routes
+import scoutbox/recruitment/invoices
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
 import scoutbox/recruitment/room_routes
+import scoutbox/recruitment/signing_routes
 import scoutbox/recruitment/signings
 import scoutbox/recruitment/trial_day
 import scoutbox/recruitment/trial_routes
@@ -157,6 +159,66 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { offer_routes.get(ctx, req, org, oid) })
         ["offers", oid, "history"] ->
           only(req, Get, fn() { offer_routes.history(ctx, req, org, oid) })
+        ["offers", oid, "signing"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.start(ctx, req, org, oid)
+          })
+        ["signings", sid] ->
+          case req.method {
+            Get -> signing_routes.get(ctx, req, org, sid)
+            Patch -> {
+              use req <- contract.rerun_on_stale(req)
+              signing_routes.edit_draft(ctx, req, org, sid)
+            }
+            _ -> not_found()
+          }
+        ["signings", sid, "history"] ->
+          only(req, Get, fn() { signing_routes.history(ctx, req, org, sid) })
+        ["signings", sid, "document"] ->
+          case req.method {
+            Get -> signing_routes.document(ctx, req, org, sid)
+            Post -> {
+              use req <- contract.rerun_on_stale(req)
+              signing_routes.attach(ctx, req, org, sid)
+            }
+            _ -> not_found()
+          }
+        ["signings", sid, "executed-document"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.attach_executed(ctx, req, org, sid)
+          })
+        ["signings", sid, "ready"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.ready(ctx, req, org, sid)
+          })
+        ["signings", sid, "parties", "club", "complete"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.club_party(ctx, req, org, sid)
+          })
+        ["signings", sid, "complete"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.complete(ctx, req, org, sid)
+          })
+        ["signings", sid, "cancel"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.close(ctx, req, org, sid, signing_routes.Cancel)
+          })
+        ["signings", sid, "void"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.close(ctx, req, org, sid, signing_routes.Void)
+          })
+        ["signings", sid, "supersede"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.supersede(ctx, req, org, sid)
+          })
         ["offers", oid, "draft"] ->
           only(req, Patch, fn() {
             use req <- contract.rerun_on_stale(req)
@@ -214,6 +276,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["signings"] ->
           only(req, Get, fn() { signings.org_page(ctx, req, org.org.id) })
+        ["invoices"] ->
+          only(req, Get, fn() { invoices.org_page(ctx, req, org.org.id) })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
         ["audit"] -> only(req, Get, fn() { org_audit.feed(ctx, req, org) })
@@ -237,6 +301,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Put, fn() { delivery_prefs.put(ctx, req, org) })
         ["players", id] ->
           only(req, Get, fn() { discovery.profile(ctx, org, id.player(id)) })
+        ["players", id, "signing"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.legacy_record(ctx, req, org, id)
+          })
         ["players", id, "notes"] ->
           only(req, Post, fn() {
             discovery.add_note(ctx, req, org, id.player(id))
@@ -385,6 +454,21 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["insights"] -> only(req, Get, fn() { insights.show(ctx, player) })
         ["journeys"] ->
           only(req, Get, fn() { case_routes.player_journeys(ctx, req, player) })
+        ["signings"] ->
+          only(req, Get, fn() { signing_routes.player_list(ctx, req, player) })
+        ["signings", sid] ->
+          only(req, Get, fn() {
+            signing_routes.player_get(ctx, req, player, sid)
+          })
+        ["signings", sid, "document"] ->
+          only(req, Get, fn() {
+            signing_routes.player_document(ctx, req, player, sid)
+          })
+        ["signings", sid, "complete"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.player_complete(ctx, req, player, sid)
+          })
         ["box-cam", "sessions", sid, "cv", "finalize"] ->
           only(req, Post, fn() { box_prefs.cv_finalize(ctx, player, sid) })
         ["box-cam", "prefs"] ->
@@ -629,6 +713,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
           only(req, Post, fn() { invites.guardian_accept(ctx, req, guardian) })
+        ["signings"] ->
+          only(req, Get, fn() { signing_routes.guardian_list(guardian) })
+        ["signings", _] -> only(req, Get, signing_routes.guardian_get)
+        ["signings", _, "document"] ->
+          only(req, Get, signing_routes.guardian_document)
+        ["signings", _, "complete"] ->
+          only(req, Post, signing_routes.guardian_complete)
         ["children", cid] ->
           only(req, Delete, fn() {
             erasure.delete_child(ctx, guardian, id.player(cid))
@@ -869,6 +960,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["agent", "profiles"] ->
           only(req, Get, fn() { agent.admin_profiles(ctx, req) })
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
+        ["signings", sid, "void"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            signing_routes.admin_void(ctx, req, sid)
+          })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
         ["support", id, "reply"] ->
@@ -1118,6 +1214,8 @@ fn agent_org(
       only(req, Post, fn() { agent.terminate(ctx, req, org, rid) })
     ["clients", rid, "offers"] ->
       only(req, Get, fn() { offer_routes.agent_offers(ctx, req, org, rid) })
+    ["clients", rid, "signings"] ->
+      only(req, Get, fn() { signing_routes.agent_signings(ctx, req, org, rid) })
     ["clients", rid, "journey"] ->
       only(req, Get, fn() { case_routes.agent_journey(ctx, req, org, rid) })
     ["clients", rid, "opportunities"] ->
@@ -1408,6 +1506,7 @@ fn rooms(
     [rid, "trials", tid, "evidence"], Get ->
       trial_routes.evidence(ctx, org, room(rid), tid)
     [rid, "offers"], Get -> offer_routes.surface(ctx, req, org, room(rid))
+    [rid, "signing"], Get -> signing_routes.surface(ctx, req, org, room(rid))
     [rid, "offers"], Post -> {
       use req <- contract.rerun_on_stale(req)
       offer_routes.create(ctx, req, org, room(rid))

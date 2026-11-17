@@ -3,8 +3,7 @@
 //// package's completion and, for a recruitment with no Offer, the legacy route. Every write and notice runs inside
 //// the caller's unit.
 ////
-//// Not ported yet: the success-fee invoice (no billing provider is configured in either server) and the live
-//// 'players' event.
+//// Not ported yet: the live 'players' event.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -22,6 +21,7 @@ import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/operator
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/recruitment/invoices
 import scoutbox/recruitment/signing_rules.{type Package, type Revision}
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -311,6 +311,12 @@ fn write(
   }
   use _ <- result.try(signing_row.insert(tx, signing))
   use _ <- result.try(list.try_each(parties, signing_party_row.insert(tx, _)))
+  // The dev-ledger provider records the success fee locally, so it is written in the unit: a completion that rolls
+  // back issues no invoice, as the TypeScript server's after-commit call guarantees.
+  use _ <- result.try(case signing.inside_attribution_window {
+    True -> invoices.issue_for_signing(tx, signing, org)
+    False -> Ok(Nil)
+  })
   // Grassroots signings make semi-pros; academy/pro signings make pros.
   let level_after = case org.level {
     Some(orgs.LevelGrassroots) -> playing_level.SemiPro
