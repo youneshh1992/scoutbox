@@ -20,46 +20,30 @@ import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import {
-  SIGNING_ERROR_HTTP,
-  PUBLIC_ERROR_FIELDS,
-  publicErrorBody,
-} from '../../domains/recruitment/signings/errors.mjs';
-import {
-  SIGNING_STATUSES,
-  SIGNING_STORED_STATUSES,
-  SIGNING_METHODS,
-  PARTY_TYPES,
-  MINOR_SIGNING_PATHWAY_ENABLED,
-  minorSigningPathwayOpen,
-  payloadFingerprint,
-  validateContractDates,
-  validateExpiry,
-  requiredPartiesFor,
-  effectiveStatus,
-  canStart,
-  canCompleteParty,
-  completionGate,
-  signingIntegrity,
-  signingConsistency,
-  signingCorrupt,
-  SIGNING_CORRUPTION,
-  signingRecipientView,
-  signingAgentView,
-  signingClubView,
-  cleanText,
-  SIGNING_INPUT_CODES,
-} from '../../domains/recruitment/signings/signing.mjs';
+import { readRows } from '../support/sqlRows.mjs';
+import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
+import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
+import signingErrorsSpec from '../support/spec/recruitment/signings/errors.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
-const LATEST_SCHEMA = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
+const { EVENT_REGISTRY } = eventRegistrySpec;
+const { RATE_LIMIT_POLICY } = rateLimitSpec;
+const { SIGNING_ERROR_HTTP } = signingErrorsSpec;
+// The table migrations a new database records, and its tables, as the migrated schema lists them.
+const [MIGRATIONS, SCHEMA_TABLES] = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23sg-schema-')));
+  try {
+    return [
+      R.rows('data_migrations').map((r) => r.id),
+      R.sql
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+        .all()
+        .map((r) => r.name),
+    ];
+  } finally {
+    R.close();
+  }
+})();
+const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
 
 const PORT = pickPort(7100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
@@ -113,37 +97,15 @@ const SHA_B = sha256(DOC_B);
 // ================================================================ A — model / store (pure)
 section('A — model and store: vocabulary, validators, gates, integrity, error taxonomy, the closed minor pathway');
 {
-  // That nothing is backfilled or reinterpreted is proved on a planted legacy file in signingsPersistence section 1.
+  // The vocabulary, validators, gates, integrity and views are in scripts/rules/recruitment/signings.mjs. That
+  // nothing is backfilled or reinterpreted is proved on a planted legacy file in signingsPersistence section 1.
   ok(
-    DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0018_signings_follow_ups'),
+    MIGRATIONS.length === LATEST_SCHEMA && MIGRATIONS.includes('0018_signings_follow_ups'),
     'A1 every table migration; the signing tables are 0018',
   );
   ok(
-    TABLE_BACKED.includes('signingPackages') && TABLE_BACKED.includes('signings'),
+    SCHEMA_TABLES.includes('signing_packages') && SCHEMA_TABLES.includes('signings'),
     'A2 signingPackages and signings are tables read through SQL',
-  );
-  ok(
-    SIGNING_STATUSES.length === 8 &&
-      SIGNING_STORED_STATUSES.length === 6 &&
-      !SIGNING_STORED_STATUSES.includes('EXPIRED') &&
-      !SIGNING_STORED_STATUSES.includes('SUPERSEDED'),
-    'A4 eight statuses; EXPIRED is derived and SUPERSEDED is a revision status — neither is ever stored on a package',
-  );
-  neg(
-    !SIGNING_STATUSES.includes('SIGNED'),
-    'A5 no SIGNED workflow status: the word belongs to the case lifecycle alone',
-  );
-  ok(
-    PARTY_TYPES.join() === 'PLAYER,GUARDIAN,CLUB_SIGNATORY' &&
-      SIGNING_METHODS.join() === 'PLATFORM_ACKNOWLEDGMENT,UPLOAD_EXECUTED_DOCUMENT',
-    'A6 three party types; only the two implemented methods',
-  );
-  neg(
-    Object.values(MINOR_SIGNING_PATHWAY_ENABLED).every((v) => v === false) &&
-      ['GB', 'ENG', 'INT', 'USA', 'FR', 'KR', 'ZZ', '', null, '__proto__', 'constructor'].every(
-        (j) => minorSigningPathwayOpen(j) === false,
-      ),
-    '#15 A7 the minor signing pathway is closed in every jurisdiction, including unknown and prototype keys',
   );
   const codesList = Object.keys(SIGNING_ERROR_HTTP);
   ok(
@@ -151,335 +113,6 @@ section('A — model and store: vocabulary, validators, gates, integrity, error 
       codesList.every((c) => /^SIGNING_/.test(c)) &&
       [400, 403, 404, 409, 422, 500].every((s) => Object.values(SIGNING_ERROR_HTTP).includes(s)),
     `A8 ${codesList.length} SIGNING_* codes across six status bands, in one table`,
-  );
-  neg(
-    [...Object.values(SIGNING_INPUT_CODES.codes), ...Object.values(SIGNING_INPUT_CODES.fieldCodes)].every(
-      (c) => SIGNING_ERROR_HTTP[c] === 400,
-    ) && ['problem', 'min', 'max'].every((f) => PUBLIC_ERROR_FIELDS.includes(f)),
-    'A8b every input refusal code is a 400 in the table, and a refusal carries its problem and bounds',
-  );
-  neg(
-    SIGNING_ERROR_HTTP.__proto__ === undefined && SIGNING_ERROR_HTTP.constructor === undefined,
-    'A9 the error table has no prototype',
-  );
-  neg(
-    !has(publicErrorBody({ error: 'SIGNING_STATE_UNKNOWN', stack: 'x', row: { secret: 1 } }), 'secret') &&
-      !PUBLIC_ERROR_FIELDS.includes('stack'),
-    'A10 a 500 body carries no internals',
-  );
-  ok(
-    payloadFingerprint({ contract: { startDate: '2027-07-01', endDate: null } }) !==
-      payloadFingerprint({ contract: { startDate: '2027-07-02', endDate: null } }) &&
-      payloadFingerprint({ a: { b: 1, c: 2 } }) === payloadFingerprint({ a: { c: 2, b: 1 } }),
-    'A11 the fingerprint is deep and canonical',
-  );
-  const cd = validateContractDates({ startDate: '2027-07-01', endDate: '2029-06-30' });
-  ok(
-    cd.ok && cd.contract.startDate === '2027-07-01' && cd.contract.endDate === '2029-06-30',
-    'A12 contract days validate as DATE_ONLY',
-  );
-  neg(
-    !validateContractDates({ startDate: '2027-02-30' }).ok &&
-      !validateContractDates({ startDate: '2027-07-01', endDate: '2027-06-30' }).ok &&
-      !validateContractDates({ startDate: '2027-07-01', endDate: '2040-07-01' }).ok &&
-      !validateContractDates({ startDate: 1720000000000 }).ok &&
-      !validateContractDates({}).ok,
-    '#44 A13 an impossible day, an end before the start, an eleven-year contract, an instant, and no start are all refused',
-  );
-  const T = Date.parse('2026-03-15T12:00:00Z');
-  neg(
-    !validateExpiry(T + 30 * 60 * 1000, { now: T }).ok &&
-      !validateExpiry(T + 91 * DAY, { now: T }).ok &&
-      !validateExpiry('tomorrow', { now: T }).ok &&
-      validateExpiry(undefined, { now: T }).defaulted === true &&
-      validateExpiry(T + 2 * H, { now: T }).ok,
-    'A14 expiry: ≥1 h, ≤90 d, an instant; absent → the default',
-  );
-  const parties = requiredPartiesFor({ recipientType: 'player', playerId: 'p1', orgId: 'o1' });
-  ok(
-    parties.length === 2 &&
-      parties[0].partyType === 'PLAYER' &&
-      parties[0].forEntityId === 'p1' &&
-      parties[1].partyType === 'CLUB_SIGNATORY' &&
-      parties[1].forEntityId === 'o1' &&
-      parties.every((p) => p.status === 'PENDING'),
-    'A15 required parties for an adult: the player and the club signatory, both pending',
-  );
-  const pkg = (patch = {}, revPatch = {}) => ({
-    id: 'spk-1',
-    orgId: 'o1',
-    playerId: 'p1',
-    caseId: 'c1',
-    offerId: 'rof-1',
-    offerRevisionId: 'rofr-1',
-    status: 'READY',
-    currentRevisionId: 'spr-1',
-    createdAt: T,
-    expiresAt: T + 7 * DAY,
-    revisions: [
-      {
-        id: 'spr-1',
-        revisionNumber: 1,
-        status: 'READY',
-        createdAt: T,
-        readyAt: T + H,
-        document: { evidenceId: 'vevd-1', sha256: SHA_A },
-        contract: { startDate: '2027-07-01', endDate: null },
-        requiredParties: requiredPartiesFor({ recipientType: 'player', playerId: 'p1', orgId: 'o1' }),
-        ...revPatch,
-      },
-    ],
-    ...patch,
-  });
-  ok(
-    effectiveStatus(pkg(), T + 7 * DAY - 1) === 'READY' &&
-      effectiveStatus(pkg(), T + 7 * DAY) === 'EXPIRED' &&
-      effectiveStatus(pkg({ status: 'COMPLETED' }), T + 8 * DAY) === 'COMPLETED',
-    'A16 lazy expiry: READY 1 ms before, EXPIRED at the instant, a COMPLETED package never expires',
-  );
-  neg(
-    effectiveStatus(pkg({ status: 'SIGNED' }), T) === null &&
-      effectiveStatus(pkg({ status: 'signed' }), T) === null &&
-      effectiveStatus(pkg({ status: '' }), T) === null &&
-      effectiveStatus(pkg({ status: 'EXPIRED' }), T) === null,
-    'A17 an unknown or unstorable status word is nothing — not live, not completed (fails closed)',
-  );
-  for (const st of ['DRAFT', 'ISSUED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED'])
-    neg(
-      canStart(
-        {
-          offerStatus: st,
-          offerRevisionStatus: st,
-          caseStatus: 'offer_accepted',
-          recipientType: 'player',
-          jurisdiction: 'GB',
-        },
-        T,
-      ).error === 'SIGNING_OFFER_NOT_ACCEPTED',
-      `#1 A18 no package over a ${st} Offer`,
-    );
-  neg(
-    canStart(
-      {
-        offerStatus: 'ACCEPTED',
-        offerRevisionStatus: 'ACCEPTED',
-        caseStatus: 'offer_made',
-        recipientType: 'player',
-        jurisdiction: 'GB',
-      },
-      T,
-    ).error === 'SIGNING_LIFECYCLE_CONFLICT',
-    'A19 the case must be at offer_accepted',
-  );
-  neg(
-    canStart(
-      {
-        offerStatus: 'ACCEPTED',
-        offerRevisionStatus: 'ACCEPTED',
-        caseStatus: 'offer_accepted',
-        recipientType: 'guardian',
-        jurisdiction: 'GB',
-      },
-      T,
-    ).error === 'SIGNING_PATHWAY_CLOSED',
-    '#15 A20 a guardian-addressed Offer opens no package while the pathway is closed',
-  );
-  neg(
-    canStart(
-      {
-        offerStatus: 'ACCEPTED',
-        offerRevisionStatus: 'ACCEPTED',
-        caseStatus: 'offer_accepted',
-        recipientType: 'player',
-        jurisdiction: 'GB',
-        existing: [pkg()],
-      },
-      T,
-    ).error === 'SIGNING_PACKAGE_EXISTS' &&
-      canStart(
-        {
-          offerStatus: 'ACCEPTED',
-          offerRevisionStatus: 'ACCEPTED',
-          caseStatus: 'offer_accepted',
-          recipientType: 'player',
-          jurisdiction: 'GB',
-          existing: [pkg({ status: 'COMPLETED', completion: { signingId: 's', completedAt: T } })],
-        },
-        T,
-      ).error === 'SIGNING_ALREADY_COMPLETED',
-    'A21 one live package per Offer; a completed one blocks another',
-  );
-  neg(
-    canCompleteParty(
-      pkg(),
-      { partyType: 'PLAYER', actorKind: 'org', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_A },
-      T,
-    ).error === 'SIGNING_NOT_PERMITTED',
-    '#10 A22 an org actor cannot complete the PLAYER party (the pure gate)',
-  );
-  neg(
-    canCompleteParty(
-      pkg(),
-      { partyType: 'CLUB_SIGNATORY', actorKind: 'player', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_A },
-      T,
-    ).error === 'SIGNING_NOT_PERMITTED',
-    'A23 a player cannot complete the club signatory',
-  );
-  neg(
-    canCompleteParty(
-      pkg(),
-      { partyType: 'PLAYER', actorKind: 'player', actorId: 'p2', revisionId: 'spr-1', documentSha256: SHA_A },
-      T,
-    ).error === 'SIGNING_PARTY_NOT_REQUIRED',
-    '#9 A24 another player is not a required party',
-  );
-  neg(
-    canCompleteParty(
-      pkg(),
-      { partyType: 'PLAYER', actorKind: 'player', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_B },
-      T,
-    ).error === 'SIGNING_DOCUMENT_MISMATCH',
-    'A25 confirming a different digest than the presented revision is a mismatch',
-  );
-  const two = pkg({ currentRevisionId: 'spr-2' });
-  two.revisions.push({ ...two.revisions[0], id: 'spr-2', revisionNumber: 2 });
-  two.revisions[0].status = 'SUPERSEDED';
-  neg(
-    canCompleteParty(
-      two,
-      { partyType: 'PLAYER', actorKind: 'player', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_A },
-      T,
-    ).error === 'SIGNING_SUPERSEDED',
-    '#18 A26 a signature against a superseded revision is refused',
-  );
-  neg(
-    canCompleteParty(
-      pkg(),
-      { partyType: 'PLAYER', actorKind: 'player', actorId: 'p1', revisionId: 'spr-1', documentSha256: SHA_A },
-      T + 8 * DAY,
-    ).error === 'SIGNING_EXPIRED',
-    'A27 no party completes an expired package',
-  );
-  const gateCtx = (p, extra = {}) =>
-    completionGate(p, {
-      now: T + 2 * H,
-      offer: { id: 'rof-1', status: 'ACCEPTED', orgId: 'o1', playerId: 'p1', caseId: 'c1' },
-      offerRevision: { id: 'rofr-1', status: 'ACCEPTED' },
-      kase: { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'offer_accepted' } },
-      ...extra,
-    });
-  neg(gateCtx(pkg()).includes('PARTIES_INCOMPLETE'), '#16 #26 A28 a package with no party complete cannot complete');
-  const done = pkg({ status: 'IN_PROGRESS' }, { status: 'IN_PROGRESS' });
-  for (const p of done.revisions[0].requiredParties)
-    Object.assign(p, {
-      status: 'COMPLETED',
-      completedAt: T + 90 * 60 * 1000,
-      completedBy: { kind: p.partyType === 'PLAYER' ? 'player' : 'org', id: 'x' },
-      method: 'PLATFORM_ACKNOWLEDGMENT',
-      evidenceRef: {
-        kind: 'platform_acknowledgment',
-        id: 'sgev-x',
-        revisionId: 'spr-1',
-        documentSha256: SHA_A,
-        at: T + 90 * 60 * 1000,
-        actorKind: p.partyType === 'PLAYER' ? 'player' : 'org',
-        actorId: 'x',
-        session: 'authenticated',
-      },
-    }); // a real evidence reference names the revision, the digest, the actor and the instant
-  ok(gateCtx(done).length === 0, 'A29 every party complete against the exact digest: the gate is empty');
-  neg(
-    gateCtx(done, { blocked: true }).includes('BLOCKED') &&
-      gateCtx(done, { otherCompleted: true }).includes('CONFLICTING_COMPLETED_SIGNING') &&
-      gateCtx(done, { kase: { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'on_hold' } } }).includes(
-        'LIFECYCLE_CONFLICT',
-      ) &&
-      gateCtx(done, { offer: { id: 'rof-1', status: 'ACCEPTED', orgId: 'o1', playerId: 'p2', caseId: 'c1' } }).includes(
-        'REFERENCE_MISMATCH',
-      ),
-    'A30 a block, a conflicting completed signing, a paused case and a player mismatch each close the gate',
-  );
-  const bad = JSON.parse(JSON.stringify(done));
-  bad.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA_B;
-  neg(gateCtx(bad).includes('DOCUMENT_MISMATCH'), 'A31 evidence against another digest closes the gate');
-  ok(signingIntegrity(pkg()).length === 0 && signingIntegrity(done).length === 0, 'A32 sound rows pass integrity');
-  neg(
-    signingIntegrity(pkg({ status: 'SIGNED' })).includes('status') &&
-      signingIntegrity(pkg({}, { status: 'countersigned' })).includes('revision_status'),
-    'A33 unknown package and revision statuses are named',
-  );
-  const late = pkg();
-  late.revisions[0].readyAt = T - H;
-  neg(signingIntegrity(late).includes('ready_before_created'), '#45 A34 presented before created is corruption');
-  const early = JSON.parse(JSON.stringify(done));
-  early.revisions[0].requiredParties[0].completedAt = T;
-  neg(
-    signingIntegrity(early).includes('party_before_ready'),
-    '#45 A35 a party completed before the revision was presented is corruption',
-  );
-  const comp = JSON.parse(JSON.stringify(done));
-  comp.status = 'COMPLETED';
-  comp.revisions[0].status = 'COMPLETED';
-  comp.revisions[0].completedAt = T + H;
-  comp.completion = { signingId: 's', completedAt: T + H };
-  neg(
-    signingIntegrity(comp).includes('completed_before_parties'),
-    '#46 A36 completed before the final party is corruption',
-  );
-  const noComp = JSON.parse(JSON.stringify(comp));
-  noComp.completion = null;
-  noComp.revisions[0].completedAt = T + 2 * H;
-  neg(
-    signingIntegrity(noComp).includes('completion'),
-    'A37 a COMPLETED package without its completion record is corruption',
-  );
-  const ptr = pkg({ currentRevisionId: 'spr-1' });
-  ptr.revisions.push({ ...ptr.revisions[0], id: 'spr-2', revisionNumber: 2 });
-  neg(
-    signingIntegrity(ptr).includes('current_revision_not_latest'),
-    'A38 a pointer at a non-latest revision is corruption',
-  );
-  const agentActor = JSON.parse(JSON.stringify(done));
-  agentActor.revisions[0].requiredParties[0].completedBy = { kind: 'org', id: 'agent' };
-  neg(
-    signingIntegrity(agentActor).includes('party_actor_kind'),
-    '#10 A39 a PLAYER party completed by an org actor is corruption on the record too',
-  );
-  neg(
-    signingConsistency(
-      pkg({ status: 'COMPLETED', completion: { signingId: 's', completedAt: T } }),
-      {
-        offer: { orgId: 'o1', playerId: 'p1', caseId: 'c1' },
-        kase: { orgId: 'o1', playerId: 'p1', room: { status: 'offer_accepted' } },
-      },
-      T,
-    ).includes('COMPLETED_BUT_CASE_NOT_SIGNED'),
-    'A40 a completed package on a case that is not signed is corruption',
-  );
-  const rv = signingRecipientView(pkg({}, { readyAt: null, status: 'DRAFT' }), T, {
-    orgName: 'X',
-    partyType: 'PLAYER',
-    forEntityId: 'p1',
-  });
-  neg(
-    rv.currentRevision === null && rv.revisions.length === 0 && !has(rv, S_NOTE),
-    '#8 A41 the recipient view of an unpresented revision carries no revision',
-  );
-  const cv = signingClubView(pkg({ internalNote: S_NOTE }), T);
-  const av = signingAgentView(pkg({ internalNote: S_NOTE }), T);
-  neg(
-    has(cv, S_NOTE) &&
-      !has(av, S_NOTE) &&
-      !has(
-        signingRecipientView(pkg({ internalNote: S_NOTE }), T, { partyType: 'PLAYER', forEntityId: 'p1' }),
-        S_NOTE,
-      ) &&
-      !has(av, 'sha256'),
-    '#39 A42 the note reaches the club view only; the agent view carries no digest',
-  );
-  neg(
-    cleanText('a‮b', 100).value === 'ab' && cleanText('x'.repeat(101), 100).ok === false,
-    'A43 bidi controls stripped; limits enforced',
   );
   for (const [name, p] of [
     ['signing_start', 'org'],
@@ -547,7 +180,11 @@ let server = await boot();
 async function j(method, url, body, token, extra = {}) {
   const r = await fetch(`${BASE}${url}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data = null;
@@ -556,10 +193,21 @@ async function j(method, url, body, token, extra = {}) {
   } catch {
     /* non-json */
   }
-  return { status: r.status, body: data, text: data === null ? null : JSON.stringify(data) };
+  return {
+    status: r.status,
+    body: data,
+    text: data === null ? null : JSON.stringify(data),
+  };
 }
 const login = async (orgId, scoutName, role, platform) =>
-  (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
+  (
+    await j('POST', '/auth/org/login', {
+      orgId,
+      scoutName,
+      role,
+      ...(platform ? { platform } : {}),
+    })
+  ).body;
 const playerLogin = async (playerId) => (await j('POST', '/auth/player/login', { playerId })).body;
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 async function sseCollect(token, ms) {
@@ -705,7 +353,13 @@ async function issued(token, playerId, { clock = T0, terms = TERMS } = {}) {
   const c = await j(
     'POST',
     `/org/rooms/${RID}/offers`,
-    { terms, expiresAt: clock + 14 * DAY, internalNote: S_OFFER_NOTE, recipientMessage: 'Welcome.', clientKey: key() },
+    {
+      terms,
+      expiresAt: clock + 14 * DAY,
+      internalNote: S_OFFER_NOTE,
+      recipientMessage: 'Welcome.',
+      clientKey: key(),
+    },
     token,
     at(clock),
   );
@@ -718,7 +372,12 @@ async function issued(token, playerId, { clock = T0, terms = TERMS } = {}) {
     at(clock),
   );
   if (i.status !== 200) throw new Error(`issue ${i.status} ${JSON.stringify(i.body).slice(0, 200)}`);
-  return { RID, OID: c.body.offer.id, R: i.body.offer.currentRevisionId, rev: i.body.offer.rev };
+  return {
+    RID,
+    OID: c.body.offer.id,
+    R: i.body.offer.currentRevisionId,
+    rev: i.body.offer.rev,
+  };
 }
 /** An ACCEPTED Offer (case at offer_accepted). */
 async function accepted(token, playerId, opts = {}) {
@@ -785,7 +444,11 @@ async function presented(token, playerId, opts = {}) {
   if (a.status !== 200) throw new Error(`attach ${a.status} ${JSON.stringify(a.body).slice(0, 200)}`);
   const r = await ready(
     SID,
-    { expectedRev: sv(a).rev, clientKey: key(), ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}) },
+    {
+      expectedRev: sv(a).rev,
+      clientKey: key(),
+      ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
+    },
     token,
     at(opts.clock ?? T0),
   );
@@ -911,7 +574,12 @@ section('C — club authority: scout, foreign club, room lead vs recruitment lea
     expect(
       await clubSign(
         sv(sM).id,
-        { expectedRev: sv(rM).rev, revisionId: revOf(rM).id, documentSha256: SHA_A, clientKey: key() },
+        {
+          expectedRev: sv(rM).rev,
+          revisionId: revOf(rM).id,
+          documentSha256: SHA_A,
+          clientKey: key(),
+        },
         tom.token,
       ),
       403,
@@ -943,7 +611,12 @@ section('C — club authority: scout, foreign club, room lead vs recruitment lea
     '#37 C12 after the demotion his session cannot act on the package he opened — authority is re-derived',
   );
   ok((await sGet(sv(sM).id, tom.token)).status === 200, 'C13 he still reads it');
-  globalThis.__M = { ...M, SID: sv(sM).id, SREV: revOf(rM).id, rev: sv(rM).rev };
+  globalThis.__M = {
+    ...M,
+    SID: sv(sM).id,
+    SREV: revOf(rM).id,
+    rev: sv(rM).rev,
+  };
 }
 
 // ================================================================ G — documents (before D, the player needs a presented package)
@@ -953,7 +626,12 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   // Input is valid as sent or refused by name, before anything is stored.
   const refusedAs = (r, code, field, problem) =>
     expect(r, 400, code) && r.body.field === field && r.body.problem === problem;
-  const docBody = (extra) => ({ dataUrl: dataUrl(DOC_A), filename: 'contract.pdf', expectedRev: K.rev, ...extra });
+  const docBody = (extra) => ({
+    dataUrl: dataUrl(DOC_A),
+    filename: 'contract.pdf',
+    expectedRev: K.rev,
+    ...extra,
+  });
   const patch = (body) => j('PATCH', `/org/signings/${K.SID}`, body, maria.token, at(T0));
   neg(
     refusedAs(
@@ -992,13 +670,19 @@ section('G — documents: the exact bytes, their digest, who may read them and w
       'not_object',
     ) &&
       refusedAs(
-        await patch({ contract: { startDate: '2027-07-01', months: 24 }, expectedRev: K.rev }),
+        await patch({
+          contract: { startDate: '2027-07-01', months: 24 },
+          expectedRev: K.rev,
+        }),
         'SIGNING_CONTRACT_DATES_INVALID',
         'contract.months',
         'unknown_field',
       ) &&
       refusedAs(
-        await patch({ contract: { startDate: '1 July 2027' }, expectedRev: K.rev }),
+        await patch({
+          contract: { startDate: '1 July 2027' },
+          expectedRev: K.rev,
+        }),
         'SIGNING_CONTRACT_DATES_INVALID',
         'contract.startDate',
         'not_a_date',
@@ -1022,7 +706,11 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   neg(
     refusedAs(
-      await ready(K.SID, { expectedRev: K.rev, clientKey: key(), expiresAt: { at: 1 } }),
+      await ready(K.SID, {
+        expectedRev: K.rev,
+        clientKey: key(),
+        expiresAt: { at: 1 },
+      }),
       'SIGNING_EXPIRY_INVALID',
       'expiresAt',
       'not_a_timestamp',
@@ -1043,7 +731,11 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   neg(
     refusedAs(
-      await cancel(K.SID, { reason: ['changed our minds'], expectedRev: K.rev, clientKey: key() }),
+      await cancel(K.SID, {
+        reason: ['changed our minds'],
+        expectedRev: K.rev,
+        clientKey: key(),
+      }),
       'SIGNING_INPUT_INVALID',
       'reason',
       'not_text',
@@ -1208,7 +900,12 @@ section('D — player authority: the addressed adult, their own act, against the
     expect(
       await pSign(
         K.SID,
-        { revisionId: K.SREV, documentSha256: SHA_A, method: 'EXTERNAL_PROVIDER', clientKey: key() },
+        {
+          revisionId: K.SREV,
+          documentSha256: SHA_A,
+          method: 'EXTERNAL_PROVIDER',
+          clientKey: key(),
+        },
         kola,
       ),
       400,
@@ -1232,7 +929,12 @@ section('D — player authority: the addressed adult, their own act, against the
   ]) {
     const forged = await pSign(
       K.SID,
-      { revisionId: K.SREV, documentSha256: SHA_A, clientKey: key(), [field]: value },
+      {
+        revisionId: K.SREV,
+        documentSha256: SHA_A,
+        clientKey: key(),
+        [field]: value,
+      },
       kola,
     );
     neg(
@@ -1353,7 +1055,12 @@ section('F — the agent: read-only over a shared Offer; never a signatory');
     expect(
       await clubSign(
         K.SID,
-        { expectedRev: K.rev, revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() },
+        {
+          expectedRev: K.rev,
+          revisionId: K.SREV,
+          documentSha256: SHA_A,
+          clientKey: key(),
+        },
         ana.token,
       ),
       404,
@@ -1362,7 +1069,12 @@ section('F — the agent: read-only over a shared Offer; never a signatory');
       expect(
         await clubSign(
           K.SID,
-          { expectedRev: K.rev, revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() },
+          {
+            expectedRev: K.rev,
+            revisionId: K.SREV,
+            documentSha256: SHA_A,
+            clientKey: key(),
+          },
           alexAgent.token,
         ),
         404,
@@ -1434,7 +1146,12 @@ section('I/J/K — required parties, evidence, the completion gate and the canon
   );
   neg(
     expect(
-      await clubSign(K.SID, { expectedRev: sv(cs).rev, revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() }),
+      await clubSign(K.SID, {
+        expectedRev: sv(cs).rev,
+        revisionId: K.SREV,
+        documentSha256: SHA_A,
+        clientKey: key(),
+      }),
       409,
       'SIGNING_PARTY_ALREADY_COMPLETED',
     ),
@@ -1451,7 +1168,10 @@ section('I/J/K — required parties, evidence, the completion gate and the canon
   };
   const orgSse = await sseCollect(maria.token, 1500);
   const KC = key();
-  const done = await complete(K.SID, { expectedRev: sv(cs).rev, clientKey: KC });
+  const done = await complete(K.SID, {
+    expectedRev: sv(cs).rev,
+    clientKey: KC,
+  });
   const frames = await orgSse.stop();
   if (!(done.status === 200 && sv(done).status === 'COMPLETED'))
     console.error('   complete →', done.status, JSON.stringify(done.body).slice(0, 400));
@@ -1636,7 +1356,10 @@ section('H — revisions: a changed document supersedes; signatures do not carry
     cs.status === 200 && revOf(cs).requiredParties.every((p) => p.status === 'COMPLETED'),
     'H7 the club signs revision 2 as well',
   );
-  const done = await complete(M.SID, { expectedRev: sv(cs).rev, clientKey: key() });
+  const done = await complete(M.SID, {
+    expectedRev: sv(cs).rev,
+    clientKey: key(),
+  });
   const mRow = (await signings()).find((s) => s.signingPackageId === M.SID);
   if (!(done.status === 200 && mRow?.documentSha256 === SHA_B))
     console.error('   H8 →', done.status, JSON.stringify(done.body).slice(0, 200), JSON.stringify(mRow).slice(0, 300));
@@ -1707,7 +1430,11 @@ section('L — lifecycle: only the canonical completion reaches signed');
     cs.status === 200,
     `L8 back at offer_accepted, the club signatory may sign again (${cs.status} ${cs.body?.error ?? 'ok'})`,
   );
-  const c = await cancel(sv(s).id, { expectedRev: await nRev(), reason: 'Case reopened for review', clientKey: key() });
+  const c = await cancel(sv(s).id, {
+    expectedRev: await nRev(),
+    reason: 'Case reopened for review',
+    clientKey: key(),
+  });
   ok(
     c.status === 200 && sv(c).status === 'CANCELLED' && (await stage(N.RID)) === 'offer_accepted',
     '#27 L9 cancellation ends the package and moves no case',
@@ -1749,7 +1476,13 @@ section('P — concurrency: exactly one authoritative result');
   const cur = (await sGet(SA)).body.signing;
   const pc = await Promise.all(
     [
-      () => clubSign(SA, { expectedRev: cur.rev, revisionId: revOf(r).id, documentSha256: SHA_A, clientKey: key() }),
+      () =>
+        clubSign(SA, {
+          expectedRev: cur.rev,
+          revisionId: revOf(r).id,
+          documentSha256: SHA_A,
+          clientKey: key(),
+        }),
       () => cancel(SA, { expectedRev: cur.rev, reason: 'x', clientKey: key() }),
     ].map((f) => f()),
   );
@@ -1798,7 +1531,12 @@ section('P — concurrency: exactly one authoritative result');
   const cv = await Promise.all(
     [
       () => complete(O.SID, { expectedRev: sv(cso).rev, clientKey: key() }),
-      () => voidP(O.SID, { expectedRev: sv(cso).rev, reason: 'wrong document', clientKey: key() }),
+      () =>
+        voidP(O.SID, {
+          expectedRev: sv(cso).rev,
+          reason: 'wrong document',
+          clientKey: key(),
+        }),
     ].map((f) => f()),
   );
   const fo = (await sGet(O.SID)).body.signing;
@@ -1905,7 +1643,10 @@ section(
 section('R — expiry: lazy, server clock, fails closed at the instant');
 {
   const X0 = T0 + DAY;
-  const E = await presented(maria.token, 'pl-mensah', { clock: X0, expiresAt: X0 + 2 * H });
+  const E = await presented(maria.token, 'pl-mensah', {
+    clock: X0,
+    expiresAt: X0 + 2 * H,
+  });
   const XE = X0 + 2 * H;
   const kw = P['pl-mensah'].token;
   ok(
@@ -1977,7 +1718,12 @@ section('S — blocks: no new communication or commitment; closure still allowed
   const c = (await sGet(T.SID)).body.signing;
   neg(
     expect(
-      await clubSign(T.SID, { expectedRev: c.rev, revisionId: T.SREV, documentSha256: SHA_A, clientKey: key() }),
+      await clubSign(T.SID, {
+        expectedRev: c.rev,
+        revisionId: T.SREV,
+        documentSha256: SHA_A,
+        clientKey: key(),
+      }),
       403,
       'SIGNING_BLOCKED',
     ),
@@ -1997,7 +1743,11 @@ section('S — blocks: no new communication or commitment; closure still allowed
     expect(await start(T.OID, { clientKey: key() }), 403, 'SIGNING_BLOCKED'),
     'S5 no new package while blocked (the block is checked before the package gate, as for Offers)',
   );
-  const can = await cancel(T.SID, { expectedRev: c.rev, reason: 'blocked', clientKey: key() });
+  const can = await cancel(T.SID, {
+    expectedRev: c.rev,
+    reason: 'blocked',
+    clientKey: key(),
+  });
   ok(can.status === 200 && sv(can).status === 'CANCELLED', 'S6 the club may still cancel (closure)');
   neg(expect(await start(T.OID, { clientKey: key() }), 403, 'SIGNING_BLOCKED'), 'S7 no new package while blocked');
   neg(
@@ -2097,7 +1847,12 @@ section('V — events: exactly one per act, org-private, ids only');
     !/signing_/.test(pf),
     "V4 the player's stream carries no signing event (org-private); she hears through a notification",
   );
-  globalThis.__F = { ...F, SID: sv(s).id, SREV: revOf(r).id, rev: (await sGet(sv(s).id)).body.signing.rev };
+  globalThis.__F = {
+    ...F,
+    SID: sv(s).id,
+    SREV: revOf(r).id,
+    rev: (await sGet(sv(s).id)).body.signing.rev,
+  };
 }
 
 // ================================================================ X — legacy
@@ -2173,17 +1928,26 @@ section('Y — temporal integrity: server clock, DATE_ONLY contract days, imposs
   );
   // A player with no other case here: a declined Offer cannot be offered again.
   const N2 = await accepted(maria.token, 'pl-osei');
-  const s = await start(N2.OID, { contract: { startDate: '2027-02-30' }, clientKey: key() });
+  const s = await start(N2.OID, {
+    contract: { startDate: '2027-02-30' },
+    clientKey: key(),
+  });
   neg(expect(s, 400, 'SIGNING_CONTRACT_DATES_INVALID'), '#44 Y2 an impossible start day is refused at start');
   neg(
     expect(
-      await start(N2.OID, { contract: { startDate: '2027-07-01', endDate: '2027-06-30' }, clientKey: key() }),
+      await start(N2.OID, {
+        contract: { startDate: '2027-07-01', endDate: '2027-06-30' },
+        clientKey: key(),
+      }),
       400,
       'SIGNING_CONTRACT_DATES_INVALID',
     ),
     '#44 Y3 an end before the start is refused',
   );
-  const s2 = await start(N2.OID, { contract: { startDate: '2030-07-01', endDate: '2032-06-30' }, clientKey: key() });
+  const s2 = await start(N2.OID, {
+    contract: { startDate: '2030-07-01', endDate: '2032-06-30' },
+    clientKey: key(),
+  });
   ok(
     s2.status === 201 && revOf(s2).contract.startDate === '2030-07-01',
     'Y4 a future start is recorded as a calendar day, distinct from the signing instant',
@@ -2212,80 +1976,7 @@ section('Y — temporal integrity: server clock, DATE_ONLY contract days, imposs
 // ================================================================ AD — adversarial closure (#5 #6 #7 #28 #48)
 section('AD — reference mismatches, a voided package, and a completion that fails half-way');
 {
-  // #5 #6 #7 (pure): a package whose Offer, case or Offer revision contradicts it is corruption — omitted, refused, never repaired.
-  const TT = T0;
-  const mk = (patch = {}) => ({
-    id: 'spk-x',
-    orgId: 'o1',
-    playerId: 'p1',
-    caseId: 'c1',
-    offerId: 'rof-1',
-    offerRevisionId: 'rofr-1',
-    status: 'READY',
-    currentRevisionId: 'spr-1',
-    createdAt: TT,
-    expiresAt: TT + DAY,
-    revisions: [
-      {
-        id: 'spr-1',
-        revisionNumber: 1,
-        status: 'READY',
-        createdAt: TT,
-        readyAt: TT + 1,
-        document: { evidenceId: 'ev', sha256: SHA_A },
-        contract: { startDate: '2027-07-01', endDate: null },
-        requiredParties: [
-          { partyType: 'PLAYER', forEntityId: 'p1', status: 'PENDING' },
-          { partyType: 'CLUB_SIGNATORY', forEntityId: 'o1', status: 'PENDING' },
-        ],
-      },
-    ],
-    ...patch,
-  });
-  const okOffer = {
-    id: 'rof-1',
-    orgId: 'o1',
-    playerId: 'p1',
-    caseId: 'c1',
-    revisions: [{ id: 'rofr-1', status: 'ACCEPTED' }],
-  };
-  const okCase = { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'offer_accepted' } };
-  ok(
-    signingConsistency(mk(), { offer: okOffer, kase: okCase }, TT).length === 0,
-    'AD0 a sound package over its accepted Offer revision has no consistency problem',
-  );
-  const c5 = signingConsistency(mk(), { offer: { ...okOffer, playerId: 'p2' }, kase: okCase }, TT);
-  neg(
-    c5.includes('OFFER_REFERENCE_MISMATCH') && signingCorrupt(c5),
-    '#5 AD1 a package whose Offer names another player is corruption',
-  );
-  neg(
-    signingConsistency(mk(), { offer: okOffer, kase: { ...okCase, playerId: 'p2' } }, TT).includes(
-      'CASE_REFERENCE_MISMATCH',
-    ) &&
-      signingConsistency(mk(), { offer: { ...okOffer, caseId: 'c9' }, kase: okCase }, TT).includes(
-        'OFFER_REFERENCE_MISMATCH',
-      ),
-    '#6 AD2 a package whose case names another player, or whose Offer belongs to another case, is corruption',
-  );
-  const staleOffer = {
-    ...okOffer,
-    revisions: [
-      { id: 'rofr-0', status: 'SUPERSEDED', supersededByRevisionId: 'rofr-1' },
-      { id: 'rofr-1', status: 'ACCEPTED' },
-    ],
-  };
-  neg(
-    signingConsistency(mk({ offerRevisionId: 'rofr-0' }), { offer: staleOffer, kase: okCase }, TT).includes(
-      'OFFER_REVISION_MISMATCH',
-    ) &&
-      signingConsistency(mk({ offerRevisionId: 'rofr-9' }), { offer: staleOffer, kase: okCase }, TT).includes(
-        'OFFER_REVISION_MISMATCH',
-      ) &&
-      signingConsistency(mk(), { offer: staleOffer, kase: okCase }, TT).length === 0 &&
-      SIGNING_CORRUPTION.includes('OFFER_REVISION_MISMATCH'),
-    '#7 AD3 a package bound to a superseded or unknown Offer revision is corruption; bound to the accepted one it is sound',
-  );
+  // #5 #6 #7 (the pure reference-mismatch rules) are in scripts/rules/recruitment/signings.mjs.
 
   // #28 (HTTP): a voided package writes nothing and moves nothing. Harbour (Rita) and Svensson.
   const V = await presented(rita.token, 'pl-svensson');
@@ -2298,7 +1989,11 @@ section('AD — reference mismatches, a voided package, and a completion that fa
   const vRev = async () => (await sGet(V.SID, rita.token)).body.signing.rev;
   const vo = await voidP(
     V.SID,
-    { expectedRev: await vRev(), reason: 'Wrong document presented', clientKey: key() },
+    {
+      expectedRev: await vRev(),
+      reason: 'Wrong document presented',
+      clientKey: key(),
+    },
     rita.token,
   );
   ok(
@@ -2327,7 +2022,12 @@ section('AD — reference mismatches, a voided package, and a completion that fa
       expect(
         await clubSign(
           V.SID,
-          { expectedRev: sv(vo).rev, revisionId: V.SREV, documentSha256: SHA_A, clientKey: key() },
+          {
+            expectedRev: sv(vo).rev,
+            revisionId: V.SREV,
+            documentSha256: SHA_A,
+            clientKey: key(),
+          },
           rita.token,
         ),
         409,
@@ -2370,7 +2070,12 @@ section('AD — reference mismatches, a voided package, and a completion that fa
     const fRev = async () => (await sGet(F.SID, rita.token)).body.signing.rev;
     const fs2 = await clubSign(
       F.SID,
-      { expectedRev: await fRev(), revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() },
+      {
+        expectedRev: await fRev(),
+        revisionId: F.SREV,
+        documentSha256: SHA_A,
+        clientKey: key(),
+      },
       rita.token,
     );
     ok(fs1.status === 200 && fs2.status === 200, `AD10 ${playerId}: both parties confirmed Harbour's document`);
@@ -2431,7 +2136,11 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   // restart
   const D = globalThis.__DONE;
   const KI = globalThis.__KI;
-  const before = { d: (await sGet(D.SID)).body.signing, k: (await sGet(KI.SID)).body.signing, rows: await signings() };
+  const before = {
+    d: (await sGet(D.SID)).body.signing,
+    k: (await sGet(KI.SID)).body.signing,
+    rows: await signings(),
+  };
   server.kill('SIGKILL');
   for (let i = 0; i < 40; i += 1) {
     try {

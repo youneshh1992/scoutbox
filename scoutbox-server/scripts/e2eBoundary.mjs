@@ -43,9 +43,6 @@ export const NOT_YET_NEUTRAL = [
   'recruitment/journeyAdversarial',
   'recruitment/journeyPersistence',
   'recruitment/lifecycle',
-  'recruitment/signings',
-  'recruitment/signingsAdversarial',
-  'recruitment/signingsPersistence',
 ];
 
 /** Every boundary problem under e2e/, as messages. Empty when the boundary holds. */
