@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { boundaryProblems } from '../e2e/support/boundary.mjs';
+import { sweepStaleRuns } from '../e2e/support/staleRuns.mjs';
 import { serverCommand, serverDir } from '../e2e/support/server.mjs';
 import { openFixture, writeFixture, plantCase, legacyMoves } from '../e2e/support/sqlFixture.mjs';
 import { readRows, rows, json } from '../e2e/support/sqlRows.mjs';
@@ -298,3 +299,35 @@ console.log('✓ sqlRows reads stored rows exactly, refuses unknown names, and n
   }
 }
 console.log('✓ plantCase and legacyMoves in SQL leave what the repository versions leave');
+
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'staleruns-'));
+  try {
+    const now = Date.now();
+    const made = (name, ageMs) => {
+      const dir = path.join(root, name);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, 'scoutbox.db'), 'x');
+      const t = (now - ageMs) / 1000;
+      fs.utimesSync(dir, t, t);
+      return dir;
+    };
+    const old = made('sbx-old-a1b2c3', 2 * 86_400_000);
+    const oldSuite = made('sb-idrepo-a1b2c3', 25 * 3_600_000);
+    const fresh = made('sbx-fresh-a1b2c3', 3_600_000);
+    const unrelated = made('someone-else-a1b2c3', 30 * 86_400_000);
+    fs.writeFileSync(path.join(root, 'sbx-a-file'), 'x');
+    const t = (now - 30 * 86_400_000) / 1000;
+    fs.utimesSync(path.join(root, 'sbx-a-file'), t, t);
+    assert.equal(sweepStaleRuns({ dir: root, now }), 2);
+    assert.equal(fs.existsSync(old), false, 'a run folder over a day old is removed');
+    assert.equal(fs.existsSync(oldSuite), false, "a unit suite's folder too");
+    assert.equal(fs.existsSync(fresh), true, 'a folder from the last day is kept');
+    assert.equal(fs.existsSync(unrelated), true, 'a folder no run names is kept');
+    assert.equal(fs.existsSync(path.join(root, 'sbx-a-file')), true, 'a file is never removed');
+    assert.equal(sweepStaleRuns({ dir: path.join(root, 'missing'), now }), 0, 'a missing directory sweeps nothing');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+console.log('✓ sweepStaleRuns removes run folders more than a day old, and nothing else');

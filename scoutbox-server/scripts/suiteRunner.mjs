@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { sweepStaleRuns } from '../e2e/support/staleRuns.mjs';
 
 const plural = (word, n) => (n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`);
 const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
@@ -34,6 +35,7 @@ export async function runSuites({ label, tool, entries, timeoutMs }) {
   const jobs = jobsEnv ? Number(jobsEnv) : Math.max(1, Math.min(4, os.availableParallelism()));
   const verbose = process.env.TEST_VERBOSE === '1';
   const keepFailed = process.env.TEST_KEEP_TMP === '1';
+  sweepStaleRuns();
   // One folder per run, one sub-folder per file; whatever is left of it is removed when the run ends.
   const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), `scoutbox-${tool}-`));
   const kept = new Set();
