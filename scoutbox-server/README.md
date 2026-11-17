@@ -15,12 +15,12 @@ items it opens), the organisation audit and a player's erasure, and the start of
 (opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
 schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
 calendar export and the mandatory report), structured assessments, and the Football Passport's trial timeline. It
-answers nineteen of the TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
+answers twenty of the TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
 `platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`,
 `platform/delivery`, `platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
 `verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence`,
 `recruitment/offers`, `recruitment/offersAdversarial`, `recruitment/offersPersistence`, `recruitment/trials`,
-`recruitment/trialsPersistence` and `agents/core`.
+`recruitment/trialsPersistence`, `recruitment/trialDatesMinorsAndErasure` and `agents/core`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -77,7 +77,7 @@ Every route below is exercised by a battery, except where marked.
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
-| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (an empty page: no route here creates one) |
+| Recruitment | `POST /org/players/:id/request` (a contact, or a direct trial request with its days, venue and notes; refused while a trial report is outstanding), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/requests`, `/org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (the records as stored; no route here creates one); `GET /org/recruitment-analytics` (the overdue trial reports only); `GET /org/feed`; `GET /orgs/directory` (no Grassroots pathway record) |
 | Trials | `GET`/`POST /org/rooms/:id/trials`, `GET …/trials/:tid`, `POST …/schedule`, `…/reschedule`, `…/cancel`, `…/complete`, `…/sessions/:sid/attendance`, `…/sessions/:sid/evidence`, `…/evidence/:eid/unlink`, `GET …/evidence`, `…/evidence/candidates`, `GET /org/recruitment/trial-policy`; `GET /org/trials`, `/org/trials/:id/day`, `/org/trials/:id/ics`, `POST /org/trials/:id/staff`, `/arrival`, `/cancel`, `/postpone`, `/checkin`, `/report`; `GET /player/trials`, `POST /player/trials/:id/confirm-schedule`, `/decline-schedule`, `/cancel`, `/consent`, `/emergency-contact`, `GET …/safety-pack`, and the guardian's `/guardian/trials…` |
 | Assessments | `GET`/`POST /org/assessments`, `PUT /org/assessments/:id`, `POST …/submit`, `GET /org/players/:id/assessment-compare` |
 | Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
@@ -90,8 +90,8 @@ Every route below is exercised by a battery, except where marked.
 | Combine | `GET /org/combine/protocols` (the registry, recorded from the TypeScript server by `dev/combine_protocols.mjs`), `/org/combine/players/:id` (results: none, until Box Cam's service hands them over) |
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
-| Player | `GET /player/me`, `/player/export`, `GET`/`PATCH /player/box-cam/prefs`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
-| Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
+| Player | `GET /player/me`, `/player/export`, `GET`/`PATCH /player/box-cam/prefs`, `POST /player/box-cam/sessions/:id/cv/finalize` (its rate limit and session check only); `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
+| Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `DELETE /guardian/children/:id`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
 | Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |

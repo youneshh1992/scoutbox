@@ -1375,13 +1375,15 @@ pub fn file_report(
   t: Trial,
   r: report_row.Row,
 ) -> Result(Nil, Fail(e)) {
-  use _ <- result.try(guarded(
+  // Checked before the unit, so a report filed meanwhile, or the subject's erasure, is a lost race: stale.
+  use touched <- result.try(store.write(
     tx,
-    t.row.id,
-    "status = 'reported'",
-    [],
-    "status = 'awaiting_report'",
-    "already has its report",
+    "UPDATE trials SET status = 'reported' WHERE id = ? AND status = 'awaiting_report' AND subject_removed_at IS NULL RETURNING id",
+    [id.trial_sql(t.row.id)],
+    decode.at([0], decode.string),
   ))
-  report_row.insert(tx, r)
+  case touched {
+    [_] -> report_row.insert(tx, r)
+    _ -> store.stale("trial " <> id.trial_to_string(t.row.id) <> " report")
+  }
 }

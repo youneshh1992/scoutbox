@@ -16,12 +16,14 @@ import scoutbox/development/combine
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
+import scoutbox/discovery/org_feed
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/support
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/club_directory
 import scoutbox/identity/erasure
 import scoutbox/identity/guardian_routes
 import scoutbox/identity/invite_routes
@@ -53,6 +55,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/operator
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
+import scoutbox/recruitment/analytics
 import scoutbox/recruitment/case_routes
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_routes
@@ -98,6 +101,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["meta"] -> only(req, Get, operator.meta)
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
+    ["orgs", "directory"] ->
+      only(req, Get, fn() { club_directory.directory(ctx, req) })
     ["media", id] -> only(req, Get, fn() { links.serve(ctx, req, id) })
     ["events"] -> only(req, Get, fn() { live_routes.connect(ctx, req) })
     ["events", "ticket"] ->
@@ -174,6 +179,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
+        ["feed"] -> only(req, Get, fn() { org_feed.feed(ctx, org) })
+        ["recruitment-analytics"] ->
+          only(req, Get, fn() { analytics.dashboard(ctx, org) })
+        ["requests"] ->
+          only(req, Get, fn() { request_routes.org_page(ctx, req, org) })
         ["trials"] -> only(req, Get, fn() { trial_day.org_page(ctx, req, org) })
         ["trials", tid, "day"] ->
           only(req, Get, fn() { trial_day.day(ctx, org, tid) })
@@ -194,8 +204,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["trials", tid, "checkin"] ->
           only(req, Post, fn() { trial_day.check_in(ctx, org, tid) })
         ["trials", tid, "report"] ->
-          only(req, Post, fn() { trial_day.report(ctx, req, org, tid) })
-        ["signings"] -> only(req, Get, fn() { signings.org_page() })
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_day.report(ctx, req, org, tid)
+          })
+        ["signings"] ->
+          only(req, Get, fn() { signings.org_page(ctx, req, org.org.id) })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
         ["audit"] -> only(req, Get, fn() { org_audit.feed(ctx, req, org) })
@@ -364,6 +378,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
+        ["box-cam", "sessions", sid, "cv", "finalize"] ->
+          only(req, Post, fn() { box_prefs.cv_finalize(ctx, player, sid) })
         ["box-cam", "prefs"] ->
           case req.method {
             Get -> box_prefs.show(ctx, player)
@@ -606,6 +622,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
           only(req, Post, fn() { invites.guardian_accept(ctx, req, guardian) })
+        ["children", cid] ->
+          only(req, Delete, fn() {
+            erasure.delete_child(ctx, guardian, id.player(cid))
+          })
         ["children", id, "references"] ->
           only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })

@@ -131,6 +131,24 @@ pub fn page(
   read: Read,
   page: paging.Page,
 ) -> Result(#(List(Org), Option(String)), Fail(e)) {
+  page_where(read, "1", [], page)
+}
+
+/// The organisations of one type, oldest first, keyed by rowid.
+pub fn page_of_type(
+  read: Read,
+  type_: org_type.OrgType,
+  page: paging.Page,
+) -> Result(#(List(Org), Option(String)), Fail(e)) {
+  page_where(read, "type = ?", [sqlight.text(org_type.to_string(type_))], page)
+}
+
+fn page_where(
+  read: Read,
+  where: String,
+  args: List(sqlight.Value),
+  page: paging.Page,
+) -> Result(#(List(Org), Option(String)), Fail(e)) {
   let after = case page.after {
     Some([paging.IntKey(rid)]) -> rid
     _ -> 0
@@ -140,8 +158,10 @@ pub fn page(
       read,
       "SELECT "
         <> row.columns
-        <> ", rowid FROM orgs WHERE rowid > ? ORDER BY rowid LIMIT ?",
-      [sqlight.int(after), sqlight.int(page.limit + 1)],
+        <> ", rowid FROM orgs WHERE "
+        <> where
+        <> " AND rowid > ? ORDER BY rowid LIMIT ?",
+      list.append(args, [sqlight.int(after), sqlight.int(page.limit + 1)]),
       {
         use o <- decode.then(row.decoder())
         use rid <- decode.field(row.width, decode.int)

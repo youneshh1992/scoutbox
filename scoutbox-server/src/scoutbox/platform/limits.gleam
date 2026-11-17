@@ -88,6 +88,8 @@ pub type Action {
   OfferWithdraw
   /// Offer acceptances and declines, per player or guardian answering.
   OfferResponse
+  /// Production CV finalizations, per player: only bounds a retry loop.
+  BoxCvFinalize
   /// Trial invitations, per organisation.
   TrialInvite
   /// Trial schedules proposed, revised or cancelled, per organisation.
@@ -136,6 +138,8 @@ const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
+
 const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const trial_schedule_policy = Policy(max: 60, window_ms: 3_600_000)
@@ -175,6 +179,7 @@ fn action_name(action: Action) -> String {
     OfferIssue -> "offer_issue"
     OfferWithdraw -> "offer_withdraw"
     OfferResponse -> "offer_response"
+    BoxCvFinalize -> "box_cv_finalize"
     TrialInvite -> "trial_invite"
     TrialSchedule -> "trial_schedule"
     TrialResponse -> "trial_response"
@@ -203,6 +208,7 @@ fn action_policy(action: Action) -> Policy {
     OfferIssue -> offer_issue_policy
     OfferWithdraw -> offer_withdraw_policy
     OfferResponse -> offer_response_policy
+    BoxCvFinalize -> box_cv_finalize_policy
     TrialInvite -> trial_invite_policy
     TrialSchedule -> trial_schedule_policy
     TrialResponse -> trial_response_policy

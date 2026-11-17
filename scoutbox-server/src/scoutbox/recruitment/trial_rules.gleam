@@ -330,13 +330,194 @@ pub fn ics_text(s: String) -> String {
 /// A trial date: a calendar day `YYYY-MM-DD` in 2000–2100 (domain.ts parseTrialDate). Error: why not.
 pub fn trial_date(s: String) -> Result(String, String) {
   case temporal.date_only(s) {
-    Error(why) -> Error(why)
-    Ok(day) ->
-      case string.slice(day, 0, 4) |> int.parse {
+    Error("wrong shape") -> Error("wrong shape")
+    checked ->
+      case string.slice(s, 0, 4) |> int.parse {
         Ok(y) if y < 2000 || y > 2100 -> Error("year outside 2000–2100")
-        _ -> Ok(day)
+        _ -> checked
       }
   }
+}
+
+/// A trial's logistics as a club types them (domain.ts validateTrialDetails): a proposed day and up to two
+/// alternative days, a one-line venue and notes. Error: the refusal's fields, in the TypeScript server's order.
+pub type Details {
+  Details(
+    proposed_date: Option(String),
+    alt_days: List(String),
+    venue: Option(String),
+    notes: String,
+  )
+}
+
+fn date_refusal(why: String, field: String) -> List(#(String, Json)) {
+  [
+    #("ok", json.bool(False)),
+    #("error", json.string("TRIAL_DATE_INVALID")),
+    #(
+      "message",
+      json.string(
+        "A trial date must be a calendar day written YYYY-MM-DD ("
+        <> why
+        <> ").",
+      ),
+    ),
+    #("expected", json.string("YYYY-MM-DD")),
+    #("field", json.string(field)),
+  ]
+}
+
+fn detail_refusal(
+  error: String,
+  field: String,
+  message: String,
+) -> List(#(String, Json)) {
+  [
+    #("ok", json.bool(False)),
+    #("error", json.string(error)),
+    #("field", json.string(field)),
+    #("message", json.string(message)),
+  ]
+}
+
+/// parseTrialDate over a value as sent: absent, null or "" is no date.
+fn sent_date(v: Option(Dynamic)) -> Result(Option(String), String) {
+  case v {
+    None -> Ok(None)
+    Some(d) ->
+      case dynamic.classify(d), decode.run(d, decode.string) {
+        "Nil", _ -> Ok(None)
+        _, Ok("") -> Ok(None)
+        _, Ok(text) -> trial_date(text) |> result.map(Some)
+        _, Error(_) -> Error("not text")
+      }
+  }
+}
+
+pub fn validate_details(
+  proposed: Option(Dynamic),
+  alt: Option(Dynamic),
+  venue: Option(Dynamic),
+  notes: Option(Dynamic),
+) -> Result(Details, List(#(String, Json))) {
+  use proposed <- result.try(
+    sent_date(proposed) |> result.map_error(date_refusal(_, "proposedDate")),
+  )
+  let present = fn(v: Option(Dynamic)) {
+    case v {
+      Some(d) -> dynamic.classify(d) != "Nil"
+      None -> False
+    }
+  }
+  use alt_days <- result.try(case alt {
+    Some(d) ->
+      case present(alt) {
+        False -> Ok([])
+        True ->
+          case decode.run(d, decode.list(decode.dynamic)) {
+            Error(_) ->
+              Error(detail_refusal(
+                "TRIAL_SLOTS_INVALID",
+                "altSlots",
+                "Alternative slots must be a list of dates.",
+              ))
+            Ok(items) ->
+              case list.length(items) > 2 {
+                True ->
+                  Error(detail_refusal(
+                    "TRIAL_SLOTS_INVALID",
+                    "altSlots",
+                    "Offer at most 2 alternative slots.",
+                  ))
+                False ->
+                  list.try_fold(items, [], fn(acc, item) {
+                    case sent_date(Some(item)) {
+                      Error(why) -> Error(date_refusal(why, "altSlots"))
+                      Ok(None) ->
+                        Error(detail_refusal(
+                          "TRIAL_SLOTS_INVALID",
+                          "altSlots",
+                          "An alternative slot cannot be empty.",
+                        ))
+                      Ok(Some(day)) ->
+                        case Some(day) == proposed || list.contains(acc, day) {
+                          True ->
+                            Error(detail_refusal(
+                              "TRIAL_SLOTS_INVALID",
+                              "altSlots",
+                              "Each offered slot must be a different day.",
+                            ))
+                          False -> Ok(list.append(acc, [day]))
+                        }
+                    }
+                  })
+              }
+          }
+      }
+    None -> Ok([])
+  })
+  use venue <- result.try(case venue {
+    Some(d) ->
+      case dynamic.classify(d), decode.run(d, decode.string) {
+        "Nil", _ -> Ok(None)
+        _, Ok("") -> Ok(None)
+        _, Ok(text) ->
+          case input.utf16_length(text) > 200, has_control(text) {
+            True, _ ->
+              Error(detail_refusal(
+                "TRIAL_VENUE_INVALID",
+                "venue",
+                "Keep the venue under 200 characters.",
+              ))
+            _, True ->
+              Error(detail_refusal(
+                "TRIAL_VENUE_INVALID",
+                "venue",
+                "The venue is one line of text.",
+              ))
+            False, False -> Ok(Some(text))
+          }
+        _, Error(_) ->
+          Error(detail_refusal(
+            "TRIAL_VENUE_INVALID",
+            "venue",
+            "The venue must be text.",
+          ))
+      }
+    None -> Ok(None)
+  })
+  use notes <- result.map(case notes {
+    Some(d) ->
+      case dynamic.classify(d), decode.run(d, decode.string) {
+        "Nil", _ -> Ok("")
+        _, Ok(text) ->
+          case input.utf16_length(text) > 500 {
+            True ->
+              Error(detail_refusal(
+                "TRIAL_NOTES_INVALID",
+                "notes",
+                "Keep the notes under 500 characters.",
+              ))
+            False -> Ok(text)
+          }
+        _, Error(_) ->
+          Error(detail_refusal(
+            "TRIAL_NOTES_INVALID",
+            "notes",
+            "Notes must be text.",
+          ))
+      }
+    None -> Ok("")
+  })
+  Details(proposed_date: proposed, alt_days:, venue:, notes:)
+}
+
+fn has_control(s: String) -> Bool {
+  string.to_utf_codepoints(s)
+  |> list.any(fn(cp) {
+    let c = string.utf_codepoint_to_int(cp)
+    c <= 0x1F || c == 0x7F
+  })
 }
 
 /// True only for a stored value that is a valid trial date (never for "no date").

@@ -1264,8 +1264,8 @@ fn report_shape() -> input.Shape(ReportBody) {
   use v <- one("duelSuccessPct", v)
   use v <- one("coachRating", v)
   use notes <- input.field("notes", text(2000))
-  use strength_note <- input.field("strengthNote", text(2000))
-  use focus_note <- input.field("focusNote", text(2000))
+  use strength_note <- input.field("strengthNote", text(500))
+  use focus_note <- input.field("focusNote", text(500))
   input.done(ReportBody(
     values: list.reverse(v),
     notes:,

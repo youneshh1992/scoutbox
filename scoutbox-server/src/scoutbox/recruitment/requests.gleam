@@ -196,6 +196,59 @@ pub fn create_trial(
   request
 }
 
+/// A club's direct trial request (no case): the days offered and the venue line, no slots.
+pub fn create_direct_trial(
+  tx: Tx,
+  c: NewContact,
+  proposed_date: Option(String),
+  alt_days: List(String),
+  venue: Option(String),
+  notes: String,
+) -> Result(Request, Fail(e)) {
+  use id <- result.try(id.next_request(tx))
+  let routed_to = case c.guardian_id {
+    Some(_) -> party.Guardian
+    None -> party.Player
+  }
+  use rows <- result.map(store.write(
+    tx,
+    row.insert_sql <> " RETURNING " <> row.columns,
+    row.values(
+      row.Row(
+        ..row.new(
+          id:,
+          player_id: c.player_id,
+          org_id: c.org_id,
+          org_name: c.org_name,
+          org_verified: c.org_verified,
+          org_safeguarding_certified: c.org_safeguarding_certified,
+          user_id: c.user_id,
+          type_: row.Trial,
+          status: row.Pending,
+          created_at: c.at,
+          routed_to:,
+        ),
+        player_name: Some(c.player_name),
+        org_type: Some(c.org_type),
+        org_trusted_partner: Some(c.org_trusted_partner),
+        scout_name: Some(c.scout_name),
+        scout_role: Some(c.scout_role),
+        message: Some(c.message),
+        guardian_id: c.guardian_id,
+        trial_proposed_date: proposed_date,
+        trial_alt_days_json: Some(
+          json.to_string(json.array(alt_days, json.string)),
+        ),
+        trial_venue: venue,
+        trial_notes: Some(notes),
+      ),
+    ),
+    row.decoder(),
+  ))
+  let assert [request] = rows as "an INSERT … RETURNING returns its row"
+  request
+}
+
 /// An invitation's offered slots, in order.
 pub fn slots_of(
   read: Read,
@@ -269,6 +322,115 @@ pub fn trial_details_json(r: Request, slots: List(slot_row.Row)) -> Json {
       ])
     row.Contact -> json.null()
   }
+}
+
+/// A request as the repository decodes it (the club's page of its requests): every field, the private trial
+/// details included.
+pub fn record_json(r: Request, slots: List(slot_row.Row)) -> Json {
+  let opt = json.nullable(_, json.string)
+  json.object([
+    #("id", id.request_json(r.id)),
+    #("playerId", id.player_json(r.player_id)),
+    #("playerName", opt(r.player_name)),
+    #("orgId", id.org_json(r.org_id)),
+    #("orgName", json.string(r.org_name)),
+    #("orgType", opt(option.map(r.org_type, org_type.to_string))),
+    #("orgVerified", json.bool(r.org_verified)),
+    #("orgSafeguardingCertified", json.bool(r.org_safeguarding_certified)),
+    #("trustedPartner", json.nullable(r.org_trusted_partner, json.bool)),
+    #("userId", id.org_user_json(r.user_id)),
+    #("scoutName", opt(r.scout_name)),
+    #("scoutRole", opt(r.scout_role)),
+    #("type", row.type_to_json(r.type_)),
+    #("message", opt(r.message)),
+    #("subject", opt(r.subject)),
+    #("contactId", opt(r.contact_id)),
+    #("trialDetails", case r.type_ {
+      row.Contact -> json.null()
+      row.Trial ->
+        json.object([
+          #("proposedDate", opt(r.trial_proposed_date)),
+          #("altSlots", json.array(alt_days(r), json.string)),
+          #("venue", opt(r.trial_venue)),
+          #("notes", opt(r.trial_notes)),
+          #(
+            "slots",
+            json.array(slots, fn(s) {
+              json.object([
+                #("id", id.trial_slot_json(s.id)),
+                #("day", json.string(s.day)),
+                #("kind", trial_session_kind.to_json(s.kind)),
+                #("startsAt", json.int(s.starts_at)),
+                #("endsAt", json.int(s.ends_at)),
+                #("timezone", json.string(s.timezone)),
+                #("venue", case s.venue_name {
+                  Some(name) ->
+                    json.object([
+                      #("name", json.string(name)),
+                      #("town", opt(s.venue_town)),
+                      #("address", opt(s.venue_address)),
+                    ])
+                  None -> json.null()
+                }),
+              ])
+            }),
+          ),
+          #(
+            "private",
+            case r.trial_private_venue_address, r.trial_private_instructions {
+              None, None -> json.null()
+              address, instructions ->
+                json.object([
+                  #("venueAddress", opt(address)),
+                  #("instructions", opt(instructions)),
+                ])
+            },
+          ),
+        ])
+    }),
+    #("status", row.status_to_json(r.status)),
+    #("createdAt", json.int(r.created_at)),
+    #("respondedAt", json.nullable(r.responded_at, json.int)),
+    #("respondedBy", opt(option.map(r.responded_by, party.to_string))),
+    #("routedTo", party.to_json(r.routed_to)),
+    #("guardianId", json.nullable(r.guardian_id, id.guardian_json)),
+    #("contactChannel", json.nullable(r.contact_channel_id, id.channel_json)),
+    #("caseId", json.nullable(r.case_id, id.recruitment_case_json)),
+    #("trialId", json.nullable(r.trial_id, id.trial_json)),
+    #("recipient", case r.recipient_type {
+      Some(t) ->
+        json.object([
+          #("type", party.to_json(t)),
+          #("playerId", json.nullable(r.recipient_player_id, id.player_json)),
+          #(
+            "guardianId",
+            json.nullable(r.recipient_guardian_id, id.guardian_json),
+          ),
+          #("minor", json.bool(r.recipient_minor == Some(True))),
+        ])
+      None -> json.null()
+    }),
+    #(
+      "keys",
+      json.object([
+        #("invite", case r.invite_key, r.invite_fp {
+          Some(k), Some(fp) ->
+            json.object([#("key", json.string(k)), #("fp", json.string(fp))])
+          _, _ -> json.null()
+        }),
+      ]),
+    ),
+    #("subjectRemovedAt", json.nullable(r.subject_removed_at, json.int)),
+  ])
+}
+
+/// An organisation's requests, newest first, by cursor.
+pub fn page_for_org(
+  read: Read,
+  org_id: id.OrgId,
+  page: Page,
+) -> Result(#(List(Request), Option(String)), Fail(e)) {
+  page_where(read, "org_id = ?", [id.org_sql(org_id)], page)
 }
 
 /// A request with its slots read, for a recipient-facing view.

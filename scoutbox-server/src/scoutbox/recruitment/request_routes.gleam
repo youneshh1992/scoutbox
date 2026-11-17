@@ -7,6 +7,7 @@
 import gleam/bool
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -23,6 +24,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/limits
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
@@ -43,13 +45,60 @@ import wisp.{type Request, type Response}
 const message_max = 2000
 
 type Direct {
-  Direct(type_: request_row.Type, message: Option(String))
+  Direct(
+    type_: request_row.Type,
+    message: Option(String),
+    proposed_date: Option(Dynamic),
+    alt_slots: Option(Dynamic),
+    venue: Option(Dynamic),
+    notes: Option(Dynamic),
+  )
+}
+
+/// One shape per type (schemas.mjs `oneShapeOf`): a contact carries a message only; a trial its logistics too,
+/// judged by the one Trial validator.
+fn direct_shape() -> input.Shape(Direct) {
+  use type_ <- input.field(
+    "type",
+    input.required(input.one_of(request_row.type_pairs)),
+  )
+  use message <- input.field("message", input.nullish(input.text(message_max)))
+  case type_ {
+    request_row.Trial -> {
+      use proposed_date <- input.field(
+        "proposedDate",
+        input.optional(input.anything()),
+      )
+      use alt_slots <- input.field("altSlots", input.optional(input.anything()))
+      use venue <- input.field("venue", input.optional(input.anything()))
+      use notes <- input.field("notes", input.optional(input.anything()))
+      input.done(Direct(
+        type_:,
+        message:,
+        proposed_date:,
+        alt_slots:,
+        venue:,
+        notes:,
+      ))
+    }
+    request_row.Contact -> {
+      input.done(Direct(
+        type_:,
+        message:,
+        proposed_date: None,
+        alt_slots: None,
+        venue: None,
+        notes: None,
+      ))
+    }
+  }
 }
 
 /// `POST /org/players/:id/request`.
 ///
-/// Not ported yet: trial requests (their logistics, slots and the overdue-report rule), and the per-club budget
-/// of 30 contacts an hour.
+/// A trial request is refused while the club has a trial awaiting its mandatory report.
+///
+/// Not ported yet: the per-club budget of 30 contacts an hour.
 pub fn request(
   ctx: Ctx,
   req: Request,
@@ -82,18 +131,7 @@ pub fn request(
         "This player (or their guardian) has blocked your organisation.",
       )
     Ok(Some(#(p, _))) -> {
-      let shape = {
-        use type_ <- input.field(
-          "type",
-          input.required(input.one_of(request_row.type_pairs)),
-        )
-        use message <- input.field(
-          "message",
-          input.nullish(input.text(message_max)),
-        )
-        input.done(Direct(type_:, message:))
-      }
-      use body <- http.body(req, shape, [
+      use body <- http.body(req, direct_shape(), [
         #("type", "TYPE_MUST_BE_CONTACT_OR_TRIAL"),
       ])
       let message = option.unwrap(body.message, "")
@@ -110,12 +148,7 @@ pub fn request(
         ),
       )
       case body.type_ {
-        request_row.Trial ->
-          http.error_message(
-            501,
-            "NOT_PORTED",
-            "Trial requests are not supported by this server yet.",
-          )
+        request_row.Trial -> direct_trial(ctx, req, a, p, message, body, now)
         request_row.Contact -> contact(ctx, a, p, message, now)
       }
     }
@@ -124,6 +157,179 @@ pub fn request(
 
 type Refusal {
   Pending(request_id: id.RequestId)
+}
+
+fn direct_trial(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  p: players.Player,
+  message: String,
+  body: Direct,
+  now: Int,
+) -> Response {
+  // An unfiled report for a trial blocks new trial requests. A tombstoned trial can never be reported, so it does
+  // not block.
+  case
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT id FROM trials WHERE org_id = ? AND status = 'awaiting_report' AND subject_removed_at IS NULL ORDER BY rowid",
+        [id.org_sql(a.org.id)],
+        decode.at([0], decode.string),
+      )
+    })
+  {
+    Error(e) -> http.internal(e)
+    Ok([_, ..] as outstanding) ->
+      http.json(
+        409,
+        json.object([
+          #("error", json.string("REPORTS_OUTSTANDING")),
+          #(
+            "message",
+            json.string(
+              "You have "
+              <> int.to_string(list.length(outstanding))
+              <> " trial(s) awaiting a mandatory performance report. File them before requesting new trials.",
+            ),
+          ),
+          #("trialIds", json.array(outstanding, json.string)),
+        ]),
+      )
+    Ok([]) ->
+      case
+        trial_rules.validate_details(
+          body.proposed_date,
+          body.alt_slots,
+          body.venue,
+          body.notes,
+        )
+      {
+        Error(fields) -> http.json(400, json.object(fields))
+        Ok(details) -> {
+          let notes_checked = fn(next) {
+            case details.notes {
+              "" -> next()
+              n ->
+                moderate.or_refuse(
+                  ctx,
+                  n,
+                  audit.Context(
+                    kind: "trial_notes",
+                    player_id: None,
+                    org_id: Some(a.org.id),
+                    user_id: None,
+                    channel_id: None,
+                    request_id: None,
+                  ),
+                  next,
+                )
+            }
+          }
+          use <- notes_checked
+          case
+            !http.rerun(req)
+            && limits.limited(
+              ctx.limits,
+              limits.TrialInvite,
+              id.org_to_string(a.org.id),
+              clock.now_ms(),
+            )
+          {
+            True ->
+              http.json(
+                429,
+                json.object(
+                  list.map(limits.limited_body(limits.TrialInvite), fn(x) {
+                    #(x.0, json.string(x.1))
+                  }),
+                ),
+              )
+            False -> file_direct_trial(ctx, a, p, message, details, now)
+          }
+        }
+      }
+  }
+}
+
+fn file_direct_trial(
+  ctx: Ctx,
+  a: OrgAccess,
+  p: players.Player,
+  message: String,
+  details: trial_rules.Details,
+  now: Int,
+) -> Response {
+  let minor = !players.is_adult(p, now)
+  let guardian_id = case minor {
+    True -> p.row.guardian_id
+    False -> None
+  }
+  let filed =
+    store.unit(ctx.store, fn(tx) {
+      let read = store.reading(tx)
+      use pending <- result.try(requests.pending_between(
+        read,
+        a.org.id,
+        p.row.id,
+        request_row.Trial,
+      ))
+      use <- refuse_when(pending, fn(r: requests.Request) { Pending(r.id) })
+      use certified <- result.try(orgs.safeguarding_certified(read, a.org))
+      use r <- result.try(requests.create_direct_trial(
+        tx,
+        requests.NewContact(
+          player_id: p.row.id,
+          player_name: p.row.name,
+          org_id: a.org.id,
+          org_name: a.org.name,
+          org_type: a.org.type_,
+          org_verified: a.org.verified,
+          org_safeguarding_certified: certified,
+          org_trusted_partner: a.org.trusted_partner,
+          user_id: a.user.id,
+          scout_name: a.user.name,
+          scout_role: a.user.role,
+          message:,
+          guardian_id:,
+          at: now,
+        ),
+        details.proposed_date,
+        details.alt_days,
+        details.venue,
+        details.notes,
+      ))
+      use _ <- result.map(trial_routes.request_notices(tx, a, p, r, minor, now))
+      r
+    })
+  case filed {
+    Ok(r) ->
+      http.json(
+        201,
+        json.object([
+          #("ok", json.bool(True)),
+          #("requestId", id.request_json(r.id)),
+          #("status", json.string("pending")),
+          #("routedTo", party.to_json(r.routed_to)),
+        ]),
+      )
+    Error(store.Refused(Pending(request_id))) ->
+      http.json(
+        409,
+        json.object([
+          #("error", json.string("REQUEST_PENDING")),
+          #(
+            "message",
+            json.string(
+              "A trial request to this player is already awaiting an answer.",
+            ),
+          ),
+          #("requestId", id.request_json(request_id)),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
 }
 
 fn contact(
@@ -322,6 +528,26 @@ pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
     })
   case found {
     Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /org/requests`: the club's request records, newest first, by cursor.
+pub fn org_page(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use page <- pages.lenient(req, [IntKind])
+  case
+    store.read(ctx.store, fn(read) {
+      use #(items, next) <- result.try(requests.page_for_org(
+        read,
+        a.org.id,
+        page,
+      ))
+      use with <- result.map(requests.with_slots(read, items))
+      #(with, next)
+    })
+  {
+    Ok(#(items, next)) ->
+      pages.respond(items, next, fn(p) { requests.record_json(p.0, p.1) })
     Error(failure) -> http.internal(failure)
   }
 }

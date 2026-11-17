@@ -424,6 +424,7 @@ pub const tables = [
   "saved_searches",
   "sessions",
   "signings",
+  "signing_parties",
   "support_ticket_refs",
   "support_ticket_replies",
   "support_tickets",

@@ -2,9 +2,12 @@
 //// development activity is shared for recruitment (the Combine consent rule reads it), and whether clips are
 //// kept. An adult sets their own; a child's are the guardian's.
 ////
+//// It also holds the one Box Cam CV route a battery reaches: the finalize budget.
+////
 //// Not ported yet: the rest of Box Cam (sessions, challenges, assignments, disputes; its analysis is moving to a
 //// service of its own), and the ledger row's detail.
 
+import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -16,6 +19,7 @@ import scoutbox/identity/players
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/limits
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/box_cam_prefs as row
@@ -188,5 +192,48 @@ pub fn update_child(
     False -> http.error(404, "CHILD_NOT_FOUND")
     True ->
       apply(ctx, req, child, party.Guardian, id.guardian_to_string(g.row.id))
+  }
+}
+
+/// `POST /player/box-cam/sessions/:id/cv/finalize` (domains/development/boxcam/cv/routes.mjs): the per-player
+/// budget runs before anything else, then the session must be the player's own.
+///
+/// Not ported yet: the client-field and body refusals, and finalizing with the CV provider (moving to a service of
+/// its own): a player's own session answers 501.
+pub fn cv_finalize(ctx: Ctx, p: PlayerAccess, session: String) -> Response {
+  let owner = id.player_to_string(p.player.row.id)
+  case limits.limited(ctx.limits, limits.BoxCvFinalize, owner, clock.now_ms()) {
+    True ->
+      http.json(
+        429,
+        json.object([
+          #("error", json.string("rate_limited")),
+          #("retryAfterSeconds", json.int(5)),
+        ]),
+      )
+    False ->
+      case
+        store.read(ctx.store, fn(read) {
+          store.one(
+            read,
+            "SELECT 1 FROM box_sessions WHERE id = ? AND player_id = ?",
+            [sqlight.text(session), id.player_sql(p.player.row.id)],
+            decode.at([0], decode.int),
+          )
+        })
+      {
+        Error(e) -> http.internal(e)
+        Ok(Error(Nil)) ->
+          http.json(
+            404,
+            json.object([#("error", json.string("session_not_found"))]),
+          )
+        Ok(Ok(_)) ->
+          http.error_message(
+            501,
+            "NOT_PORTED",
+            "Box Cam analysis is not supported by this server yet.",
+          )
+      }
   }
 }

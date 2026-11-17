@@ -4,8 +4,7 @@
 //// records keep their ids and states and lose the name and the person's own words. Media files go after COMMIT.
 ////
 //// Not ported yet: the compliance contexts' and transaction workspaces' `forgetPlayer`, signing packages'
-//// redaction (no route here creates any of them), the profile-signal refresh after a trial is redacted (no route
-//// here records a trial), and retrying a media file that could not be removed at the next boot or sweep.
+//// redaction (no route here creates any of them), and retrying a media file that could not be removed at the next boot or sweep.
 
 import gleam/dynamic/decode
 import gleam/json
@@ -15,6 +14,7 @@ import gleam/string
 import scoutbox/agents/agent_store
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -402,7 +402,23 @@ pub fn delete_account(ctx: Ctx, p: PlayerAccess) -> Response {
       )
     False ->
       case erase(ctx, p.player.row.id) {
-        Ok(_) -> http.json(200, json.object([#("deleted", json.bool(True))]))
+        Ok(True) -> http.json(200, json.object([#("deleted", json.bool(True))]))
+        // A concurrent delete erased it first, taking this session with it.
+        Ok(False) -> access.player_session_gone()
+        Error(failure) -> http.internal(failure)
+      }
+  }
+}
+
+/// `DELETE /guardian/children/:id`: a guardian erases their child's profile. A child already erased is no longer
+/// theirs, so a second delete is a 404, not a second cascade.
+pub fn delete_child(ctx: Ctx, g: Guardian, child: id.PlayerId) -> Response {
+  case list.contains(g.child_ids, child) {
+    False -> http.error(404, "CHILD_NOT_FOUND")
+    True ->
+      case erase(ctx, child) {
+        Ok(True) -> http.json(200, json.object([#("deleted", json.bool(True))]))
+        Ok(False) -> http.error(404, "CHILD_NOT_FOUND")
         Error(failure) -> http.internal(failure)
       }
   }

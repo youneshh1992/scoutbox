@@ -1507,7 +1507,7 @@ fn send_invitation(
 
 /// issueRecruitmentRequest's ledger row and notices for a trial invitation: a minor's goes to the guardian, and the
 /// child hears only that the guardian was contacted.
-fn request_notices(
+pub fn request_notices(
   tx: Tx,
   a: OrgAccess,
   player: players.Player,

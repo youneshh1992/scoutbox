@@ -142,13 +142,18 @@ pub fn player_session(
   case found {
     Error(failure) -> http.internal(failure)
     Ok(Some(p)) -> next(PlayerAccess(p, !players.is_adult(p, now)))
-    Ok(None) ->
-      http.error_message(
-        401,
-        "PLAYER_AUTH_REQUIRED",
-        "Log in again — this session is no longer valid.",
-      )
+    Ok(None) -> player_session_gone()
   }
+}
+
+/// The 401 for a player session that no longer holds: also what a request answers when the account was erased
+/// while it ran (the TypeScript server serialises requests, so the later one finds no session).
+pub fn player_session_gone() -> Response {
+  http.error_message(
+    401,
+    "PLAYER_AUTH_REQUIRED",
+    "Log in again — this session is no longer valid.",
+  )
 }
 
 /// A child's settings and conversations are the guardian's: a minor is refused with GUARDIAN_MANAGED.

@@ -20,4 +20,5 @@ export const BATTERIES = [
   'agents/core',
   'recruitment/trialsPersistence',
   'recruitment/trials',
+  'recruitment/trialDatesMinorsAndErasure',
 ];
