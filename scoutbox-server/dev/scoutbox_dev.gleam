@@ -770,7 +770,10 @@ pub const id_columns = [
   RefersTo("signing_packages.player_id", "players"),
   RefersTo("signing_packages.transaction_id", "agent_transactions"),
   RefersTo("signing_packages.current_revision_id", "signing_revisions"),
-  RefersTo("signing_packages.rev_by_user_id", "org_users"),
+  Untyped(
+    "signing_packages.rev_by_user_id",
+    "may be the recipient who acted (a player or guardian) or a Trust & Safety reviewer, not staff",
+  ),
   Untyped(
     "signing_packages.voided_by_id",
     "a staff member or a Trust & Safety reviewer, as voided_by_kind says",

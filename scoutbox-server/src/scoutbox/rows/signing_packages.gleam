@@ -128,7 +128,7 @@ pub type Row {
     updated_at: Int,
     rev: Int,
     rev_at: Option(Int),
-    rev_by_user_id: Option(id.OrgUserId),
+    rev_by_user_id: Option(String),
     rev_by_name: Option(String),
     policy_version: Int,
     subject_removed_at: Option(Int),
@@ -284,7 +284,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use updated_at <- decode.field(40, decode.int)
   use rev <- decode.field(41, decode.int)
   use rev_at <- decode.field(42, decode.optional(decode.int))
-  use rev_by_user_id <- decode.field(43, decode.optional(id.org_user_decoder()))
+  use rev_by_user_id <- decode.field(43, decode.optional(decode.string))
   use rev_by_name <- decode.field(44, decode.optional(decode.string))
   use policy_version <- decode.field(45, decode.int)
   use subject_removed_at <- decode.field(46, decode.optional(decode.int))
@@ -400,7 +400,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.int(row.updated_at),
     sqlight.int(row.rev),
     sqlight.nullable(sqlight.int, row.rev_at),
-    sqlight.nullable(id.org_user_sql, row.rev_by_user_id),
+    sqlight.nullable(sqlight.text, row.rev_by_user_id),
     sqlight.nullable(sqlight.text, row.rev_by_name),
     sqlight.int(row.policy_version),
     sqlight.nullable(sqlight.int, row.subject_removed_at),

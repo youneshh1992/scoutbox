@@ -47,6 +47,7 @@ pub type Problem {
   NotAllowed
   NotATime
   NotADate
+  NotATimestamp
   Invalid
 }
 
@@ -68,6 +69,7 @@ pub fn problem_name(problem: Problem) -> String {
     NotAllowed -> "not_allowed"
     NotATime -> "not_a_time"
     NotADate -> "not_a_date"
+    NotATimestamp -> "not_a_timestamp"
     Invalid -> "invalid"
   }
 }
@@ -287,6 +289,29 @@ pub fn due_date() -> Check(Option(temporal.Due)) {
               Error(_) -> refused("not a date-time")
             }
         }
+    }
+  }
+}
+
+/// An instant (schemas.mjs `instant`): an ISO 8601 date-time with an offset or Z, or integer milliseconds. The value
+/// is kept as sent (a fingerprint is of what was sent); `temporal.instant` reads it.
+pub fn instant() -> Check(Dynamic) {
+  fn(v) {
+    case temporal.instant(v, 1900, 2100) {
+      Ok(_) -> Ok(v)
+      Error(why) ->
+        Error(
+          Issue(
+            ..issue(
+              NotATimestamp,
+              "must be a date-time with an offset or Z, or whole milliseconds ("
+                <> why
+                <> ")",
+            ),
+            expected: Some("ISO 8601 with offset or Z, or integer milliseconds"),
+            code: Some("TIMESTAMP_INVALID"),
+          ),
+        )
     }
   }
 }
