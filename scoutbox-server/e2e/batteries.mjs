@@ -30,7 +30,9 @@ export const BATTERIES = [
   'discovery/secondLookAndNobodyMissed',
   'recruitment/decisions',
   'recruitment/lifecycle',
+  'recruitment/journey',
   'recruitment/journeyPersistence',
   'recruitment/journeyAdversarial',
   'discovery/exposureCalibrationAndCoverage',
+  'discovery/matchingAndWatchlists',
 ];

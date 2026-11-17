@@ -72,6 +72,8 @@ pub const policy = [
   #("transaction_note_write", transaction_note_write_policy),
   #("analytics_read", analytics_read_policy),
   #("brief_write", brief_write_policy),
+  #("matching_query", matching_query_policy),
+  #("watchlist_write", watchlist_write_policy),
   #("second_look_action", second_look_action_policy),
   #("nobody_missed_action", nobody_missed_action_policy),
 ]
@@ -123,6 +125,10 @@ pub type Action {
   AnalyticsRead
   /// Recruitment Brief creates and edits, per organisation.
   BriefWrite
+  /// Explainable Matching queries, per organisation.
+  MatchingQuery
+  /// Dynamic Watchlist creates and edits, per organisation.
+  WatchlistWrite
   /// Second Look reviews, dismissals and reopens, per organisation.
   SecondLookAction
   /// Nobody Missed reviews, dismissals and add-to-room, per organisation.
@@ -197,6 +203,10 @@ const analytics_read_policy = Policy(max: 600, window_ms: 3_600_000)
 
 const brief_write_policy = Policy(max: 60, window_ms: 3_600_000)
 
+const matching_query_policy = Policy(max: 240, window_ms: 3_600_000)
+
+const watchlist_write_policy = Policy(max: 120, window_ms: 3_600_000)
+
 const second_look_action_policy = Policy(max: 200, window_ms: 3_600_000)
 
 const nobody_missed_action_policy = Policy(max: 200, window_ms: 3_600_000)
@@ -232,6 +242,8 @@ fn action_name(action: Action) -> String {
     RoomCreate -> "room_create"
     AnalyticsRead -> "analytics_read"
     BriefWrite -> "brief_write"
+    MatchingQuery -> "matching_query"
+    WatchlistWrite -> "watchlist_write"
     SecondLookAction -> "second_look_action"
     NobodyMissedAction -> "nobody_missed_action"
     RoomComment -> "room_comment"
@@ -273,6 +285,8 @@ fn action_policy(action: Action) -> Policy {
     RoomCreate -> room_create_policy
     AnalyticsRead -> analytics_read_policy
     BriefWrite -> brief_write_policy
+    MatchingQuery -> matching_query_policy
+    WatchlistWrite -> watchlist_write_policy
     SecondLookAction -> second_look_action_policy
     NobodyMissedAction -> nobody_missed_action_policy
     RoomComment -> room_comment_policy

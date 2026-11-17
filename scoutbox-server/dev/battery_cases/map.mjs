@@ -707,10 +707,25 @@ const criteria = record({
     combineProtocols: ['combine_protocols', list(string)],
   },
   ignore: ['positionGroups'],
+  defaults: {
+    positions: '[]',
+    min_age: 'None',
+    max_age: 'None',
+    radius_km: 'None',
+    max_level: 'None',
+    foot: 'None',
+    availability: 'None',
+    evidence_requirements: '[]',
+    min_trust_band: 'None',
+    combine_protocols: '[]',
+  },
 });
+const ENGINE = 'scoutbox/discovery/matching/engine';
+const CRIT = 'scoutbox/discovery/matching/criteria';
+const WLR = 'scoutbox/discovery/matching/watchlist_rules';
 /** A candidate's facts; the evidence flags are the keys the record meets. */
 const facts = record({
-  module: NM,
+  module: ENGINE,
   constructor: 'Facts',
   fields: {
     playerId: ['player_id', ident('player')],
@@ -726,9 +741,110 @@ const facts = record({
     combineProtocols: ['combine', list(string)],
     evidenceFlags: (v) => [['evidence', list(string)(Object.keys(v).filter((k) => v[k]))]],
     lastEvidenceAt: ['last_evidence_at', option(int)],
+    lastFootageAt: ['last_footage_at', option(int)],
+    combineMeasurements: (v, ctx) => [
+      ['combine_measurements', `[${Object.entries(v).map(([k, x]) => `#(${string(k)}, ${float(x)})`).join(', ')}]`],
+    ],
   },
-  defaults: { last_evidence_at: 'None', secondary: '[]', combine: '[]', evidence: '[]' },
+  defaults: {
+    last_evidence_at: 'None',
+    last_footage_at: 'None',
+    secondary: '[]',
+    combine: '[]',
+    combine_measurements: '[]',
+    evidence: '[]',
+  },
 });
+const watchStatus = vocab('scoutbox/rows/dynamic_watchlists', 'status_pairs');
+const transitionV = vocab('scoutbox/rows/watchlist_membership_events', 'transition_pairs');
+const reasonV = vocab('scoutbox/rows/watchlist_membership_events', 'reason_pairs');
+/** A validated criterion's test, from its type, operator and body. */
+const testOf = (c, ctx) => {
+  const C = ctx.use(CRIT);
+  const op = `${c.type}:${c.operator}`;
+  const bound = (gte) => `${C}.${gte ? 'AtLeastValue' : 'AtMostValue'}`;
+  switch (op) {
+    case 'position:in':
+      return `${C}.PositionIn(${list(string)(c.values, ctx)}, ${bool(c.primaryOnly === true)})`;
+    case 'age:between':
+      return `${C}.Age(${C}.Between(${int(c.values[0])}, ${int(c.values[1])}))`;
+    case 'age:gte':
+      return `${C}.Age(${C}.AtLeast(${int(c.value)}))`;
+    case 'age:lte':
+      return `${C}.Age(${C}.AtMost(${int(c.value)}))`;
+    case 'geography:within_radius':
+      return `${C}.WithinRadius(${float(c.value)})`;
+    case 'level:lte':
+      return `${C}.LevelAtMost(${playingLevel(c.value, ctx)})`;
+    case 'level:in':
+      return `${C}.LevelIn(${list(playingLevel)(c.values, ctx)})`;
+    case 'foot:in':
+      return `${C}.FootIn(${list(string)(c.values, ctx)})`;
+    case 'availability:equals':
+      return `${C}.AvailabilityIs(${string(c.value)})`;
+    case 'evidence:exists':
+      return `${C}.EvidenceExists(${string(c.value)})`;
+    case 'evidence_recency:within_days':
+      return `${C}.EvidenceWithin(${int(c.value)}, ${C}.${c.evidenceKind === 'any' ? 'AnyEvidence' : 'Footage'})`;
+    case 'trust_band:gte':
+      return `${C}.TrustBandAtLeast(${band(c.value, ctx)})`;
+    case 'combine_result:exists':
+      return `${C}.CombineResult(${string(c.value)})`;
+    case 'combine_measurement:gte':
+    case 'combine_measurement:lte':
+      return `${C}.CombineMeasurement(${string(c.protocol)}, ${bound(c.operator === 'gte')}, ${float(c.value)})`;
+    default:
+      throw new Error(`no criterion ${op}`);
+  }
+};
+const CLASSES = { required: 'Required', preferred: 'Preferred' };
+/** A validated criterion, with the id it was recorded with. */
+const criterion = (c, ctx) => {
+  if (!CLASSES[c.class]) throw new Error(`a criterion of class ${c.class}`);
+  return `${ctx.use(CRIT)}.Criterion(id: ${string(c.id)}, class: ${ctx.use(CRIT)}.${CLASSES[c.class]}, check: ${testOf(c, ctx)})`;
+};
+/** A validated criteria set; its schema version is a constant. */
+const criteriaSet = (v, ctx) =>
+  `${ctx.use(CRIT)}.Criteria(required: ${list(criterion)(v?.required ?? [], ctx)}, preferred: ${list(criterion)(v?.preferred ?? [], ctx)})`;
+/** A criterion as the editor writes it. */
+const scalar = (v, ctx) => {
+  if (typeof v === 'string') return `${ctx.use(CRIT)}.Text(${string(v)})`;
+  if (typeof v === 'number' && Number.isFinite(v)) return `${ctx.use(CRIT)}.Number(${float(v)})`;
+  throw new Error(`a criterion value ${JSON.stringify(v)}`);
+};
+const rawCriterion = record({
+  module: CRIT,
+  constructor: 'Raw',
+  fields: {
+    type: ['type_', option(string)],
+    operator: ['operator', option(string)],
+    value: ['value', option(scalar)],
+    values: ['values', option(list(scalar))],
+    primaryOnly: ['primary_only', option(bool)],
+    evidenceKind: ['evidence_kind', option(string)],
+    protocol: ['protocol', option(string)],
+  },
+  defaults: {
+    type_: 'None',
+    operator: 'None',
+    value: 'None',
+    values: 'None',
+    primary_only: 'None',
+    evidence_kind: 'None',
+    protocol: 'None',
+  },
+});
+const rawList = (v, ctx) => (Array.isArray(v) ? list(rawCriterion)(v, ctx) : '[]');
+/** One required outcome a watchlist remembers. */
+const met = record({
+  module: WLR,
+  constructor: 'Met',
+  fields: { criterionId: ['criterion_id', string], met: ['met', bool], text: ['text', string] },
+  ignore: ['type', 'key'],
+  defaults: { text: '""' },
+});
+const matchOf = (m, ctx) => (m ? `Some(${list(met)(m.required ?? [], ctx)})` : 'None');
+const nowOf = (opts, ctx) => int(opts?.now ?? ctx.now);
 /** A brief's input fields as `briefs.Fields` reads them; any other key (a prohibited one) is only a key. */
 const briefFields = (input, ctx) => {
   const f = (k, p) => option(p)(input[k], ctx);
@@ -877,15 +993,143 @@ const DISCOVERY_MAP = {
     test: (c, ctx) => eqJson(`${ctx.use(BR)}.explain(${criteria(c.args[0], ctx)})`, c.result, ctx),
   },
   ['domains/discovery/matching/match.mjs#playerMatchesBrief']: {
-    module: NM,
+    module: ENGINE,
+    now: true,
     test: (c, ctx) =>
-      eqJson(`${ctx.use(NM)}.match_json(${ctx.use(NM)}.match_brief(${facts(c.args[0], ctx)}, ${criteria(c.args[1], ctx)}))`, c.result, ctx),
+      eqJson(
+        `${ctx.use(ENGINE)}.match_brief_json(${ctx.use(ENGINE)}.match_brief(${facts(c.args[0], ctx)}, ${criteria(c.args[1] ?? {}, ctx)}, ${nowOf(c.args[2], ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  ['domains/discovery/matching/match.mjs#matchBrief']: {
+    module: ENGINE,
+    now: true,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(ENGINE)}.match_brief_json(${ctx.use(ENGINE)}.match_brief(${facts(c.args[0], ctx)}, ${criteria(c.args[1] ?? {}, ctx)}, ${nowOf(c.args[2], ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  ['domains/discovery/matching/match.mjs#briefCriteriaToCanonical']: {
+    module: ENGINE,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(CRIT)}.criteria_json(${ctx.use(ENGINE)}.brief_criteria(${criteria(c.args[0] ?? {}, ctx)}))`, c.result, ctx),
+  },
+  ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: {
+    module: ENGINE,
+    now: true,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(ENGINE)}.match_json(${ctx.use(ENGINE)}.match(${facts(c.args[0], ctx)}, ${criteriaSet(c.args[1], ctx)}, ${nowOf(c.args[2], ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  ['domains/discovery/matching/criteria.mjs#validateCriteria']: {
+    module: CRIT,
+    test: (c, ctx) => {
+      const [input = {}, { orgLevel = 'pro', protocols = null } = {}] = c.args;
+      const context = `${ctx.use(CRIT)}.Context(grassroots: ${bool(orgLevel === 'grassroots')}, protocols: ${option(list(string))(protocols, ctx)})`;
+      return eqJson(
+        `${ctx.use(CRIT)}.validation_json(${ctx.use(CRIT)}.validate(${rawList(input?.required, ctx)}, ${rawList(input?.preferred, ctx)}, ${context}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  ['domains/discovery/matching/criteria.mjs#criterionId']: {
+    module: CRIT,
+    test: (c, ctx) => {
+      const [type, operator, body = {}] = c.args;
+      return eq(`${ctx.use(CRIT)}.criterion_id(${testOf({ type, operator, ...body }, ctx)})`, string(c.result));
+    },
+  },
+  ['domains/discovery/matching/criteria.mjs#criteriaVersion']: {
+    module: CRIT,
+    test: (c, ctx) => eq(`${ctx.use(CRIT)}.version(${criteriaSet(c.args[0], ctx)})`, string(c.result)),
+  },
+  ['domains/discovery/matching/criteria.mjs#describeCriteria']: {
+    module: CRIT,
+    test: (c, ctx) => eqJson(`${ctx.use(CRIT)}.describe(${criteriaSet(c.args[0], ctx)})`, c.result, ctx),
+  },
+  ['domains/discovery/matching/criteria.mjs#isProhibitedCriterion']: {
+    module: CRIT,
+    test: (c, ctx) => eq(`${ctx.use(CRIT)}.is_prohibited(${string(c.args[0])})`, bool(c.result)),
+  },
+  ['domains/discovery/matching/watchlists.mjs#reconcileMembership']: {
+    module: WLR,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(WLR)}.diff_json(${ctx.use(WLR)}.reconcile(${list(string)(c.args[0] ?? [], ctx)}, ${list(string)(c.args[1] ?? [], ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  ['domains/discovery/matching/watchlists.mjs#transitionFingerprint']: {
+    module: WLR,
+    test: (c, ctx) => {
+      const f = c.args[0];
+      return eq(
+        `${ctx.use(WLR)}.fingerprint(${string(f.watchlistId)}, ${string(f.playerId)}, ${string(f.criteriaVersion)}, ${transitionV(f.transition, ctx)}, ${reasonV(f.reason, ctx)})`,
+        string(c.result),
+      );
+    },
+  },
+  ['domains/discovery/matching/watchlists.mjs#explainTransition']: {
+    module: WLR,
+    test: (c, ctx) => {
+      const a = c.args[0];
+      return eqJson(
+        `${ctx.use(WLR)}.explanation_json(${ctx.use(WLR)}.explain(${matchOf(a.previousMatch, ctx)}, ${matchOf(a.currentMatch, ctx)}, ${bool(!!a.criteriaChanged)}, ${bool(!!a.briefChanged)}, ${transitionV(a.transition, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  ['domains/discovery/matching/watchlists.mjs#membershipSummary']: {
+    module: WLR,
+    test: (c, ctx) => {
+      const { entered = [], left = [], unchanged = [] } = c.args[0];
+      return eqJson(`${ctx.use(WLR)}.summary(${entered.length}, ${left.length}, ${unchanged.length})`, c.result, ctx);
+    },
+  },
+  ['domains/discovery/matching/watchlists.mjs#membershipNotification']: {
+    module: WLR,
+    test: (c, ctx) => {
+      const { watchlistName, entered = [], left = [], reason } = c.args[0];
+      const cause = { criteria_changed: 'CriteriaEdited', brief_changed: 'BriefEdited' }[reason] ?? 'FactsChanged';
+      const W = ctx.use(WLR);
+      return eqJson(
+        `${W}.notification_json(${W}.notification(${string(watchlistName)}, ${entered.length}, ${left.length}, ${W}.${cause}), ${entered.length}, ${left.length})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  ['domains/platform/notificationPrefs.mjs#categoryOf']: {
+    module: 'scoutbox/messaging/notification_prefs',
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use('scoutbox/messaging/notification_prefs')}.category_of(${string(c.args[0])}, ${string(c.args[1] ?? '')}), ${ctx.use('scoutbox/vocab/notification_category')}.to_string)`,
+        option(string)(c.result, ctx),
+      ),
+  },
+  ['domains/discovery/matching/watchlists.mjs#watchlistBlockedState']: {
+    module: WLR,
+    test: (c, ctx) => {
+      const { status, mode, brief } = c.args[0];
+      const W = ctx.use(WLR);
+      const link = mode === 'live_linked' ? `${W}.LinkedTo(${brief ? `Some(${briefStatus(brief.status, ctx)})` : 'None'})` : `${W}.NotLinked`;
+      return eqJson(`${W}.blocked_state(${watchStatus(status, ctx)}, ${link})`, c.result, ctx);
+    },
   },
   [`${DISCOVERY}#buildNobodyMissedCandidate`]: {
     module: NM,
     test: (c, ctx) => {
       const { facts: f, brief, match, evaluation, roomOpen } = c.args[0];
-      const reasons = `[${match.reasons.map((r) => `${ctx.use(NM)}.Reason(key: ${string(r.key)}, met: ${bool(r.met)}, text: ${string(r.text)})`).join(', ')}]`;
+      const reasons = `[${match.reasons.map((r) => `${ctx.use(ENGINE)}.Reason(key: ${string(r.key)}, met: ${bool(r.met)}, text: ${string(r.text)})`).join(', ')}]`;
       return eqOptionJson(
         `${ctx.use('gleam/option')}.map(${ctx.use(NM)}.card(${facts(f, ctx)}, ${ctx.use('scoutbox/rows/id')}.brief(${string(brief.id)}), ${int(brief.version)}, #(${bool(match.matched)}, ${reasons}), ${bool(!!evaluation?.evaluated)}, ${bool(!!roomOpen)}), ${ctx.use('gleam/json')}.object)`,
         c.result,
@@ -992,6 +1236,7 @@ export const MAP = {
  * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
  */
 export const HAND_PORTED = {
+  ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
   ...Object.fromEntries(
     ['dashboard.mjs#buildDashboard', 'dashboard.mjs#buildReportingContext', 'funnels.mjs#stagesReached', 'metrics.mjs#assertMetricRegistry'].map(

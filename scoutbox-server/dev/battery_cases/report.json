@@ -168,6 +168,155 @@
     ]
   },
   {
+    "battery": "discovery/matchingAndWatchlists",
+    "functions": [
+      {
+        "function": "domain.ts#ageOn",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/matching/criteria.mjs#criteriaVersion",
+        "calls": 7,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/criteria.mjs#criterionId",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/criteria.mjs#describeCriteria",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/criteria.mjs#isProhibitedCriterion",
+        "calls": 38,
+        "cases": 38,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/criteria.mjs#validateCriteria",
+        "calls": 84,
+        "cases": 72,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/match.mjs#briefCriteriaToCanonical",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/match.mjs#matchBrief",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/match.mjs#matchPlayerToCriteria",
+        "calls": 46,
+        "cases": 40,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a criterion of class undefined": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/match.mjs#playerMatchesBrief",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#explainTransition",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#membershipNotification",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#membershipSummary",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#reconcileMembership",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#transitionFingerprint",
+        "calls": 4,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/discovery/matching/watchlists.mjs#watchlistBlockedState",
+        "calls": 6,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/platform/eventAudience.mjs#audienceFor",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#isRegistered",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#minimizePayload",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#categoryOf",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "discovery/secondLookAndNobodyMissed",
     "functions": [
       {
@@ -452,7 +601,7 @@
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/notificationPrefs.mjs#createNotificationPrefs",
@@ -2592,7 +2741,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },

@@ -60,6 +60,15 @@ pub type Event {
   )
   /// A scout submitted an assessment. Private to the club.
   AssessmentSubmitted(org_id: String, assessment_id: String)
+  /// A Dynamic Watchlist changed (each change is its own registry entry). Ids only: the club re-reads it under its
+  /// own authorisation. Private to the club.
+  WatchlistChanged(
+    change: WatchlistChange,
+    org_id: String,
+    watchlist_id: String,
+  )
+  /// A Room was opened from matching or a watchlist. Private to the club.
+  MatchingRoomCreated(org_id: String, room_id: String)
   /// A Room's case moved between lifecycle states. Private to the club.
   RecruitmentCaseMoved(
     org_id: String,
@@ -119,6 +128,13 @@ pub type Event {
   )
   /// A transaction moved status. Private to the agency.
   AgentTransactionStatusChanged(org_id: String, tx_id: String, status: String)
+}
+
+pub type WatchlistChange {
+  WatchlistCreated
+  WatchlistUpdated
+  WatchlistMembershipChanged
+  WatchlistArchived
 }
 
 pub type OfferChange {
@@ -210,6 +226,14 @@ pub fn name(event: Event) -> String {
         SigningSuperseded(..) -> "signing_superseded"
       }
     AssessmentSubmitted(..) -> "assessment_submitted"
+    WatchlistChanged(change:, ..) ->
+      case change {
+        WatchlistCreated -> "watchlist_created"
+        WatchlistUpdated -> "watchlist_updated"
+        WatchlistMembershipChanged -> "watchlist_membership_changed"
+        WatchlistArchived -> "watchlist_archived"
+      }
+    MatchingRoomCreated(..) -> "matching_room_created"
     RecruitmentCaseMoved(..) -> "recruitment_case_moved"
     RecruitmentRoomArchived(..) -> "recruitment_room_archived"
     RoomReopenedFromSecondLook(..) ->
@@ -257,6 +281,8 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | OfferResponded(org_id:, ..)
     | SigningChanged(org_id:, ..)
     | AssessmentSubmitted(org_id:, ..)
+    | WatchlistChanged(org_id:, ..)
+    | MatchingRoomCreated(org_id:, ..)
     | RecruitmentCaseMoved(org_id:, ..)
     | RecruitmentRoomArchived(org_id:, ..)
     | RoomReopenedFromSecondLook(org_id:, ..)
@@ -352,6 +378,14 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("orgId", json.string(org_id)),
       #("assessmentId", json.string(assessment_id)),
     ]
+    WatchlistChanged(org_id:, watchlist_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("watchlistId", json.string(watchlist_id)),
+    ]
+    MatchingRoomCreated(org_id:, room_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+    ]
     RecruitmentCaseMoved(org_id:, room_id:, from:, to:) -> [
       #("orgId", json.string(org_id)),
       #("roomId", json.string(room_id)),
@@ -429,6 +463,8 @@ pub fn replays(event: Event) -> Bool {
     | Notify(..)
     | OfferResponded(..)
     | AssessmentSubmitted(..)
+    | WatchlistChanged(..)
+    | MatchingRoomCreated(..)
     | RecruitmentCaseMoved(..)
     | RecruitmentRoomArchived(..)
     | RoomReopenedFromSecondLook(..)

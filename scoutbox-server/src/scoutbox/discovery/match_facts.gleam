@@ -1,5 +1,5 @@
-//// The stored match facts (domains/discovery/matchFacts.mjs) that Nobody Missed, and later matching and the
-//// watchlists, test: one row per live player, derived from the records that own each fact. Nothing in them depends
+//// The stored match facts (domains/discovery/matchFacts.mjs) that matching, the watchlists and Nobody Missed test:
+//// one row per live player, derived from the records that own each fact. Nothing in them depends
 //// on who reads them (visibility, age and distance are the query's), so they are derived once per player.
 ////
 //// Triggers on the inputs (migration 0040) mark a player dirty; `drain` re-derives the marked players inside every

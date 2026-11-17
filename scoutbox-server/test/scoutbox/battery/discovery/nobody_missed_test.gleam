@@ -4,11 +4,10 @@
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import scoutbox/discovery/briefs
+import scoutbox/discovery/matching/engine
 import scoutbox/discovery/nobody_missed
 import scoutbox/rows/id
 import scoutbox/vocab/playing_level
-import scoutbox/vocab/position
 import scoutbox/vocab/trust_band
 
 // secondLookAndNobodyMissed: isMeaningfullyEvaluated — [neg] viewing a profile, a search result and a Passport is still NOT an evaluation
@@ -51,300 +50,12 @@ pub fn neg_a_decision_200_days_ago_is_not_recent_test() {
     == "{\"evaluated\":true,\"signals\":[\"room_decided\"],\"recentlyDecided\":false,\"policyVersion\":1}"
 }
 
-// secondLookAndNobodyMissed: playerMatchesBrief — a matching player matches
-pub fn a_matching_player_matches_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":true,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] an unknown age fails an age criterion closed
-pub fn neg_an_unknown_age_fails_an_age_criterion_closed_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: None,
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":false,\"text\":\"Age is not on record\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] an unknown distance fails a radius criterion closed
-pub fn neg_an_unknown_distance_fails_a_radius_criterion_closed_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: None,
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: Some(50.0),
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"location\",\"met\":false,\"text\":\"Distance could not be established\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] a striker does not match a defensive-midfield brief
-pub fn neg_a_striker_does_not_match_a_defensive_midfield_brief_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("ST"),
-          secondary: [],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":false,\"text\":\"Does not match the position criteria\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] a missing evidence requirement fails the match
-pub fn neg_a_missing_evidence_requirement_fails_the_match_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"evidence:recent_full_match\",\"met\":false,\"text\":\"Recent full match available — not on record\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] a pro player fails a semi-pro ceiling
-pub fn neg_a_pro_player_fails_a_semi_pro_ceiling_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Pro),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.EstablishedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: Some(playing_level.SemiPro),
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: None,
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"level\",\"met\":false,\"text\":\"Plays at a level above the criteria\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — [neg] evidence confidence below the criteria fails the match
-pub fn neg_evidence_confidence_below_the_criteria_fails_the_match_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.LimitedEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: Some(trust_band.StrongEvidence),
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":false,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"},{\"key\":\"minTrustBand\",\"met\":false,\"text\":\"Evidence confidence is below the criteria (limited_evidence)\"}]}"
-}
-
-// secondLookAndNobodyMissed: playerMatchesBrief — evidence confidence above the criteria passes
-pub fn evidence_confidence_above_the_criteria_passes_test() {
-  assert json.to_string(
-      nobody_missed.match_json(nobody_missed.match_brief(
-        nobody_missed.Facts(
-          player_id: id.player("pl-1"),
-          name: "A Player",
-          age: Some(17),
-          position: Some("CDM"),
-          secondary: ["CM"],
-          level: Some(playing_level.Amateur),
-          foot: Some("Right"),
-          availability: Some("seeking"),
-          distance_km: Some(10.0),
-          trust_band: Some(trust_band.VeryStrongEvidence),
-          combine: ["box_touch_60"],
-          evidence: ["recent_full_match", "combine_verified"],
-          last_evidence_at: None,
-        ),
-        briefs.Criteria(
-          positions: [position.CDM],
-          min_age: Some(16),
-          max_age: Some(18),
-          radius_km: None,
-          max_level: None,
-          foot: None,
-          availability: None,
-          evidence_requirements: ["recent_full_match"],
-          min_trust_band: Some(trust_band.EstablishedEvidence),
-          combine_protocols: [],
-        ),
-      )),
-    )
-    == "{\"matched\":true,\"reasons\":[{\"key\":\"position\",\"met\":true,\"text\":\"Matches position criteria (CDM)\"},{\"key\":\"age\",\"met\":true,\"text\":\"Matches age criteria (17)\"},{\"key\":\"evidence:recent_full_match\",\"met\":true,\"text\":\"Recent full match available\"},{\"key\":\"minTrustBand\",\"met\":true,\"text\":\"Evidence confidence meets the criteria (very_strong_evidence)\"}]}"
-}
-
 // secondLookAndNobodyMissed: buildNobodyMissedCandidate — [neg] an already-evaluated player is never a Nobody Missed candidate
 pub fn neg_an_already_evaluated_player_is_never_a_nobody_missed_candidate_test() {
   assert option.map(
       option.map(
         nobody_missed.card(
-          nobody_missed.Facts(
+          engine.Facts(
             player_id: id.player("pl-1"),
             name: "A Player",
             age: Some(17),
@@ -358,21 +69,23 @@ pub fn neg_an_already_evaluated_player_is_never_a_nobody_missed_candidate_test()
             combine: ["box_touch_60"],
             evidence: ["recent_full_match", "combine_verified"],
             last_evidence_at: None,
+            last_footage_at: None,
+            combine_measurements: [],
           ),
           id.brief("brf-1"),
           1,
           #(True, [
-            nobody_missed.Reason(
+            engine.Reason(
               key: "position",
               met: True,
               text: "Matches position criteria (CDM)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "age",
               met: True,
               text: "Matches age criteria (17)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "evidence:recent_full_match",
               met: True,
               text: "Recent full match available",
@@ -393,7 +106,7 @@ pub fn neg_a_player_with_an_open_room_is_never_a_nobody_missed_candidate_test() 
   assert option.map(
       option.map(
         nobody_missed.card(
-          nobody_missed.Facts(
+          engine.Facts(
             player_id: id.player("pl-1"),
             name: "A Player",
             age: Some(17),
@@ -407,21 +120,23 @@ pub fn neg_a_player_with_an_open_room_is_never_a_nobody_missed_candidate_test() 
             combine: ["box_touch_60"],
             evidence: ["recent_full_match", "combine_verified"],
             last_evidence_at: None,
+            last_footage_at: None,
+            combine_measurements: [],
           ),
           id.brief("brf-1"),
           1,
           #(True, [
-            nobody_missed.Reason(
+            engine.Reason(
               key: "position",
               met: True,
               text: "Matches position criteria (CDM)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "age",
               met: True,
               text: "Matches age criteria (17)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "evidence:recent_full_match",
               met: True,
               text: "Recent full match available",
@@ -442,7 +157,7 @@ pub fn the_candidate_explanation_includes_the_workflow_fact_test() {
   assert option.map(
       option.map(
         nobody_missed.card(
-          nobody_missed.Facts(
+          engine.Facts(
             player_id: id.player("pl-1"),
             name: "A Player",
             age: Some(17),
@@ -456,21 +171,23 @@ pub fn the_candidate_explanation_includes_the_workflow_fact_test() {
             combine: ["box_touch_60"],
             evidence: ["recent_full_match", "combine_verified"],
             last_evidence_at: None,
+            last_footage_at: None,
+            combine_measurements: [],
           ),
           id.brief("brf-1"),
           1,
           #(True, [
-            nobody_missed.Reason(
+            engine.Reason(
               key: "position",
               met: True,
               text: "Matches position criteria (CDM)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "age",
               met: True,
               text: "Matches age criteria (17)",
             ),
-            nobody_missed.Reason(
+            engine.Reason(
               key: "evidence:recent_full_match",
               met: True,
               text: "Recent full match available",

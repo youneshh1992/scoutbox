@@ -15,8 +15,8 @@ items it opens), the organisation audit and a player's erasure, and the start of
 (opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
 schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
 calendar export and the mandatory report), structured assessments, the Football Passport's trial timeline, and
-Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query), and
-the club's insight: exposure, the review queue, calibration sessions, the decision review and coverage planning. It
+Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query),
+Explainable Matching and Dynamic Watchlists (one match engine, which Nobody Missed shares), and the club's insight: exposure, the review queue, calibration sessions, the decision review and coverage planning. It
 answers every battery in `e2e/batteries.mjs` unchanged.
 
 ```sh
@@ -87,7 +87,8 @@ Every route below is exercised by a battery, except where marked.
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Case workspace | `POST /org/cases` (a plain case), `/org/cases/:id/stage` (refused on a case with a Room), `/org/cases/:id/decision` (a non-lead's sign waits for a lead's approval); each answers the whole case record |
-| Watchlists | `GET /org/watchlists` (the list only: no route here creates one) |
+| Matching | `GET /org/matching/vocabulary`, `POST /org/matching` (by cursor; a brief's criteria or the club's own) |
+| Watchlists | `GET`/`POST /org/watchlists`, `GET`/`PATCH /org/watchlists/:id` (reading one derives its membership and records the transitions), `GET …/:id/history`, `POST …/:id/room` |
 | Second Look | `GET /org/second-look` (reconciled with the source records on every read), `/org/second-look/:id`, `/org/second-look/:id/changes`; `POST /org/second-look/:id/review`, `/dismiss`, `/reopen-room` (through the Rooms' own reopen path) |
 | Nobody Missed | `GET`/`POST /org/recruitment-briefs`, `GET`/`PATCH /org/recruitment-briefs/:id`, `GET /org/nobody-missed` (over the stored match facts, by cursor), `GET /org/evaluation-coverage`; `POST /org/nobody-missed/add-to-room`, `/review` and `/dismiss` (no battery) |
 | Insight | `POST /org/exposure/impressions`, `GET /org/exposure/report`, `/org/review-queue`, `POST /org/review-queue/:id/later`, `GET /org/discovery-rotation`, `/org/decision-review`, `/player/exposure`; `GET /org/players/:id/evidence-gaps`, `POST /org/evidence-gaps/:id/request`, `/dismiss` and `/reviewed` (no battery); `GET`/`POST /org/calibration`, `GET /org/calibration/:id`, `POST …/submit`, `…/close` (no battery), `…/notes`; `GET /org/assessment-templates` (the list only); `GET`/`POST /org/coverage/fixtures`, `/org/coverage-plans`, `/org/coverage/assignments`, `POST …/assignments/:id/complete`, `…/cancel` (no battery), `GET /org/coverage/suggestions`; not the sweep (review reminders, pruning old exposure) |
@@ -135,7 +136,7 @@ for players and guardians (a new player account stores a hash no password matche
   its dispatch in its own unit, so a dispatch is never sent twice.
 - Distances agree with domain.ts to the last bit except within about 1e-12 km of the 50 km radius or a rounding
   edge, where macOS's `cos` and V8's `x ** 2` differ in the last place (`test/scoutbox/distance_test.gleam`).
-- A Nobody Missed foot criterion lowers ASCII only (SQLite's `lower()`); the TypeScript server's `lower_js` lowers
+- A foot criterion (matching, watchlists, Nobody Missed) lowers ASCII only (SQLite's `lower()`); the TypeScript server's `lower_js` lowers
   as JavaScript does. Every stored foot is ASCII.
 - Second Look's changes, and its queue, break ties of time and kind by code point; the TypeScript server uses
   `localeCompare`, which orders punctuation and case differently. Only items changed in the same millisecond can

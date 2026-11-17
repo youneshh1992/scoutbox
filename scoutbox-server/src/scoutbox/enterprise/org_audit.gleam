@@ -2,8 +2,7 @@
 //// other domains' histories. Entries say what happened and who did it, never content. Reason codes are the
 //// organisation's own structured vocabulary, so they are shown; the free text beside them is not.
 ////
-//// Not ported yet: the recruitment brief, dynamic watchlist and development plan sources, whose domains are not
-//// ported. Every source here is read whole, not paged in SQL.
+//// Not ported yet: the development plan source. Every source here is read whole, not paged in SQL.
 
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -29,7 +28,10 @@ import scoutbox/rows/case_history as history_row
 import scoutbox/rows/contact_history as contact_history_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/recruitment_brief_history as brief_history_row
 import scoutbox/rows/trial_history as trial_history_row
+import scoutbox/rows/watchlist_history as watchlist_history_row
+import scoutbox/vocab/brief_status
 import scoutbox/vocab/org_type
 import scoutbox/vocab/trial_actor_kind
 import wisp.{type Request, type Response}
@@ -282,6 +284,124 @@ fn contact_rows(
   })
 }
 
+fn some(
+  o: Option(a),
+  name: String,
+  to_json: fn(a) -> Json,
+) -> List(#(String, Json)) {
+  case o {
+    Some(v) -> [#(name, to_json(v))]
+    None -> []
+  }
+}
+
+/// A brief's trail: created, edited and activated.
+fn brief_rows(read: Read, org: Org) -> Result(List(agent_audit.Row), Fail(e)) {
+  use rows <- result.map(
+    store.query(
+      read,
+      "SELECT "
+        <> brief_history_row.qualified("h")
+        <> ", b.title FROM recruitment_brief_history h JOIN recruitment_briefs b ON b.id = h.brief_id WHERE b.org_id = ? ORDER BY h.rowid",
+      [id.org_sql(org.id)],
+      {
+        use h <- decode.then(brief_history_row.decoder())
+        use title <- decode.field(brief_history_row.width, decode.string)
+        decode.success(#(h, title))
+      },
+    ),
+  )
+  list.map(rows, fn(r) {
+    let #(h, title) = r
+    // The trail's detail, in the allowlist's order.
+    let detail =
+      list.flatten([
+        some(h.detail_from, "from", brief_status.to_json),
+        some(h.detail_to, "to", brief_status.to_json),
+        some(h.detail_version, "version", json.int),
+        some(h.detail_criteria_changed, "criteriaChanged", json.bool),
+      ])
+    agent_audit.Row(id.brief_event_to_string(h.id), h.at, [
+      #("id", id.brief_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", brief_history_row.action_to_json(h.action)),
+      #("domain", json.string("recruitment_brief")),
+      #(
+        "actor",
+        json.object([
+          #("userId", id.org_user_json(h.by_id)),
+          #("name", json.nullable(h.by_name, json.string)),
+        ]),
+      ),
+      #(
+        "target",
+        json.object([
+          #("type", json.string("brief")),
+          #("id", id.brief_json(h.brief_id)),
+          #("title", json.string(title)),
+        ]),
+      ),
+      #("detail", case detail {
+        [] -> json.null()
+        fields -> json.object(fields)
+      }),
+    ])
+  })
+}
+
+/// A watchlist's lifecycle only: membership changes stay in the watchlist's own history.
+fn watchlist_rows(
+  read: Read,
+  org: Org,
+) -> Result(List(agent_audit.Row), Fail(e)) {
+  use rows <- result.map(
+    store.query(
+      read,
+      "SELECT "
+        <> watchlist_history_row.qualified("h")
+        <> ", w.name FROM watchlist_history h JOIN dynamic_watchlists w ON w.id = h.watchlist_id WHERE w.org_id = ? ORDER BY h.rowid",
+      [id.org_sql(org.id)],
+      {
+        use h <- decode.then(watchlist_history_row.decoder())
+        use name <- decode.field(watchlist_history_row.width, decode.string)
+        decode.success(#(h, name))
+      },
+    ),
+  )
+  list.map(rows, fn(r) {
+    let #(h, name) = r
+    agent_audit.Row(id.watchlist_lifecycle_event_to_string(h.id), h.at, [
+      #("id", id.watchlist_lifecycle_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", watchlist_history_row.action_to_json(h.action)),
+      #("domain", json.string("dynamic_watchlist")),
+      #(
+        "actor",
+        json.object([
+          #("userId", id.org_user_json(h.by_id)),
+          #("name", json.nullable(h.by_name, json.string)),
+        ]),
+      ),
+      #(
+        "target",
+        json.object([
+          #("type", json.string("watchlist")),
+          #("id", id.watchlist_json(h.watchlist_id)),
+          #("title", json.string(name)),
+        ]),
+      ),
+      // Of the trail's detail, only the status is on the allowlist.
+      #("detail", case h.detail_status {
+        Some(s) ->
+          json.object([
+            #("status", watchlist_history_row.detail_status_to_json(s)),
+          ])
+        None -> json.null()
+      }),
+    ])
+  })
+}
+
 fn ledger_rows(read: Read, org: Org) -> Result(List(agent_audit.Row), Fail(e)) {
   use rows <- result.map(store.query(
     read,
@@ -387,11 +507,15 @@ pub fn feed(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           use trials <- result.try(trial_rows(r, a.org, now))
           use contacts <- result.try(contact_rows(r, a.org, now))
           use ledger <- result.try(ledger_rows(r, a.org))
+          use watchlists <- result.try(watchlist_rows(r, a.org))
+          use briefs <- result.try(brief_rows(r, a.org))
           use agency <- result.map(case a.org.type_ {
             org_type.Agency -> agent_audit.rows(r, a.org, now)
             _ -> Ok([])
           })
-          list.flatten([rooms, contacts, trials, agency, ledger])
+          list.flatten([
+            rooms, contacts, trials, briefs, watchlists, agency, ledger,
+          ])
         })
       {
         Error(failure) -> http.internal(failure)

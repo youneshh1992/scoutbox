@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 38 of 53 neutral]
+### Untangling [in progress: 39 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 32 batteries pass unchanged]
+### Porting, domain by domain [in progress: 34 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -114,8 +114,8 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics | 18 | `recruitment/journey`: everything but Z1 (matching and watchlists) passes |
-| Discovery: Second Look and Nobody Missed, exposure, calibration and coverage | 2 | `matchingAndWatchlists` to go |
+| Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
+| Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -150,7 +150,11 @@ are for surprising facts or points that later work depends on, not implementatio
       table for notifications was only partly ported, so types such as `evidence_request`, `calibration` and
       `recruitment_room` escaped their category's mute. It is now whole, and its test requires equality with the
       snapshot.
-   3. `discovery/matchingAndWatchlists`, once its Box Cam results come from `sqlFixture.mjs` rows.
+   3. `discovery/matchingAndWatchlists` [**done**; with it `recruitment/journey`, whose Z1 was all that waited].
+      It never read a Box Cam result: its output is the same without `BOX_CAM_TEST_PROVIDER`, so no fixture rows
+      were needed. The match engine is one set of modules (`discovery/matching/`), which Nobody Missed now shares.
+      The org audit feed gained its brief and watchlist sources. Pending: the event registry's rules and `ageOn`
+      (11 cases, with `dates`).
 3. **Agents**: the other 8 batteries. Clear `agents/core`'s pending cases too. `journeyAdversarial` and
    `operations` also call `/org/agent`.
 4. `scouting/clubWorkflows`. It needs the uploads check first.
@@ -219,7 +223,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 15 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 14 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 

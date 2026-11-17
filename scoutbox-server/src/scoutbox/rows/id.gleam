@@ -3625,6 +3625,11 @@ pub fn watchlist_decoder() -> decode.Decoder(WatchlistId) {
   decode.map(decode.string, WatchlistId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_watchlist(tx: Tx) -> Result(WatchlistId, Fail(e)) {
+  ids.next(tx, "wl") |> result.map(WatchlistId)
+}
+
 /// An id of `watchlist_membership_events`.
 pub opaque type WatchlistEventId {
   WatchlistEventId(String)
@@ -3650,6 +3655,51 @@ pub fn watchlist_event_json(id: WatchlistEventId) -> Json {
 
 pub fn watchlist_event_decoder() -> decode.Decoder(WatchlistEventId) {
   decode.map(decode.string, WatchlistEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_watchlist_event(tx: Tx) -> Result(WatchlistEventId, Fail(e)) {
+  ids.next(tx, "wlh") |> result.map(WatchlistEventId)
+}
+
+/// An id of `watchlist_history`.
+pub opaque type WatchlistLifecycleEventId {
+  WatchlistLifecycleEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn watchlist_lifecycle_event(text: String) -> WatchlistLifecycleEventId {
+  WatchlistLifecycleEventId(text)
+}
+
+pub fn watchlist_lifecycle_event_to_string(
+  id: WatchlistLifecycleEventId,
+) -> String {
+  let WatchlistLifecycleEventId(text) = id
+  text
+}
+
+pub fn watchlist_lifecycle_event_sql(
+  id: WatchlistLifecycleEventId,
+) -> sqlight.Value {
+  sqlight.text(watchlist_lifecycle_event_to_string(id))
+}
+
+pub fn watchlist_lifecycle_event_json(id: WatchlistLifecycleEventId) -> Json {
+  json.string(watchlist_lifecycle_event_to_string(id))
+}
+
+pub fn watchlist_lifecycle_event_decoder() -> decode.Decoder(
+  WatchlistLifecycleEventId,
+) {
+  decode.map(decode.string, WatchlistLifecycleEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_watchlist_lifecycle_event(
+  tx: Tx,
+) -> Result(WatchlistLifecycleEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(WatchlistLifecycleEventId)
 }
 
 /// An id of `webhook_deliveries`.

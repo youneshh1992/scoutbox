@@ -539,6 +539,11 @@ pub const tables = [
   "ver_root_requests",
   "ver_root_transfers",
   "ver_tokens",
+  "watchlist_criteria",
+  "watchlist_criterion_values",
+  "watchlist_history",
+  "watchlist_member_checks",
+  "watchlist_members",
   "watchlist_membership_events",
   "webhook_deliveries",
   "webhook_delivery_attempts",
@@ -666,8 +671,9 @@ pub const ided = [
   Ided("recruitment_brief_history", "BriefEvent", Some("aud")),
   Ided("nobody_missed_reviews", "NobodyMissedReview", Some("nmr")),
   Ided("second_look_items", "SecondLookItem", Some("slk")),
-  Ided("dynamic_watchlists", "Watchlist", None),
-  Ided("watchlist_membership_events", "WatchlistEvent", None),
+  Ided("dynamic_watchlists", "Watchlist", Some("wl")),
+  Ided("watchlist_membership_events", "WatchlistEvent", Some("wlh")),
+  Ided("watchlist_history", "WatchlistLifecycleEvent", Some("aud")),
 ]
 
 /// Id columns no foreign key types. See `codegen.IdColumn`.
@@ -697,6 +703,19 @@ pub const id_columns = [
     "watchlist_membership_events.criterion_id",
     "a criterion's key within its watchlist, not a row id",
   ),
+  Untyped(
+    "watchlist_criteria.criterion_id",
+    "a criterion's key within its watchlist, not a row id",
+  ),
+  Untyped(
+    "watchlist_member_checks.criterion_id",
+    "a criterion's key within its watchlist, not a row id",
+  ),
+  RefersTo("watchlist_criterion_values.watchlist_id", "dynamic_watchlists"),
+  RefersTo("watchlist_members.player_id", "players"),
+  RefersTo("watchlist_member_checks.watchlist_id", "dynamic_watchlists"),
+  RefersTo("watchlist_member_checks.player_id", "players"),
+  RefersTo("watchlist_history.by_id", "org_users"),
   RefersTo("case_transaction_handoffs.invited_by_user_id", "org_users"),
   RefersTo("case_transaction_handoffs.transaction_id", "agent_transactions"),
   RefersTo("case_transaction_handoffs.invited_agency_org_id", "orgs"),

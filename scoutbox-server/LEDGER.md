@@ -19,11 +19,11 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 |---|---|---|---|---|---|---|
 | agents | 9 | 1 | 1 | 0 / 216 | 0 / 1 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
-| discovery | 3 | 2 | 2 | 135 / 0 | 1 / 1 | 1 to go |
+| discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 9 | 40 / 2320 | 0 / 191 | 5 to go |
-| recruitment | 19 | 19 | 18 | 519 / 4158 | 28 / 295 | 13 to go |
+| platform | 13 | 13 | 9 | 46 / 2314 | 0 / 191 | 5 to go |
+| recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -50,14 +50,14 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
-| `discovery/matchingAndWatchlists` | not yet neutral | 13 → 13 | 152 | 152 |  |  |  |  |  | not untangled; not answered |
+| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
 | `passport/passport` | not yet neutral | 1 → 1 | 215 | 215 |  |  |  |  |  | not untangled; not answered |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
-| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 7 / 43 | 0 / 25 | not answered; 43 cases pending; 25 hand-port calls |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 13 / 37 | 0 / 25 | not answered; 37 cases pending; 25 hand-port calls |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 11 / 2242 | 0 / 135 | not answered; 2242 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
@@ -73,7 +73,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
-| `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
+| `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 0 / 30 |  | 30 cases pending; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 16 / 2927 | 2 / 95 | 2927 cases pending; 93 hand-port calls |
@@ -84,7 +84,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 0 / 82 | 0 / 1 | 82 cases pending; 1 hand-port calls |
 | `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 0 / 43 |  | 43 cases pending |
 | `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  | yes |  |  | **done** |
-| `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 0 / 106 | 0 / 6 | 106 cases pending; 6 hand-port calls |
+| `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 1 / 105 | 0 / 6 | 105 cases pending; 6 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 264 |  |  |  |  |  | not answered |
@@ -111,6 +111,8 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 
 | Battery | Checks | Why |
 |---|---|---|
+| `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
+| `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
@@ -127,6 +129,8 @@ ported by hand to a gleeunit test.
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
 | `agents/core` | `domains/agents/core/shared.mjs#can` | 1 | args[] is undefined | to do |
+| `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
+| `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
 | `platform/contracts` | `domain.ts#ageOn` | 8 | args[] is a ; result is NaN | to do |
 | `platform/contracts` | `domain.ts#isAdult` | 3 | args[] is a  | to do |
@@ -244,6 +248,9 @@ mapped, then `npm run cases`.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
+| `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
+| `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
+| `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |
 | `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
 | `platform/contracts` | `domain.ts#isAdult` | 1 |
 | `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |
@@ -253,7 +260,6 @@ mapped, then `npm run cases`.
 | `platform/contracts` | `domains/platform/eventRegistry.mjs#minimizePayload` | 2 |
 | `platform/contracts` | `domains/platform/integrity.mjs#integrityReport` | 4 |
 | `platform/contracts` | `domains/platform/integrity.mjs#integritySummary` | 1 |
-| `platform/contracts` | `domains/platform/notificationPrefs.mjs#categoryOf` | 6 |
 | `platform/contracts` | `domains/platform/notificationPrefs.mjs#defaultPrefs` | 1 |
 | `platform/dates` | `domain.ts#adultAgeFor` | 1 |
 | `platform/dates` | `domain.ts#isTrialDate` | 2 |
@@ -434,7 +440,6 @@ mapped, then `npm run cases`.
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 42 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 10 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#validateTrialDetails` | 33 |
-| `recruitment/trialDatesMinorsAndErasure` | `domains/platform/notificationPrefs.mjs#categoryOf` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 7 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#blockedAllows` | 9 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#canComplete` | 9 |

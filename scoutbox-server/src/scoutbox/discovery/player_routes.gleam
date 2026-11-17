@@ -113,7 +113,7 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
                             "Statistical similarity — a lead, not a verdict.",
                           ),
                         ),
-                        // Not ported yet: "more like this" and the archetypes are discovery's matching.
+                        // Not ported yet: "more like this" and the archetypes are the similarity engine.
                         #("players", json.preprocessed_array([])),
                         #("archetypes", json.preprocessed_array([])),
                       ]),

@@ -17,6 +17,7 @@ import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
 import scoutbox/discovery/insights
+import scoutbox/discovery/matching_routes
 import scoutbox/discovery/nobody_missed
 import scoutbox/discovery/org_feed
 import scoutbox/discovery/player_routes as discovery
@@ -332,8 +333,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { case_workspace.set_stage(ctx, req, org, cid) })
         ["cases", cid, "decision"] ->
           only(req, Post, fn() { case_workspace.decide(ctx, req, org, cid) })
+        ["matching", "vocabulary"] ->
+          only(req, Get, fn() { matching_routes.vocabulary(org) })
+        ["matching"] ->
+          only(req, Post, fn() { matching_routes.run(ctx, req, org) })
         ["watchlists"] ->
-          only(req, Get, fn() { watchlists.list(ctx, req, org) })
+          case req.method {
+            Get -> watchlists.list(ctx, req, org)
+            Post -> watchlists.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["watchlists", wid] ->
+          case req.method {
+            Get -> watchlists.get(ctx, req, org, wid)
+            Patch -> {
+              use req <- contract.rerun_on_stale(req)
+              watchlists.edit(ctx, req, org, wid)
+            }
+            _ -> not_found()
+          }
+        ["watchlists", wid, "history"] ->
+          only(req, Get, fn() { watchlists.history(ctx, req, org, wid) })
+        ["watchlists", wid, "room"] ->
+          only(req, Post, fn() { watchlists.room(ctx, req, org, wid) })
         ["recruitment-briefs"] ->
           case req.method {
             Get -> nobody_missed.list_briefs(ctx, req, org)

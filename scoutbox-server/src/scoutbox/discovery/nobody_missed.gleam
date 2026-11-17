@@ -17,18 +17,19 @@ import gleam/order
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
-import scoutbox/discovery/briefs.{type Brief, type Criteria}
+import scoutbox/discovery/briefs.{type Brief}
+import scoutbox/discovery/matching/engine
+import scoutbox/discovery/matching/query
 import scoutbox/discovery/second_look
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/clock
-import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
-import scoutbox/platform/keyset.{Asc, Desc, OrderKey}
+import scoutbox/platform/keyset.{Asc, OrderKey}
 import scoutbox/platform/limits
-import scoutbox/platform/paging.{IntKind, TextKind}
+import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/rev
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -37,11 +38,9 @@ import scoutbox/rows/id
 import scoutbox/rows/nobody_missed_review_history as review_history_row
 import scoutbox/rows/nobody_missed_reviews as review_row
 import scoutbox/rows/recruitment_brief_history as brief_history_row
-import scoutbox/rows/recruitment_briefs as brief_row
-import scoutbox/rules/age
 import scoutbox/rules/visibility
 import scoutbox/vocab/brief_status
-import scoutbox/vocab/playing_level.{type PlayingLevel}
+
 import scoutbox/vocab/position
 import scoutbox/vocab/review_state
 import scoutbox/vocab/source_context
@@ -83,360 +82,14 @@ const non_evaluation_signals = [
   #("passport_view", "Reading a Passport is not an evaluation."),
 ]
 
-// --------------------------------------------------------------------------------------------------- criteria
-
-/// One required criterion (matching/match.mjs `briefCriteriaToCanonical`): everything a brief carries is required.
-pub type Criterion {
-  PositionIn(values: List(String))
-  AgeWithin(lo: Option(Int), hi: Option(Int))
-  LevelAtMost(level: PlayingLevel)
-  WithinRadius(km: Float)
-  FootIn(foot: String)
-  AvailabilityIs(value: String)
-  EvidenceExists(key: String)
-  TrustBandAtLeast(band: TrustBand)
-  CombineResult(protocol: String)
-}
-
-pub fn canonical(c: Criteria) -> List(Criterion) {
-  list.flatten([
-    case c.positions {
-      [] -> []
-      ps -> [PositionIn(list.map(ps, position.to_string))]
-    },
-    case c.min_age, c.max_age {
-      None, None -> []
-      lo, hi -> [AgeWithin(lo, hi)]
-    },
-    option.map(c.max_level, LevelAtMost) |> option_list,
-    option.map(c.radius_km, WithinRadius) |> option_list,
-    option.map(c.foot, fn(f) { FootIn(brief_row.foot_to_string(f)) })
-      |> option_list,
-    option.map(c.availability, AvailabilityIs) |> option_list,
-    list.map(c.evidence_requirements, EvidenceExists),
-    option.map(c.min_trust_band, TrustBandAtLeast) |> option_list,
-    list.map(c.combine_protocols, CombineResult),
-  ])
-}
-
-fn option_list(o: Option(a)) -> List(a) {
-  case o {
-    Some(a) -> [a]
-    None -> []
-  }
-}
-
-fn level_rank(l: PlayingLevel) -> Int {
-  case l {
-    playing_level.Amateur -> 0
-    playing_level.SemiPro -> 1
-    playing_level.Pro -> 2
-  }
-}
-
-fn band_rank(b: TrustBand) -> Int {
-  case b {
-    trust_band.LimitedEvidence -> 0
-    trust_band.DevelopingEvidence -> 1
-    trust_band.EstablishedEvidence -> 2
-    trust_band.StrongEvidence -> 3
-    trust_band.VeryStrongEvidence -> 4
-  }
-}
-
-/// The band's index, as the facts' band index stores it: -1 for none.
-const band_rank_sql =
-  "COALESCE(CASE f.trust_band WHEN 'limited_evidence' THEN 0 WHEN 'developing_evidence' THEN 1 WHEN 'established_evidence' THEN 2 WHEN 'strong_evidence' THEN 3 WHEN 'very_strong_evidence' THEN 4 END, -1)"
-
-const level_rank_sql =
-  "COALESCE(CASE p.level WHEN 'amateur' THEN 0 WHEN 'semi_pro' THEN 1 WHEN 'pro' THEN 2 END, -1)"
-
-fn texts(values: List(String)) -> sqlight.Value {
-  json.array(values, json.string) |> json.to_string |> sqlight.text
-}
-
-/// Only a Grassroots club with a ground may see distance.
-fn ground(org: Org) -> Option(#(Float, Float)) {
-  case orgs.is_grassroots(org), org.lat, org.lng {
-    True, Some(lat), Some(lng) -> Some(#(lat, lng))
-    _, _, _ -> None
-  }
-}
-
-/// The same test as `evaluate`, as an SQL condition over `players p` joined to `player_match_facts f`.
-fn criterion_sql(c: Criterion, org: Org, now: Int) -> Fragment {
-  let today = age.day_of(now)
-  case c {
-    PositionIn(values) ->
-      sql.concat([
-        sql.text(
-          "p.id IN (SELECT player_id FROM player_match_facts WHERE position IN (SELECT value FROM json_each(",
-        ),
-        sql.arg(texts(values)),
-        sql.text(
-          ")) UNION SELECT player_id FROM player_match_fact_positions WHERE code IN (SELECT value FROM json_each(",
-        ),
-        sql.arg(texts(values)),
-        sql.text(")))"),
-      ])
-    // Age ≥ n exactly when the birth day is on or before n years before today, so the index can serve it.
-    AgeWithin(lo, hi) ->
-      sql.concat([
-        sql.text("p.birth_date IS NOT NULL"),
-        case lo {
-          Some(n) ->
-            sql.concat([
-              sql.text(" AND p.birth_date <= "),
-              sql.arg(sqlight.text(age.born_by(today, n))),
-            ])
-          None -> sql.text("")
-        },
-        case hi {
-          Some(n) ->
-            sql.concat([
-              sql.text(" AND p.birth_date > "),
-              sql.arg(sqlight.text(age.born_by(today, n + 1))),
-            ])
-          None -> sql.text("")
-        },
-      ])
-    // An unknown level does not block.
-    LevelAtMost(level) ->
-      sql.concat([
-        sql.text(level_rank_sql <> " <= "),
-        sql.arg(sqlight.int(level_rank(level))),
-      ])
-    WithinRadius(km) ->
-      case ground(org) {
-        None -> sql.text("0")
-        Some(#(lat, lng)) -> {
-          let tenths = distance.tenths(At(lat, lng), Columns("p.lat", "p.lng"))
-          sql.concat([
-            tenths,
-            sql.text(" IS NOT NULL AND "),
-            tenths,
-            sql.text(" / 10.0 <= "),
-            sql.arg(sqlight.float(km)),
-          ])
-        }
-      }
-    // Case-insensitive: the vocabulary is written "Right" and the stored fact "right".
-    FootIn(foot) ->
-      sql.concat([
-        sql.text(
-          "p.foot IS NOT NULL AND (lower(p.foot) IN (SELECT value FROM json_each(",
-        ),
-        sql.arg(texts([string.lowercase(foot)])),
-        sql.text(")) OR lower(p.foot) = 'both')"),
-      ])
-    AvailabilityIs(value) ->
-      sql.concat([sql.text("f.availability = "), sql.arg(sqlight.text(value))])
-    EvidenceExists(key) ->
-      case key {
-        "recent_full_match" ->
-          sql.concat([
-            sql.text("f.last_footage_at > "),
-            sql.arg(sqlight.int(now - 180 * day_ms)),
-          ])
-        "coach_reference" -> sql.text("f.coach_reference = 1")
-        "confirmed_current_club" -> sql.text("f.club_confirmed = 1")
-        "combine_verified" ->
-          sql.text(
-            "EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id)",
-          )
-        _ -> sql.text("0")
-      }
-    TrustBandAtLeast(band) ->
-      sql.concat([
-        sql.text("f.trust_band IS NOT NULL AND " <> band_rank_sql <> " >= "),
-        sql.arg(sqlight.int(band_rank(band))),
-      ])
-    CombineResult(protocol) ->
-      sql.concat([
-        sql.text(
-          "EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ",
-        ),
-        sql.arg(sqlight.text(protocol)),
-        sql.text(")"),
-      ])
-  }
-}
-
-// ------------------------------------------------------------------------------------------------------ facts
-
-/// A candidate's facts, as the match explanation reads them (matching/match.mjs `factsOfRow`).
-pub type Facts {
-  Facts(
-    player_id: id.PlayerId,
-    name: String,
-    age: Option(Int),
-    position: Option(String),
-    secondary: List(String),
-    level: Option(PlayingLevel),
-    foot: Option(String),
-    availability: Option(String),
-    distance_km: Option(Float),
-    trust_band: Option(TrustBand),
-    combine: List(String),
-    /// The evidence requirements the player's record meets (`evidenceFlags`), by key.
-    evidence: List(String),
-    last_evidence_at: Option(Int),
-  )
-}
-
-pub type Reason {
-  Reason(key: String, met: Bool, text: String)
-}
-
-fn reason_json(r: Reason) -> Json {
-  json.object([
-    #("key", json.string(r.key)),
-    #("met", json.bool(r.met)),
-    #("text", json.string(r.text)),
-  ])
-}
-
-fn evidence_label(key: String) -> String {
-  list.key_find(briefs.evidence_requirements, key) |> result.unwrap(key)
-}
-
-/// Does the player satisfy the criterion? Fail closed: a missing fact does not satisfy a criterion about it.
-pub fn evaluate(c: Criterion, f: Facts) -> Reason {
-  case c {
-    PositionIn(values) -> {
-      let has = list.append(option_list(f.position), f.secondary)
-      case list.filter(has, list.contains(values, _)) {
-        [] -> Reason("position", False, "Does not match the position criteria")
-        hit ->
-          Reason(
-            "position",
-            True,
-            "Matches position criteria (" <> string.join(hit, ", ") <> ")",
-          )
-      }
-    }
-    AgeWithin(lo, hi) ->
-      case f.age {
-        None -> Reason("age", False, "Age is not on record")
-        Some(a) -> {
-          let n = int.to_string(a)
-          case lo, hi {
-            Some(l), _ if a < l ->
-              Reason("age", False, "Age " <> n <> " is below the criteria")
-            _, Some(h) if a > h ->
-              Reason("age", False, "Age " <> n <> " is above the criteria")
-            _, _ -> Reason("age", True, "Matches age criteria (" <> n <> ")")
-          }
-        }
-      }
-    WithinRadius(km) ->
-      case f.distance_km {
-        None -> Reason("location", False, "Distance could not be established")
-        Some(d) if d >. km ->
-          Reason("location", False, "Outside the permitted search area")
-        // No number: explaining a match must not become a way to learn where a player (often a child) lives.
-        Some(_) ->
-          Reason("location", True, "Within the club’s permitted search area")
-      }
-    LevelAtMost(max) -> {
-      let max_rank = level_rank(max)
-      // An unknown level does not block.
-      case option.map(f.level, level_rank) {
-        Some(rank) if rank > max_rank ->
-          Reason("level", False, "Plays at a level above the criteria")
-        _ -> Reason("level", True, "Within the level criteria")
-      }
-    }
-    FootIn(foot) ->
-      case f.foot {
-        None -> Reason("foot", False, "Preferred foot is not on record")
-        Some(have) -> {
-          let have_lower = string.lowercase(have)
-          case have_lower == string.lowercase(foot) || have_lower == "both" {
-            True ->
-              Reason("foot", True, "Matches foot criteria (" <> have <> ")")
-            False -> Reason("foot", False, "Does not match the foot criteria")
-          }
-        }
-      }
-    AvailabilityIs(value) ->
-      case f.availability {
-        None -> Reason("availability", False, "Availability is not on record")
-        Some(a) if a == value ->
-          Reason("availability", True, "Matches the availability criteria")
-        Some(_) ->
-          Reason(
-            "availability",
-            False,
-            "Does not match the availability criteria",
-          )
-      }
-    EvidenceExists(key) -> {
-      let label = evidence_label(key)
-      case list.contains(f.evidence, key) {
-        True -> Reason("evidence:" <> key, True, label)
-        False -> Reason("evidence:" <> key, False, label <> " — not on record")
-      }
-    }
-    TrustBandAtLeast(need) ->
-      case f.trust_band {
-        None ->
-          Reason("minTrustBand", False, "Evidence confidence is not available")
-        Some(have) -> {
-          let name = trust_band.to_string(have)
-          case band_rank(have) >= band_rank(need) {
-            True ->
-              Reason(
-                "minTrustBand",
-                True,
-                "Evidence confidence meets the criteria (" <> name <> ")",
-              )
-            False ->
-              Reason(
-                "minTrustBand",
-                False,
-                "Evidence confidence is below the criteria (" <> name <> ")",
-              )
-          }
-        }
-      }
-    CombineResult(protocol) ->
-      case list.contains(f.combine, protocol) {
-        True ->
-          Reason(
-            "combine:" <> protocol,
-            True,
-            protocol <> " Combine Verified result available",
-          )
-        False ->
-          Reason(
-            "combine:" <> protocol,
-            False,
-            "No " <> protocol <> " Combine Verified result",
-          )
-      }
-  }
-}
-
-/// playerMatchesBrief: does the player meet every criterion the brief carries, and why (or why not).
-pub fn match_brief(f: Facts, c: Criteria) -> #(Bool, List(Reason)) {
-  let reasons = list.map(canonical(c), evaluate(_, f))
-  #(list.all(reasons, fn(r) { r.met }), reasons)
-}
-
-pub fn match_json(m: #(Bool, List(Reason))) -> Json {
-  json.object([
-    #("matched", json.bool(m.0)),
-    #("reasons", json.array(m.1, reason_json)),
-  ])
-}
+// --------------------------------------------------------------------------------------------------- candidates
 
 /// buildNobodyMissedCandidate: None when the player does not match, or already entered the workflow.
 pub fn card(
-  f: Facts,
+  f: engine.Facts,
   brief_id: id.BriefId,
   brief_version: Int,
-  matched: #(Bool, List(Reason)),
+  matched: #(Bool, List(engine.Reason)),
   evaluated: Bool,
   room_open: Bool,
 ) -> Option(List(#(String, Json))) {
@@ -460,13 +113,13 @@ pub fn card(
           "reasons",
           json.array(
             list.append(matched.1, [
-              Reason(
+              engine.Reason(
                 "no_room",
                 True,
                 "No Recruitment Room in your organisation",
               ),
             ]),
-            reason_json,
+            engine.reason_json,
           ),
         ),
         #(
@@ -533,8 +186,8 @@ pub fn order(items: List(Orderable), sort: String) -> List(Orderable) {
         )
       "evidence_confidence" ->
         int.compare(
-          option.map(b.trust_band, band_rank) |> option.unwrap(-1),
-          option.map(a.trust_band, band_rank) |> option.unwrap(-1),
+          option.map(b.trust_band, engine.band_rank) |> option.unwrap(-1),
+          option.map(a.trust_band, engine.band_rank) |> option.unwrap(-1),
         )
       "newest_evidence" ->
         int.compare(
@@ -564,25 +217,6 @@ pub fn clamp_page(n: Float, fallback: Int) -> Int {
 }
 
 // ------------------------------------------------------------------------------------------------------ queries
-
-fn from(org: Org, required: List(Criterion), now: Int, extra: List(Fragment)) {
-  sql.concat([
-    sql.text(
-      "players p JOIN player_match_facts f ON f.player_id = p.id WHERE p.deleted_at IS NULL AND ",
-    ),
-    visibility.can_see_sql(org, now),
-    ..list.map(
-      list.append(list.map(required, criterion_sql(_, org, now)), extra),
-      fn(c) { sql.concat([sql.text(" AND ("), c, sql.text(")")]) },
-    )
-  ])
-}
-
-fn count(read: Read, from: Fragment) -> Result(Int, Fail(e)) {
-  let q = sql.concat([sql.text("SELECT COUNT(*) FROM "), from])
-  store.one(read, q.sql, q.args, decode.at([0], decode.int))
-  |> result.map(result.unwrap(_, 0))
-}
 
 /// The players this organisation has evaluated, as SQL over the signals in `evaluation_signals` (a Room, open or
 /// ended, is a case with a room; a deferral counts until it is due). NULLs are filtered out: one NULL in the set
@@ -651,11 +285,14 @@ fn coverage(
   b: Brief,
   at: Int,
 ) -> Result(Coverage, Fail(e)) {
-  let required = canonical(b.criteria)
-  use eligible <- result.try(count(read, from(org, required, at, [])))
-  use evaluated <- result.map(count(
+  let required = engine.brief_criteria(b.criteria).required
+  use eligible <- result.try(query.count(
     read,
-    from(org, required, at, [evaluated_sql(org.id, at)]),
+    query.from(org, required, at, []),
+  ))
+  use evaluated <- result.map(query.count(
+    read,
+    query.from(org, required, at, [evaluated_sql(org.id, at)]),
   ))
   Coverage(eligible:, evaluated:)
 }
@@ -701,46 +338,14 @@ pub fn coverage_state(c: Coverage, suppress_min: Int) -> Json {
   }
 }
 
-const no_distance = 10_000_000_000
-
+/// The queue's order: matching's sorts, and the last time the club reviewed the player for this brief.
 fn order_for(
   sort: String,
   org: Org,
   brief_id: id.BriefId,
   now: Int,
 ) -> List(keyset.OrderKey) {
-  let today = age.day_of(now)
-  let lead = case sort {
-    "name" -> OrderKey(sql.text("f.name_key"), Asc, TextKind)
-    "age" ->
-      OrderKey(
-        sql.concat([
-          sql.text("COALESCE(("),
-          sql.arg(sqlight.int(today.year)),
-          sql.text(" - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - ("),
-          sql.arg(sqlight.text(string.drop_start(age.born_by(today, 0), 5))),
-          sql.text(" < substr(p.birth_date, 6, 5))), 999)"),
-        ]),
-        Asc,
-        IntKind,
-      )
-    "evidence_confidence" -> OrderKey(sql.text(band_rank_sql), Desc, IntKind)
-    // Only a Grassroots club is shown distance: elsewhere every player ties on it, so neither the order nor a
-    // cursor can carry a distance the club is not shown.
-    "distance" ->
-      case ground(org) {
-        Some(#(lat, lng)) ->
-          OrderKey(
-            sql.concat([
-              sql.text("COALESCE("),
-              distance.tenths(At(lat, lng), Columns("p.lat", "p.lng")),
-              sql.text(", " <> int.to_string(no_distance) <> ")"),
-            ]),
-            Asc,
-            IntKind,
-          )
-        None -> OrderKey(sql.text(int.to_string(no_distance)), Asc, IntKind)
-      }
+  query.order(case sort {
     "last_reviewed" ->
       OrderKey(
         sql.concat([
@@ -755,162 +360,7 @@ fn order_for(
         Asc,
         IntKind,
       )
-    _ -> OrderKey(sql.text("COALESCE(f.last_evidence_at, 0)"), Desc, IntKind)
-  }
-  // Tie-break on f.player_id (equal to p.id) so the facts index serves the order.
-  [lead, OrderKey(sql.text("f.player_id"), Asc, TextKind)]
-}
-
-const fact_columns =
-  "p.id, p.name, p.birth_date, p.level, p.foot, f.position, f.availability, f.trust_band, f.last_evidence_at, f.last_footage_at, f.coach_reference, f.club_confirmed"
-
-const fact_width = 12
-
-type FactRow {
-  FactRow(
-    player_id: id.PlayerId,
-    name: String,
-    birth_date: String,
-    level: Option(PlayingLevel),
-    foot: Option(String),
-    position: Option(String),
-    availability: Option(String),
-    trust_band: Option(TrustBand),
-    last_evidence_at: Option(Int),
-    last_footage_at: Option(Int),
-    coach_reference: Bool,
-    club_confirmed: Bool,
-  )
-}
-
-fn fact_row_decoder() -> decode.Decoder(FactRow) {
-  use player_id <- decode.field(0, id.player_decoder())
-  use name <- decode.field(1, decode.string)
-  use birth_date <- decode.field(2, decode.string)
-  use level <- decode.field(3, decode.optional(playing_level.decoder()))
-  use foot <- decode.field(4, decode.optional(decode.string))
-  use position <- decode.field(5, decode.optional(decode.string))
-  use availability <- decode.field(6, decode.optional(decode.string))
-  use trust_band <- decode.field(7, decode.optional(trust_band.decoder()))
-  use last_evidence_at <- decode.field(8, decode.optional(decode.int))
-  use last_footage_at <- decode.field(9, decode.optional(decode.int))
-  use coach_reference <- decode.field(10, sqlight.decode_bool())
-  use club_confirmed <- decode.field(11, sqlight.decode_bool())
-  decode.success(FactRow(
-    player_id:,
-    name:,
-    birth_date:,
-    level:,
-    foot:,
-    position:,
-    availability:,
-    trust_band:,
-    last_evidence_at:,
-    last_footage_at:,
-    coach_reference:,
-    club_confirmed:,
-  ))
-}
-
-/// The page's players' secondary positions, Combine protocols and (for a Grassroots club) distance.
-fn facts_of(
-  read: Read,
-  org: Org,
-  found: List(FactRow),
-  now: Int,
-) -> Result(List(Facts), Fail(e)) {
-  let ids =
-    json.array(found, fn(r) { id.player_json(r.player_id) })
-    |> json.to_string
-    |> sqlight.text
-  use secondary <- result.try(
-    store.query(
-      read,
-      "SELECT player_id, code FROM player_match_fact_positions WHERE player_id IN (SELECT value FROM json_each(?)) ORDER BY player_id, ord",
-      [ids],
-      {
-        use p <- decode.field(0, id.player_decoder())
-        use c <- decode.field(1, decode.string)
-        decode.success(#(p, c))
-      },
-    ),
-  )
-  use combine <- result.try(
-    store.query(
-      read,
-      "SELECT player_id, protocol_id FROM player_match_fact_combine WHERE player_id IN (SELECT value FROM json_each(?)) ORDER BY player_id, protocol_id",
-      [ids],
-      {
-        use p <- decode.field(0, id.player_decoder())
-        use c <- decode.field(1, decode.string)
-        decode.success(#(p, c))
-      },
-    ),
-  )
-  use distances <- result.map(case ground(org) {
-    None -> Ok([])
-    Some(#(lat, lng)) -> {
-      let q =
-        sql.concat([
-          sql.text("SELECT p.id, "),
-          distance.tenths(At(lat, lng), Columns("p.lat", "p.lng")),
-          sql.text(
-            " FROM players p WHERE p.id IN (SELECT value FROM json_each(",
-          ),
-          sql.arg(ids),
-          sql.text("))"),
-        ])
-      store.query(read, q.sql, q.args, {
-        use p <- decode.field(0, id.player_decoder())
-        use t <- decode.field(1, decode.optional(decode.int))
-        decode.success(#(p, t))
-      })
-    }
-  })
-  let of = fn(pairs: List(#(id.PlayerId, String)), pid) {
-    list.filter_map(pairs, fn(x) {
-      case x.0 == pid {
-        True -> Ok(x.1)
-        False -> Error(Nil)
-      }
-    })
-  }
-  list.map(found, fn(r) {
-    Facts(
-      player_id: r.player_id,
-      name: r.name,
-      age: age.age_on(r.birth_date, now),
-      position: r.position,
-      secondary: of(secondary, r.player_id),
-      level: r.level,
-      foot: r.foot,
-      availability: r.availability,
-      distance_km: list.key_find(distances, r.player_id)
-        |> option.from_result
-        |> option.flatten
-        |> option.map(fn(t) { int.to_float(t) /. 10.0 }),
-      trust_band: r.trust_band,
-      combine: of(combine, r.player_id),
-      evidence: list.flatten([
-        case r.last_footage_at {
-          Some(at) if at > now - 180 * day_ms -> ["recent_full_match"]
-          _ -> []
-        },
-        case r.coach_reference {
-          True -> ["coach_reference"]
-          False -> []
-        },
-        case r.club_confirmed {
-          True -> ["confirmed_current_club"]
-          False -> []
-        },
-        case of(combine, r.player_id) {
-          [] -> []
-          _ -> ["combine_verified"]
-        },
-      ]),
-      last_evidence_at: r.last_evidence_at,
-    )
+    _ -> query.lead(sort, org, now)
   })
 }
 
@@ -1766,16 +1216,16 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               }
             }
         })
-        let required = canonical(b.criteria)
+        let required = engine.brief_criteria(b.criteria).required
         let evaluated = evaluated_sql(a.org.id, now)
         let closed = closed_sql(a.org.id, b.row.id)
         use cov <- result.try(
           coverage(read, a.org, b, now) |> room_routes.storage,
         )
         use closed_count <- result.try(
-          count(
+          query.count(
             read,
-            from(a.org, required, now, [
+            query.from(a.org, required, now, [
               sql.concat([
                 sql.text("("),
                 evaluated,
@@ -1787,25 +1237,22 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           )
           |> room_routes.storage,
         )
-        let q =
-          keyset.query(
-            fact_columns,
-            from(a.org, required, now, [negated(evaluated), negated(closed)]),
+        use found <- result.try(
+          query.page(
+            read,
+            query.from(a.org, required, now, [
+              negated(evaluated),
+              negated(closed),
+            ]),
             order,
             page,
           )
-        use found <- result.try(
-          store.query(read, q.sql, q.args, {
-            use r <- decode.then(fact_row_decoder())
-            use keys <- decode.then(keyset.keys_decoder(fact_width, order))
-            decode.success(#(r, keys))
-          })
           |> room_routes.storage,
         )
         let #(shown, next_cursor) =
           paging.page_of(found, page.limit, fn(x) { x.1 })
         use facts <- result.try(
-          facts_of(read, a.org, list.map(shown, fn(x) { x.0 }), now)
+          query.facts_of(read, a.org, list.map(shown, fn(x) { x.0 }), now)
           |> room_routes.storage,
         )
         use reviews <- result.map(
@@ -1818,7 +1265,7 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               f,
               b.row.id,
               b.row.version,
-              match_brief(f, b.criteria),
+              engine.match_brief(f, b.criteria, now),
               False,
               False,
             )
