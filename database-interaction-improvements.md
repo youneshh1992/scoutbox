@@ -6,7 +6,7 @@ Ideas for making the server's SQL safer and its generated code more useful. They
 enums and CHECK bools. Its functions take a bare `sqlight.Connection`, which bypasses `Tx`/`Read` and our
 statement cache. And it can't express composed SQL. Some of its ideas are still worth taking.
 
-#1 is implemented. Each of the others needs agreement on its design first.
+#1 and #2 are implemented. Each of the others needs agreement on its design first.
 
 ## Where we stand
 
@@ -51,7 +51,7 @@ left for later.
 
 ## 2. Catch arguments bound to the wrong column
 
-**Cost:** medium. **Builds on:** #1.
+**Cost:** medium. **Builds on:** #1. **Status:** done: part of `npm run sql:check` (`dev/scoutbox/sql_bindings.gleam`).
 
 Match each `?` to the column it binds, for the simple shapes only:
 
@@ -72,6 +72,25 @@ most swaps. Two `String` arguments swapped with each other still get through.
 
 Any `?` the checker can't tie to a column is skipped: `CASE`, `INSERT … SELECT`, expressions and function
 arguments. Arguments built away from the call site (`args` passed in, `list.map` results) are skipped too.
+
+As built:
+
+- The ties are `col` compared with `?` (including `IS` and `IS NOT`), `col IN (?, …)`, `SET col = ?` and an
+  INSERT's column list. `IN (SELECT value FROM json_each(?))` isn't tied: its argument is a JSON array, not one
+  value. A bare column is tied only when exactly one of the statement's tables has it and none of them is a CTE.
+- Arguments are followed through `let`s and same-module helpers, so a list built at a call and bound inside
+  `offers.select` is still compared.
+- Text bound to an id or vocabulary column (`sqlight.text(id_string)`) is reported as *untyped* in `--verbose`,
+  not failed: it's a place where a typed id or `to_string` would help, not a bug. There are 43 today.
+- Two extra rules fell out: binding NULL (or a `nullable`) to a NOT NULL column in a write, and comparing with a
+  NULL argument using `=`/`IN`, which is never true.
+- Gleam decides between a module and a local variable of the same name by type (`id.player_sql(id)` reaches the
+  module). The reader can't see types, so it takes `alias.member` as the module whenever the module defines
+  `member`.
+
+On the first run it compared 947 of the 1,049 arguments the source writes out and found no problems. Swapping
+real argument pairs (two ids in `players.gleam`, `combine.gleam` and `trial_routes.gleam`, and an Int with an id
+in `cases.gleam`) was caught each time.
 
 ## 3. Typed fragments for SETs and WHEREs from the existing generator
 

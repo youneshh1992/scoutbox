@@ -38,8 +38,9 @@ npm run ledger         # write LEDGER.md: every TypeScript battery, where its ch
 npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
 npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
 npm run sql:check      # prepare every query the source spells out against the migrated schema, and check its
-                       # placeholders against its argument list (`--verbose` after `gleam dev sql-check` lists
-                       # the queries it can't read)
+                       # placeholders against its arguments and each argument against the column it binds
+                       # (`gleam dev sql-check --verbose` lists the queries it can't read and the arguments
+                       # bound as plain text to an id or vocabulary column)
 node dev/perf.mjs      # latency of the hot paths on both servers (after `gleam export erlang-shipment`)
 node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 and 1000 streams, on both servers
 ```

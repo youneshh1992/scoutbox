@@ -12,6 +12,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import scoutbox/codegen.{Ided, RefersTo, Shared, Untyped}
 import scoutbox/sql_check
+import scoutbox/sql_source
 import simplifile
 
 /// The vocabularies several tables share, declared once. Each must be exactly some column's CHECK list.
@@ -1108,10 +1109,14 @@ fn check_sql(verbose: Bool) -> Nil {
     Error(file) -> panic as { "sql-check: glance can't parse " <> file }
   }
   case verbose {
-    True ->
+    True -> {
       list.each(report.unresolved, fn(u) {
         io.println(where(u.0) <> ": not spelt out: " <> u.1)
       })
+      list.each(report.untyped, fn(u) {
+        io.println(where(u.0) <> ": untyped: " <> u.1)
+      })
+    }
     False -> Nil
   }
   list.each(report.problems, fn(p) {
@@ -1121,9 +1126,15 @@ fn check_sql(verbose: Bool) -> Nil {
   io.println(
     "sql-check: "
     <> int.to_string(report.checked)
-    <> " queries prepared against the schema; "
+    <> " queries prepared against the schema, "
+    <> int.to_string(report.tied)
+    <> " of their "
+    <> int.to_string(report.arguments)
+    <> " arguments compared with the column they bind; "
     <> int.to_string(list.length(report.unresolved))
-    <> " not spelt out in the source"
+    <> " queries not spelt out in the source, "
+    <> int.to_string(list.length(report.untyped))
+    <> " arguments bound as plain text to an id or vocabulary column"
     <> case verbose {
       True -> ""
       False -> " (--verbose lists them)"
@@ -1138,7 +1149,7 @@ fn check_sql(verbose: Bool) -> Nil {
   }
 }
 
-fn where(site: sql_check.Site) -> String {
+fn where(site: sql_source.Site) -> String {
   site.file
   <> ":"
   <> int.to_string(site.line)

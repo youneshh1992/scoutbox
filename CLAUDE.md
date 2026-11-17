@@ -67,7 +67,8 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 - SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
 - `npm run sql:check` (part of `e2e:check`) prepares every query whose SQL the source spells out against the
-  migrated schema, and checks its `?`s against the argument list when that is written out. It reads literals,
+  migrated schema, checks its `?`s against the argument list when that is written out, and compares each
+  argument with the column its `?` binds (an `id.player_sql` bound to a `case_id` fails). It reads literals,
   constants, row modules' `columns`/`table`/`qualified`, `let`s, and calls to helpers in the same module; SQL
   built with `string.join` or passed in from another module isn't read (`gleam dev sql-check --verbose` lists
   those). Prefer building a query from these, so it is checked.
