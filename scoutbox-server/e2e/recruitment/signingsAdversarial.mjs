@@ -376,7 +376,10 @@ const orgPlayer = async (id, token) => {
 const setFaults = (rules) => j('POST', '/__faults', { rules });
 /** A presented package: start → attach A → ready. */
 async function presented(token, playerId, opts = {}) {
-  const x = await accepted(token, playerId, opts);
+  return presentedOver(await accepted(token, playerId, opts), token, opts);
+}
+/** A presented package over an accepted Offer `x` ({ RID, OID, R, playerId }): start → attach A → ready. */
+async function presentedOver(x, token, opts = {}) {
   const s = await start(x.OID, { internalNote: S_NOTE, clientKey: key() }, token, at(opts.clock ?? T0));
   if (s.status !== 201) throw new Error(`start ${s.status} ${JSON.stringify(s.body).slice(0, 200)}`);
   const SID = sv(s).id;
@@ -1746,7 +1749,19 @@ section(
   'Q — partial failures: no success with split authoritative state; a party write that fails leaves the party pending',
 );
 {
-  const Q = await presented(rita.token, 'pl-carvalho').catch(() => null);
+  // J4's race left Carvalho's Harbour case signed (the signature won) or at offer_accepted with its package
+  // cancelled (the cancel won); either way the fixture is a fresh package over an accepted Offer.
+  const Q = await (async () => {
+    const r = await j('POST', '/org/rooms', { playerId: 'pl-carvalho', sourceContext: 'search' }, rita.token);
+    const RID = r.status === 201 ? r.body.room.roomId : r.body?.existingRoomId;
+    if (!RID || (await stage(RID, rita.token)) !== 'offer_accepted') return presented(rita.token, 'pl-carvalho');
+    const OID = (await sRoom(RID, rita.token)).body.requirements.acceptedOfferId;
+    const offer = (await j('GET', `/org/offers/${OID}`, undefined, rita.token)).body.offer;
+    return presentedOver(
+      { RID, OID, R: offer.currentRevisionId, playerId: 'pl-carvalho', token: rita.token },
+      rita.token,
+    );
+  })().catch(() => null);
   const target = Q ?? globalThis.__L; // fallback: some presented Harbour package with a pending party
   if (Q) {
     ok(

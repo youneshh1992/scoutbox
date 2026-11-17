@@ -5,8 +5,11 @@ import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/result
+import gleam/string
 import scoutbox/identity/players.{type Player}
+import scoutbox/platform/clock
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/cases.{type Room}
 import scoutbox/recruitment/offer_rules.{type Offer}
@@ -15,6 +18,7 @@ import scoutbox/recruitment/signing_packages
 import scoutbox/recruitment/signing_rules.{type Package}
 import scoutbox/recruitment/signing_writer
 import scoutbox/rows/id
+import scoutbox/rows/signing_packages as pkg_row
 import scoutbox/rows/signings as signing_row
 
 /// What the reads around a package found: its case and Offer (when they are its club's), its completed row and
@@ -158,6 +162,47 @@ pub fn with_signing(
     case e.0 {
       "signing" -> #("signing", summary)
       _ -> e
+    }
+  })
+}
+
+/// The player's live contract (createContractLookup): a completed-signing row over a COMPLETED package that names it
+/// back, whose contract end has not passed. Some(end) when one stands; this record owns `under_contract`.
+pub fn canonical_contract(
+  read: Read,
+  player_id: id.PlayerId,
+  now: Int,
+) -> Result(Option(Option(String)), Fail(e)) {
+  let today = clock.iso_day(now)
+  use rows <- result.try(signing_writer.for_player(read, player_id))
+  list.try_fold(rows, None, fn(found, s) {
+    case found, s.signing_package_id {
+      Some(_), _ | None, None -> Ok(found)
+      None, Some(pid) -> {
+        use pkg <- result.map(signing_packages.by_id(
+          read,
+          id.signing_package_to_string(pid),
+        ))
+        let mine = Some(s.id)
+        case pkg {
+          Some(p)
+            if p.row.status == pkg_row.Completed
+            && p.row.completion_signing_id == mine
+          -> {
+            let end =
+              option.or(s.contract_end_date, p.row.completion_contract_end_date)
+            let ended = case end {
+              Some(e) -> string.compare(e, today) == order.Lt
+              None -> False
+            }
+            case ended {
+              True -> None
+              False -> Some(end)
+            }
+          }
+          _ -> None
+        }
+      }
     }
   })
 }

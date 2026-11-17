@@ -59,3 +59,18 @@ pub fn update(
     as "the in-memory table did not answer"
   answer
 }
+
+/// Every entry, in no particular order.
+pub fn entries(table: Table(v)) -> List(#(String, v)) {
+  let reply = process.new_subject()
+  process.send(
+    table.subject,
+    Apply(fn(state) {
+      process.send(reply, dict.to_list(state))
+      state
+    }),
+  )
+  let assert Ok(entries) = process.receive(reply, 5000)
+    as "the in-memory table did not answer"
+  entries
+}

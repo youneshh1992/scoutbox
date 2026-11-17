@@ -100,6 +100,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         True -> fault_routes.handle(ctx, req)
         False -> not_found()
       }
+    ["__rate-limits"] ->
+      case faults.enabled(ctx.faults) {
+        True -> only(req, Get, fn() { rate_limits(ctx) })
+        False -> not_found()
+      }
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
     ["meta"] -> only(req, Get, operator.meta)
@@ -1531,4 +1536,24 @@ fn rooms(
       case_routes.finalize(ctx, req, org, room(rid), True)
     _, _ -> not_found()
   }
+}
+
+/// `GET /__rate-limits` (development only, on the same guard as `/__faults`): the live buckets, so a battery can
+/// see which budget a request drew on without spending it.
+fn rate_limits(ctx: Ctx) -> Response {
+  contract.json(
+    200,
+    json.object([
+      #(
+        "buckets",
+        json.array(limits.snapshot(ctx.limits), fn(b) {
+          json.object([
+            #("action", json.string(b.0)),
+            #("key", json.string(b.1)),
+            #("spent", json.int(b.2)),
+          ])
+        }),
+      ),
+    ]),
+  )
 }

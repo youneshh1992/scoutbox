@@ -20,6 +20,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Tx}
+import scoutbox/recruitment/signing_reads
 import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
@@ -162,10 +163,8 @@ type Availability {
   )
 }
 
-/// `POST /player/availability`.
-///
-/// Not ported yet: a contract a completed signing records (recruitment's signings) makes the status canonical
-/// and refuses a change here; this server has no signings, so none is.
+/// `POST /player/availability`. A contract a completed signing records makes the status canonical: no word
+/// replaces it here while that contract stands.
 pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   use <- access.guardian_managed_only(p)
   let shape = {
@@ -205,26 +204,55 @@ pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           ),
         ]),
       )
-    _ ->
-      act(
-        ctx,
-        players.set_availability(
+    Some(_) ->
+      case
+        store.read(ctx.store, signing_reads.canonical_contract(
           _,
           p.player.row.id,
-          body.availability,
-          body.contract_status,
-        ),
-        fn(s) {
-          json.object([
-            #("availability", availability.to_json(s.row.availability)),
-            #(
-              "contractStatus",
-              row.contract_status_to_json(s.row.contract_status),
-            ),
-          ])
-        },
-      )
+          clock.now_ms(),
+        ))
+      {
+        Error(failure) -> http.internal(failure)
+        Ok(Some(end)) ->
+          http.json(
+            409,
+            json.object([
+              #("error", json.string("CONTRACT_STATUS_CANONICAL")),
+              #(
+                "message",
+                json.string(
+                  "Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.",
+                ),
+              ),
+              #(
+                "contractStatus",
+                row.contract_status_to_json(p.player.row.contract_status),
+              ),
+              #("endDate", json.nullable(end, json.string)),
+            ]),
+          )
+        Ok(None) -> set_availability(ctx, p, body)
+      }
+    None -> set_availability(ctx, p, body)
   }
+}
+
+fn set_availability(ctx: Ctx, p: PlayerAccess, body: Availability) -> Response {
+  act(
+    ctx,
+    players.set_availability(
+      _,
+      p.player.row.id,
+      body.availability,
+      body.contract_status,
+    ),
+    fn(s) {
+      json.object([
+        #("availability", availability.to_json(s.row.availability)),
+        #("contractStatus", row.contract_status_to_json(s.row.contract_status)),
+      ])
+    },
+  )
 }
 
 /// A figure as sent: a number, judged by the route (BAD_STAT) rather than the shape.

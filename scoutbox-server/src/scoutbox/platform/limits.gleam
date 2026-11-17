@@ -6,6 +6,7 @@
 //// - wrong second-factor codes, per staff member: five lock the account's code checks for five minutes;
 //// - the acts RATE_LIMIT_POLICY bounds per owner (`Action`), each in its own window.
 
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
@@ -329,6 +330,20 @@ pub fn limited(
 }
 
 /// The 429 body for an act over its budget (rateLimitedBody).
+/// The live buckets of the acts' budgets, as `GET /__rate-limits` lists them: the action, whose budget it is, and
+/// how much of it is spent.
+pub fn snapshot(limits: Limits) -> List(#(String, String, Int)) {
+  table.entries(limits.acts)
+  |> list.map(fn(e) {
+    let #(key, w) = e
+    case string.split_once(key, ":") {
+      Ok(#(action, owner)) -> #(action, owner, w.count)
+      Error(Nil) -> #(key, "", w.count)
+    }
+  })
+  |> list.sort(fn(a, b) { string.compare(a.0 <> ":" <> a.1, b.0 <> ":" <> b.1) })
+}
+
 pub fn limited_body(action: Action) -> List(#(String, String)) {
   [
     #("error", "RATE_LIMITED"),
