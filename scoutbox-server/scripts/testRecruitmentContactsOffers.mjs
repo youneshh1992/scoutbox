@@ -270,7 +270,7 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   rm(d);
 });
 
-test("[fixtures][typed] a write STOPS with the id on a record the columns cannot hold — nothing written: an unknown status, a subject over 120 characters, a field or value the tables would not store as written (an unknown field, top level and nested, an off-type rev), a list that is not a list, a current revision the offer does not hold, a response naming another offer's revision, two answers to one revision, a receipt naming a missing revision; a contact naming a case or a request that is not there", () => {
+test("[fixtures][typed] a write STOPS with the id on a record the columns cannot hold — nothing written: an unknown status, a subject over 120 characters, a field or value the tables would not store as written (an unknown field, top level and nested, an off-type rev), a list that is not a list, an entry that is not a record, a current revision the offer does not hold, a response naming another offer's revision, two answers to one revision, a receipt naming a missing revision; a contact naming a case or a request that is not there", () => {
   const C = (over) => ({ recruitmentContacts: [draftContact(over)] });
   const O = (o) => ({ recruitmentOffers: [o] });
   refusedSave(
@@ -290,6 +290,12 @@ test("[fixtures][typed] a write STOPS with the id on a record the columns cannot
     /recruitment_contacts rct-1 emailCopy\.extra: is not stored as written/,
   );
   refusedSave('rev', C({ rev: '1' }), /recruitment_contacts rct-1 rev: is not stored as written/);
+  refusedSave(
+    'null-entry',
+    { recruitmentContacts: [draftContact(), null] },
+    /CONTACTS_OFFERS_INPUT_INVALID: recruitment_contacts: a record must be an object \(got null\)/,
+  );
+  refusedSave('history', C({ history: 'not-a-list' }), /recruitment_contacts rct-1 history: must be a list/);
   refusedSave(
     'attempts',
     C({ attempts: { not: 'a list' } }),

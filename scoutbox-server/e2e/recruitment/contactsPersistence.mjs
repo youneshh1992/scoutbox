@@ -13,31 +13,59 @@
 //      died is still a replay (proved over HTTP in contacts.mjs group Z;
 //      re-proved here after a restart).
 //
-// No fixture here calls buildSeed(): the whole defect
-// class lives in the gap between "the seed made it" and "the database
-// guarantees it".
+// No fixture here calls buildSeed(): the whole defect class lives in the gap between "the seed made it" and "the
+// database guarantees it". Fixtures are written and read back as stored rows. The integrity rule and the evidence it
+// feeds are checked over the battery's records in scripts/rules/recruitment/contactsPersistence.mjs; the repository's
+// refusal of entries that have no row form (an entry that is not a record, a history that is not a list) is in
+// scripts/testRecruitmentContactsOffers.mjs.
 
 import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { integrityReport } from '../../domains/platform/integrity.mjs';
-import { OPEN_ROOM_STATUSES } from '../../domains/recruitment/public.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
-import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { openFixture } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
+import contactSpec from '../support/spec/recruitment/lifecycle/contact.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
-import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
-const LATEST_SCHEMA = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
 
-const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
+const { CONTACT_STATUSES } = contactSpec;
+// The table migrations a new database records, as the migrated schema lists them.
+const MIGRATIONS = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-cp-schema-')));
+  try {
+    return R.rows('data_migrations').map((r) => r.id);
+  } finally {
+    R.close();
+  }
+})();
+const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
+
+// The tables a contact is stored in.
+const CONTACT_TABLES = ['recruitment_contacts', 'contact_attempts', 'contact_history'];
+/** What a stopped server left: the contact tables, the requests and the cases, as stored rows. */
+const stored = (dir) => {
+  const R = readRows(dir);
+  try {
+    return Object.fromEntries(
+      [...CONTACT_TABLES, 'recruitment_requests', 'recruitment_cases'].map((t) => [t, R.rows(t)]),
+    );
+  } finally {
+    R.close();
+  }
+};
+/** Every contact row in every contact table, as text to compare. */
+const contactRows = (s) => JSON.stringify(CONTACT_TABLES.map((t) => s[t]));
+/** The whole database, as text: the yardstick for "nothing was written". */
+const everything = (dir) => {
+  const R = readRows(dir);
+  try {
+    return JSON.stringify(R.all());
+  } finally {
+    R.close();
+  }
+};
 
 let passed = 0;
 let negatives = 0;
@@ -69,7 +97,7 @@ process.on('exit', () => {
   }
 });
 
-/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the records back. */
+/** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the stored rows back. */
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
   const proc = spawn(...serverCommand(), {
@@ -115,169 +143,229 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
 
 const PORT = pickPort(5600, 200, [0, 1, 2, 3, 4, 5, 6]);
+const NOW = Date.now(); // when the fixtures are installed: the migrated schema's own rows carry it
 
-// ------------------------------------------------------------- fixtures
+// ------------------------------------------------------------- fixtures, as stored rows
 
-/** A minimal, sound database with one verified club, one adult player, one case at contact_planned. */
-function baseDb() {
-  const db = {
-    players: [
-      {
-        id: 'pl-x',
-        name: 'Xavier Adult',
-        dob: '2000-05-05',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
-    orgs: [
-      {
-        id: 'org-x',
-        name: 'X FC',
-        type: 'club',
-        level: 'pro',
-        plan: 'Pro',
-        verified: true,
-        safeguardingContractSigned: true,
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
-    guardians: [],
-    // A request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
-    // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
-    users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
-    sessions: [],
-    ledger: [],
-    notifications: [],
-    recruitmentCases: [
-      {
-        id: 'case-x',
-        orgId: 'org-x',
-        playerId: 'pl-x',
-        playerName: 'Xavier Adult',
-        ownerUserId: 'usr-owner',
-        ownerName: 'Owner',
-        stage: 'review',
-        priority: 'medium',
-        restricted: false,
-        assignments: [],
-        tasks: [],
-        approvals: [],
-        decision: null,
-        links: { requestIds: [], trialIds: [], signingId: null },
-        room: {
-          status: 'contact_planned',
-          priority: 'normal',
-          tags: [],
-          leadScoutUserId: 'usr-owner',
-          sourceContext: 'search',
-          updatedAt: 1000,
-          archivedAt: null,
-          closedAt: null,
-          rev: 2,
-          revAt: 1000,
-          revBy: null,
-        },
-        createdAt: 1000,
-        history: [
-          {
-            id: 'aud-1',
-            at: 1000,
-            byKind: 'org',
-            byId: 'usr-owner',
-            byName: 'Owner',
-            action: 'room_created',
-            detail: { status: 'watching' },
-          },
-          {
-            id: 'aud-2',
-            at: 1001,
-            byKind: 'org',
-            byId: 'usr-owner',
-            byName: 'Owner',
-            action: 'room_status_changed',
-            detail: { from: 'watching', to: 'contact_planned', reasonCodes: [] },
-          },
-        ],
-      },
-    ],
-  };
-  return db;
-}
+const CLUB = (id, name) => ({
+  id,
+  name,
+  type: 'club',
+  level: 'pro',
+  plan: 'Pro',
+  lat: 51.5,
+  lng: -0.1,
+  trusted_partner: 0,
+  verified: 1,
+  safeguarding_contract_signed: 1,
+  suspended: 0,
+  email_domain_verified: 0,
+  mfa_required_for_leads: 0,
+  created_at: NOW,
+});
 
-const soundContact = (over = {}) => ({
-  id: 'rct-1',
-  orgId: 'org-x',
-  caseId: 'case-x',
-  playerId: 'pl-x',
-  status: 'delivered',
-  channel: 'in_app',
-  recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false },
-  contactMode: 'player_only',
-  routingSnapshot: null,
-  subject: 'Hello',
-  body: 'Hi Xavier.',
-  summary: null,
-  createdBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-  createdAt: 2000,
-  updatedAt: 2001,
-  sentBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-  sentAt: 2001,
-  deliveredAt: 2001,
-  failedAt: null,
-  failureCode: null,
-  attempts: [{ at: 2001, ok: true, code: null }],
-  requestId: 'req-1',
-  emailCopy: null,
-  lifecycle: null,
-  occurredAt: null,
-  recordedBy: null,
-  recordedAt: null,
-  respondedAt: null,
-  response: null,
-  cancelledAt: null,
-  cancelledBy: null,
-  keys: {
-    create: { key: 'ck-1', fp: '{"body":"Hi Xavier.","subject":"Hello"}' },
-    send: { key: 'sk-1', fp: '{"contactId":"rct-1"}' },
-    record: null,
-  },
-  history: [
+/** A minimal, sound database with one verified club, one adult player, one case at contact_planned. A request names
+ *  its staff member by a real key (recruitment_requests.user_id → org_users), so the fixture carries the staff row the
+ *  case and the request name (the dev login below finds it by org and name). */
+const baseRows = () => ({
+  orgs: [CLUB('org-x', 'X FC')],
+  org_users: [
     {
-      id: 'aud-10',
-      at: 2000,
-      action: 'contact_created',
-      by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      detail: { channel: 'in_app' },
-    },
-    {
-      id: 'aud-11',
-      at: 2001,
-      action: 'contact_sent',
-      by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      detail: { channel: 'in_app', recipientType: 'player', attempt: 1 },
+      id: 'usr-owner',
+      org_id: 'org-x',
+      name: 'Owner',
+      name_key: 'owner',
+      role: 'Head of Recruitment',
+      created_at: 1,
+      email_enabled: 1,
     },
   ],
-  rev: 2,
-  revAt: 2001,
-  revBy: { userId: 'usr-owner', name: 'Owner' },
-  policyVersion: 1,
+  players: [
+    {
+      id: 'pl-x',
+      name: 'Xavier Adult',
+      birth_date: '2000-05-05',
+      country: 'GB',
+      city: 'London',
+      academy_plus: 0,
+      first_team_seeker: 0,
+      availability: 'not_seeking',
+      contract_status: 'unknown',
+      level: 'amateur',
+      identity_verified: 0,
+      lat: 51.5,
+      lng: -0.1,
+      medical_shared: 0,
+      medical_condition_status: 'unknown',
+      profile_signal: 30,
+    },
+  ],
+  recruitment_cases: [
+    {
+      id: 'case-x',
+      org_id: 'org-x',
+      player_id: 'pl-x',
+      player_name: 'Xavier Adult',
+      owner_user_id: 'usr-owner',
+      owner_name: 'Owner',
+      stage: 'review',
+      priority: 'medium',
+      restricted: 0,
+      created_at: 1000,
+      room_status: 'contact_planned',
+      room_priority: 'normal',
+      room_lead_scout_user_id: 'usr-owner',
+      room_source_context: 'search',
+      room_updated_at: 1000,
+      room_rev: 2,
+      room_rev_at: 1000,
+    },
+  ],
+  case_history: [
+    {
+      case_id: 'case-x',
+      position: 0,
+      id: 'aud-1',
+      at: 1000,
+      action: 'room_created',
+      by_kind: 'org',
+      by_id: 'usr-owner',
+      by_name: 'Owner',
+      detail_json: JSON.stringify({ status: 'watching' }),
+    },
+    {
+      case_id: 'case-x',
+      position: 1,
+      id: 'aud-2',
+      at: 1001,
+      action: 'room_status_changed',
+      by_kind: 'org',
+      by_id: 'usr-owner',
+      by_name: 'Owner',
+      detail_json: JSON.stringify({ from: 'watching', to: 'contact_planned', reasonCodes: [] }),
+    },
+  ],
+});
+
+const OWNER = { by_kind: 'org', by_user_id: 'usr-owner', by_name: 'Owner' };
+/** A contact history entry: `by` is the staff member unless given. */
+const entry = (position, id, at, action, detail, by = OWNER) => ({
+  id,
+  position,
+  at,
+  action,
+  ...by,
+  detail_json: detail === undefined ? null : JSON.stringify(detail),
+});
+// A contact that was never sent: no recipient, no send, no keys.
+const NO_RECIPIENT = { recipient_type: null, recipient_player_id: null, recipient_minor: null };
+const NOT_SENT = { sent_by_user_id: null, sent_by_name: null, sent_at: null, delivered_at: null, request_id: null };
+const NO_KEYS = { create_key: null, create_fp: null, send_key: null, send_fp: null };
+
+/** A sound contact delivered in the app, with its one attempt and its history, in its rows. `over` changes the
+ *  recruitment_contacts row; `attempts` and `history` replace the child rows. */
+const soundContact = (
+  over = {},
+  {
+    attempts = [{ position: 0, at: 2001, ok: 1 }],
+    history = [
+      entry(0, 'aud-10', 2000, 'contact_created', { channel: 'in_app' }),
+      entry(1, 'aud-11', 2001, 'contact_sent', { channel: 'in_app', recipientType: 'player', attempt: 1 }),
+    ],
+  } = {},
+) => {
+  const id = over.id ?? 'rct-1';
+  return {
+    recruitment_contacts: [
+      {
+        id,
+        org_id: 'org-x',
+        case_id: 'case-x',
+        player_id: 'pl-x',
+        status: 'delivered',
+        channel: 'in_app',
+        contact_mode: 'player_only',
+        recipient_type: 'player',
+        recipient_player_id: 'pl-x',
+        recipient_minor: 0,
+        subject: 'Hello',
+        body: 'Hi Xavier.',
+        created_by_user_id: 'usr-owner',
+        created_by_name: 'Owner',
+        created_at: 2000,
+        updated_at: 2001,
+        sent_by_user_id: 'usr-owner',
+        sent_by_name: 'Owner',
+        sent_at: 2001,
+        delivered_at: 2001,
+        request_id: 'req-1',
+        create_key: 'ck-1',
+        create_fp: '{"body":"Hi Xavier.","subject":"Hello"}',
+        send_key: 'sk-1',
+        send_fp: '{"contactId":"rct-1"}',
+        rev: 2,
+        rev_at: 2001,
+        rev_by_user_id: 'usr-owner',
+        rev_by_name: 'Owner',
+        policy_version: 1,
+        ...over,
+      },
+    ],
+    contact_attempts: attempts.map((a) => ({ contact_id: id, ...a })),
+    contact_history: history.map((h) => ({ contact_id: id, ...h })),
+  };
+};
+
+/** The contact request a send issues for contact `contactId` (issueRecruitmentRequest's literal: the staff member and
+ *  the organisation's flags it always sets). */
+const contactRequest = (id, contactId, over = {}) => ({
+  id,
+  player_id: 'pl-x',
+  player_name: 'Xavier Adult',
+  org_id: 'org-x',
+  org_name: 'X FC',
+  org_type: 'club',
+  org_verified: 1,
+  org_safeguarding_certified: 1,
+  user_id: 'usr-owner',
+  scout_name: 'Owner',
+  scout_role: 'Head of Recruitment',
+  type: 'contact',
+  message: 'Hi Xavier.',
+  contact_id: contactId,
+  status: 'pending',
+  created_at: 2001,
+  routed_to: 'player',
   ...over,
 });
+
+const merge = (...sets) => {
+  const out = {};
+  for (const s of sets) for (const [t, rs] of Object.entries(s)) out[t] = [...(out[t] ?? []), ...rs];
+  return out;
+};
+
+/** Write `tables` into `dir` in one transaction: a row the schema refuses refuses the whole fixture. */
+const write = (dir, tables) => {
+  const F = openFixture(dir, { now: NOW });
+  try {
+    F.transaction(() => {
+      if (F.fresh) F.markInstalled();
+      F.sql.exec('PRAGMA defer_foreign_keys = ON'); // a sent contact and its request name each other
+      for (const [table, rs] of Object.entries(tables)) for (const r of rs) F.insert(table, r);
+      F.raiseIdCounter(500);
+    });
+  } finally {
+    F.close();
+  }
+  return dir;
+};
 
 // The table-migration ledger of a stopped server's file: every id with the time it was applied.
 const ledger = (dir) => {
@@ -290,175 +378,92 @@ const ledger = (dir) => {
 };
 
 // ======================================================= the guarantee
-section('the store is guaranteed by the registry, on every path');
+section('the store is guaranteed by the schema, on every path');
 {
-  ok(
-    TABLE_BACKED.includes('recruitmentContacts') &&
-      DATA_MIGRATIONS.filter((m) => m.id === '0017_recruitment_contacts_offers').length === 1,
-    'recruitmentContacts is a table, created by migration 0017 (read through SQL)',
-  );
-  const noContacts = buildRecruitmentJourney(
-    { recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] },
-    'k',
-    { kind: 'org_staff', orgId: 'o1' },
-  );
-  ok(
-    noContacts.ok === false &&
-      noContacts.error === 'JOURNEY_STORE_MISSING' &&
-      noContacts.missing.includes('recruitmentContacts'),
-    'the journey still requires the contacts: without their queries it reports the store missing',
-  );
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-cp-tables-')));
+  try {
+    ok(
+      R.tables().includes('recruitment_contacts') &&
+        MIGRATIONS.filter((m) => m === '0017_recruitment_contacts_offers').length === 1,
+      'recruitment_contacts is a table, created by migration 0017 (read through SQL)',
+    );
+  } finally {
+    R.close();
+  }
 }
 
 // ======================================================= byte-faithful restore
 section('a fixture with Contact rows restores byte-faithfully through a real boot');
 const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
 {
-  const db = baseDb();
-  const rows = [
+  const rows = merge(
+    baseRows(),
     soundContact(),
-    soundContact({
-      id: 'rct-2',
-      status: 'draft',
-      recipient: null,
-      sentBy: null,
-      sentAt: null,
-      deliveredAt: null,
-      attempts: [],
-      requestId: null,
-      keys: { create: null, send: null, record: null },
-      history: [
-        {
-          id: 'aud-20',
-          at: 3000,
-          action: 'contact_created',
-          by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-          detail: { channel: 'in_app' },
-        },
-      ],
-      rev: 1,
-      revAt: 3000,
-    }),
-    soundContact({
-      id: 'rct-3',
-      status: 'recorded',
-      channel: 'phone',
-      body: null,
-      subject: null,
-      summary: 'Called.',
-      occurredAt: 3500,
-      recordedAt: 3600,
-      recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      sentBy: null,
-      sentAt: null,
-      deliveredAt: null,
-      attempts: [],
-      requestId: null,
-      keys: { create: null, send: null, record: { key: 'rk-1', fp: 'x' } },
-      history: [
-        {
-          id: 'aud-30',
-          at: 3600,
-          action: 'contact_external_recorded',
-          by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-          detail: { channel: 'phone', occurredAt: 3500, recipientType: 'player' },
-        },
-      ],
-    }),
-    // A sent contact and its request are a PAIR (recruitment_contacts.request_id is a real key and the request names its
-    // contact back); two contacts naming ONE request is a state the production writer never produces (the send creates
-    // the request for that contact) and a save refuses it with the ids (CONTACT_REQUEST_MISMATCH), never repairs it. The
-    // responded contact therefore carries its own request, as a real one would.
-    soundContact({
-      id: 'rct-4',
-      status: 'responded',
-      requestId: 'req-4',
-      respondedAt: 4000,
-      response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 },
-      history: [
-        {
-          id: 'aud-40',
-          at: 2001,
-          action: 'contact_sent',
-          by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-          detail: {},
-        },
-        {
-          id: 'aud-41',
-          at: 4000,
-          action: 'contact_responded',
-          by: { kind: 'player', name: 'Player' },
-          detail: { kind: 'accepted' },
-        },
-      ],
-      rev: 3,
-    }),
-  ];
-  db.recruitmentContacts = rows;
-  // The request rows are issueRecruitmentRequest's literal (the staff member and the organisation's flags it
-  // always sets); a row the typed table cannot hold is refused with its id, never repaired.
-  db.requests = [
+    soundContact(
+      { id: 'rct-2', status: 'draft', ...NO_RECIPIENT, ...NOT_SENT, ...NO_KEYS, rev: 1, rev_at: 3000 },
+      { attempts: [], history: [entry(0, 'aud-20', 3000, 'contact_created', { channel: 'in_app' })] },
+    ),
+    soundContact(
+      {
+        id: 'rct-3',
+        status: 'recorded',
+        channel: 'phone',
+        subject: null,
+        body: null,
+        summary: 'Called.',
+        occurred_at: 3500,
+        recorded_by_user_id: 'usr-owner',
+        recorded_by_name: 'Owner',
+        recorded_at: 3600,
+        ...NOT_SENT,
+        ...NO_KEYS,
+        record_key: 'rk-1',
+        record_fp: 'x',
+      },
+      {
+        attempts: [],
+        history: [
+          entry(0, 'aud-30', 3600, 'contact_external_recorded', {
+            channel: 'phone',
+            occurredAt: 3500,
+            recipientType: 'player',
+          }),
+        ],
+      },
+    ),
+    // A sent contact and its request are a PAIR (recruitment_contacts.request_id is a real key and the request names
+    // its contact back); two contacts naming ONE request is a state the production writer never produces (the send
+    // creates the request for that contact). The responded contact therefore carries its own request, as a real one
+    // would.
+    soundContact(
+      {
+        id: 'rct-4',
+        status: 'responded',
+        request_id: 'req-4',
+        responded_at: 4000,
+        response_kind: 'accepted',
+        response_message: 'Yes',
+        response_by: 'player',
+        response_at: 4000,
+        rev: 3,
+      },
+      {
+        history: [
+          entry(0, 'aud-40', 2001, 'contact_sent', {}),
+          entry(1, 'aud-41', 4000, 'contact_responded', { kind: 'accepted' }, { by_kind: 'player', by_name: 'Player' }),
+        ],
+      },
+    ),
     {
-      id: 'req-1',
-      playerId: 'pl-x',
-      playerName: 'Xavier Adult',
-      orgId: 'org-x',
-      orgName: 'X FC',
-      orgType: 'club',
-      orgVerified: true,
-      orgSafeguardingCertified: true,
-      userId: 'usr-owner',
-      scoutName: 'Owner',
-      scoutRole: 'Head of Recruitment',
-      type: 'contact',
-      message: 'Hi Xavier.',
-      status: 'pending',
-      createdAt: 2001,
-      routedTo: 'player',
-      guardianId: null,
-      contactId: 'rct-1',
-      contactChannel: null,
+      recruitment_requests: [
+        contactRequest('req-1', 'rct-1'),
+        contactRequest('req-4', 'rct-4', { status: 'accepted', responded_at: 4000, responded_by: 'player' }),
+      ],
     },
-    {
-      id: 'req-4',
-      playerId: 'pl-x',
-      playerName: 'Xavier Adult',
-      orgId: 'org-x',
-      orgName: 'X FC',
-      orgType: 'club',
-      orgVerified: true,
-      orgSafeguardingCertified: true,
-      userId: 'usr-owner',
-      scoutName: 'Owner',
-      scoutRole: 'Head of Recruitment',
-      type: 'contact',
-      message: 'Hi Xavier.',
-      status: 'accepted',
-      createdAt: 2001,
-      respondedAt: 4000,
-      respondedBy: 'player',
-      routedTo: 'player',
-      guardianId: null,
-      contactId: 'rct-4',
-      contactChannel: null,
-    },
-  ];
-  writeFixture(RESTORE_DIR, db, { idCounter: 500 });
+  );
+  write(RESTORE_DIR, rows);
   const L0 = ledger(RESTORE_DIR);
-  // The rows are read back from the tables in column order, every key and value identical, so the comparison is
-  // key-order-insensitive.
-  const canon = (v) =>
-    Array.isArray(v)
-      ? v.map(canon)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.keys(v)
-              .sort()
-              .map((k) => [k, canon(v[k])]),
-          )
-        : v;
-  const stable = (v) => JSON.stringify(canon(v));
-  const before = stable(rows);
+  const before = contactRows(stored(RESTORE_DIR));
 
   const s = await bootOn(RESTORE_DIR, PORT);
   ok(s.up, 'the server boots on the fixture');
@@ -515,13 +520,13 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     'and the same key with a different payload is a 409 CONTACT_IDEMPOTENCY_CONFLICT, from the snapshot',
   );
   const after = await s.stop();
-  ok(after !== null, 'the server shut down and wrote the snapshot back');
+  ok(after !== null, 'the server shut down and the rows were read back');
   neg(
-    stable(after.recruitmentContacts) === before,
-    'the four Contact rows came back IDENTICAL in every key and value — reads, replays and a boot rewrote nothing',
+    contactRows(after) === before,
+    'the four contacts came back IDENTICAL in every row of every contact table — reads, replays and a boot rewrote nothing',
   );
   neg(
-    JSON.parse(L0).length === DATA_MIGRATIONS.length && ledger(RESTORE_DIR) === L0,
+    JSON.parse(L0).length === MIGRATIONS.length && ledger(RESTORE_DIR) === L0,
     'and the migration record did not churn',
   );
 }
@@ -533,222 +538,141 @@ function expect422(r) {
 section('corrupt Contact rows are named and omitted, never fabricated, and never take the server down');
 const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 {
-  // The contacts are rows of typed tables. A row the columns cannot hold — an
-  // entry that is not a record, a duplicated id, an unknown status word, an off-type history or timestamp, a channel
-  // the vocabulary does not know, a record missing the writer's fields — and a contact naming a request that is not in
-  // the file are REFUSED by the save, naming the entry, and nothing is written; asserted below, one directory each. The
-  // defects a typed row CAN carry (a delivered contact with no recipient, a contact answered but never delivered, a row
-  // of another organisation, a player disagreeing with its case) are still planted and still judged on read.
-  const REQ = {
-    playerId: 'pl-x',
-    playerName: 'Xavier Adult',
-    orgId: 'org-x',
-    orgName: 'X FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    userId: 'usr-owner',
-    scoutName: 'Owner',
-    scoutRole: 'Head of Recruitment',
-    type: 'contact',
-    message: 'Hi Xavier.',
-    status: 'pending',
-    createdAt: 2001,
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
-  };
-  // A fixture is written through the repositories in one unit of work: a record they cannot hold is refused, naming the
-  // entry, and nothing of the fixture is written. What a new directory holds then (the migrations' reference rows and
-  // the first installation's organisation and player, by id) is the yardstick for "nothing was written".
-  const rowIds = (db) =>
-    JSON.stringify(
-      Object.fromEntries(Object.entries(db).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])),
-    );
-  const FRESH_DB = (() => {
-    const { orgs, players, guardians } = baseDb();
-    return rowIds(
-      readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-cp-fresh-')), { orgs, players, guardians })),
-    );
+  // The contacts are rows of typed tables. A row the columns cannot hold — a duplicated id, an unknown status word,
+  // an off-type timestamp, a channel the vocabulary does not know, a row missing the writer's columns — and a contact
+  // naming a request that is not in the file are REFUSED by the schema, and nothing is written; asserted below, one
+  // directory each. The defects a typed row CAN carry (a delivered contact with no recipient, a contact answered but
+  // never delivered, a row of another organisation, a player disagreeing with its case) are still planted and still
+  // judged on read.
+  //
+  // A fixture is one transaction: a row the schema refuses (a key, a CHECK, a STRICT type, a NOT NULL) refuses the
+  // whole fixture, and the directory is left as a new one with nothing written.
+  const FRESH = (() => {
+    const D = mkdtempSync(path.join(tmpdir(), 'sbx-cp-fresh-'));
+    openFixture(D, { now: NOW }).close();
+    return everything(D);
   })();
   const refusedAtCutover = async (label, port, contacts, requests, pattern) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-cp-refused-'));
-    const fixture = baseDb();
-    fixture.recruitmentContacts = contacts;
-    fixture.requests = requests;
     let refused = null;
     try {
-      writeFixture(dir, fixture, { idCounter: 500 });
+      write(dir, merge(baseRows(), ...contacts, { recruitment_requests: requests }));
     } catch (err) {
       refused = err;
     }
     const msg = String(refused?.message ?? '');
     neg(
       !!refused && pattern.test(msg),
-      `${label}: the write is refused and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`,
+      `${label}: the write is refused and names the column (${(pattern.exec(msg) ?? ['NOT named'])[0]})`,
     );
     if (!refused || !pattern.test(msg)) console.error(`   ${label}: refused=${!!refused}; ${msg.slice(0, 700)}`);
-    neg(rowIds(readRecords(dir)) === FRESH_DB, `${label}: nothing was written — nothing imported, dropped or repaired`);
+    neg(everything(dir) === FRESH, `${label}: nothing was written — nothing imported, dropped or repaired`);
     if (port) {
       const s = await bootOn(dir, port);
       neg(s.up, `${label}: a server started on the directory boots (the refused fixture left nothing behind)`);
       if (s.up) await s.stop();
     }
   };
-  const req1 = [{ ...REQ, id: 'req-1', contactId: 'rct-1' }];
-  await refusedAtCutover(
-    'a null entry',
-    PORT + 4,
-    [soundContact(), null],
-    req1,
-    /CONTACTS_OFFERS_INPUT_INVALID: recruitment_contacts: a record must be an object \(got null\)/,
-  );
+  const req1 = [contactRequest('req-1', 'rct-1')];
   await refusedAtCutover(
     'a duplicated id',
     PORT + 5,
-    [soundContact(), soundContact({ id: 'rct-1', requestId: null })],
+    [soundContact(), soundContact({ request_id: null }, { attempts: [], history: [] })],
     req1,
-    /CONTACTS_OFFERS_DUPLICATE: recruitment_contacts rct-1 already exists/,
+    /UNIQUE constraint failed: recruitment_contacts\.id/,
   );
   await refusedAtCutover(
     'a request that is not in the file',
     PORT + 6,
-    [soundContact({ requestId: 'req-ghost' })],
+    [soundContact({ request_id: 'req-ghost' })],
     [],
     /FOREIGN KEY constraint failed/,
-  ); // recruitment_contacts.request_id → recruitment_requests
+  ); // recruitment_contacts.request_id → recruitment_requests, at COMMIT
   await refusedAtCutover(
     'an unknown status word',
     null,
-    [soundContact({ id: 'rct-badstatus', status: 'sent', requestId: null })],
+    [soundContact({ id: 'rct-badstatus', status: 'sent', request_id: null })],
     [],
-    /recruitment_contacts rct-badstatus row: CHECK constraint failed: status/,
-  );
-  await refusedAtCutover(
-    'a history that is not a list',
-    null,
-    [soundContact({ id: 'rct-nohist', history: 'not-a-list', requestId: null })],
-    [],
-    /recruitment_contacts rct-nohist history: must be a list/,
+    /CHECK constraint failed: status/,
   );
   await refusedAtCutover(
     'a timestamp that is not an instant',
     null,
-    [soundContact({ id: 'rct-badts', deliveredAt: 'yesterday', requestId: null })],
+    [soundContact({ id: 'rct-badts', delivered_at: 'yesterday', request_id: null })],
     [],
-    /recruitment_contacts rct-badts row: cannot store TEXT value in INTEGER column recruitment_contacts\.delivered_at/,
+    /cannot store TEXT value in INTEGER column recruitment_contacts\.delivered_at/,
   );
   await refusedAtCutover(
     'a prototype-key channel',
     null,
-    [soundContact({ id: 'rct-badchan', channel: 'constructor', requestId: null })],
+    [soundContact({ id: 'rct-badchan', channel: 'constructor', request_id: null })],
     [],
-    /recruitment_contacts rct-badchan row: CHECK constraint failed: channel/,
+    /CHECK constraint failed: channel/,
   );
   await refusedAtCutover(
-    "a record missing the writer's fields",
+    "a row missing the writer's columns",
     null,
     [
       {
-        id: 'rct-partial',
-        orgId: 'org-x',
-        caseId: 'case-x',
-        playerId: 'pl-x',
-        status: 'draft',
-        channel: 'in_app',
-        history: [],
-        rev: 1,
+        recruitment_contacts: [
+          {
+            id: 'rct-partial',
+            org_id: 'org-x',
+            case_id: 'case-x',
+            player_id: 'pl-x',
+            status: 'draft',
+            channel: 'in_app',
+            rev: 1,
+          },
+        ],
       },
     ],
     [],
-    /recruitment_contacts rct-partial row: NOT NULL constraint failed: recruitment_contacts\.contact_mode/,
+    /NOT NULL constraint failed: recruitment_contacts\.contact_mode/,
   );
-  // Pure: the read-time integrity function still names each of those defects, should one ever reach it.
-  const unstorable = [
-    soundContact({ id: 'rct-badstatus', status: 'sent' }),
-    soundContact({ id: 'rct-nohist', history: 'not-a-list' }),
-    soundContact({ id: 'rct-badts', deliveredAt: 'yesterday' }),
-    soundContact({ id: 'rct-badchan', channel: 'constructor' }),
+
+  // Each sent row with its OWN request (the pair), as the writer produces; the request ids carry no contact id (the
+  // journey check below looks for the corrupt ids). A history entry's id is unique across contacts, as the writer's
+  // nextId makes it.
+  const sent = (i, over) =>
+    soundContact(
+      { request_id: `rq-${i}`, ...over },
+      i === 1
+        ? {}
+        : {
+            history: [
+              entry(0, `aud-10-${i - 1}`, 2000, 'contact_created', { channel: 'in_app' }),
+              entry(1, `aud-11-${i - 1}`, 2001, 'contact_sent', {
+                channel: 'in_app',
+                recipientType: 'player',
+                attempt: 1,
+              }),
+            ],
+          },
+    );
+  const contacts = [
+    sent(1, {}), // sound
+    sent(2, { id: 'rct-norecip', ...NO_RECIPIENT }), // delivered with no recipient
+    sent(3, { id: 'rct-wrongorg', org_id: 'org-other' }), // another org's row on this case id
+    sent(4, { id: 'rct-wrongplayer', player_id: 'pl-other' }), // a player disagreeing with its case: structurally sound
+    sent(5, { id: 'rct-impossible', status: 'responded', delivered_at: null, responded_at: 5 }), // answered, never delivered
+    soundContact(
+      { id: 'rct-unknownevent', status: 'draft', ...NO_RECIPIENT, ...NOT_SENT, ...NO_KEYS, rev: 1 },
+      { attempts: [], history: [{ id: 'aud-99-5', position: 0, at: 1, action: '__teleported__' }] },
+    ), // an unknown history event on a sound draft
   ];
-  ok(
-    unstorable.every((c) => contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' }).length > 0),
-    'the integrity check still names a problem on each of the four unstorable rows',
-  );
-
-  const db = baseDb();
-  db.orgs.push({
-    id: 'org-other',
-    name: 'Other FC',
-    type: 'club',
-    level: 'pro',
-    plan: 'Pro',
-    verified: true,
-    safeguardingContractSigned: true,
-    location: { lat: 51.5, lng: -0.1 },
-  }); // the foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged
-  db.recruitmentContacts = [
-    soundContact(), // sound
-    soundContact({ id: 'rct-norecip', recipient: null }), // delivered with no recipient
-    soundContact({ id: 'rct-wrongorg', orgId: 'org-other' }), // another org's row on this case id
-    soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }), // wrong player (still this org/case) — sound structurally, reported by case? no: playerId is free
-    soundContact({ id: 'rct-impossible', status: 'responded', deliveredAt: null, respondedAt: 5 }), // impossible: responded but never delivered
-    soundContact({
-      id: 'rct-unknownevent',
-      status: 'draft',
-      recipient: null,
-      sentBy: null,
-      sentAt: null,
-      deliveredAt: null,
-      attempts: [],
-      requestId: null,
-      keys: { create: null, send: null, record: null },
-      history: [{ id: 'aud-99', at: 1, action: '__teleported__', by: null, detail: null }],
-      rev: 1,
-    }), // unknown history event on a sound draft
-  ]
-    .map((c, i) => (c.requestId === 'req-1' ? { ...c, requestId: `rq-${i + 1}` } : c)) // each sent row with its OWN request (the pair), as the writer produces; the request ids carry no contact id (the journey check below looks for the corrupt ids)
-    .map((c, i) => (i === 0 ? c : { ...c, history: c.history.map((h) => ({ ...h, id: `${h.id}-${i}` })) })); // a history entry's id is unique across contacts, as the writer's nextId makes it
-  db.requests = db.recruitmentContacts
-    .filter((c) => c.requestId)
-    .map((c) => ({ ...REQ, id: c.requestId, contactId: c.id, orgId: c.orgId, playerId: c.playerId }));
-  // `rct-wrongorg` is NOT in this list: a row carrying another organisation's
-  // id is that organisation's row, whatever case id it names. It is filtered
-  // by tenant before the shape check, never listed, never counted and, by id,
-  // answers the concealing 404 — a foreign row must not become a corruption
-  // oracle for the club that can see the case.
+  const rows = merge(baseRows(), { orgs: [CLUB('org-other', 'Other FC')] }, ...contacts);
+  // The foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged.
+  rows.recruitment_requests = rows.recruitment_contacts
+    .filter((c) => c.request_id)
+    .map((c) => contactRequest(c.request_id, c.id, { org_id: c.org_id, player_id: c.player_id }));
+  // `rct-wrongorg` is NOT in this list: a row carrying another organisation's id is that organisation's row, whatever
+  // case id it names. It is filtered by tenant before the shape check, never listed, never counted and, by id, answers
+  // the concealing 404 — a foreign row must not become a corruption oracle for the club that can see the case.
   const expectedOmitted = ['rct-norecip', 'rct-impossible'];
-  // Pure: the integrity function names each problem.
-  const named = db.recruitmentContacts
-    .filter((c) => c && expectedOmitted.includes(c.id))
-    .map((c) => [c.id, contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' })]);
-  ok(
-    named.every(([, p]) => p.length > 0),
-    `the integrity check names a problem on every one of the ${named.length} corrupt rows`,
-  );
-  neg(
-    contactIntegrity(soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }), {
-      orgId: 'org-x',
-      caseId: 'case-x',
-    }).length === 0,
-    'a row whose player disagrees with its case is structurally sound — the case check, not the shape check, is where that is caught (below)',
-  );
-  ok(
-    contactIntegrity(db.recruitmentContacts[5]).length === 0,
-    'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone',
-  );
 
-  writeFixture(CORRUPT_DIR, db, { idCounter: 500 });
-  const canon = (v) =>
-    Array.isArray(v)
-      ? v.map(canon)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.keys(v)
-              .sort()
-              .map((k) => [k, canon(v[k])]),
-          )
-        : v;
-  const before = JSON.stringify(canon(db.recruitmentContacts));
+  write(CORRUPT_DIR, rows);
+  const before = contactRows(stored(CORRUPT_DIR));
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
   ok(s.up, 'the server boots with six rows, two of them corrupt and one foreign');
   if (!s.up) {
@@ -775,7 +699,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   );
   neg(
     ids.filter((id) => id === 'rct-1').length === 1,
-    'the sound row is listed once (a duplicated id can no longer reach a boot: the cutover refused it above, with the id, for a person to decide which is real)',
+    'the sound row is listed once (a duplicated id can no longer reach a boot: the schema refused it above, for a person to decide which is real)',
   );
   for (const id of expectedOmitted) {
     const one = await s.j('GET', `/org/rooms/case-x/contacts/${id}`, undefined, owner.token);
@@ -808,35 +732,21 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     !JSON.stringify(jr.body.history.entries).includes('__teleported__'),
     'an unknown history event is not rendered as a milestone',
   );
-  // The evidence provider ignores corrupt rows but still sees the sound one.
-  const ev = createEvidenceProvider({
-    signings: [],
-    recruitmentContacts: db.recruitmentContacts.filter((c) => c && expectedOmitted.includes(c.id)),
-  }).check('contact_delivered', { kase: db.recruitmentCases[0] });
-  neg(
-    ev.satisfied === false && ev.reason === 'no_contact_delivered',
-    'the corrupt "delivered" rows are NOT evidence of contact',
-  );
-  const ev2 = createEvidenceProvider({ signings: [], recruitmentContacts: db.recruitmentContacts }).check(
-    'contact_delivered',
-    { kase: db.recruitmentCases[0] },
-  );
-  ok(ev2.satisfied === true && ev2.sourceId === 'rct-1', 'the sound row beside them is');
+  // Boot-time integrity: contacts are not part of the boot integrity report's subject, and must not make it lie.
+  const caps = (await s.j('GET', '/capabilities')).body;
+  ok(caps?.integrity?.ok === true && caps.integrity.violations === 0, 'the boot integrity report is clean');
   const after = await s.stop();
   neg(
-    JSON.stringify(canon(after.recruitmentContacts)) === before,
-    'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)',
+    contactRows(after) === before,
+    'shutdown left the corrupt rows UNCHANGED in every row — reported, never repaired (the missing recipient and the impossible state carried as written)',
   );
-  // Boot-time integrity: contacts are not part of the boot integrity report's subject, and must not make it lie.
-  const rep = integrityReport(after, { cases: after.recruitmentCases ?? [], openRoomStatuses: OPEN_ROOM_STATUSES });
-  ok(rep.ok === true && rep.violations.length === 0, 'the boot integrity report is clean');
 }
 
 // ======================================================= clean boot, empty
 section('clean boot: empty store, first write, restart');
 const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
 {
-  writeFixture(CLEAN_DIR, baseDb(), { idCounter: 500 });
+  write(CLEAN_DIR, baseRows());
   const s = await bootOn(CLEAN_DIR, PORT + 2);
   ok(s.up, 'boot on an empty contacts store');
   const owner = (
@@ -851,7 +761,7 @@ const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
   ok(d.status === 201, 'the first write lands');
   const snap1 = await s.stop();
   ok(
-    snap1.recruitmentContacts.length === 1 && snap1.recruitmentContacts[0].status === 'draft',
+    snap1.recruitment_contacts.length === 1 && snap1.recruitment_contacts[0].status === 'draft',
     'and is on disk as a draft after shutdown',
   );
   const s2 = await bootOn(CLEAN_DIR, PORT + 3);
@@ -877,12 +787,12 @@ const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
   );
   const snap2 = await s2.stop();
   ok(
-    snap2.recruitmentContacts[0].status === 'delivered' &&
-      snap2.recruitmentCases[0].room.status === 'contacted' &&
-      snap2.requests.length === 1,
+    snap2.recruitment_contacts[0].status === 'delivered' &&
+      snap2.recruitment_cases[0].room_status === 'contacted' &&
+      snap2.recruitment_requests.length === 1,
     'contact, case and request row are all on disk together — one save, one transaction',
   );
-  ok(CONTACT_STATUSES.includes(snap2.recruitmentContacts[0].status), 'with a status this build recognises');
+  ok(CONTACT_STATUSES.includes(snap2.recruitment_contacts[0].status), 'with a status this build recognises');
 }
 
 const total = passed;
