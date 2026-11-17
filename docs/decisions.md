@@ -10,6 +10,7 @@ linked docs. These are settled: don't ask the Founder again, and propose a chang
 
 | Date | Decision | Who |
 |---|---|---|
+| 17 Nov | **The server moves to Gleam.** The port to Gleam on the BEAM goes ahead in full, domain by domain, checked against the e2e batteries, which must pass unchanged on both servers. The TypeScript server stays in service until every battery passes on Gleam. The feature freeze lasts until then, estimated at a further one to two weeks. Evaluation: `.claude/plans/gleam-migration-evaluation.md`. | Tom |
 | 9 Nov | **Schema changes amend the creating migration in place** (then re-seed) for now, rather than adding altering migrations: there is no production data, and each table's definition stays in one file ([`architecture.md`](architecture.md)). | Tom |
 | 9 Nov | **The SQLite migration is complete; the feature freeze stays** while the codebase is cleaned up and its architecture tightened. In scope: clean-ups and architecture work, defects, security, tests, and design changes the Founder explicitly asks for. Tom lifts it. | Tom |
 | 4 Nov | **A club's shadow list is not its squad.** Shadowing a player (the Pro squad planner) puts them on the club's watch list for a role and nowhere else: not in the grassroots squad, not in match-day attendance or release, and not as a club relationship on the passport or the Trust score (`product/recruitment.md`). | Tom |
