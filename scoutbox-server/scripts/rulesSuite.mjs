@@ -1,6 +1,7 @@
 // The checks a rules suite (scripts/rules/<domain>/<battery>.mjs) makes: a battery's checks of the server's own rules,
 // moved out of the battery because they call the rules in this process rather than over HTTP. They keep the
-// battery's wording: `ok(condition, message)`, `neg(condition, message)` for a refusal or an absence, `section(name)`.
+// battery's wording: `ok(condition, message)`, `neg(condition, message)` for a refusal or an absence, `section(name)`,
+// and `fail(message)` for a failure found inside a loop that a single check after it then summarises.
 //
 //   const { ok, neg, section, done } = rulesSuite('platform/storeGuarantees');
 //   …
@@ -27,10 +28,15 @@ export function rulesSuite(battery) {
     negatives++;
     ok(condition, `[neg] ${message}`);
   };
+  const fail = (message) => {
+    failed++;
+    console.error(`✗ ${message}`);
+    process.exitCode = 1;
+  };
   const section = (name) => console.log(`\n— ${name} —`);
   const done = () => {
     console.log(`\n${battery} rules: ${passed} checks passed, ${negatives} negative, ${failed} failed`);
     process.exit(failed ? 1 : 0);
   };
-  return { ok, neg, section, done };
+  return { ok, neg, fail, section, done };
 }

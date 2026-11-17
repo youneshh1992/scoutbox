@@ -1,0 +1,12 @@
+{
+  "$source": "domains/recruitment/lifecycle/decision.mjs",
+  "DECISION_POLICY_VERSION": 1,
+  "DECISION_LIMITS": {
+    "note": 2000,
+    "supersessionReason": 500,
+    "evidenceRefs": 50,
+    "clientKey": 64,
+    "reasonCodes": 6,
+    "historyPage": 100
+  }
+}
