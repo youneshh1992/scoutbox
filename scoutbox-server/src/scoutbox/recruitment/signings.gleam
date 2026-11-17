@@ -3,7 +3,8 @@
 ////
 //// `GET /org/signings` lists the records as stored.
 ////
-//// Not ported yet: the signings domain (packages, documents, parties, completion); no route here creates one.
+//// The completion and the legacy route write them (recruitment/signing_writer); the packages are
+//// recruitment/signing_packages.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

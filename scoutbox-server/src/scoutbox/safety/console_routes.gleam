@@ -61,6 +61,8 @@ pub fn overview(ctx: Ctx) -> Response {
       use hits <- result.try(audit.moderation_count(read, None))
       use emails <- result.try(count_of(read, "outbox"))
       use sessions <- result.try(count_of(read, "sessions"))
+      use signings <- result.try(count_of(read, "signings"))
+      use invoices <- result.try(count_of(read, "invoices"))
       use channel_count <- result.try(channels.count(read))
       use pushes <- result.try(push.count(read))
       use grooming <- result.map(audit.moderation_count(
@@ -74,11 +76,9 @@ pub fn overview(ctx: Ctx) -> Response {
         #("openReports", json.int(open)),
         #("blocks", json.int(blocks)),
         #("moderationHits", json.int(hits)),
-        // Not ported yet: signings (recruitment) and invoices (billing) are domains this server does not run; it
-        // holds none of each.
         #("channels", json.int(channel_count)),
-        #("signings", json.int(0)),
-        #("invoices", json.int(0)),
+        #("signings", json.int(signings)),
+        #("invoices", json.int(invoices)),
         #("emailsSent", json.int(emails)),
         #("pushesSent", json.int(pushes)),
         #("sessions", json.int(sessions)),

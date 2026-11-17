@@ -3,8 +3,9 @@
 //// probability or progress percentage: how far a case has travelled is a fact about a club's process, not a
 //// measurement of a person.
 ////
-//// Not ported yet: signing packages (no route here records one, so they read as none), and the player's,
-//// guardian's, agent's and Trust & Safety's projections.
+//// The outcome reads the case's signing packages and the row a completed one names. Not ported yet: the stages,
+//// next actions and shared views a package moves, and the player's, guardian's, agent's and Trust & Safety's
+//// projections.
 
 import gleam/dynamic/decode
 import gleam/int

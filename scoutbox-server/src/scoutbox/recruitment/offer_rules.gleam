@@ -797,8 +797,8 @@ fn label_of(s: Option(OfferStatus)) -> Json {
 const club_honest =
   "An Offer is the club's proposal, issued as an exact revision. An acceptance in ScoutBox is the recipient saying yes to that revision; it is not a signing, not a registration and not an executed contract."
 
-/// The club's view, including the internal note and provenance references. Not ported yet: the signing package
-/// an accepted Offer opens, so `signing` is always null (nothing is inferred).
+/// The club's view, including the internal note and provenance references. `signing` is null here; the routes set
+/// the Offer's signing summary (signing_reads.with_signing), and nothing is inferred.
 pub fn club_view(o: Offer, now: Int) -> List(#(String, Json)) {
   let st = status(o, now)
   let live = live_status(o, now)

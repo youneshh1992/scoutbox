@@ -3,8 +3,8 @@
 //// The player row stays as a tombstone that keeps only the id, the birth date and the country; each domain's
 //// records keep their ids and states and lose the name and the person's own words. Media files go after COMMIT.
 ////
-//// Not ported yet: the compliance contexts' and transaction workspaces' `forgetPlayer`, signing packages'
-//// redaction (no route here creates any of them), and retrying a media file that could not be removed at the next boot or sweep.
+//// Not ported yet: the compliance contexts' and transaction workspaces' `forgetPlayer` (no route here creates
+//// either), and retrying a media file that could not be removed at the next boot or sweep.
 
 import gleam/dynamic/decode
 import gleam/json
@@ -20,6 +20,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/recruitment/signing_packages
 import scoutbox/rows/id
 import scoutbox/rows/players as row
 import simplifile
@@ -264,6 +265,8 @@ fn redact(tx: Tx, player_id: id.PlayerId, at: Int) -> Result(Nil, Fail(e)) {
     ),
   )
   use _ <- result.try(agent_store.redact_client(tx, text, at))
+  // A signing package keeps its parties and history; the player's name goes from them.
+  use _ <- result.try(signing_packages.redact_player(tx, player_id, at))
   // An Offer leaves ids and states behind, never a name.
   use _ <- result.try(
     run(

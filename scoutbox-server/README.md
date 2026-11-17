@@ -78,9 +78,10 @@ Every route below is exercised by a battery, except where marked.
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
-| Recruitment | `POST /org/players/:id/request` (a contact, or a direct trial request with its days, venue and notes; refused while a trial report is outstanding), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/requests`, `/org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (the records as stored; no route here creates one); `GET /org/recruitment-analytics` (the overdue trial reports only); `GET /org/feed`; `GET /orgs/directory` (no Grassroots pathway record) |
+| Recruitment | `POST /org/players/:id/request` (a contact, or a direct trial request with its days, venue and notes; refused while a trial report is outstanding), `/player/requests/:id/respond`, `/guardian/requests/:id/respond` (a trial invitation's acceptance is the trial's birth); `GET /org/requests`, `/org/ledger`, `/org/funnel`, `/player/inbox`, `/guardian/inbox`; `GET /org/signings` (newest first, by cursor), `GET /org/invoices` (the success fees), `POST /org/players/:id/signing` (the legacy recorder, refused when the workflow owns the signing); `GET /org/recruitment-analytics` (the overdue trial reports only); `GET /org/feed`; `GET /orgs/directory` (no Grassroots pathway record) |
 | Contacts | `GET`/`POST /org/rooms/:id/contacts`, `GET`/`PATCH …/contacts/:cid`, `POST …/contacts/:cid/cancel`, `…/contacts/:cid/send` (the in-app request, the guardian's email copy, the agent beside the player when their authority holds), `POST …/contacts/external`, `GET /org/recruitment/contact-policy`; a recipient's answer lands on the contact through the respond route; `GET /player/insights`; `GET /player/journeys`, `GET /guardian/children/:id/journeys` (what was shared with the recipient), `GET /org/agent/clients/:id/journey` (what the client routed or shared to the agent, as far as the agent's basis, scope and licence open it); signing packages not yet |
 | Trials | `GET`/`POST /org/rooms/:id/trials`, `GET …/trials/:tid`, `POST …/schedule`, `…/reschedule`, `…/cancel`, `…/complete`, `…/sessions/:sid/attendance`, `…/sessions/:sid/evidence`, `…/evidence/:eid/unlink`, `GET …/evidence`, `…/evidence/candidates`, `GET /org/recruitment/trial-policy`; `GET /org/trials`, `/org/trials/:id/day`, `/org/trials/:id/ics`, `POST /org/trials/:id/staff`, `/arrival`, `/cancel`, `/postpone`, `/checkin`, `/report`; `GET /player/trials`, `POST /player/trials/:id/confirm-schedule`, `/decline-schedule`, `/cancel`, `/consent`, `/emergency-contact`, `GET …/safety-pack`, and the guardian's `/guardian/trials…` |
+| Signings | `GET /org/rooms/:id/signing`, `POST /org/offers/:id/signing`, `GET`/`PATCH /org/signings/:id`, `GET …/history`, `GET`/`POST …/document`, `POST …/executed-document`, `…/ready`, `…/parties/club/complete`, `…/complete` (the gate, the one signing writer and the move to signed in one unit), `…/cancel`, `…/void`, `…/supersede`; `POST /admin/signings/:id/void`; `GET /player/signings`, `…/:id`, `…/:id/document`, `POST …/:id/complete`; the guardian's (dormant: the minor pathway is closed); `GET /org/agent/clients/:id/signings`; an Offer's view carries its signing summary; `POST /player/availability` refuses a status while a completed signing's contract stands |
 | Assessments | `GET`/`POST /org/assessments`, `PUT /org/assessments/:id`, `POST …/submit`, `GET /org/players/:id/assessment-compare` |
 | Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
 | Case | `GET /org/rooms/:id/journey` (the club's projection), `POST /org/rooms/:id/lifecycle` (a named action, gated by the evidence provider); `GET /org/rooms/:id/decision`, `POST`/`PATCH`/`DELETE …/decision/draft`, `POST …/decision/finalize`, `…/decision/supersede` |
@@ -104,7 +105,7 @@ Every route below is exercised by a battery, except where marked.
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: signings, the similarity engine ("more like this"),
+The largest: the similarity engine ("more like this"),
 insights, coach vouches, club setup, staff SSO, the Expo push transport, process metrics, and password sign-in
 for players and guardians (a new player account stores a hash no password matches). `dev/shape_diff.mjs` lists where responses differ because of them.
 
@@ -130,8 +131,12 @@ for players and guardians (a new player account stores a hash no password matche
 - Inside a Room, the Passport is its version, the player and the club history only, and has no revision; a
   snapshot records no Passport revision either. A Room's Combine results, development activity and the
   missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
-- The journey, the evidence provider and the decision surface see no Contact records, Trials or signing packages
-  (`Not ported yet:`): no route here records one.
+- The journey, the evidence provider and the decision surface see no Contact records or Trials (`Not ported yet:`):
+  no route here records one.
+- The journey's stages, next actions and shared views take no account of a signing package (`Not ported yet:`);
+  its outcome and the confirmed-join evidence do.
+- A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
+  COMMIT. Either way a completion that rolls back issues none.
 - A transaction workspace stays at DRAFT: only opening one and its notes are ported, so no party can confirm.
 - A mail's withheld one-time codes (`SendMail`'s `secrets`) read as the placeholder in `/admin/outbox` too. The
   TypeScript server's dev transport keeps the full text in process memory and shows it there.
