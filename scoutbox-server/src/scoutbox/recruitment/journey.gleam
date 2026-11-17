@@ -3,9 +3,7 @@
 //// probability or progress percentage: how far a case has travelled is a fact about a club's process, not a
 //// measurement of a person.
 ////
-//// The outcome reads the case's signing packages and the row a completed one names. Not ported yet: the stages,
-//// next actions and shared views a package moves, and the player's, guardian's, agent's and Trust & Safety's
-//// projections.
+//// Not ported yet: Trust & Safety's projection.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -39,6 +37,7 @@ import scoutbox/rows/recruitment_contacts as contact_row
 import scoutbox/rows/recruitment_requests as request_row
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/signing_packages as signing_pkg_row
+import scoutbox/rows/signing_revision_parties as signing_party_row
 import scoutbox/rows/signings as signing_row
 import scoutbox/rows/trials as trial_row
 import scoutbox/vocab/decision_outcome
@@ -46,6 +45,7 @@ import scoutbox/vocab/offer_status
 import scoutbox/vocab/party
 import scoutbox/vocab/recruitment_actor_kind
 import scoutbox/vocab/room_status.{type RoomStatus}
+import scoutbox/vocab/signing_party_type
 import scoutbox/vocab/trial_actor_kind
 import scoutbox/vocab/trial_workflow_state
 
@@ -438,6 +438,11 @@ fn club(
       )
     })
   let signing = supporting_signing(rec)
+  let #(sound_packages, packages_corrupt) =
+    list.partition(rec.packages, fn(p) {
+      signing_rules.integrity(p, Some(r.org_id)) == []
+    })
+  let packages_corrupt = list.length(packages_corrupt)
   let assessed =
     list.any(rec.assessments, fn(a) { a.state != assessment_row.Draft })
   let total_history =
@@ -448,6 +453,7 @@ fn club(
       trial_rows,
       trial_assessments,
       sound_offers,
+      sound_packages,
       contact_records,
       now,
     )
@@ -563,8 +569,9 @@ fn club(
         trial_requests,
         trial_rows,
         sound_contacts,
+        sound_packages,
         signing,
-        corrupt_offers + corrupt_trials + contacts_omitted,
+        corrupt_offers + corrupt_trials + contacts_omitted + packages_corrupt,
         assessed,
         now,
       ),
@@ -678,10 +685,7 @@ fn club(
         // A case at `signed` with no package has none, and none is invented.
         #(
           "signingPackages",
-          rec.packages
-            |> list.filter(fn(p) {
-              signing_rules.integrity(p, Some(rec.room.row.org_id)) == []
-            })
+          sound_packages
             |> json.array(fn(p) {
               json.object([
                 #("id", id.signing_package_json(p.row.id)),
@@ -751,7 +755,11 @@ fn supporting_signing(rec: Records) -> Option(signing_row.Row) {
   }
 }
 
-fn stage_of(status: RoomStatus, assessed: Bool) -> String {
+fn stage_of(
+  status: RoomStatus,
+  assessed: Bool,
+  signing_opened: Bool,
+) -> String {
   case status {
     room_status.Watching -> "watching"
     room_status.UnderReview | room_status.Shortlisted | room_status.Priority ->
@@ -766,8 +774,11 @@ fn stage_of(status: RoomStatus, assessed: Bool) -> String {
     room_status.OfferConsideration
     | room_status.OfferMade
     | room_status.OfferDeclined -> "offer"
-    // Not ported yet: a signing package opened over the acceptance (`signing`).
-    room_status.OfferAccepted -> "acceptance"
+    room_status.OfferAccepted ->
+      case signing_opened {
+        True -> "signing"
+        False -> "acceptance"
+      }
     room_status.Signed -> "signed"
     room_status.OnHold -> "paused"
     room_status.Withdrawn | room_status.Archived | room_status.Closed -> "ended"
@@ -830,6 +841,26 @@ fn current_offer(offers: List(Offer), now: Int) -> Option(CurrentOffer) {
     o,
     offer_rules.live_revision(o) |> option.or(offer_rules.current_revision(o)),
   )
+}
+
+/// The current package: a live one, then a completed one, then the newest of any status, so an expired package
+/// never masks a live one.
+fn current_signing(
+  packages: List(signing_rules.Package),
+  now: Int,
+) -> Option(signing_rules.Package) {
+  let tier = fn(pred) {
+    newest(list.filter(packages, pred), fn(p) { p.row.created_at }, fn(p) {
+      id.signing_package_to_string(p.row.id)
+    })
+  }
+  tier(signing_rules.is_live(_, now))
+  |> option.lazy_or(fn() {
+    tier(fn(p) {
+      signing_rules.effective_status(p, now) == signing_rules.Completed
+    })
+  })
+  |> option.lazy_or(fn() { tier(fn(_) { True }) })
 }
 
 /// The current Contact, newest first within each tier: delivered and awaiting a response, then responded or
@@ -900,6 +931,7 @@ fn journey_block(
   trial_requests: List(request_row.Row),
   case_trials: List(Trial),
   case_contacts: List(Contact),
+  packages: List(signing_rules.Package),
   signing: Option(signing_row.Row),
   corrupt: Int,
   assessed: Bool,
@@ -936,6 +968,11 @@ fn journey_block(
     _ -> None
   }
   let offer = current_offer(offers, now)
+  let package = current_signing(packages, now)
+  let opened = case package {
+    Some(p) -> signing_rules.is_live(p, now)
+    None -> False
+  }
   let subject_removed = r.subject_removed_at != None || !rec.player_present
   let problems =
     validate(
@@ -946,6 +983,7 @@ fn journey_block(
       case_trials,
       case_contacts,
       case_decisions,
+      packages,
       signing,
       corrupt,
       now,
@@ -963,13 +1001,14 @@ fn journey_block(
       assessed,
       decision,
       offer,
+      package,
       signing,
       classification == "integrity_error",
       now,
     )
   json.object([
     #("policyVersion", json.int(policy_version)),
-    #("stage", json.string(stage_of(status, assessed))),
+    #("stage", json.string(stage_of(status, assessed, opened))),
     #(
       "completedStages",
       json.preprocessed_array(completed_stages(
@@ -979,6 +1018,7 @@ fn journey_block(
         case_trials,
         offers,
         case_decisions,
+        packages,
         signing,
         now,
       )),
@@ -1034,10 +1074,16 @@ fn journey_block(
             id.offer_revision_json,
           ),
         ),
-        #("signingPackageId", json.null()),
+        #(
+          "signingPackageId",
+          json.nullable(
+            option.map(package, fn(p) { p.row.id }),
+            id.signing_package_json,
+          ),
+        ),
         #(
           "completedSigningId",
-          json.nullable(option.map(signing, fn(s) { s.id }), id.signing_json),
+          json.nullable(completed_signing_id(signing, package), id.signing_json),
         ),
       ]),
     ),
@@ -1047,6 +1093,17 @@ fn journey_block(
     #("blocked", json.bool(rec.blocked)),
     #("subjectRemoved", json.bool(subject_removed)),
   ])
+}
+
+/// The signing row the case's outcome rests on, else the one its current package names.
+fn completed_signing_id(
+  signing: Option(signing_row.Row),
+  package: Option(signing_rules.Package),
+) -> Option(id.SigningId) {
+  option.map(signing, fn(s) { s.id })
+  |> option.lazy_or(fn() {
+    option.then(package, fn(p) { p.row.completion_signing_id })
+  })
 }
 
 /// The formal chain head, else the advisory head. Never a draft.
@@ -1114,6 +1171,7 @@ fn completed_stages(
   case_trials: List(Trial),
   offers: List(Offer),
   case_decisions: List(decisions.Decision),
+  packages: List(signing_rules.Package),
   signing: Option(signing_row.Row),
   now: Int,
 ) -> List(Json) {
@@ -1199,6 +1257,14 @@ fn completed_stages(
       )
     })
     |> list.first
+  let completed_package =
+    newest(
+      list.filter(packages, fn(p) {
+        signing_rules.effective_status(p, now) == signing_rules.Completed
+      }),
+      fn(p) { option.unwrap(p.row.completion_completed_at, 0) },
+      fn(p) { id.signing_package_to_string(p.row.id) },
+    )
   let offer_refs = fn(x: #(Offer, offer_rules.Revision)) {
     [
       #("offerId", id.offer_json({ x.0 }.row.id)),
@@ -1262,6 +1328,18 @@ fn completed_stages(
       ]
       Error(Nil) -> lifecycle_only("acceptance", ["offer_accepted"])
     },
+    case completed_package {
+      Some(p) -> [
+        stage_json("signing", "canonical", p.row.completion_completed_at, [
+          #("signingPackageId", id.signing_package_json(p.row.id)),
+          #(
+            "completedSigningId",
+            json.nullable(p.row.completion_signing_id, id.signing_json),
+          ),
+        ]),
+      ]
+      None -> []
+    },
     case first_reach(room, ["signed"]), status == room_status.Signed {
       None, False -> []
       at, _ ->
@@ -1287,6 +1365,7 @@ fn validate(
   case_trials: List(Trial),
   case_contacts: List(Contact),
   case_decisions: List(decisions.Decision),
+  packages: List(signing_rules.Package),
   signing: Option(signing_row.Row),
   corrupt: Int,
   now: Int,
@@ -1300,6 +1379,8 @@ fn validate(
   let contact_ids =
     list.map(case_contacts, fn(c) { id.contact_to_string(c.row.id) })
   let trial_ids = list.map(case_trials, fn(t) { id.trial_to_string(t.row.id) })
+  let package_ids =
+    list.map(packages, fn(p) { id.signing_package_to_string(p.row.id) })
   let stale = fn(value: Option(String), known: List(String)) {
     case value {
       Some(v) -> !list.contains(known, v)
@@ -1352,7 +1433,7 @@ fn validate(
               || stale(d.request_id, request_ids)
               || stale(d.decision_id, decision_ids)
               || stale(d.offer_id, offer_ids)
-              || option.is_some(d.signing_package_id)
+              || stale(d.signing_package_id, package_ids)
             {
               True -> ["STALE_POINTER", ..problems]
               False -> problems
@@ -1450,11 +1531,33 @@ fn validate(
         proved(s) && !list.any(reached, fn(x) { x.0 == s }) && current != s
       },
     )
+  // The TypeScript reader hands each package at most one row (`signings.forPackage`), so a duplicate is never seen
+  // here. Ported as it behaves.
   let domain =
-    list.flat_map(offers, fn(o) {
-      offer_rules.case_consistency(o, Some(status), now)
-      |> list.filter(fn(c) { offer_rules.case_corrupt([c]) })
-    })
+    list.append(
+      list.flat_map(offers, fn(o) {
+        offer_rules.case_consistency(o, Some(status), now)
+        |> list.filter(fn(c) { offer_rules.case_corrupt([c]) })
+      }),
+      list.flat_map(packages, fn(p) {
+        let rows =
+          list.find(rec.signings, fn(s) {
+            s.signing_package_id == Some(p.row.id)
+          })
+          |> result.map(fn(s) { [s] })
+          |> result.unwrap([])
+        signing_rules.consistency(
+          p,
+          list.find(offers, fn(o) { o.row.id == p.row.offer_id })
+            |> option.from_result,
+          Some(room),
+          rows,
+          None,
+          now,
+        )
+        |> list.filter(fn(c) { signing_rules.corrupt([c]) })
+      }),
+    )
   let problems =
     list.flatten([
       history_problems,
@@ -1474,7 +1577,16 @@ fn validate(
           }
         _ -> []
       },
-      case option.is_some(signing) && status != room_status.Signed && live {
+      case
+        {
+          option.is_some(signing)
+          || list.any(packages, fn(p) {
+            signing_rules.effective_status(p, now) == signing_rules.Completed
+          })
+        }
+        && status != room_status.Signed
+        && live
+      {
         True -> ["LIFECYCLE_BEHIND_TERMINAL_EVIDENCE"]
         False -> []
       },
@@ -1535,6 +1647,10 @@ fn next_def(code: String) -> Next {
     "REVISE_OR_WITHDRAW_OFFER" -> club_permission("offer", "offer", 2)
     "REVIEW_DECLINED_OFFER" -> club("offer", "offer", "considerOffer")
     "START_SIGNING" -> club_permission("acceptance", "signing", 2)
+    "PRESENT_SIGNING" -> club_permission("signing", "signing", 2)
+    "SIGN_FOR_CLUB" -> club_permission("signing", "signing", 3)
+    "AWAIT_RECIPIENT_SIGNATURE" -> wait("signing", "signing")
+    "COMPLETE_SIGNING" -> club_permission("signing", "signing", 3)
     "RECRUITMENT_COMPLETE" ->
       Next(code, Some("signed"), "none", "signing", None, None)
     "RESUME_CASE" -> club("paused", "overview", "resumeCase")
@@ -1554,6 +1670,7 @@ fn next_action(
   assessed: Bool,
   decision: Option(decisions.Decision),
   offer: Option(CurrentOffer),
+  package: Option(signing_rules.Package),
   signing: Option(signing_row.Row),
   integrity_error: Bool,
   now: Int,
@@ -1581,13 +1698,23 @@ fn next_action(
       id.room_decision_json,
     ),
   )
+  let package_ref = fn(p: Option(signing_rules.Package)) {
+    #(
+      "signingPackageId",
+      json.nullable(option.map(p, fn(p) { p.row.id }), id.signing_package_json),
+    )
+  }
+  let offer_refs = case offer {
+    Some(o) -> offer_ref(o)
+    None -> [#("offerId", json.null()), #("offerRevisionId", json.null())]
+  }
   let #(code, refs) = case status {
     room_status.Signed -> #("RECRUITMENT_COMPLETE", [
       #(
         "completedSigningId",
-        json.nullable(option.map(signing, fn(s) { s.id }), id.signing_json),
+        json.nullable(completed_signing_id(signing, package), id.signing_json),
       ),
-      #("signingPackageId", json.null()),
+      package_ref(package),
     ])
     room_status.Withdrawn | room_status.Archived | room_status.Closed -> #(
       "CASE_ENDED",
@@ -1689,15 +1816,40 @@ fn next_action(
         ),
       ),
     ])
-    // Not ported yet: signing packages, so an acceptance always waits for one to start.
-    room_status.OfferAccepted -> #("START_SIGNING", case offer {
-      Some(o) -> list.append(offer_ref(o), [#("signingPackageId", json.null())])
-      None -> [
-        #("offerId", json.null()),
-        #("offerRevisionId", json.null()),
-        #("signingPackageId", json.null()),
-      ]
-    })
+    room_status.OfferAccepted -> {
+      let live = case package {
+        Some(p) -> signing_rules.is_live(p, now)
+        None -> False
+      }
+      let refs = list.append(offer_refs, [package_ref(package)])
+      case live, package {
+        False, _ | _, None -> #(
+          "START_SIGNING",
+          list.append(offer_refs, [package_ref(None)]),
+        )
+        True, Some(p) -> {
+          let parties = case signing_rules.current_revision(p) {
+            Some(rev) -> rev.parties
+            None -> []
+          }
+          let pending = fn(club) {
+            list.any(parties, fn(x) {
+              { x.party_type == signing_party_type.ClubSignatory } == club
+              && x.status == signing_party_row.Pending
+            })
+          }
+          case signing_rules.effective_status(p, now) {
+            signing_rules.Draft -> #("PRESENT_SIGNING", refs)
+            _ ->
+              case pending(True), pending(False) {
+                True, _ -> #("SIGN_FOR_CLUB", refs)
+                False, True -> #("AWAIT_RECIPIENT_SIGNATURE", refs)
+                False, False -> #("COMPLETE_SIGNING", refs)
+              }
+          }
+        }
+      }
+    }
   }
   let def = next_def(code)
   let club = def.kind == "club"
@@ -1754,6 +1906,13 @@ const trial_timeline_actions = [
   "trial_schedule_confirmed", "trial_schedule_declined",
   "trial_attendance_recorded", "trial_cancelled", "trial_completed",
   "trial_evidence_linked",
+]
+
+/// Signing history actions that are milestones.
+const signing_timeline_actions = [
+  "signing_created", "signing_ready", "signing_party_completed",
+  "signing_completed", "signing_cancelled", "signing_voided",
+  "signing_superseded",
 ]
 
 /// The trial history detail fields a milestone carries.
@@ -1820,6 +1979,7 @@ fn timeline(
   case_trials: List(Trial),
   trial_assessments: List(assessment_row.Row),
   offers: List(Offer),
+  packages: List(signing_rules.Package),
   contact_records: List(Contact),
   now: Int,
 ) -> List(Json) {
@@ -1830,6 +1990,7 @@ fn timeline(
     case_trials,
     trial_assessments,
     offers,
+    packages,
     contact_records,
     now,
   )
@@ -1851,6 +2012,7 @@ fn timeline_lines(
   case_trials: List(Trial),
   trial_assessments: List(assessment_row.Row),
   offers: List(Offer),
+  packages: List(signing_rules.Package),
   contact_records: List(Contact),
   now: Int,
 ) -> List(Line) {
@@ -2042,6 +2204,70 @@ fn timeline_lines(
       }
       list.append(entries, expired)
     })
+  // Document attachments carry a digest and are not milestones.
+  let signing_lines =
+    list.flat_map(packages, fn(p) {
+      list.filter_map(p.history, fn(h) {
+        case list.contains(signing_timeline_actions, h.action) {
+          False -> Error(Nil)
+          True -> {
+            let text = fn(name, next) {
+              decode.optional_field(
+                name,
+                None,
+                decode.optional(decode.string),
+                next,
+              )
+            }
+            let d =
+              h.detail_json
+              |> option.then(fn(t) {
+                json.parse(t, {
+                  use revision <- text("revisionId")
+                  use party_type <- text("partyType")
+                  use signing <- text("signingId")
+                  decode.success(#(revision, party_type, signing))
+                })
+                |> option.from_result
+              })
+              |> option.unwrap(#(None, None, None))
+            let present = fn(name, value: Option(String)) {
+              case value {
+                Some(v) if v != "" -> [#(name, json.string(v))]
+                _ -> []
+              }
+            }
+            Ok(Line(
+              h.at,
+              h.action
+                <> ":"
+                <> id.signing_package_to_string(p.row.id)
+                <> ":"
+                <> id.signing_event_to_string(h.id),
+              list.flatten([
+                [
+                  #("kind", json.string(h.action)),
+                  #("at", json.int(h.at)),
+                  #("by", case h.by_kind {
+                    Some(recruitment_actor_kind.Org) ->
+                      json.nullable(h.by_name, json.string)
+                    _ -> json.null()
+                  }),
+                  #(
+                    "byKind",
+                    json.nullable(h.by_kind, recruitment_actor_kind.to_json),
+                  ),
+                  #("signingPackageId", id.signing_package_json(p.row.id)),
+                ],
+                present("signingRevisionId", d.0),
+                present("partyType", d.1),
+                present("completedSigningId", d.2),
+              ]),
+            ))
+          }
+        }
+      })
+    })
   let case_lines =
     list.filter_map(room.history, fn(h) {
       case
@@ -2171,6 +2397,7 @@ fn timeline_lines(
     assessment_lines,
     contact_lines,
     offer_lines,
+    signing_lines,
     case_lines,
     handoff_lines,
     decision_lines,
@@ -2275,6 +2502,7 @@ type Shared {
     requests: List(request_row.Row),
     trials: List(Trial),
     offers: List(CurrentOffer),
+    packages: List(signing_rules.Package),
   )
 }
 
@@ -2334,7 +2562,38 @@ fn shared_with(
     requests: list.reverse(requests),
     trials:,
     offers: offers_shared_with(rec, who, now),
+    packages: packages_shared_with(rec, who),
   ))
+}
+
+/// Packages presented (ready or later; a draft never reached anyone) with a required party for this recipient.
+fn packages_shared_with(
+  rec: Records,
+  who: Recipient,
+) -> List(signing_rules.Package) {
+  let room = rec.room
+  list.filter(rec.packages, fn(p) {
+    let party = case who {
+      PlayerSelf(player_id:) -> #(
+        signing_party_type.Player,
+        id.player_to_string(player_id),
+      )
+      GuardianOf(guardian_id:, ..) -> #(
+        signing_party_type.Guardian,
+        id.guardian_to_string(guardian_id),
+      )
+    }
+    p.row.case_id == room.row.id
+    && p.row.org_id == room.row.org_id
+    && p.row.player_id == room.row.player_id
+    && signing_rules.integrity(p, Some(room.row.org_id)) == []
+    && case signing_rules.current_revision(p) {
+      Some(rev) ->
+        option.is_some(rev.row.ready_at)
+        && option.is_some(signing_rules.find_party(rev, party.0, Some(party.1)))
+      None -> False
+    }
+  })
 }
 
 /// Offers whose live revision's recipient snapshot names this recipient.
@@ -2440,19 +2699,61 @@ fn shared_json(s: Shared, now: Int) -> Json {
         ),
       ])
     })
-  // Not ported yet: signing packages, whose presented ones are shared here too.
-  json.preprocessed_array(list.flatten([requests, trials, offers]))
+  let signings =
+    list.map(s.packages, fn(p) {
+      let rev = signing_rules.current_revision(p)
+      json.object([
+        #("kind", json.string("signing")),
+        #("id", id.signing_package_json(p.row.id)),
+        #(
+          "status",
+          json.string(
+            signing_rules.status_name(signing_rules.effective_status(p, now)),
+          ),
+        ),
+        #(
+          "revisionNumber",
+          json.nullable(
+            option.map(rev, fn(r) { r.row.revision_number }),
+            json.int,
+          ),
+        ),
+        #(
+          "at",
+          json.int(
+            option.then(rev, fn(r) { r.row.ready_at })
+            |> option.unwrap(p.row.created_at),
+          ),
+        ),
+        #("completedAt", json.nullable(p.row.completion_completed_at, json.int)),
+      ])
+    })
+  json.preprocessed_array(list.flatten([requests, trials, offers, signings]))
 }
 
-/// The recipient's stage: only stages that involve them, never the club's pipeline. Signing packages are not
-/// ported yet, so `signing` and `signed` are not reached.
+/// The recipient's stage: only stages that involve them, never the club's pipeline.
 fn player_stage(
   contacted: Bool,
   trial_invited: Bool,
   trials: List(Trial),
   offer: Option(CurrentOffer),
+  signing: Option(signing_rules.Package),
+  signed: Bool,
   now: Int,
 ) -> String {
+  let st = option.map(signing, signing_rules.effective_status(_, now))
+  let live = case signing {
+    Some(p) -> signing_rules.is_live(p, now)
+    None -> False
+  }
+  use <- bool_or(signed || st == Some(signing_rules.Completed), "signed")
+  use <- bool_or(
+    live
+      && {
+      st == Some(signing_rules.Ready) || st == Some(signing_rules.InProgress)
+    },
+    "signing",
+  )
   let offer_stage =
     offer
     |> option.then(fn(o) { offer_rules.live_status(o.offer, now) })
@@ -2501,6 +2802,7 @@ fn player_next(
   trial_requests: List(request_row.Row),
   trials: List(Trial),
   offer: Option(CurrentOffer),
+  signing_pending: Option(signing_rules.Package),
   now: Int,
 ) -> #(String, List(#(String, Json))) {
   let pending = fn(rows: List(request_row.Row)) {
@@ -2521,6 +2823,18 @@ fn player_next(
       && t.sessions != []
       && t.row.completion_state == None
     })
+  use <- bool_or(
+    option.is_some(signing_pending),
+    #("SIGN", [
+      #(
+        "signingPackageId",
+        json.nullable(
+          option.map(signing_pending, fn(p) { p.row.id }),
+          id.signing_package_json,
+        ),
+      ),
+    ]),
+  )
   case issued, awaiting, pending(trial_requests), pending(contact_requests) {
     Some(o), _, _, _ -> #("RESPOND_TO_OFFER", [
       #("offerId", id.offer_json(o.offer.row.id)),
@@ -2554,9 +2868,9 @@ fn recipient_journey(
   now: Int,
 ) -> Result(Option(#(String, Json, Json)), Fail(e)) {
   use s <- result.map(shared_with(read, rec, who, now))
-  case s.requests, s.trials, s.offers {
-    [], [], [] -> None
-    _, _, _ -> {
+  case s.requests, s.trials, s.offers, s.packages {
+    [], [], [], [] -> None
+    _, _, _, _ -> {
       let room = rec.room
       let audience = recipient_audience(who)
       let contact_requests =
@@ -2564,8 +2878,45 @@ fn recipient_journey(
       let trial_requests =
         list.filter(s.requests, fn(r) { r.type_ == request_row.Trial })
       let offer = current_offer(list.map(s.offers, fn(o) { o.offer }), now)
+      let signing = current_signing(s.packages, now)
+      let #(party_type, party_id) = case who {
+        PlayerSelf(player_id:) -> #(
+          signing_party_type.Player,
+          id.player_to_string(player_id),
+        )
+        GuardianOf(guardian_id:, ..) -> #(
+          signing_party_type.Guardian,
+          id.guardian_to_string(guardian_id),
+        )
+      }
+      let signing_pending =
+        option.then(signing, fn(p) {
+          let st = signing_rules.effective_status(p, now)
+          let pending =
+            signing_rules.current_revision(p)
+            |> option.then(signing_rules.find_party(
+              _,
+              party_type,
+              Some(party_id),
+            ))
+            |> option.map(fn(q) { q.status == signing_party_row.Pending })
+          case
+            { st == signing_rules.Ready || st == signing_rules.InProgress }
+            && pending == Some(True)
+          {
+            True -> Some(p)
+            False -> None
+          }
+        })
       let #(code, refs) =
-        player_next(contact_requests, trial_requests, s.trials, offer, now)
+        player_next(
+          contact_requests,
+          trial_requests,
+          s.trials,
+          offer,
+          signing_pending,
+          now,
+        )
       let wanted = case who {
         PlayerSelf(_) -> party.Player
         GuardianOf(..) -> party.Guardian
@@ -2600,6 +2951,7 @@ fn recipient_journey(
           s.trials,
           [],
           list.map(s.offers, fn(o) { o.offer }),
+          s.packages,
           contact_records,
           now,
         )
@@ -2616,6 +2968,8 @@ fn recipient_journey(
               list.any(trial_requests, fn(r) { r.status == request_row.Pending }),
               s.trials,
               offer,
+              signing,
+              completed_row(rec, signing),
               now,
             )),
           ),
@@ -2667,14 +3021,34 @@ fn recipient_journey(
                   id.offer_revision_json,
                 ),
               ),
-              // Not ported yet: signing packages.
-              #("signingPackageId", json.null()),
+              #(
+                "signingPackageId",
+                json.nullable(
+                  option.map(signing, fn(p) { p.row.id }),
+                  id.signing_package_json,
+                ),
+              ),
             ]),
           ),
           #("timeline", audience_timeline(lines, audience, ["by", "contactId"])),
         ])
       Some(#(code, shared_json(s, now), journey))
     }
+  }
+}
+
+/// Whether a stored-completed package's row exists and names it back (`completedRowOf`).
+fn completed_row(rec: Records, signing: Option(signing_rules.Package)) -> Bool {
+  case signing {
+    Some(p) ->
+      case p.row.status, p.row.completion_signing_id {
+        signing_pkg_row.Completed, Some(sid) ->
+          list.any(rec.signings, fn(s) {
+            s.id == sid && s.signing_package_id == Some(p.row.id)
+          })
+        _, _ -> False
+      }
+    None -> False
   }
 }
 
@@ -2803,14 +3177,32 @@ fn agent_journey(
         })
       })
   }
-  // Not ported yet: signing packages, shared with the agent beside their Offer.
+  let shared_offers = list.map(offer_rows, fn(o) { o.row.id })
+  let packages = case granted("signings") {
+    False -> []
+    True ->
+      list.filter(rec.packages, fn(p) {
+        p.row.case_id == r.id
+        && p.row.org_id == r.org_id
+        && p.row.player_id == r.player_id
+        && list.contains(shared_offers, p.row.offer_id)
+        && signing_rules.integrity(p, Some(r.org_id)) == []
+        && case signing_rules.current_revision(p) {
+          Some(rev) -> option.is_some(rev.row.ready_at)
+          None -> False
+        }
+      })
+  }
   let offer = current_offer(offer_rows, now)
+  let signing = current_signing(packages, now)
   let stage =
     player_stage(
       contact_records != [],
       list.any(invitations, fn(q) { q.status == request_row.Pending }),
       trial_rows,
       offer,
+      signing,
+      completed_row(rec, signing),
       now,
     )
   let lines =
@@ -2821,6 +3213,7 @@ fn agent_journey(
       trial_rows,
       [],
       offer_rows,
+      packages,
       contact_records,
       now,
     )
@@ -2862,7 +3255,13 @@ fn agent_journey(
               id.offer_revision_json,
             ),
           ),
-          #("signingPackageId", json.null()),
+          #(
+            "signingPackageId",
+            json.nullable(
+              option.map(signing, fn(p) { p.row.id }),
+              id.signing_package_json,
+            ),
+          ),
         ]),
       ),
       #("timeline", audience_timeline(lines, "agent", ["by"])),

@@ -11,6 +11,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/platform/clock
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/cases.{type Room}
@@ -479,8 +480,10 @@ pub fn apply(
   trigger: String,
   mover: Mover,
   detail: List(#(String, Json)),
-  now: Int,
 ) -> Result(#(RoomStatus, RoomStatus), Fail(e)) {
+  // The move and its history entry carry the server's own time, never a request's pinned test clock, as in the
+  // TypeScript writer: a case's moves stay in the order they were made, whatever instant each act was judged at.
+  let now = clock.now_ms()
   let from = room.status
   let reopens =
     list.contains(room_rules.reopened_from, from) && room_rules.is_open(to)
@@ -657,7 +660,6 @@ pub fn advance(
         trigger,
         mover,
         status_detail(action_name, None, key_detail),
-        at,
       ))
       Advanced(
         True,

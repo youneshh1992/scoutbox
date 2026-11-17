@@ -528,7 +528,6 @@ fn advance(
         case_lifecycle.status_detail("recordContact", None, [
           #("contactId", id.contact_json(c.row.id)),
         ]),
-        at,
       ))
       use stored <- result.map(contacts.record_lifecycle(
         tx,

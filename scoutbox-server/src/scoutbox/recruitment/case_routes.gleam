@@ -376,7 +376,6 @@ fn act(
                     "lifecycle:" <> action_name,
                     case_lifecycle.StaffMover(a.user.id, a.user.name),
                     case_lifecycle.status_detail(action_name, key, []),
-                    now,
                   )
                   |> storage,
                 )
@@ -1853,7 +1852,6 @@ fn write_formal(
                 case_lifecycle.status_detail(m.action, None, [
                   #("decisionId", id.room_decision_json(decision_id)),
                 ]),
-                now,
               )
               |> storage,
             )

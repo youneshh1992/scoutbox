@@ -698,7 +698,6 @@ fn advance(
         trigger,
         mover,
         case_lifecycle.status_detail(action_name, None, key_detail),
-        at,
       ))
       MovedCase(moved.0, moved.1, at)
     }
