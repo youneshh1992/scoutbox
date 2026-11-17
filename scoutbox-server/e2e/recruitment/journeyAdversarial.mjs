@@ -935,10 +935,15 @@ section('B — adjacent-stage races: one authoritative result');
       at(T1),
     ),
   ]);
+  // On one thread the reschedule, sent first, always won and the cancel met the rev; under real concurrency the
+  // cancel can win, and the reschedule then meets a cancelled trial before its rev.
+  const loser = [resch, canc].find((r) => r.status !== 200);
   neg(
     [resch, canc].filter((r) => r.status === 200).length === 1 &&
-      [resch, canc].some((r) => r.status === 409 && r.body?.error === 'TRIAL_VERSION_CONFLICT'),
-    `B3 reschedule vs cancel with one rev: one wins, one TRIAL_VERSION_CONFLICT (${resch.status}/${canc.status})`,
+      loser?.status === 409 &&
+      (loser.body?.error === 'TRIAL_VERSION_CONFLICT' ||
+        (loser === resch && loser.body?.error === 'TRIAL_INVALID_STATE')),
+    `B3 reschedule vs cancel with one rev: one wins; the other meets the rev, or the cancelled trial (${resch.status} ${resch.body?.error ?? ''}/${canc.status} ${canc.body?.error ?? ''})`,
   );
   // 5. assessment vs hold: both recorded.
   const pid2 = 'pl-svensson';
@@ -1463,8 +1468,14 @@ const G = {};
   );
   // Terminal evidence the lifecycle lags: a COMPLETED package on an offer_accepted case.
   const S = globalThis.__B.S;
+  // B12 races the completion against a close: on one thread the completion, sent first, always won; under real
+  // concurrency the close can win, B12 reopens the case, and no package completed.
   const held = await jb(S.RID);
-  ok(['signed', 'ended', 'signing'].includes(held.stage), `G6 the completed case reads ${held.stage}`);
+  const completed = (await sGet(S.SID)).body.signing.status === 'COMPLETED';
+  ok(
+    completed ? ['signed', 'ended', 'signing'].includes(held.stage) : held.stage === 'review',
+    `G6 the case reads ${held.stage} (${completed ? 'its package completed' : 'the close won B12: reopened, no package completed'})`,
+  );
   // A held case with evidence beyond its last live state is NOT drift.
   const B = globalThis.__B;
   const hb = await lifecycle(B.R3, 'holdCase');
