@@ -10,6 +10,7 @@ import gleam/http/response
 import gleam/int
 import gleam/json.{type Json}
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/platform/input.{type Refusal, type Shape}
@@ -365,22 +366,44 @@ pub fn query(
 }
 
 /// The query string as an object of text values (a repeated key is a list), for a route that reads it with a
-/// shape of its own.
+/// shape of its own. A bracketed key (`source[x]=…`) is a nested object under its root, as Express's `qs`
+/// parser reads it, so a shape refuses `source` as not text rather than naming an unknown `source[x]`.
 pub fn query_input(req: Request) -> Dynamic {
   let grouped =
     wisp.get_query(req)
-    |> list.group(fn(pair) { pair.0 })
+    |> list.group(fn(pair) { query_root(pair.0).0 })
     |> dict.to_list
     |> list.map(fn(entry) {
-      let #(key, pairs) = entry
-      let values =
-        list.reverse(pairs) |> list.map(fn(pair) { dynamic.string(pair.1) })
-      case values {
-        [one] -> #(dynamic.string(key), one)
-        many -> #(dynamic.string(key), dynamic.list(many))
+      let #(root, pairs) = entry
+      let pairs = list.reverse(pairs)
+      let nested =
+        list.filter_map(pairs, fn(pair) {
+          case query_root(pair.0) {
+            #(_, Some(inner)) ->
+              Ok(#(dynamic.string(inner), dynamic.string(pair.1)))
+            #(_, None) -> Error(Nil)
+          }
+        })
+      let values = list.map(pairs, fn(pair) { dynamic.string(pair.1) })
+      case nested, values {
+        [_, ..], _ -> #(dynamic.string(root), dynamic.properties(nested))
+        [], [one] -> #(dynamic.string(root), one)
+        [], many -> #(dynamic.string(root), dynamic.list(many))
       }
     })
   dynamic.properties(grouped)
+}
+
+/// `root[inner]` split into its root and what the brackets hold; any other key is a root of its own.
+fn query_root(key: String) -> #(String, Option(String)) {
+  case string.split_once(key, "[") {
+    Ok(#(root, rest)) if root != "" ->
+      case string.ends_with(rest, "]") {
+        True -> #(root, Some(string.drop_end(rest, 1)))
+        False -> #(key, None)
+      }
+    _ -> #(key, None)
+  }
 }
 
 pub fn header(req: Request, name: String) -> Result(String, Nil) {

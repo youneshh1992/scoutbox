@@ -1,0 +1,9 @@
+{
+  "$source": "domains/recruitment/analytics/index.mjs",
+  "DRILLDOWN_METRICS": [
+    "stalled_rooms",
+    "decision_outstanding",
+    "terminal_with_recorded_decision",
+    "overdue_trial_reports"
+  ]
+}

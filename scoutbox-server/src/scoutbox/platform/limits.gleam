@@ -70,6 +70,7 @@ pub const policy = [
   #("transaction_handoff", transaction_handoff_policy),
   #("transaction_write", transaction_write_policy),
   #("transaction_note_write", transaction_note_write_policy),
+  #("analytics_read", analytics_read_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -115,6 +116,8 @@ pub type Action {
   BoxCvFinalize
   /// Trial invitations, per organisation.
   TrialInvite
+  /// Recruitment analytics reads (the dashboard and its drill-down rows), per organisation.
+  AnalyticsRead
   /// Trial schedules proposed, revised or cancelled, per organisation.
   TrialSchedule
   /// Trial schedule confirmations, declines and cancellations, per player or guardian answering.
@@ -181,6 +184,8 @@ const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
 const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const analytics_read_policy = Policy(max: 600, window_ms: 3_600_000)
+
 const trial_schedule_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const trial_response_policy = Policy(max: 30, window_ms: 3_600_000)
@@ -210,6 +215,7 @@ fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
     RoomCreate -> "room_create"
+    AnalyticsRead -> "analytics_read"
     RoomComment -> "room_comment"
     RoomCombineRequest -> "room_combine_request"
     DecisionDraft -> "decision_draft"
@@ -247,6 +253,7 @@ fn action_policy(action: Action) -> Policy {
   case action {
     EmailChallengeRequest -> email_challenge_request_policy
     RoomCreate -> room_create_policy
+    AnalyticsRead -> analytics_read_policy
     RoomComment -> room_comment_policy
     RoomCombineRequest -> room_combine_request_policy
     DecisionDraft -> decision_draft_policy

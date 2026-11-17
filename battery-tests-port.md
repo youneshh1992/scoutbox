@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 32 of 53 neutral]
+### Untangling [in progress: 33 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 25 batteries pass unchanged]
+### Porting, domain by domain [in progress: 26 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -114,7 +114,7 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings | 13 | `recruitment/journey`: everything but H5 (Second Look) and I (the analytics pipeline family) passes |
+| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings, analytics | 14 | `recruitment/journey`: everything but H5 (Second Look) and I (the analytics pipeline family) passes |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -124,8 +124,10 @@ Work down this list. Mark each item `[**done**]` when it is done, and commit the
 are for surprising facts or points that later work depends on, not implementation detail.
 
 1. **Finish recruitment.** Untangle each battery first.
-   1. `recruitment/analytics`. `journey` section I waits on it, and `lifecycle` and `journeyAdversarial` use
-      its funnels.
+   1. `recruitment/analytics` [**done**]. `journey` section I waits on it, and `lifecycle` and
+      `journeyAdversarial` use its funnels. A read-only domain can be compared whole by booting both servers on
+      copies of a database a TypeScript battery left behind in the temp directory: that exercised every family
+      here, which the seed does not.
    2. `recruitment/lifecycle` and `recruitment/decisions`.
    3. `recruitment/journeyPersistence`.
    4. `recruitment/journeyAdversarial`. It also reaches into `/org/agent` and `/admin/blocks`.
@@ -158,7 +160,10 @@ Patterns established on the way. New domains should reuse them, and `CLAUDE.md` 
   Whole responses are compared with `dev/shape_diff.mjs`, and for heavy acts the stored rows are compared with a
   probe run on both servers.
 - **Port TypeScript bugs as they behave,** and note them. Examples: `uncorroborated_claims` never fires, a
-  journey's history never names anyone, and a snapshot's `passportVersion` is always null.
+  journey's history never names anyone, a snapshot's `passportVersion` is always null, and the journey evidence
+  funnel never counts a case's current status as "history only".
+- **Query strings are read as Express's `qs` reads them:** `source[x]=…` is an object under `source`, so a shape
+  refuses it as not text (`http.query_input`).
 - **Port only as far as the battery reaches.** Mark the rest `Not ported yet:`. There are 120 such markers, and the
   next battery in a domain usually starts by clearing some.
 

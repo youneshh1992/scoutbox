@@ -471,8 +471,163 @@ const ROOM_MAP = {
   [`${ROOM_RULES}#normaliseSourceContext`]: room('normalise_source_context', [string], sourceContext),
 };
 
+// ------------------------------------------------------------------------------------------ recruitment analytics
+
+const ANALYTICS = 'domains/recruitment/analytics';
+const METRICS = 'scoutbox/recruitment/analytics/metrics';
+const ACONTEXT = 'scoutbox/recruitment/analytics/context';
+const SERIES = 'scoutbox/recruitment/analytics/time_series';
+
+/** A JavaScript number where the Gleam type is a Float. */
+const failFloat = (v) => {
+  throw new Error(`expected a Float, got ${JSON.stringify(v)}`);
+};
+const float = (v) =>
+  typeof v === 'number' && Number.isFinite(v) ? (Number.isInteger(v) ? `${v}.0` : String(v)) : failFloat(v);
+
+/** A window. The rules read only its bounds, so a window given as bounds alone is a custom one of no stated length. */
+const window_ = record({
+  module: METRICS,
+  constructor: 'Window',
+  fields: { preset: ['preset', string], from: ['from', string], to: ['to', string], days: ['days', int] },
+  defaults: { preset: '"custom"', days: '0' },
+});
+
+/** A history entry as analytics projects it: the detail keeps only `from`, `to` and `status`. */
+const entry = (v, ctx) => {
+  const d = v.detail && typeof v.detail === 'object' ? v.detail : {};
+  return `${ctx.use(ACONTEXT)}.Entry(at: ${int(v.at)}, action: ${string(v.action)}, from: ${option(string)(d.from, ctx)}, to: ${option(string)(d.to, ctx)}, status: ${option(string)(d.status, ctx)})`;
+};
+
+/** A projected room; its transitions are derived from its history, as projectRoom does. */
+const aroom = (v, ctx) => {
+  const known = ['id', 'playerId', 'createdAt', 'status', 'priority', 'sourceContext', 'history', 'transitions'];
+  for (const k of Object.keys(v)) if (!known.includes(k)) throw new Error(`a projected room has no field for ${k}`);
+  return `${ctx.use(ACONTEXT)}.room(id: ${ident('recruitment_case')(v.id, ctx)}, player_id: ${ident('player')(v.playerId, ctx)}, created_at: ${int(v.createdAt)}, status: ${string(v.status)}, priority: ${string(v.priority)}, source_context: ${string(v.sourceContext ?? 'direct')}, history: ${list(entry)(v.history ?? [], ctx)})`;
+};
+
+const transition = record({
+  module: ACONTEXT,
+  constructor: 'Transition',
+  fields: { at: ['at', int], from: ['from', option(string)], to: ['to', string], reopen: ['reopen', bool] },
+});
+
+const visit = record({
+  module: SERIES,
+  constructor: 'Visit',
+  fields: { status: ['status', string], from: ['from', int], to: ['to', int], ms: ['ms', int] },
+});
+
+const ANALYTICS_MAP = {
+  [`${ANALYTICS}/metrics.mjs#ratio`]: {
+    module: METRICS,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(METRICS)}.ratio_json(${ctx.use(METRICS)}.ratio(${int(c.args[0])}, ${int(c.args[1])}))`, c.result, ctx),
+  },
+  [`${ANALYTICS}/metrics.mjs#distribution`]: {
+    module: METRICS,
+    test: (c, ctx) => {
+      const [values, { excluded = 0, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`distribution has no argument for ${Object.keys(rest)}`);
+      return eqJson(
+        `${ctx.use(METRICS)}.distribution_json(${ctx.use(METRICS)}.distribution(${list(float)(values, ctx)}, ${int(excluded)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ANALYTICS}/metrics.mjs#count`]: {
+    module: METRICS,
+    test: (c, ctx) => eqJson(`${ctx.use(METRICS)}.count_json(${int(c.args[0])})`, c.result, ctx),
+  },
+  [`${ANALYTICS}/metrics.mjs#compare`]: {
+    module: METRICS,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(METRICS)}.comparison_json(${ctx.use(METRICS)}.compare(${int(c.args[0])}, ${int(c.args[1])}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  [`${ANALYTICS}/metrics.mjs#resolveWindow`]: {
+    module: METRICS,
+    test: (c, ctx) => {
+      const [{ preset, from, to, ...rest } = {}, now] = c.args;
+      if (Object.keys(rest).length) throw new Error(`resolveWindow has no argument for ${Object.keys(rest)}`);
+      return eqJson(
+        `${ctx.use(METRICS)}.resolution_json(${ctx.use(METRICS)}.resolve_window(${option(string)(preset, ctx)}, ${option(string)(from, ctx)}, ${option(string)(to, ctx)}, ${int(now)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ANALYTICS}/metrics.mjs#utcDay`]: {
+    module: METRICS,
+    test: (c, ctx) => eq(`${ctx.use(METRICS)}.utc_day(${int(c.args[0])})`, string(c.result)),
+  },
+  [`${ANALYTICS}/metrics.mjs#inWindow`]: {
+    module: METRICS,
+    test: (c, ctx) => eq(`${ctx.use(METRICS)}.in_window(${int(c.args[0])}, ${window_(c.args[1], ctx)})`, bool(c.result)),
+  },
+  [`${ANALYTICS}/metrics.mjs#previousWindow`]: {
+    module: METRICS,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(METRICS)}.window_json(${ctx.use(METRICS)}.previous_window(${window_(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${ANALYTICS}/metrics.mjs#cohortIncomplete`]: {
+    module: METRICS,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(METRICS)}.cohort_incomplete(${window_(c.args[0], ctx)}, ${option(float)(c.args[1], ctx)}, ${int(c.args[2])})`,
+        bool(c.result),
+      ),
+  },
+  [`${ANALYTICS}/metrics.mjs#wire`]: {
+    module: METRICS,
+    test: (c, ctx) => eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(METRICS)}.wire(${string(c.args[0].id)}))`, c.result, ctx),
+  },
+  [`${ANALYTICS}/metrics.mjs#assertMetricRegistry`]: {
+    module: METRICS,
+    test: (c, ctx) => {
+      if (c.result === undefined) throw new Error('assertMetricRegistry threw');
+      const m = ctx.use(METRICS);
+      return eq(
+        `#(${ctx.use('gleam/list')}.length(${m}.metrics), ${ctx.use('gleam/list')}.length(${m}.families), ${m}.registry_problems(${m}.metrics))`,
+        `#(${int(c.result.metrics)}, ${int(c.result.families)}, [])`,
+      );
+    },
+  },
+  [`${ANALYTICS}/funnels.mjs#transitions`]: {
+    module: ACONTEXT,
+    test: (c, ctx) =>
+      eq(`${ctx.use(ACONTEXT)}.transitions(${list(entry)(c.args[0].history ?? [], ctx)})`, list(transition)(c.result, ctx)),
+  },
+  [`${ANALYTICS}/funnels.mjs#openedStatus`]: {
+    module: ACONTEXT,
+    test: (c, ctx) => eq(`${ctx.use(ACONTEXT)}.opened_status(${aroom(c.args[0], ctx)})`, option(string)(c.result, ctx)),
+  },
+  [`${ANALYTICS}/funnels.mjs#firstReachedAt`]: {
+    module: ACONTEXT,
+    test: (c, ctx) =>
+      eq(`${ctx.use(ACONTEXT)}.first_reached_at(${aroom(c.args[0], ctx)}, ${string(c.args[1])})`, option(int)(c.result, ctx)),
+  },
+  [`${ANALYTICS}/funnels.mjs#firstTerminalAt`]: {
+    module: ACONTEXT,
+    test: (c, ctx) => eq(`${ctx.use(ACONTEXT)}.first_terminal_at(${aroom(c.args[0], ctx)})`, option(int)(c.result, ctx)),
+  },
+  [`${ANALYTICS}/timeSeries.mjs#stageVisits`]: {
+    module: SERIES,
+    test: (c, ctx) => eq(`${ctx.use(SERIES)}.stage_visits(${aroom(c.args[0], ctx)})`, list(visit)(c.result, ctx)),
+  },
+  [`${ANALYTICS}/timeSeries.mjs#lastActivityAt`]: {
+    module: SERIES,
+    test: (c, ctx) => eq(`${ctx.use(SERIES)}.last_activity_at(${aroom(c.args[0], ctx)})`, int(c.result)),
+  },
+};
+
 export const MAP = {
   ...ROOM_MAP,
+  ...ANALYTICS_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
   [`${SHARED}#applyTransition`]: {
     module: CLAIMS,
@@ -536,6 +691,11 @@ export const MAP = {
  * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
  */
 export const HAND_PORTED = {
+  ...Object.fromEntries(
+    ['dashboard.mjs#buildDashboard', 'dashboard.mjs#buildReportingContext', 'funnels.mjs#stagesReached', 'metrics.mjs#assertMetricRegistry'].map(
+      (f) => [`domains/recruitment/analytics/${f}`, 'test/scoutbox/recruitment/analytics_test.gleam'],
+    ),
+  ),
   [`${SHARED}#arrayTokenStore`]: 'test/scoutbox/verification/tokens_test.gleam',
   [`${SHARED}#mintToken`]: 'test/scoutbox/verification/tokens_test.gleam',
   [`${SHARED}#peekToken`]: 'test/scoutbox/verification/tokens_test.gleam',

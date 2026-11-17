@@ -26,4 +26,5 @@ export const BATTERIES = [
   'recruitment/signings',
   'recruitment/signingsAdversarial',
   'recruitment/signingsPersistence',
+  'recruitment/analytics',
 ];

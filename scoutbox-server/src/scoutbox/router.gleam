@@ -283,7 +283,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
         ["feed"] -> only(req, Get, fn() { org_feed.feed(ctx, org) })
         ["recruitment-analytics"] ->
-          only(req, Get, fn() { analytics.dashboard(ctx, org) })
+          only(req, Get, fn() { analytics.dashboard(ctx, req, org) })
+        ["recruitment-analytics", "catalogue"] ->
+          only(req, Get, fn() { analytics.catalogue(org) })
+        ["recruitment-analytics", "rows"] ->
+          only(req, Get, fn() { analytics.rows(ctx, req, org) })
         ["requests"] ->
           only(req, Get, fn() { request_routes.org_page(ctx, req, org) })
         ["trials"] -> only(req, Get, fn() { trial_day.org_page(ctx, req, org) })

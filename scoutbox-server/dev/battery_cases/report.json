@@ -515,14 +515,14 @@
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/analytics/metrics.mjs#resolveWindow",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#cooldownFor",
@@ -890,6 +890,159 @@
         "function": "domains/recruitment/rooms/shared.mjs#stageForRoomStatus",
         "calls": 18,
         "cases": 18,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/analytics",
+    "functions": [
+      {
+        "function": "domains/recruitment/analytics/dashboard.mjs#buildDashboard",
+        "calls": 4,
+        "cases": 0,
+        "handPort": {
+          "args[].roomIds is a Set": 4
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/dashboard.mjs#buildReportingContext",
+        "calls": 3,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.trials.byId is a function": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#firstReachedAt",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#firstTerminalAt",
+        "calls": 4,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#openedStatus",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#stagesReached",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "result is a Set": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#transitions",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#assertMetricRegistry",
+        "calls": 4,
+        "cases": 1,
+        "handPort": {
+          "throws Error without a code": 2
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#cohortIncomplete",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#compare",
+        "calls": 6,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#count",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#distribution",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#inWindow",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#previousWindow",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#ratio",
+        "calls": 7,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#resolveWindow",
+        "calls": 18,
+        "cases": 14,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#utcDay",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#wire",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/timeSeries.mjs#lastActivityAt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/recruitment/analytics/timeSeries.mjs#stageVisits",
+        "calls": 1,
+        "cases": 1,
         "handPort": {},
         "status": "generated"
       }

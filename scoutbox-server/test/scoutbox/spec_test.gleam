@@ -6,10 +6,15 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import scoutbox/agents/core_routes
 import scoutbox/agents/transaction_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
+import scoutbox/recruitment/analytics
+import scoutbox/recruitment/analytics/cohorts
+import scoutbox/recruitment/analytics/funnels
+import scoutbox/recruitment/analytics/metrics
 import scoutbox/recruitment/domain_errors
 import scoutbox/vocab/notification_category
 import simplifile
@@ -112,4 +117,90 @@ pub fn signing_error_table_test() {
     "SIGNING_ERROR_HTTP",
     domain_errors.signing_statuses,
   )
+}
+
+/// The metric registry, entry for entry and in order, with what travels beside it.
+pub fn recruitment_analytics_registry_test() {
+  let file = "recruitment/analytics/metrics.json"
+  let ids =
+    snapshot(file, decode.at(["METRIC_IDS"], decode.list(decode.string)))
+  assert ids == metrics.metric_ids()
+  let registry =
+    snapshot(
+      file,
+      decode.at(
+        ["METRICS"],
+        decode.dict(decode.string, {
+          use id <- decode.field("id", decode.string)
+          use family <- decode.field("family", decode.string)
+          use name <- decode.field("name", decode.string)
+          use unit <- decode.field("unit", decode.string)
+          use semantics <- decode.field("semantics", decode.string)
+          use sources <- decode.field("sources", decode.list(decode.string))
+          use reads <- decode.field("reads", decode.list(decode.string))
+          use ratio <- decode.optional_field(
+            "ratio",
+            None,
+            decode.optional(decode.bool),
+          )
+          use distribution <- decode.optional_field(
+            "distribution",
+            False,
+            decode.bool,
+          )
+          use association <- decode.optional_field(
+            "association",
+            False,
+            decode.bool,
+          )
+          use limitation <- decode.field("limitation", decode.string)
+          let measure = case distribution, ratio {
+            True, _ -> metrics.IsDistribution
+            False, Some(r) -> metrics.IsRatio(r)
+            False, None -> metrics.IsRatio(False)
+          }
+          decode.success(metrics.Metric(
+            id:,
+            family:,
+            name:,
+            unit:,
+            semantics:,
+            sources:,
+            reads:,
+            measure:,
+            association:,
+            limitation:,
+          ))
+        }),
+      ),
+    )
+  list.each(metrics.metrics, fn(m) {
+    assert dict.get(registry, m.id) == Ok(m)
+  })
+  assert snapshot(file, decode.at(["FAMILY_IDS"], decode.list(decode.string)))
+    == metrics.family_ids()
+  assert snapshot(file, decode.at(["SMALL_N_MIN"], decode.int))
+    == metrics.small_n_min
+  assert snapshot(
+      file,
+      decode.at(["PERSON_DIMENSIONS"], decode.list(decode.string)),
+    )
+    == metrics.person_dimensions
+  assert snapshot(file, decode.at(["ASSOCIATION_NOTE"], decode.string))
+    == metrics.association_note
+  assert snapshot(
+      "recruitment/analytics/cohorts.json",
+      decode.at(["EVIDENCE_REASON_CODES"], decode.list(decode.string)),
+    )
+    == cohorts.evidence_reason_codes()
+  assert snapshot(
+      "recruitment/analytics/index.json",
+      decode.at(["DRILLDOWN_METRICS"], decode.list(decode.string)),
+    )
+    == analytics.drilldown_metrics
+  assert snapshot(
+      "recruitment/analytics/funnels.json",
+      decode.at(["FUNNEL_STAGES"], decode.list(decode.string)),
+    )
+    == funnels.funnel_stages()
 }

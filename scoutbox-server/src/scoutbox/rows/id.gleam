@@ -357,6 +357,33 @@ pub fn box_session_decoder() -> decode.Decoder(BoxSessionId) {
   decode.map(decode.string, BoxSessionId)
 }
 
+/// An id of `recruitment_briefs`.
+pub opaque type BriefId {
+  BriefId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn brief(text: String) -> BriefId {
+  BriefId(text)
+}
+
+pub fn brief_to_string(id: BriefId) -> String {
+  let BriefId(text) = id
+  text
+}
+
+pub fn brief_sql(id: BriefId) -> sqlight.Value {
+  sqlight.text(brief_to_string(id))
+}
+
+pub fn brief_json(id: BriefId) -> Json {
+  json.string(brief_to_string(id))
+}
+
+pub fn brief_decoder() -> decode.Decoder(BriefId) {
+  decode.map(decode.string, BriefId)
+}
+
 /// An id of `passport_career_entries`.
 pub opaque type CareerEntryId {
   CareerEntryId(String)
@@ -1351,6 +1378,33 @@ pub fn moderation_entry_decoder() -> decode.Decoder(ModerationEntryId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_moderation_entry(tx: Tx) -> Result(ModerationEntryId, Fail(e)) {
   ids.next(tx, "mod") |> result.map(ModerationEntryId)
+}
+
+/// An id of `nobody_missed_reviews`.
+pub opaque type NobodyMissedReviewId {
+  NobodyMissedReviewId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn nobody_missed_review(text: String) -> NobodyMissedReviewId {
+  NobodyMissedReviewId(text)
+}
+
+pub fn nobody_missed_review_to_string(id: NobodyMissedReviewId) -> String {
+  let NobodyMissedReviewId(text) = id
+  text
+}
+
+pub fn nobody_missed_review_sql(id: NobodyMissedReviewId) -> sqlight.Value {
+  sqlight.text(nobody_missed_review_to_string(id))
+}
+
+pub fn nobody_missed_review_json(id: NobodyMissedReviewId) -> Json {
+  json.string(nobody_missed_review_to_string(id))
+}
+
+pub fn nobody_missed_review_decoder() -> decode.Decoder(NobodyMissedReviewId) {
+  decode.map(decode.string, NobodyMissedReviewId)
 }
 
 /// An id of `notifications`.
@@ -2401,6 +2455,33 @@ pub fn next_scouting_evidence(tx: Tx) -> Result(ScoutingEvidenceId, Fail(e)) {
   ids.next(tx, "evd") |> result.map(ScoutingEvidenceId)
 }
 
+/// An id of `second_look_items`.
+pub opaque type SecondLookItemId {
+  SecondLookItemId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn second_look_item(text: String) -> SecondLookItemId {
+  SecondLookItemId(text)
+}
+
+pub fn second_look_item_to_string(id: SecondLookItemId) -> String {
+  let SecondLookItemId(text) = id
+  text
+}
+
+pub fn second_look_item_sql(id: SecondLookItemId) -> sqlight.Value {
+  sqlight.text(second_look_item_to_string(id))
+}
+
+pub fn second_look_item_json(id: SecondLookItemId) -> Json {
+  json.string(second_look_item_to_string(id))
+}
+
+pub fn second_look_item_decoder() -> decode.Decoder(SecondLookItemId) {
+  decode.map(decode.string, SecondLookItemId)
+}
+
 /// An id of `signings`.
 pub opaque type SigningId {
   SigningId(String)
@@ -3189,6 +3270,60 @@ pub fn ver_token_decoder() -> decode.Decoder(VerTokenId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_ver_token(tx: Tx) -> Result(VerTokenId, Fail(e)) {
   ids.next(tx, "vtk") |> result.map(VerTokenId)
+}
+
+/// An id of `dynamic_watchlists`.
+pub opaque type WatchlistId {
+  WatchlistId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn watchlist(text: String) -> WatchlistId {
+  WatchlistId(text)
+}
+
+pub fn watchlist_to_string(id: WatchlistId) -> String {
+  let WatchlistId(text) = id
+  text
+}
+
+pub fn watchlist_sql(id: WatchlistId) -> sqlight.Value {
+  sqlight.text(watchlist_to_string(id))
+}
+
+pub fn watchlist_json(id: WatchlistId) -> Json {
+  json.string(watchlist_to_string(id))
+}
+
+pub fn watchlist_decoder() -> decode.Decoder(WatchlistId) {
+  decode.map(decode.string, WatchlistId)
+}
+
+/// An id of `watchlist_membership_events`.
+pub opaque type WatchlistEventId {
+  WatchlistEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn watchlist_event(text: String) -> WatchlistEventId {
+  WatchlistEventId(text)
+}
+
+pub fn watchlist_event_to_string(id: WatchlistEventId) -> String {
+  let WatchlistEventId(text) = id
+  text
+}
+
+pub fn watchlist_event_sql(id: WatchlistEventId) -> sqlight.Value {
+  sqlight.text(watchlist_event_to_string(id))
+}
+
+pub fn watchlist_event_json(id: WatchlistEventId) -> Json {
+  json.string(watchlist_event_to_string(id))
+}
+
+pub fn watchlist_event_decoder() -> decode.Decoder(WatchlistEventId) {
+  decode.map(decode.string, WatchlistEventId)
 }
 
 /// An id of `webhook_deliveries`.

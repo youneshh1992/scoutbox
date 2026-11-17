@@ -22,8 +22,8 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 1 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 14 | 13 | 444 / 1081 | 15 / 160 | 15 to go |
+| platform | 13 | 13 | 9 | 25 / 2347 | 0 / 179 | 5 to go |
+| recruitment | 19 | 15 | 14 | 496 / 1081 | 26 / 171 | 14 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -58,7 +58,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 0 / 2253 | 0 / 135 | not answered; 2253 cases pending; 135 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 7 / 2246 | 0 / 135 | not answered; 2246 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -68,7 +68,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
-| `recruitment/analytics` | not yet neutral | 13 → 13 | 104 | 104 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
 | `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 3 / 232 | 0 / 46 | 232 cases pending; 46 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | not yet neutral | 9 → 9 | 249 | 249 |  |  |  |  |  | not untangled; not answered |
@@ -113,6 +113,8 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |
+| `recruitment/analytics` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all sixty) |
+| `recruitment/analytics` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
 
 ## Calls to port by hand
@@ -151,6 +153,10 @@ ported by hand to a gleeunit test.
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | to do |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#memoryRateLimitProvider` | 1 | result.consume is a function | to do |
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/analytics` | `domains/recruitment/analytics/dashboard.mjs#buildDashboard` | 4 | args[].roomIds is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/analytics` | `domains/recruitment/analytics/dashboard.mjs#buildReportingContext` | 3 | args[].reads.trials.byId is a function | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/analytics` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/analytics` | `domains/recruitment/analytics/metrics.mjs#assertMetricRegistry` | 2 | throws Error without a code | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 1 | args[] is undefined | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].contacts.byId is a function; args[].signings.byId is a function | to do |
@@ -258,8 +264,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
 | `platform/dates` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 4 |
 | `platform/dates` | `domains/passport/shared.mjs#normWhen` | 7 |
-| `platform/dates` | `domains/recruitment/analytics/metrics.mjs#previousWindow` | 1 |
-| `platform/dates` | `domains/recruitment/analytics/metrics.mjs#resolveWindow` | 6 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 4 |

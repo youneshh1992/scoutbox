@@ -46,6 +46,9 @@ pub type Config {
     /// AGENT_VERIFICATION_TEST_PROVIDER=1 (development only): the synthetic licence register, which verifies any
     /// `TEST-VERIFIED…` reference an agent submits.
     agent_verification_test: Bool,
+    /// Development only: a route may inject a named fault for a test of its failure path (the dashboard's
+    /// `simulateFailure`), as the TypeScript server allows outside production.
+    dev_faults: Bool,
   )
 }
 
@@ -156,6 +159,7 @@ pub fn load() -> Result(Config, String) {
     test_clock: !production && envoy.get("SCOUTBOX_TEST_CLOCK") == Ok("1"),
     agent_verification_test: !production
       && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
+    dev_faults: !production,
   ))
 }
 
