@@ -1208,6 +1208,145 @@
     ]
   },
   {
+    "battery": "recruitment/decisions",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#assessmentSnapshot",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#chainHead",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#decisionIntegrity",
+        "calls": 16,
+        "cases": 16,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#decisionMilestone",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#decisionRequirements",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#decisionView",
+        "calls": 9,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#draftView",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#normaliseDecisionClientKey",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#resolveEvidenceRefs",
+        "calls": 12,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.trials.byId is a function": 12
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#summariseAssessments",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons",
+        "calls": 30,
+        "cases": 29,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes",
+        "calls": 16,
+        "cases": 16,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#validateNote",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#validateOutcome",
+        "calls": 25,
+        "cases": 23,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 8,
+        "cases": 0,
+        "handPort": {
+          "args[].contacts.byId is a function": 8
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 8,
+        "cases": 0,
+        "handPort": {
+          "args[].evidence.check is a function": 8
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomCan",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "recruitment/decisionsPersistence",
     "functions": [
       {
@@ -1351,6 +1490,129 @@
         "cases": 8,
         "handPort": {},
         "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/lifecycle",
+    "functions": [
+      {
+        "function": "domains/recruitment/analytics/funnels.mjs#stagesReached",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "result is a Set": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/errors.mjs#httpStatusFor",
+        "calls": 21,
+        "cases": 21,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/errors.mjs#publicErrorBody",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/errors.mjs#sendDomainError",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].status is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 7,
+        "cases": 0,
+        "handPort": {
+          "args[].signings.byId is a function": 5,
+          "result.check is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney",
+        "calls": 63,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.contacts.byId is a function": 62,
+          "args[].reads.signings.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#availableActions",
+        "calls": 175,
+        "cases": 78,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 2821,
+        "cases": 2773,
+        "handPort": {
+          "args[].evidence.check is a function": 8
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#derivedConditions",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#isLifecycleReason",
+        "calls": 19,
+        "cases": 16,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage",
+        "calls": 13,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons",
+        "calls": 14,
+        "cases": 13,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#adoptionStatusForStage",
+        "calls": 12,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomStatusForStage",
+        "calls": 31,
+        "cases": 16,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"hasOwnProperty\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"isPrototypeOf\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"prototype\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2,
+          "Gleam's types can't hold its arguments: cannot print \"valueOf\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 2
+        },
+        "status": "generated"
       }
     ]
   },

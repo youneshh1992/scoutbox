@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 25 / 2347 | 0 / 179 | 5 to go |
-| recruitment | 19 | 15 | 14 | 496 / 1081 | 26 / 171 | 14 to go |
+| recruitment | 19 | 17 | 14 | 519 / 4128 | 28 / 295 | 14 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -71,12 +71,12 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
 | `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 3 / 232 | 0 / 46 | 232 cases pending; 46 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
-| `recruitment/decisions` | not yet neutral | 9 → 9 | 249 | 249 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  |  | 7 / 120 | 0 / 29 | not answered; 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | not yet neutral | 9 → 9 | 217 | 217 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/journeyPersistence` | not yet neutral | 2 → 2 | 65 | 65 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/lifecycle` | not yet neutral | 11 → 11 | 307 | 307 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  |  | 16 / 2927 | 2 / 95 | not answered; 2927 cases pending; 93 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 8 / 151 | 6 / 31 | 151 cases pending; 25 hand-port calls |
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 0 / 82 | 0 / 23 | 82 cases pending; 23 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
@@ -164,8 +164,18 @@ ported by hand to a gleeunit test.
 | `recruitment/contacts` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 | args[].evidence.check is a function | to do |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 2 | args[].contacts.byId is a function | to do |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 1 | args[].reads.signings.byId is a function | to do |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#resolveEvidenceRefs` | 12 | args[].reads.trials.byId is a function | to do |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 1 | args[] is undefined | to do |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 8 | args[].contacts.byId is a function | to do |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 8 | args[].evidence.check is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#sendDomainError` | 1 | args[].status is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 7 | args[].signings.byId is a function; result.check is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 63 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 8 | args[].evidence.check is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#roomStatusForStage` | 14 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "isPrototypeOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "prototype" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "valueOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs | to do |
 | `recruitment/offers` | `domain.ts#isAdult` | 11 | args[] is a ; args[].dob is NaN | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
@@ -312,6 +322,20 @@ mapped, then `npm run cases`.
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 8 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#assessmentSnapshot` | 1 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 2 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 16 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionMilestone` | 1 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionRequirements` | 2 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionView` | 3 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#draftView` | 3 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 2 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#normaliseDecisionClientKey` | 7 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#summariseAssessments` | 4 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 29 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes` | 16 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateNote` | 11 |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateOutcome` | 23 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 1 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 9 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 1 |
@@ -329,6 +353,15 @@ mapped, then `npm run cases`.
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 21 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#publicErrorBody` | 1 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#availableActions` | 78 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2773 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#derivedConditions` | 2 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#isLifecycleReason` | 16 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons` | 13 |
+| `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#adoptionStatusForStage` | 11 |
 | `recruitment/offers` | `domains/recruitment/offers/errors.mjs#publicErrorBody` | 2 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 9 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRevise` | 6 |

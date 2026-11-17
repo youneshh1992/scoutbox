@@ -60,6 +60,23 @@ pub type Event {
   )
   /// A scout submitted an assessment. Private to the club.
   AssessmentSubmitted(org_id: String, assessment_id: String)
+  /// A Room's case moved between lifecycle states. Private to the club.
+  RecruitmentCaseMoved(
+    org_id: String,
+    room_id: String,
+    from: String,
+    to: String,
+  )
+  /// A Room was filed away (archived, closed or withdrawn). Ids only: Second Look reconciles from the decision row.
+  /// Private to the club.
+  RecruitmentRoomArchived(org_id: String, room_id: String)
+  /// A formal decision was recorded on a Room, first or superseding. Private to the club.
+  RoomDecisionChanged(
+    change: DecisionChange,
+    org_id: String,
+    room_id: String,
+    decision_id: String,
+  )
   /// A club sent a trial invitation from a Room. Private to the club.
   TrialInvited(org_id: String, room_id: String, request_id: String)
   /// The recipient accepted a trial invitation. Private to the club.
@@ -119,6 +136,11 @@ pub type SigningChange {
   SigningCancelled
   SigningVoided
   SigningSuperseded(revision_id: String, supersedes: String)
+}
+
+pub type DecisionChange {
+  DecisionFinalized
+  DecisionSuperseded
 }
 
 pub type TrialChange {
@@ -186,6 +208,13 @@ pub fn name(event: Event) -> String {
         SigningSuperseded(..) -> "signing_superseded"
       }
     AssessmentSubmitted(..) -> "assessment_submitted"
+    RecruitmentCaseMoved(..) -> "recruitment_case_moved"
+    RecruitmentRoomArchived(..) -> "recruitment_room_archived"
+    RoomDecisionChanged(change:, ..) ->
+      case change {
+        DecisionFinalized -> "room_decision_finalized"
+        DecisionSuperseded -> "room_decision_superseded"
+      }
     TrialInvited(..) -> "trial_invited"
     TrialAccepted(..) -> "trial_accepted"
     TrialDeclined(..) -> "trial_declined"
@@ -224,6 +253,9 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | OfferResponded(org_id:, ..)
     | SigningChanged(org_id:, ..)
     | AssessmentSubmitted(org_id:, ..)
+    | RecruitmentCaseMoved(org_id:, ..)
+    | RecruitmentRoomArchived(org_id:, ..)
+    | RoomDecisionChanged(org_id:, ..)
     | TrialInvited(org_id:, ..)
     | TrialAccepted(org_id:, ..)
     | TrialDeclined(org_id:, ..)
@@ -315,6 +347,21 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("orgId", json.string(org_id)),
       #("assessmentId", json.string(assessment_id)),
     ]
+    RecruitmentCaseMoved(org_id:, room_id:, from:, to:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("from", json.string(from)),
+      #("to", json.string(to)),
+    ]
+    RecruitmentRoomArchived(org_id:, room_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+    ]
+    RoomDecisionChanged(org_id:, room_id:, decision_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("decisionId", json.string(decision_id)),
+    ]
     TrialInvited(org_id:, room_id:, request_id:)
     | TrialDeclined(org_id:, room_id:, request_id:) -> [
       #("orgId", json.string(org_id)),
@@ -372,6 +419,8 @@ pub fn replays(event: Event) -> Bool {
     | Notify(..)
     | OfferResponded(..)
     | AssessmentSubmitted(..)
+    | RecruitmentCaseMoved(..)
+    | RecruitmentRoomArchived(..)
     | SigningChanged(..) -> True
     OfferChanged(change:, ..) -> change != OfferDraftUpdated
     _ -> False

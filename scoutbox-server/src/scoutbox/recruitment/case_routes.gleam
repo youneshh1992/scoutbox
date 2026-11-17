@@ -5,10 +5,12 @@
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/int
 import gleam/io
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/result
 import gleam/string
 import scoutbox/agents/core_routes as agent_core
@@ -21,10 +23,12 @@ import scoutbox/messaging/delivery
 import scoutbox/messaging/notifications
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
+import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/case_lifecycle
@@ -36,16 +40,19 @@ import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
+import scoutbox/rows/room_decisions as decision_row
 import scoutbox/safety/audit
 import scoutbox/vocab/audience
 import scoutbox/vocab/decision_evidence_kind
 import scoutbox/vocab/decision_outcome.{type DecisionOutcome}
 import scoutbox/vocab/room_status
+import scoutbox/vocab/trial_workflow_state
 import wisp.{type Request, type Response}
 
 fn refuse(
@@ -431,7 +438,7 @@ fn decision_permission(
 
 /// `GET /org/rooms/:id/decision`.
 ///
-/// Not ported yet: trials and Box Cam sessions, so the evidence candidates and completed-trial count list none.
+/// Not ported yet: the Box Cam evidence candidates (the trials' Box Cam observations), which list none.
 pub fn decision(
   ctx: Ctx,
   a: OrgAccess,
@@ -451,6 +458,12 @@ pub fn decision(
       ))
       use blocked <- result.try(audit.is_blocked(read, r.player_id, r.org_id))
       use player <- result.try(players.by_id(read, r.player_id))
+      use case_trials <- result.try(decisions.case_trials(
+        read,
+        r.org_id,
+        r.player_id,
+        r.id,
+      ))
       use passport <- result.map(
         store.query(
           read,
@@ -474,11 +487,21 @@ pub fn decision(
           },
         ),
       )
-      #(rows, draft, counted, blocked, player, passport)
+      #(rows, draft, counted, blocked, player, case_trials, passport)
     })
   case gathered {
     Error(e) -> http.internal(e)
-    Ok(#(rows, draft, counted, blocked, player, passport)) -> {
+    Ok(#(rows, draft, counted, blocked, player, case_trials, passport)) -> {
+      let case_trials =
+        list.sort(case_trials, fn(x, y) {
+          int.compare(x.row.accepted_at, y.row.accepted_at)
+          |> order.break_tie(string.compare(
+            id.trial_to_string(x.row.id),
+            id.trial_to_string(y.row.id),
+          ))
+        })
+      let completed_trials =
+        list.count(case_trials, fn(t) { decisions.completed_at(t) != None })
       log_rows(room, rows)
       case rows.duplicate_heads {
         [_, ..] ->
@@ -537,7 +560,26 @@ pub fn decision(
                       ])
                     }),
                   ),
-                  #("trials", json.preprocessed_array([])),
+                  #(
+                    "trials",
+                    json.array(case_trials, fn(t) {
+                      json.object([
+                        #("id", id.trial_json(t.row.id)),
+                        #(
+                          "workflowState",
+                          trial_workflow_state.to_json(
+                            trial_rules.workflow_state(t),
+                          ),
+                        ),
+                        #(
+                          "completedAt",
+                          json.nullable(decisions.completed_at(t), json.int),
+                        ),
+                        #("sessionCount", json.int(list.length(t.sessions))),
+                        #("legacy", json.bool(t.row.case_id == None)),
+                      ])
+                    }),
+                  ),
                   #("boxCam", json.preprocessed_array([])),
                   #("passport", json.preprocessed_array(passport)),
                   #(
@@ -571,7 +613,7 @@ pub fn decision(
                         "submittedAssessments",
                         json.int(list.length(summary.submitted)),
                       ),
-                      #("completedTrials", json.int(0)),
+                      #("completedTrials", json.int(completed_trials)),
                       #(
                         "note",
                         json.string(
@@ -976,7 +1018,13 @@ fn open_draft(
         True -> rate_limited(limits.DecisionDraft)
         False ->
           case
-            read(ctx, decisions.resolve_refs(_, c.refs, r.org_id, r.player_id))
+            read(ctx, decisions.resolve_refs(
+              _,
+              c.refs,
+              r.org_id,
+              r.player_id,
+              r.id,
+            ))
           {
             Error(response) -> response
             Ok(Error(refusal)) -> decision_refusal(refusal)
@@ -1152,6 +1200,7 @@ pub fn edit_draft(
                         c.refs,
                         r.org_id,
                         r.player_id,
+                        r.id,
                       ))
                       |> result.map(fn(x) { x |> result.map(Some) })
                     None -> Ok(Ok(None))
@@ -1486,6 +1535,7 @@ fn finalize_rows(
                       c.refs,
                       r.org_id,
                       r.player_id,
+                      r.id,
                     ))
                   {
                     Error(response) -> response
@@ -1736,6 +1786,9 @@ fn write_formal(
     as "an outcome names a lifecycle action"
   store.unit(ctx.store, fn(tx) {
     let read = store.reading(tx)
+    use _ <- result.try(
+      decisions.unchanged(read, r.id, r.org_id, dr, head) |> storage,
+    )
     use counted <- result.try(
       decisions.assessments_for(read, r.org_id, r.player_id) |> storage,
     )
@@ -1921,7 +1974,22 @@ fn write_formal(
       |> storage,
     )
     use fresh <- result.try(room_routes.find(store.reading(tx), a, r.id))
-    // Not ported yet: the `room_decision_finalized`/`_superseded` and `recruitment_room_archived` live events.
+    store.emit(
+      tx,
+      effect.Live(live_event.RoomDecisionChanged(
+        change: case head_formal {
+          Some(_) -> live_event.DecisionSuperseded
+          None -> live_event.DecisionFinalized
+        },
+        org_id: id.org_to_string(r.org_id),
+        room_id: id.recruitment_case_to_string(r.id),
+        decision_id: id.room_decision_to_string(decision_id),
+      )),
+    )
+    case list.contains(room_rules.terminal, fresh.status) {
+      True -> store.emit(tx, case_lifecycle.archived_event(r.org_id, r.id))
+      False -> Nil
+    }
     use _ <- result.try(
       [Some(fresh.row.owner_user_id), fresh.row.room_lead_scout_user_id]
       |> option.values
@@ -2115,4 +2183,45 @@ pub fn agent_journey(
       }
     }
   }
+}
+
+/// `GET /org/recruitment/decision-policy`: the decision vocabulary, for any org user.
+pub fn decision_policy() -> Response {
+  http.json(
+    200,
+    json.object([
+      #("policyVersion", json.int(decisions.policy_version)),
+      #(
+        "outcomes",
+        json.array(decisions.outcomes, fn(o) {
+          let m = decisions.mapping(o)
+          let assert Ok(action) =
+            list.find(lifecycle.actions, fn(x) { x.name == m.action })
+            as "every outcome maps onto a lifecycle action"
+          json.object([
+            #("outcome", decision_outcome.to_json(o)),
+            #("label", json.string(m.label)),
+            #(
+              "recommendation",
+              decision_row.recommendation_to_json(m.recommendation),
+            ),
+            #("lifecycleAction", json.string(m.action)),
+            #("to", json.string(action.to)),
+          ])
+        }),
+      ),
+      #("reasonCategories", room_rules.reason_codes_json()),
+      #(
+        "evidenceRefKinds",
+        json.array(decisions.evidence_kinds, decision_evidence_kind_json),
+      ),
+      #("limits", decisions.limits_json()),
+      #(
+        "note",
+        json.string(
+          "Evidence informs assessment; assessment informs discussion; discussion informs a formal human decision; that decision is not an offer and is never sent to the player. A positive decision stops at offer consideration.",
+        ),
+      ),
+    ]),
+  )
 }

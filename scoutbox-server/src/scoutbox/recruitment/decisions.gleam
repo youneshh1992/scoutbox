@@ -19,7 +19,10 @@ import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/room_records
 import scoutbox/recruitment/room_rules
+import scoutbox/recruitment/trial_rules.{type Trial}
+import scoutbox/recruitment/trials
 import scoutbox/rows/assessments as assessment_row
+import scoutbox/rows/box_sessions as box_row
 import scoutbox/rows/case_decision_drafts as draft_row
 import scoutbox/rows/id
 import scoutbox/rows/room_decisions as decision_row
@@ -29,6 +32,7 @@ import scoutbox/vocab/decision_outcome.{
   type DecisionOutcome, Hold, Progress, Reject,
 }
 import scoutbox/vocab/room_status.{type RoomStatus}
+import scoutbox/vocab/trial_workflow_state
 import sqlight
 
 pub const policy_version = 1
@@ -199,16 +203,38 @@ pub type Ref {
   Ref(kind: DecisionEvidenceKind, id: String, meta: Json)
 }
 
+/// The organisation's trials of the player that belong to this case, or to no case (a trial from before cases).
+pub fn case_trials(
+  read: Read,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
+  case_id: id.RecruitmentCaseId,
+) -> Result(List(Trial), Fail(e)) {
+  use all <- result.map(trials.for_org_player(read, org_id, player_id))
+  let mine = Some(case_id)
+  list.filter(all, fn(t) { t.row.case_id == None || t.row.case_id == mine })
+}
+
+/// When the trial completed, if it did.
+pub fn completed_at(t: Trial) -> Option(Int) {
+  case trial_rules.workflow_state(t) {
+    trial_workflow_state.Completed -> t.row.completion_at
+    _ -> None
+  }
+}
+
 /// Resolves each reference against this case's own records. Anything outside the case is
 /// `DECISION_CASE_MISMATCH`, with the same body whether the record exists elsewhere or not.
 ///
-/// Not ported yet: trials and Box Cam sessions, so a trial or a session reference is outside every case here.
+/// Not ported yet: Box Cam's test provider, so a `local_test` session is never citable here.
 pub fn resolve_refs(
   read: Read,
   refs: List(RefShape),
   org_id: id.OrgId,
   player_id: id.PlayerId,
+  case_id: id.RecruitmentCaseId,
 ) -> Result(Result(List(Ref), Refusal), Fail(e)) {
+  use case_trials <- result.try(case_trials(read, org_id, player_id, case_id))
   list.try_fold(refs, Ok([]), fn(acc, r) {
     case acc {
       Error(_) -> Ok(acc)
@@ -277,11 +303,94 @@ pub fn resolve_refs(
             }
           }
           decision_evidence_kind.Trial ->
-            mismatch("That trial is not one of this case's.")
-          decision_evidence_kind.BoxCamSession ->
-            mismatch(
-              "That Box Cam session is not cited on any trial of this case.",
-            )
+            case
+              list.find(case_trials, fn(t) {
+                id.trial_to_string(t.row.id) == r.id
+              })
+            {
+              Error(_) -> mismatch("That trial is not one of this case's.")
+              Ok(t) ->
+                Ok(
+                  Ok([
+                    Ref(
+                      r.kind,
+                      r.id,
+                      json.object([
+                        #(
+                          "workflowState",
+                          trial_workflow_state.to_json(
+                            trial_rules.workflow_state(t),
+                          ),
+                        ),
+                        #(
+                          "completedAt",
+                          json.nullable(completed_at(t), json.int),
+                        ),
+                      ]),
+                    ),
+                    ..out
+                  ]),
+                )
+            }
+          decision_evidence_kind.BoxCamSession -> {
+            let link =
+              list.find_map(case_trials, fn(t) {
+                list.find_map(t.sessions, fn(s) {
+                  list.find(s.evidence, fn(e) {
+                    id.box_session_to_string(e.box_session_id) == r.id
+                    && e.removed_at == None
+                  })
+                  |> result.map(fn(e) { #(t, s, e) })
+                })
+              })
+            case link {
+              Error(_) ->
+                mismatch(
+                  "That Box Cam session is not cited on any trial of this case.",
+                )
+              Ok(#(t, s, e)) -> {
+                use found <- result.try(store.query(
+                  read,
+                  "SELECT "
+                    <> box_row.columns
+                    <> " FROM box_sessions WHERE id = ?",
+                  [id.box_session_sql(e.box_session_id)],
+                  box_row.decoder(),
+                ))
+                case found {
+                  [b]
+                    if b.player_id == player_id
+                    && b.provider_id != box_row.LocalTest
+                  ->
+                    Ok(
+                      Ok([
+                        Ref(
+                          r.kind,
+                          r.id,
+                          json.object([
+                            #("trialId", id.trial_json(t.row.id)),
+                            #("trialSessionId", id.trial_session_json(s.row.id)),
+                            #(
+                              "verificationState",
+                              json.nullable(
+                                b.verification_state,
+                                box_row.verification_state_to_json,
+                              ),
+                            ),
+                            #("simulated", json.bool(False)),
+                          ]),
+                        ),
+                        ..out
+                      ]),
+                    )
+                  _ ->
+                    mismatch(
+                      "That Box Cam session is not available to this case.",
+                    )
+                }
+              }
+            }
+          }
           decision_evidence_kind.PassportEvidence -> {
             use found <- result.try(
               store.query(
@@ -1308,4 +1417,34 @@ pub fn summary_json(s: Summary) -> Json {
       ),
     ),
   ])
+}
+
+/// Inside a unit: the case's draft, its decision chain and its subject are as the route read them, or the act lost
+/// a race (two finalizations, an edit beside a finalization, the player leaving).
+pub fn unchanged(
+  read: Read,
+  room_id: id.RecruitmentCaseId,
+  org_id: id.OrgId,
+  dr: Draft,
+  head: Option(Decision),
+) -> Result(Nil, Fail(e)) {
+  use now_draft <- result.try(draft(read, room_id))
+  use rows <- result.try(rows_of(read, room_id, org_id))
+  use removed <- result.try(store.one(
+    read,
+    "SELECT subject_removed_at FROM recruitment_cases WHERE id = ?",
+    [id.recruitment_case_sql(room_id)],
+    decode.at([0], decode.optional(decode.int)),
+  ))
+  let key = fn(h: Option(Decision)) {
+    option.map(h, fn(d) { #(d.base.row.id, d.base.row.rev) })
+  }
+  let same_draft = case now_draft {
+    Some(d) -> d.row.id == dr.row.id && d.row.rev == dr.row.rev
+    None -> False
+  }
+  case same_draft, key(chain_head(rows.rows)) == key(head), removed {
+    True, True, Ok(None) -> Ok(Nil)
+    _, _, _ -> store.stale("the case's decision draft, chain or subject moved")
+  }
 }

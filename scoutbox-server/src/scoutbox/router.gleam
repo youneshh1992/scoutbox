@@ -277,6 +277,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
         ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
+        ["recruitment", "decision-policy"] ->
+          only(req, Get, case_routes.decision_policy)
         ["recruitment", "contact-policy"] ->
           only(req, Get, contact_routes.policy)
         ["rooms-funnel"] ->
@@ -1615,10 +1617,14 @@ fn rooms(
       case_routes.edit_draft(ctx, req, org, room(rid))
     [rid, "decision", "draft"], Delete ->
       case_routes.discard_draft(ctx, req, org, room(rid))
-    [rid, "decision", "finalize"], Post ->
+    [rid, "decision", "finalize"], Post -> {
+      use req <- contract.rerun_on_stale(req)
       case_routes.finalize(ctx, req, org, room(rid), False)
-    [rid, "decision", "supersede"], Post ->
+    }
+    [rid, "decision", "supersede"], Post -> {
+      use req <- contract.rerun_on_stale(req)
       case_routes.finalize(ctx, req, org, room(rid), True)
+    }
     _, _ -> not_found()
   }
 }

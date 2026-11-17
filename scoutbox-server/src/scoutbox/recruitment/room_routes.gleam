@@ -1456,7 +1456,10 @@ fn apply_move(
       True -> count(tx, "recruitment_room_signed") |> storage
       False -> Ok(Nil)
     })
-    // Not ported yet: the `recruitment_case_moved` live event.
+    store.emit(
+      tx,
+      case_lifecycle.moved_event(room.row.org_id, room.row.id, from, to),
+    )
     use moved <- result.try(reread(tx, a, room.row.id))
     use view <- result.map(room_body(tx, a, moved, now))
     http.json(
@@ -1527,7 +1530,20 @@ fn record_decision(
     )
     |> storage,
   )
-  // Not ported yet: the `recruitment_room_archived` live event for a filed-away room.
+  use now_at <- result.try(reread(tx, a, room.row.id))
+  case
+    list.contains(
+      [room_status.Archived, room_status.Closed, room_status.Withdrawn],
+      now_at.status,
+    )
+  {
+    True ->
+      store.emit(
+        tx,
+        case_lifecycle.archived_event(room.row.org_id, room.row.id),
+      )
+    False -> Nil
+  }
   use _ <- result.map(count(tx, "room_decision_recorded") |> storage)
   // The superseded predecessor is rewritten, so the decision reads back as stored.
   saved

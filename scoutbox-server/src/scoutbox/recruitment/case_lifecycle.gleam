@@ -12,6 +12,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/platform/clock
+import scoutbox/platform/effect
+import scoutbox/platform/live_event
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/cases.{type Room}
@@ -550,7 +552,7 @@ pub fn apply(
     True -> metrics.count(tx, "rooms", "recruitment_room_reopened")
     False -> Ok(Nil)
   })
-  // Not ported yet: the `recruitment_case_moved` live event.
+  store.emit(tx, moved_event(room.row.org_id, room.row.id, from, to))
   use _ <- result.map(metrics.count(
     tx,
     "rooms",
@@ -702,4 +704,30 @@ pub fn advance(
       ))
     }
   }
+}
+
+/// The `recruitment_case_moved` live event.
+pub fn moved_event(
+  org_id: id.OrgId,
+  room_id: id.RecruitmentCaseId,
+  from: RoomStatus,
+  to: RoomStatus,
+) -> effect.Effect {
+  effect.Live(live_event.RecruitmentCaseMoved(
+    org_id: id.org_to_string(org_id),
+    room_id: id.recruitment_case_to_string(room_id),
+    from: room_status.to_string(from),
+    to: room_status.to_string(to),
+  ))
+}
+
+/// The `recruitment_room_archived` live event: the Second Look contract.
+pub fn archived_event(
+  org_id: id.OrgId,
+  room_id: id.RecruitmentCaseId,
+) -> effect.Effect {
+  effect.Live(live_event.RecruitmentRoomArchived(
+    org_id: id.org_to_string(org_id),
+    room_id: id.recruitment_case_to_string(room_id),
+  ))
 }
