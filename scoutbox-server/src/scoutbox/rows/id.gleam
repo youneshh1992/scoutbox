@@ -603,6 +603,70 @@ pub fn next_conflict(tx: Tx) -> Result(ConflictId, Fail(e)) {
   ids.next(tx, "vcoi") |> result.map(ConflictId)
 }
 
+/// An id of `recruitment_contacts`.
+pub opaque type ContactId {
+  ContactId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn contact(text: String) -> ContactId {
+  ContactId(text)
+}
+
+pub fn contact_to_string(id: ContactId) -> String {
+  let ContactId(text) = id
+  text
+}
+
+pub fn contact_sql(id: ContactId) -> sqlight.Value {
+  sqlight.text(contact_to_string(id))
+}
+
+pub fn contact_json(id: ContactId) -> Json {
+  json.string(contact_to_string(id))
+}
+
+pub fn contact_decoder() -> decode.Decoder(ContactId) {
+  decode.map(decode.string, ContactId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_contact(tx: Tx) -> Result(ContactId, Fail(e)) {
+  ids.next(tx, "rct") |> result.map(ContactId)
+}
+
+/// An id of `contact_history`.
+pub opaque type ContactEventId {
+  ContactEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn contact_event(text: String) -> ContactEventId {
+  ContactEventId(text)
+}
+
+pub fn contact_event_to_string(id: ContactEventId) -> String {
+  let ContactEventId(text) = id
+  text
+}
+
+pub fn contact_event_sql(id: ContactEventId) -> sqlight.Value {
+  sqlight.text(contact_event_to_string(id))
+}
+
+pub fn contact_event_json(id: ContactEventId) -> Json {
+  json.string(contact_event_to_string(id))
+}
+
+pub fn contact_event_decoder() -> decode.Decoder(ContactEventId) {
+  decode.map(decode.string, ContactEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_contact_event(tx: Tx) -> Result(ContactEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ContactEventId)
+}
+
 /// An id of `compliance_context_history`.
 pub opaque type ContextEventId {
   ContextEventId(String)

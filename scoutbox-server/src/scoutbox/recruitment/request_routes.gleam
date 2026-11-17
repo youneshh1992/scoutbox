@@ -11,9 +11,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/regexp
 import gleam/result
-import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/guardians.{type Guardian}
@@ -28,6 +26,8 @@ import scoutbox/platform/limits
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
+import scoutbox/recruitment/contact_rules
+import scoutbox/recruitment/contacts
 import scoutbox/recruitment/requests
 import scoutbox/recruitment/trial_routes
 import scoutbox/recruitment/trial_rules
@@ -97,8 +97,6 @@ fn direct_shape() -> input.Shape(Direct) {
 /// `POST /org/players/:id/request`.
 ///
 /// A trial request is refused while the club has a trial awaiting its mandatory report.
-///
-/// Not ported yet: the per-club budget of 30 contacts an hour.
 pub fn request(
   ctx: Ctx,
   req: Request,
@@ -149,7 +147,7 @@ pub fn request(
       )
       case body.type_ {
         request_row.Trial -> direct_trial(ctx, req, a, p, message, body, now)
-        request_row.Contact -> contact(ctx, a, p, message, now)
+        request_row.Contact -> contact(ctx, req, a, p, message, now)
       }
     }
   }
@@ -294,6 +292,8 @@ fn file_direct_trial(
           message:,
           guardian_id:,
           at: now,
+          subject: None,
+          contact_id: None,
         ),
         details.proposed_date,
         details.alt_days,
@@ -332,8 +332,87 @@ fn file_direct_trial(
   }
 }
 
+/// A club's own contact request, or a Room contact's send: the request row, its ledger entry and the notices to the
+/// recipient (requests.mjs `issueRecruitmentRequest`). A minor's goes to `new.guardian_id`.
+pub fn issue_contact(
+  tx: store.Tx,
+  p: players.Player,
+  new: requests.NewContact,
+) -> Result(requests.Request, store.Fail(e)) {
+  use r <- result.try(requests.create_contact(tx, new))
+  let minor = new.guardian_id != None
+  use _ <- result.try(ledger.append(
+    tx,
+    ledger.Entry(
+      entry_type: case minor {
+        True -> ledger_row.ContactRequestToGuardian
+        False -> ledger_row.ContactRequest
+      },
+      player_id: Some(p.row.id),
+      org_id: Some(new.org_id),
+      org_name: Some(new.org_name),
+      user_id: Some(new.user_id),
+      actor_name: Some(new.scout_name),
+    ),
+    new.at,
+  ))
+  let notice = fn(kind, to, text) {
+    notifications.notify(
+      tx,
+      to: kind,
+      id: to,
+      type_: "request",
+      text:,
+      ref_id: Some(id.request_to_string(r.id)),
+      at: new.at,
+    )
+  }
+  use _ <- result.map(case new.guardian_id {
+    Some(g) -> {
+      use _ <- result.try(notice(
+        audience.Guardian,
+        id.guardian_to_string(g),
+        new.org_name
+          <> " has requested to discuss a conversation for "
+          <> p.row.name
+          <> ".",
+      ))
+      notice(
+        audience.Player,
+        id.player_to_string(p.row.id),
+        new.org_name <> " contacted your parent/guardian about a conversation.",
+      )
+    }
+    None ->
+      notice(
+        audience.Player,
+        id.player_to_string(p.row.id),
+        new.org_name <> " sent you a contact request.",
+      )
+  })
+  // Not ported yet: the live 'inbox' event.
+  r
+}
+
+fn pending_refusal(request_id: id.RequestId) -> Response {
+  http.json(
+    409,
+    json.object([
+      #("error", json.string("REQUEST_PENDING")),
+      #(
+        "message",
+        json.string(
+          "A contact request to this player is already awaiting an answer.",
+        ),
+      ),
+      #("requestId", id.request_json(request_id)),
+    ]),
+  )
+}
+
 fn contact(
   ctx: Ctx,
+  req: Request,
   a: OrgAccess,
   p: players.Player,
   message: String,
@@ -344,6 +423,49 @@ fn contact(
     True -> p.row.guardian_id
     False -> None
   }
+  // A pending request is refused before the budget is charged; the unit checks again.
+  case
+    store.read(ctx.store, requests.pending_between(
+      _,
+      a.org.id,
+      p.row.id,
+      request_row.Contact,
+    ))
+  {
+    Error(failure) -> http.internal(failure)
+    Ok(Some(r)) -> pending_refusal(r.id)
+    Ok(None) ->
+      case
+        !http.rerun(req)
+        && limits.limited(
+          ctx.limits,
+          limits.ContactSend,
+          id.org_to_string(a.org.id),
+          clock.now_ms(),
+        )
+      {
+        True ->
+          http.json(
+            429,
+            json.object(
+              list.map(limits.limited_body(limits.ContactSend), fn(x) {
+                #(x.0, json.string(x.1))
+              }),
+            ),
+          )
+        False -> file_contact(ctx, a, p, message, guardian_id, now)
+      }
+  }
+}
+
+fn file_contact(
+  ctx: Ctx,
+  a: OrgAccess,
+  p: players.Player,
+  message: String,
+  guardian_id: Option(id.GuardianId),
+  now: Int,
+) -> Response {
   let filed =
     store.unit(ctx.store, fn(tx) {
       let read = store.reading(tx)
@@ -356,8 +478,9 @@ fn contact(
       ))
       use <- refuse_when(pending, fn(r: requests.Request) { Pending(r.id) })
       use certified <- result.try(orgs.safeguarding_certified(read, a.org))
-      use r <- result.try(requests.create_contact(
+      issue_contact(
         tx,
+        p,
         requests.NewContact(
           player_id: p.row.id,
           player_name: p.row.name,
@@ -373,60 +496,10 @@ fn contact(
           message:,
           guardian_id:,
           at: now,
+          subject: None,
+          contact_id: None,
         ),
-      ))
-      use _ <- result.try(ledger.append(
-        tx,
-        ledger.Entry(
-          entry_type: case minor {
-            True -> ledger_row.ContactRequestToGuardian
-            False -> ledger_row.ContactRequest
-          },
-          player_id: Some(p.row.id),
-          org_id: Some(a.org.id),
-          org_name: Some(a.org.name),
-          user_id: Some(a.user.id),
-          actor_name: Some(a.user.name),
-        ),
-        now,
-      ))
-      let notice = fn(kind, to, text) {
-        notifications.notify(
-          tx,
-          to: kind,
-          id: to,
-          type_: "request",
-          text:,
-          ref_id: Some(id.request_to_string(r.id)),
-          at: now,
-        )
-      }
-      use _ <- result.map(case guardian_id {
-        Some(g) -> {
-          use _ <- result.try(notice(
-            audience.Guardian,
-            id.guardian_to_string(g),
-            a.org.name
-              <> " has requested to discuss a conversation for "
-              <> p.row.name
-              <> ".",
-          ))
-          notice(
-            audience.Player,
-            id.player_to_string(p.row.id),
-            a.org.name
-              <> " contacted your parent/guardian about a conversation.",
-          )
-        }
-        None ->
-          notice(
-            audience.Player,
-            id.player_to_string(p.row.id),
-            a.org.name <> " sent you a contact request.",
-          )
-      })
-      // Not ported yet: the live 'inbox' event.
-      r
+      )
     })
   case filed {
     Ok(r) ->
@@ -439,20 +512,7 @@ fn contact(
           #("routedTo", party.to_json(r.routed_to)),
         ]),
       )
-    Error(store.Refused(Pending(request_id))) ->
-      http.json(
-        409,
-        json.object([
-          #("error", json.string("REQUEST_PENDING")),
-          #(
-            "message",
-            json.string(
-              "A contact request to this player is already awaiting an answer.",
-            ),
-          ),
-          #("requestId", id.request_json(request_id)),
-        ]),
-      )
+    Error(store.Refused(Pending(request_id))) -> pending_refusal(request_id)
     Error(failure) -> http.internal(failure)
   }
 }
@@ -657,21 +717,6 @@ fn answer_shape() -> input.Shape(Answer) {
   input.done(Answer(accept:, chosen_slot:, message:))
 }
 
-const reply_max = 500
-
-/// contact.mjs `plainShared`: tags, angle brackets and control characters removed, trimmed and cut.
-///
-/// Not ported yet: NFC normalisation (OTP's `unicode:characters_to_nfc_binary` is an FFI this server avoids).
-fn plain(text: String) -> String {
-  let assert Ok(tags) = regexp.from_string("<[^>]*>|[<>]")
-  let assert Ok(controls) =
-    regexp.from_string("[\\x{0}-\\x{8}\\x{B}\\x{C}\\x{E}-\\x{1F}\\x{7F}]")
-  regexp.replace(tags, text, "")
-  |> regexp.replace(controls, _, "")
-  |> string.trim
-  |> input.utf16_take(reply_max)
-}
-
 /// The optional short reply a contact may carry: `Ok(None)` for no reply, or the 400 that refuses it.
 fn contact_reply(
   r: requests.Request,
@@ -685,7 +730,7 @@ fn contact_reply(
   case is_nothing, as_text, r.type_ {
     True, _, _ -> Ok(None)
     False, Some(Ok(text)), request_row.Contact ->
-      case plain(text) {
+      case contact_rules.plain_shared(text, contact_rules.reply_max) {
         "" -> Ok(None)
         reply -> Ok(Some(reply))
       }
@@ -819,11 +864,11 @@ fn respond(
                   }
                   case gate {
                     Error(refused) -> refused
-                    Ok(Nil) -> answer(ctx, r, player, by, True, date)
+                    Ok(Nil) -> answer(ctx, r, player, by, True, date, reply)
                   }
                 }
               }
-            _, _ -> answer(ctx, r, player, by, body.accept, None)
+            _, _ -> answer(ctx, r, player, by, body.accept, None, reply)
           }
       }
     }
@@ -862,6 +907,7 @@ fn answer(
   by: Responder,
   accept: Bool,
   trial_date: Option(String),
+  reply: Option(String),
 ) -> Response {
   let now = clock.now_ms()
   let by_guardian = by.kind == party.Guardian
@@ -883,6 +929,16 @@ fn answer(
         tx,
         id.request_to_string(r.id),
         accept,
+        by.kind,
+        now,
+      ))
+      use _ <- result.try(contacts.on_request_responded(
+        tx,
+        r.id,
+        r.contact_id,
+        r.user_id,
+        accept,
+        reply,
         by.kind,
         now,
       ))

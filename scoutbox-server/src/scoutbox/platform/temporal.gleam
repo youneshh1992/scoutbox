@@ -1,5 +1,8 @@
 //// Instants written as text, read as temporal.ts reads them: strictly, years 1900–2100.
 
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option
@@ -164,4 +167,53 @@ fn zone_ok(zone: String) -> Bool {
 fn with_seconds(s: String) -> String {
   let assert Ok(short) = regexp.from_string("^(.{10}T\\d{2}:\\d{2})(Z|[+-].*)$")
   regexp.replace(short, s, "\\1:00\\2")
+}
+
+/// parseInstant over a value as sent: ISO 8601 with an explicit offset or `Z`, or an integer millisecond
+/// timestamp, its UTC year in `year_min`–`year_max`. A bare local time or a date-only string is refused. Error: why
+/// not, in temporal.ts's words.
+pub fn instant(
+  v: Dynamic,
+  year_min: Int,
+  year_max: Int,
+) -> Result(Int, String) {
+  let year_ok = fn(ms) {
+    let #(date, _) =
+      timestamp.from_unix_seconds_and_nanoseconds(
+        int.floor_divide(ms, 1000) |> result.unwrap(0),
+        0,
+      )
+      |> timestamp.to_calendar(calendar.utc_offset)
+    case date.year < year_min || date.year > year_max {
+      True ->
+        Error(
+          "year outside "
+          <> int.to_string(year_min)
+          <> "–"
+          <> int.to_string(year_max),
+        )
+      False -> Ok(ms)
+    }
+  }
+  case decode.run(v, decode.int), decode.run(v, decode.float) {
+    Ok(n), _ -> year_ok(n)
+    _, Ok(f) ->
+      case float.floor(f) == f {
+        True -> year_ok(float.truncate(f))
+        False -> Error("not a whole number")
+      }
+    _, _ ->
+      case decode.run(v, decode.string) {
+        Ok(s) ->
+          case string.slice(s, 0, 4) |> int.parse {
+            Ok(y) if y < year_min || y > year_max ->
+              case instant_ms(s) {
+                Error("wrong shape") -> Error("wrong shape")
+                _ -> Error("no such calendar day")
+              }
+            _ -> result.try(instant_ms(s), year_ok)
+          }
+        Error(_) -> Error("not a date-time")
+      }
+  }
 }

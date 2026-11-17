@@ -10,7 +10,6 @@
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
-import gleam/float
 import gleam/int
 import gleam/json.{type Json}
 import gleam/list
@@ -247,42 +246,7 @@ const instant_year_max = 2100
 /// ISO 8601 with an explicit offset or `Z`, or an integer millisecond timestamp, in 2000–2100; a bare local time or
 /// a date-only string is refused. Error: why not, in temporal.ts's words.
 pub fn instant(v: Dynamic) -> Result(Int, String) {
-  let year_ok = fn(ms) {
-    let y = zones.local_parts(ms, "UTC").year
-    case y < instant_year_min || y > instant_year_max {
-      True ->
-        Error(
-          "year outside "
-          <> int.to_string(instant_year_min)
-          <> "–"
-          <> int.to_string(instant_year_max),
-        )
-      False -> Ok(ms)
-    }
-  }
-  case decode.run(v, decode.int), decode.run(v, decode.float) {
-    Ok(n), _ -> year_ok(n)
-    _, Ok(f) ->
-      case float.floor(f) == f {
-        True -> year_ok(float.truncate(f))
-        False -> Error("not a whole number")
-      }
-    _, _ ->
-      case decode.run(v, decode.string) {
-        Ok(s) -> {
-          let year = string.slice(s, 0, 4) |> int.parse
-          case year {
-            Ok(y) if y < instant_year_min || y > instant_year_max ->
-              case temporal.instant_ms(s) {
-                Error("wrong shape") -> Error("wrong shape")
-                _ -> Error("no such calendar day")
-              }
-            _ -> result.try(temporal.instant_ms(s), year_ok)
-          }
-        }
-        Error(_) -> Error("not a date-time")
-      }
-  }
+  temporal.instant(v, instant_year_min, instant_year_max)
 }
 
 fn instant_refusal(why: String, field: String) -> Refusal {

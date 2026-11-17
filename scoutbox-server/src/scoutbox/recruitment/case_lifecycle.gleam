@@ -14,6 +14,8 @@ import gleam/result
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/cases.{type Room}
+import scoutbox/recruitment/contact_rules
+import scoutbox/recruitment/contacts
 import scoutbox/recruitment/lifecycle.{type Action}
 import scoutbox/recruitment/offer_rules
 import scoutbox/recruitment/offers
@@ -37,7 +39,6 @@ pub type Evidence {
 /// Is there a record that supports `kind` for this case? From stores the lifecycle does not own and never
 /// writes.
 ///
-/// Not ported yet: contacts. No route here records a contact, so that kind has no record to find.
 pub fn evidence(
   read: Read,
   room: Room,
@@ -52,7 +53,25 @@ pub fn evidence(
     }
   }
   case kind {
-    room_rules.ContactDelivered -> Ok(Lacks("no_contact_delivered"))
+    // Delivered in-app, answered, or recorded as happening outside ScoutBox, by this organisation to this player.
+    // Drafts, failed attempts and corrupt records are not evidence.
+    room_rules.ContactDelivered -> {
+      use found <- result.map(contacts.for_org_player(
+        read,
+        r.org_id,
+        r.player_id,
+      ))
+      case
+        list.find(found, fn(c) {
+          contact_rules.is_evidence(c.row.status)
+          && c.row.cancelled_at == None
+          && contact_rules.integrity(c, None, None) == []
+        })
+      {
+        Ok(c) -> Holds("recruitment_contact", id.contact_to_string(c.row.id))
+        Error(Nil) -> Lacks("no_contact_delivered")
+      }
+    }
     // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed schedule) and `reported` never satisfies
     // `trial_completed` (a report is not completion). A tombstoned trial still answers, so history stays honest.
     room_rules.TrialConfirmed | room_rules.TrialCompletedEvidence -> {

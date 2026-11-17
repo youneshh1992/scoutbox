@@ -88,6 +88,12 @@ pub type Action {
   OfferWithdraw
   /// Offer acceptances and declines, per player or guardian answering.
   OfferResponse
+  /// Contact drafts created or edited, per organisation.
+  ContactDraft
+  /// Contacts sent to players and guardians, per organisation.
+  ContactSend
+  /// External contacts recorded, per organisation.
+  ContactExternalRecord
   /// Production CV finalizations, per player: only bounds a retry loop.
   BoxCvFinalize
   /// Trial invitations, per organisation.
@@ -138,6 +144,12 @@ const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const contact_draft_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const contact_send_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const contact_external_record_policy = Policy(max: 60, window_ms: 3_600_000)
+
 const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
 const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
@@ -179,6 +191,9 @@ fn action_name(action: Action) -> String {
     OfferIssue -> "offer_issue"
     OfferWithdraw -> "offer_withdraw"
     OfferResponse -> "offer_response"
+    ContactDraft -> "contact_draft"
+    ContactSend -> "contact_send"
+    ContactExternalRecord -> "contact_external_record"
     BoxCvFinalize -> "box_cv_finalize"
     TrialInvite -> "trial_invite"
     TrialSchedule -> "trial_schedule"
@@ -208,6 +223,9 @@ fn action_policy(action: Action) -> Policy {
     OfferIssue -> offer_issue_policy
     OfferWithdraw -> offer_withdraw_policy
     OfferResponse -> offer_response_policy
+    ContactDraft -> contact_draft_policy
+    ContactSend -> contact_send_policy
+    ContactExternalRecord -> contact_external_record_policy
     BoxCvFinalize -> box_cv_finalize_policy
     TrialInvite -> trial_invite_policy
     TrialSchedule -> trial_schedule_policy

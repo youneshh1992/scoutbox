@@ -57,6 +57,7 @@ import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/case_routes
+import scoutbox/recruitment/contact_routes
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
@@ -177,6 +178,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
         ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
+        ["recruitment", "contact-policy"] ->
+          only(req, Get, contact_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
         ["feed"] -> only(req, Get, fn() { org_feed.feed(ctx, org) })
@@ -1341,6 +1344,23 @@ fn rooms(
     [rid, "combine-requests"], Post ->
       room_routes.request_combine(ctx, req, org, room(rid))
     [rid, "link"], Post -> room_routes.link(ctx, req, org, room(rid))
+    [rid, "contacts"], Get -> contact_routes.list_contacts(ctx, org, rid)
+    [rid, "contacts"], Post -> contact_routes.create(ctx, req, org, rid)
+    [rid, "contacts", "external"], Post ->
+      contact_routes.record_external(ctx, req, org, rid)
+    [rid, "contacts", cid], Get -> contact_routes.get(ctx, org, rid, cid)
+    [rid, "contacts", cid], Patch -> {
+      use req <- contract.rerun_on_stale(req)
+      contact_routes.edit(ctx, req, org, rid, cid)
+    }
+    [rid, "contacts", cid, "cancel"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      contact_routes.cancel(ctx, req, org, rid, cid)
+    }
+    [rid, "contacts", cid, "send"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      contact_routes.send(ctx, req, org, rid, cid)
+    }
     [rid, "trials"], Get -> trial_routes.list_trials(ctx, org, room(rid))
     [rid, "trials"], Post -> {
       use req <- contract.rerun_on_stale(req)

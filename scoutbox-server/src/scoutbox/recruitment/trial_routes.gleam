@@ -1423,6 +1423,8 @@ fn send_invitation(
             message: inv.message,
             guardian_id: recipient.guardian_id,
             at:,
+            subject: None,
+            contact_id: None,
           ),
           case_id: room.row.id,
           slots: list.map(inv.slots, fn(s) {

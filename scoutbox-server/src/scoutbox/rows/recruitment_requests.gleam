@@ -130,7 +130,7 @@ pub type Row {
     type_: Type,
     message: Option(String),
     subject: Option(String),
-    contact_id: Option(String),
+    contact_id: Option(id.ContactId),
     trial_proposed_date: Option(String),
     trial_alt_days_json: Option(String),
     trial_venue: Option(String),
@@ -232,7 +232,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use type_ <- decode.field(12, type_decoder())
   use message <- decode.field(13, decode.optional(decode.string))
   use subject <- decode.field(14, decode.optional(decode.string))
-  use contact_id <- decode.field(15, decode.optional(decode.string))
+  use contact_id <- decode.field(15, decode.optional(id.contact_decoder()))
   use trial_proposed_date <- decode.field(16, decode.optional(decode.string))
   use trial_alt_days_json <- decode.field(17, decode.optional(decode.string))
   use trial_venue <- decode.field(18, decode.optional(decode.string))
@@ -342,7 +342,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(type_to_string(row.type_)),
     sqlight.nullable(sqlight.text, row.message),
     sqlight.nullable(sqlight.text, row.subject),
-    sqlight.nullable(sqlight.text, row.contact_id),
+    sqlight.nullable(id.contact_sql, row.contact_id),
     sqlight.nullable(sqlight.text, row.trial_proposed_date),
     sqlight.nullable(sqlight.text, row.trial_alt_days_json),
     sqlight.nullable(sqlight.text, row.trial_venue),

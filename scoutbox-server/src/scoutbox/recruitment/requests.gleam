@@ -42,6 +42,10 @@ pub type NewContact {
     /// The guardian a minor's request goes to; `None` for an adult, who answers their own.
     guardian_id: Option(id.GuardianId),
     at: Int,
+    /// A Room contact's subject and the contact the request carries (an internal link, never shown to the
+    /// recipient).
+    subject: Option(String),
+    contact_id: Option(id.ContactId),
   )
 }
 
@@ -76,6 +80,8 @@ pub fn create_contact(tx: Tx, new: NewContact) -> Result(Request, Fail(e)) {
         scout_role: Some(new.scout_role),
         message: Some(new.message),
         guardian_id: new.guardian_id,
+        subject: new.subject,
+        contact_id: new.contact_id,
       ),
     ),
     row.decoder(),
@@ -344,7 +350,7 @@ pub fn record_json(r: Request, slots: List(slot_row.Row)) -> Json {
     #("type", row.type_to_json(r.type_)),
     #("message", opt(r.message)),
     #("subject", opt(r.subject)),
-    #("contactId", opt(r.contact_id)),
+    #("contactId", json.nullable(r.contact_id, id.contact_json)),
     #("trialDetails", case r.type_ {
       row.Contact -> json.null()
       row.Trial ->
