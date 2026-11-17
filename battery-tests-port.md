@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 35 of 53 neutral]
+### Untangling [in progress: 36 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 26 batteries pass unchanged]
+### Porting, domain by domain [in progress: 29 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -114,7 +114,8 @@ of the product, so they aren't one slice.
 |---|---|---|
 | Platform (staff, safeguarding, players and guardians, store guarantees, messaging, notifications, delivery, connected mode, sessions and ports) | 9 | done |
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
-| Recruitment: Rooms, Offers, decisions persistence, trials, contacts, signings, analytics | 14 | `recruitment/journey`: everything but H5 (Second Look) and I (the analytics pipeline family) passes |
+| Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics | 16 | `recruitment/journey`: everything but Z1 (matching and watchlists) passes |
+| Discovery: Second Look and Nobody Missed | 1 | **ported**: every ledger row closed |
 | Agents: core | 1 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -128,12 +129,17 @@ are for surprising facts or points that later work depends on, not implementatio
       `journeyAdversarial` use its funnels. A read-only domain can be compared whole by booting both servers on
       copies of a database a TypeScript battery left behind in the temp directory: that exercised every family
       here, which the seed does not.
-   2. `recruitment/lifecycle` and `recruitment/decisions`. Both are untangled.
+   2. `recruitment/lifecycle` and `recruitment/decisions` [**done**: both pass; their rule cases are still pending
+      (decisions 120, lifecycle 2,927)]. A plain case's routes answer the whole stored case record, Room, budget and
+      handoff included. Under load, two lifecycle acts on one rev both committed: the Room acts re-check the rev
+      inside their unit.
    3. `recruitment/journeyPersistence`.
    4. `recruitment/journeyAdversarial`. It also reaches into `/org/agent` and `/admin/blocks`.
 2. **Discovery, alongside recruitment.** `decisions`, `lifecycle` and `journey` section H5 all call
    `/org/second-look`, so recruitment can't close without it.
-   1. `discovery/secondLookAndNobodyMissed`.
+   1. `discovery/secondLookAndNobodyMissed` [**done**]. Nobody Missed reads the stored match facts, which the store
+      re-derives inside every unit just before COMMIT (`store.with_before_commit`), as the TypeScript keeper does:
+      matching and the watchlists can use them as they are.
    2. `discovery/exposureCalibrationAndCoverage`. It is already neutral and self-contained.
    3. `discovery/matchingAndWatchlists`, once its Box Cam results come from `sqlFixture.mjs` rows.
 3. **Agents**: the other 8 batteries. Clear `agents/core`'s pending cases too. `journeyAdversarial` and
