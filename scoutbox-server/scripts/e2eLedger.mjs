@@ -74,6 +74,18 @@ export const NOTES = {
       },
     ],
   },
+  'discovery/matchingAndWatchlists': {
+    added: [
+      {
+        checks: 1,
+        why: "the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty)",
+      },
+      {
+        checks: 1,
+        why: "the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one",
+      },
+    ],
+  },
   'recruitment/analytics': {
     added: [
       {

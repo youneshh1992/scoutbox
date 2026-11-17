@@ -1,0 +1,11 @@
+{
+  "$source": "domains/discovery/schemas.mjs",
+  "MATCH_SORTS": [
+    "recent_evidence",
+    "name",
+    "age",
+    "evidence_confidence",
+    "distance"
+  ],
+  "DEFAULT_MATCH_SORT": "recent_evidence"
+}

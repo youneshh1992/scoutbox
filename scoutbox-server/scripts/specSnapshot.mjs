@@ -49,6 +49,8 @@ export const SPEC = {
     'FORBIDDEN_COPY',
     'LIMITS',
   ],
+  'domains/discovery/matching/criteria.mjs': ['MATCH_POLICY_VERSION', 'CRITERIA_SCHEMA_VERSION', 'LIMITS'],
+  'domains/discovery/schemas.mjs': ['MATCH_SORTS', 'DEFAULT_MATCH_SORT'],
   'domains/passport/shared.mjs': ['PROVENANCE', 'PROVENANCE_COPY'],
   'domains/recruitment/public.mjs': ['OPEN_ROOM_STATUSES'],
   'domains/recruitment/rooms/shared.mjs': [
