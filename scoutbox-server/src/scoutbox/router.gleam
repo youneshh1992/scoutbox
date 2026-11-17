@@ -1118,6 +1118,8 @@ fn agent_org(
       only(req, Post, fn() { agent.terminate(ctx, req, org, rid) })
     ["clients", rid, "offers"] ->
       only(req, Get, fn() { offer_routes.agent_offers(ctx, req, org, rid) })
+    ["clients", rid, "journey"] ->
+      only(req, Get, fn() { case_routes.agent_journey(ctx, req, org, rid) })
     ["clients", rid, "opportunities"] ->
       only(req, Get, fn() { agent.client_opportunities(ctx, org, rid) })
     ["opportunities"] -> only(req, Get, fn() { agent.opportunities(ctx, org) })

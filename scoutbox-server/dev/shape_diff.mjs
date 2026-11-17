@@ -38,8 +38,14 @@ const session = async (base) => ({
   hackney: (await call(base, 'POST', '/auth/org/login', { orgId: 'org-hackneymarsh', scoutName: 'Hackney Coach', role: 'Head Coach', platform: 'grassroots' })).body.token,
   amara: (await call(base, 'POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body.token,
   moss: (await call(base, 'POST', '/auth/org/login', { orgId: 'org-mossside', scoutName: 'Moss Coach', role: 'Head Coach', platform: 'grassroots' })).body.token,
+  kola: (await call(base, 'POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body.token,
+  agent: (await call(base, 'POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Tomás Rivera', role: 'Director' })).body.token,
 });
-const S = { ts: await session(ts.base), gl: await session(gl.base) };
+const withClient = async (base, s) => {
+  const clients = (await call(base, 'GET', '/org/agent/clients', null, s.agent)).body;
+  return { ...s, rel: (clients?.items ?? clients ?? [])[0]?.id ?? 'none' };
+};
+const S = { ts: await withClient(ts.base, await session(ts.base)), gl: await withClient(gl.base, await session(gl.base)) };
 const requests = [
   ['signup', (s) => ['POST', '/auth/player/signup', { name: 'Shape Adult', dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1', position: 'CM', heightCm: 180 }]],
   ['org view (pro club, adult)', (s) => ['GET', '/org/players/pl-adeyemi', null, s.maria]],
@@ -56,6 +62,8 @@ const requests = [
   ['guardian notifications', (s) => ['GET', '/guardian/notifications', null, s.amara]],
   ['guardian log', (s) => ['GET', '/guardian/log', null, s.amara]],
   ['guardian child journeys', (s) => ['GET', '/guardian/children/pl-guni/journeys', null, s.amara]],
+  ['player journeys', (s) => ['GET', '/player/journeys', null, s.kola]],
+  ['agent client journey', (s) => ['GET', `/org/agent/clients/${s.rel}/journey`, null, s.agent]],
   ['admin clubs', (s) => ['GET', '/admin/clubs?limit=1', null, null, true]],
   ['admin overview', (s) => ['GET', '/admin/overview', null, null, true]],
   ['admin metrics', (s) => ['GET', '/admin/metrics', null, null, true]],

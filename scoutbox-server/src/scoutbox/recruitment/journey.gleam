@@ -2387,8 +2387,8 @@ fn shared_json(s: Shared, now: Int) -> Json {
 /// The recipient's stage: only stages that involve them, never the club's pipeline. Signing packages are not
 /// ported yet, so `signing` and `signed` are not reached.
 fn player_stage(
-  contact_requests: List(request_row.Row),
-  trial_requests: List(request_row.Row),
+  contacted: Bool,
+  trial_invited: Bool,
   trials: List(Trial),
   offer: Option(CurrentOffer),
   now: Int,
@@ -2415,14 +2415,13 @@ fn player_stage(
         _ -> None
       }
     })
-  let pending = fn(r: request_row.Row) { r.status == request_row.Pending }
   offer_stage
   |> option.lazy_or(fn() { trial_stage })
   |> option.lazy_unwrap(fn() {
-    case list.any(trial_requests, pending), contact_requests {
+    case trial_invited, contacted {
       True, _ -> "trial_invited"
-      False, [_, ..] -> "contacted"
-      False, [] -> "none"
+      False, True -> "contacted"
+      False, False -> "none"
     }
   })
 }
@@ -2553,8 +2552,8 @@ fn recipient_journey(
           #(
             "stage",
             json.string(player_stage(
-              contact_requests,
-              trial_requests,
+              contact_requests != [],
+              list.any(trial_requests, fn(r) { r.status == request_row.Pending }),
               s.trials,
               offer,
               now,
@@ -2684,4 +2683,166 @@ pub fn for_recipient(
     |> order.lazy_break_tie(fn() { string.compare(a.2, b.2) })
   })
   |> list.map(fn(x) { x.3 })
+}
+
+/// One case's journey for an agent: only the records the client's own act routed or shared to them, and only the
+/// kinds `grants` permits. An ungranted kind reads as absent, not refused, so the projection does not disclose
+/// what it hides.
+fn agent_journey(
+  rec: Records,
+  agent: id.OrgUserId,
+  grants: List(String),
+  now: Int,
+) -> #(String, List(Line), Json) {
+  let room = rec.room
+  let r = room.row
+  let granted = fn(kind) { list.contains(grants, kind) }
+  let contact_records = case granted("contacts") {
+    False -> []
+    True ->
+      list.filter(rec.contacts, fn(c) {
+        c.row.case_id == r.id
+        && c.row.org_id == r.org_id
+        && {
+          c.row.status == contact_row.Delivered
+          || c.row.status == contact_row.Responded
+        }
+        && c.row.routing_agent_user_id == Some(agent)
+        && contact_rules.integrity(c, Some(r.org_id), Some(r.id)) == []
+      })
+  }
+  let trial_rows = case granted("trials") {
+    False -> []
+    True ->
+      list.filter(rec.case_trials, fn(t) {
+        t.row.case_id == Some(r.id)
+        && t.row.org_id == r.org_id
+        && t.row.player_id == r.player_id
+        && t.row.subject_removed_at == None
+        && trial_rules.integrity(t, Some(r.org_id), Some(r.id)) == []
+      })
+  }
+  let invitations = case granted("trials") {
+    False -> []
+    True ->
+      list.filter(rec.requests, fn(q) {
+        q.type_ == request_row.Trial && q.case_id == Some(r.id)
+      })
+  }
+  let offer_rows = case granted("offers") {
+    False -> []
+    True ->
+      list.filter(rec.offers, fn(o) {
+        o.row.case_id == r.id
+        && o.row.org_id == r.org_id
+        && o.row.player_id == r.player_id
+        && o.row.agent_share_user_id == Some(agent)
+        && offer_rules.integrity(o, Some(r.org_id), Some(r.id)) == []
+        && list.any(o.revisions, fn(v) {
+          v.row.status != offer_status.Draft && option.is_some(v.row.issued_at)
+        })
+      })
+  }
+  // Not ported yet: signing packages, shared with the agent beside their Offer.
+  let offer = current_offer(offer_rows, now)
+  let stage =
+    player_stage(
+      contact_records != [],
+      list.any(invitations, fn(q) { q.status == request_row.Pending }),
+      trial_rows,
+      offer,
+      now,
+    )
+  let lines =
+    timeline_lines(
+      rec,
+      [],
+      invitations,
+      trial_rows,
+      [],
+      offer_rows,
+      contact_records,
+      now,
+    )
+    |> list.filter(fn(l) { visible_to(line_kind(l), "agent") })
+  let journey =
+    json.object([
+      #("policyVersion", json.int(policy_version)),
+      #("stage", json.string(stage)),
+      #(
+        "resources",
+        json.object([
+          #(
+            "contactId",
+            json.nullable(
+              option.map(current_contact(contact_records), fn(c) { c.row.id }),
+              id.contact_json,
+            ),
+          ),
+          #(
+            "trialId",
+            json.nullable(
+              option.map(current_trial(trial_rows), fn(t) { t.row.id }),
+              id.trial_json,
+            ),
+          ),
+          #(
+            "offerId",
+            json.nullable(
+              option.map(offer, fn(o) { o.offer.row.id }),
+              id.offer_json,
+            ),
+          ),
+          #(
+            "offerRevisionId",
+            json.nullable(
+              option.then(offer, fn(o) {
+                option.map(o.revision, fn(v) { v.row.id })
+              }),
+              id.offer_revision_json,
+            ),
+          ),
+          #("signingPackageId", json.null()),
+        ]),
+      ),
+      #("timeline", audience_timeline(lines, "agent", ["by"])),
+      #("grants", json.array(grants, json.string)),
+    ])
+  #(stage, lines, journey)
+}
+
+/// Every club's journey with the agent's client, as far as the grants open it. A club that shared nothing with
+/// this agent is not a club the agent learns about. Sorted by club name, then club id.
+pub fn for_agent(
+  read: Read,
+  client: id.PlayerId,
+  agent: id.OrgUserId,
+  grants: List(String),
+  now: Int,
+) -> Result(List(Json), Fail(e)) {
+  use rooms <- result.try(cases.rooms_of_player(read, client))
+  use found <- result.map(
+    list.try_map(rooms, fn(room) {
+      use rec <- result.try(load(read, room, False, True))
+      let #(stage, lines, journey) = agent_journey(rec, agent, grants, now)
+      case stage, lines {
+        "none", [] -> Ok(None)
+        _, _ -> {
+          use #(name, club) <- result.map(club_json(read, room.row.org_id))
+          Some(#(
+            name,
+            id.org_to_string(room.row.org_id),
+            json.object([#("club", club), #("journey", journey)]),
+          ))
+        }
+      }
+    }),
+  )
+  found
+  |> option.values
+  |> list.sort(fn(a, b) {
+    string.compare(a.0, b.0)
+    |> order.lazy_break_tie(fn() { string.compare(a.1, b.1) })
+  })
+  |> list.map(fn(x) { x.2 })
 }

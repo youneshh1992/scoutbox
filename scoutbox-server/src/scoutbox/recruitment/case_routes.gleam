@@ -11,6 +11,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/agents/core_routes as agent_core
+import scoutbox/agents/integration
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
@@ -34,6 +36,7 @@ import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
@@ -2010,5 +2013,102 @@ pub fn guardian_journeys(
   case list.contains(g.child_ids, child) {
     False -> http.error(404, "CHILD_NOT_FOUND")
     True -> recipient_journeys(ctx, req, journey.GuardianOf(child, g.row.id))
+  }
+}
+
+/// `GET /org/agent/clients/:id/journey`: the client's journeys as this agent's basis opens them. The client's
+/// private record must be open to the agent now (403 otherwise); trials follow the client's disclosure choice, and
+/// offers and signings need an employment or transfer scope and a current licence. A kind not granted reads as
+/// absent.
+pub fn agent_journey(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  agreement_id: String,
+) -> Response {
+  use m <- agent_core.membership(ctx, a)
+  use found <- agent_core.own_agreement(ctx, m, agreement_id)
+  case found {
+    agent_core.Summary(_) ->
+      http.error_message(
+        403,
+        "AGENT_ACTION_NOT_PERMITTED",
+        "A summary row does not open a client's journey.",
+      )
+    agent_core.Own(agreement) -> {
+      let now = clock.request_ms(ctx.config, req)
+      let client_id = agreement.row.client_id
+      let built =
+        store.read(ctx.store, fn(rd) {
+          let decide = fn(surface) {
+            integration.decide(rd, surface, client_id, a.user.id, None, now)
+          }
+          use private <- result.try(decide(integration.ClientPrivate))
+          case private {
+            integration.Denied(code:, rule:) -> Ok(Error(#(code, rule)))
+            integration.Allowed(basis) -> {
+              use trials <- result.try(decide(integration.TrialProjection))
+              use licence <- result.try(integration.licence_current(
+                rd,
+                a.user.id,
+                agreement.row.jurisdiction,
+                now,
+              ))
+              let scope_ok =
+                list.any(basis.scope, fn(s) {
+                  s == scope_row.Employment || s == scope_row.Transfer
+                })
+              let grants =
+                list.flatten([
+                  ["contacts"],
+                  case trials {
+                    integration.Allowed(_) -> ["trials"]
+                    integration.Denied(..) -> []
+                  },
+                  case scope_ok && licence {
+                    True -> ["offers", "signings"]
+                    False -> []
+                  },
+                ])
+              use items <- result.map(journey.for_agent(
+                rd,
+                id.player(client_id),
+                a.user.id,
+                grants,
+                now,
+              ))
+              Ok(#(grants, items))
+            }
+          }
+        })
+      case built {
+        Error(failure) -> http.internal(failure)
+        Ok(Error(#(code, rule))) ->
+          http.json(
+            403,
+            json.object([
+              #("error", json.string(code)),
+              #("rule", json.string(rule)),
+              #(
+                "message",
+                json.string(
+                  "This client's record is not open to you right now.",
+                ),
+              ),
+            ]),
+          )
+        Ok(Ok(#(grants, items))) ->
+          http.json(
+            200,
+            json.object([
+              #("relationshipId", id.agreement_json(agreement.row.id)),
+              #("clientId", json.string(client_id)),
+              #("grants", json.array(grants, json.string)),
+              #("items", json.preprocessed_array(items)),
+              #("generatedAt", json.int(now)),
+            ]),
+          )
+      }
+    }
   }
 }
