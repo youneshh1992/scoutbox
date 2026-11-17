@@ -44,6 +44,13 @@ pub type Event {
     room_id: String,
     offer_id: String,
   )
+  /// A signing package on a Room changed (each change is its own registry entry). Private to the club.
+  SigningChanged(
+    change: SigningChange,
+    org_id: String,
+    room_id: String,
+    package_id: String,
+  )
   /// A recipient answered an Offer. Private to the club.
   OfferResponded(
     org_id: String,
@@ -103,6 +110,17 @@ pub type OfferChange {
   OfferWithdrawn
 }
 
+/// What a signing act did, with the ids the registry's payload adds after the package's.
+pub type SigningChange {
+  SigningCreated(offer_id: String)
+  SigningReady(revision_id: String)
+  SigningPartyCompleted(revision_id: String, party_type: String)
+  SigningCompleted(signing_id: String)
+  SigningCancelled
+  SigningVoided
+  SigningSuperseded(revision_id: String, supersedes: String)
+}
+
 pub type TrialChange {
   TrialScheduled
   TrialRescheduled
@@ -157,6 +175,16 @@ pub fn name(event: Event) -> String {
         OfferWithdrawn -> "offer_withdrawn"
       }
     OfferResponded(..) -> "offer_responded"
+    SigningChanged(change:, ..) ->
+      case change {
+        SigningCreated(..) -> "signing_created"
+        SigningReady(..) -> "signing_ready"
+        SigningPartyCompleted(..) -> "signing_party_completed"
+        SigningCompleted(..) -> "signing_completed"
+        SigningCancelled -> "signing_cancelled"
+        SigningVoided -> "signing_voided"
+        SigningSuperseded(..) -> "signing_superseded"
+      }
     AssessmentSubmitted(..) -> "assessment_submitted"
     TrialInvited(..) -> "trial_invited"
     TrialAccepted(..) -> "trial_accepted"
@@ -194,6 +222,7 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewRequested(org_id:, ..)
     | OfferChanged(org_id:, ..)
     | OfferResponded(org_id:, ..)
+    | SigningChanged(org_id:, ..)
     | AssessmentSubmitted(org_id:, ..)
     | TrialInvited(org_id:, ..)
     | TrialAccepted(org_id:, ..)
@@ -252,6 +281,29 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("orgId", json.string(org_id)),
       #("roomId", json.string(room_id)),
       #("offerId", json.string(offer_id)),
+    ]
+    SigningChanged(change:, org_id:, room_id:, package_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("signingPackageId", json.string(package_id)),
+      ..case change {
+        SigningCreated(offer_id:) -> [#("offerId", json.string(offer_id))]
+        SigningReady(revision_id:) -> [
+          #("revisionId", json.string(revision_id)),
+        ]
+        SigningPartyCompleted(revision_id:, party_type:) -> [
+          #("revisionId", json.string(revision_id)),
+          #("partyType", json.string(party_type)),
+        ]
+        SigningCompleted(signing_id:) -> [
+          #("signingId", json.string(signing_id)),
+        ]
+        SigningCancelled | SigningVoided -> []
+        SigningSuperseded(revision_id:, supersedes:) -> [
+          #("revisionId", json.string(revision_id)),
+          #("supersedes", json.string(supersedes)),
+        ]
+      }
     ]
     OfferResponded(org_id:, room_id:, offer_id:, status:) -> [
       #("orgId", json.string(org_id)),
@@ -316,8 +368,11 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
 /// Whether a reconnect replays it (the registry's `replayPolicy`).
 pub fn replays(event: Event) -> Bool {
   case event {
-    Messages(..) | Notify(..) | OfferResponded(..) | AssessmentSubmitted(..) ->
-      True
+    Messages(..)
+    | Notify(..)
+    | OfferResponded(..)
+    | AssessmentSubmitted(..)
+    | SigningChanged(..) -> True
     OfferChanged(change:, ..) -> change != OfferDraftUpdated
     _ -> False
   }

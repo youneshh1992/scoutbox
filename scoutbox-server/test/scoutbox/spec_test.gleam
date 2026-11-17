@@ -10,6 +10,7 @@ import scoutbox/agents/core_routes
 import scoutbox/agents/transaction_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
+import scoutbox/recruitment/domain_errors
 import scoutbox/vocab/notification_category
 import simplifile
 
@@ -102,5 +103,13 @@ pub fn transaction_error_table_test() {
     "agents/transactions/errors.json",
     "TRANSACTION_ERROR_HTTP",
     transaction_routes.statuses,
+  )
+}
+
+pub fn signing_error_table_test() {
+  error_table(
+    "recruitment/signings/errors.json",
+    "SIGNING_ERROR_HTTP",
+    domain_errors.signing_statuses,
   )
 }

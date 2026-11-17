@@ -51,6 +51,11 @@ pub const policy = [
   #("offer_issue", offer_issue_policy),
   #("offer_withdraw", offer_withdraw_policy),
   #("offer_response", offer_response_policy),
+  #("signing_start", signing_start_policy),
+  #("signing_document_write", signing_document_write_policy),
+  #("signing_party_completion", signing_party_completion_policy),
+  #("signing_closure", signing_closure_policy),
+  #("signing_safety_closure", signing_safety_closure_policy),
   #("trial_invite", trial_invite_policy),
   #("trial_schedule", trial_schedule_policy),
   #("trial_response", trial_response_policy),
@@ -88,6 +93,17 @@ pub type Action {
   OfferWithdraw
   /// Offer acceptances and declines, per player or guardian answering.
   OfferResponse
+  /// Signing packages opened over accepted Offers, per organisation.
+  SigningStart
+  /// Signing documents attached, drafts edited, packages presented or superseded, per organisation.
+  SigningDocumentWrite
+  /// A party confirming the exact signing document, per actor (the player, or the club signatory).
+  SigningPartyCompletion
+  /// Signings completed, per organisation.
+  SigningClosure
+  /// Signings cancelled or voided by the club, per organisation: its own budget, so completion traffic cannot
+  /// exhaust a safety closure.
+  SigningSafetyClosure
   /// Contact drafts created or edited, per organisation.
   ContactDraft
   /// Contacts sent to players and guardians, per organisation.
@@ -144,6 +160,16 @@ const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const signing_start_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const signing_document_write_policy = Policy(max: 120, window_ms: 3_600_000)
+
+const signing_party_completion_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const signing_closure_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const signing_safety_closure_policy = Policy(max: 60, window_ms: 3_600_000)
+
 const contact_draft_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const contact_send_policy = Policy(max: 30, window_ms: 3_600_000)
@@ -191,6 +217,11 @@ fn action_name(action: Action) -> String {
     OfferIssue -> "offer_issue"
     OfferWithdraw -> "offer_withdraw"
     OfferResponse -> "offer_response"
+    SigningStart -> "signing_start"
+    SigningDocumentWrite -> "signing_document_write"
+    SigningPartyCompletion -> "signing_party_completion"
+    SigningClosure -> "signing_closure"
+    SigningSafetyClosure -> "signing_safety_closure"
     ContactDraft -> "contact_draft"
     ContactSend -> "contact_send"
     ContactExternalRecord -> "contact_external_record"
@@ -223,6 +254,11 @@ fn action_policy(action: Action) -> Policy {
     OfferIssue -> offer_issue_policy
     OfferWithdraw -> offer_withdraw_policy
     OfferResponse -> offer_response_policy
+    SigningStart -> signing_start_policy
+    SigningDocumentWrite -> signing_document_write_policy
+    SigningPartyCompletion -> signing_party_completion_policy
+    SigningClosure -> signing_closure_policy
+    SigningSafetyClosure -> signing_safety_closure_policy
     ContactDraft -> contact_draft_policy
     ContactSend -> contact_send_policy
     ContactExternalRecord -> contact_external_record_policy

@@ -230,3 +230,56 @@ pub const offer =
     internal_message: "The Offer service cannot serve this request. This has been recorded.",
     unmapped: "OFFER_STATE_UNKNOWN",
   )
+
+/// The Signing error table (domains/recruitment/signings/errors.mjs).
+pub const signing_statuses = [
+  #("SIGNING_INPUT_INVALID", 400),
+  #("SIGNING_CONTRACT_DATES_INVALID", 400),
+  #("SIGNING_EXPIRY_INVALID", 400),
+  #("SIGNING_DOCUMENT_INVALID", 400),
+  #("SIGNING_CLIENT_KEY_INVALID", 400),
+  #("SIGNING_REV_REQUIRED", 400),
+  #("SIGNING_METHOD_UNKNOWN", 400),
+  #("SIGNING_NOT_PERMITTED", 403),
+  #("SIGNING_BLOCKED", 403),
+  #("SIGNING_AUTHORITY_LOST", 403),
+  #("SIGNING_NOT_FOUND", 404),
+  #("SIGNING_DOCUMENT_NOT_FOUND", 404),
+  #("SIGNING_STATE_INVALID", 409),
+  #("SIGNING_REV_CONFLICT", 409),
+  #("SIGNING_NOT_READY", 409),
+  #("SIGNING_ALREADY_COMPLETED", 409),
+  #("SIGNING_EXPIRED", 409),
+  #("SIGNING_CANCELLED", 409),
+  #("SIGNING_VOIDED", 409),
+  #("SIGNING_SUPERSEDED", 409),
+  #("SIGNING_PARTY_NOT_REQUIRED", 409),
+  #("SIGNING_PARTY_ALREADY_COMPLETED", 409),
+  #("SIGNING_PARTIES_INCOMPLETE", 409),
+  #("SIGNING_DOCUMENT_MISMATCH", 409),
+  #("SIGNING_IDEMPOTENCY_CONFLICT", 409),
+  #("SIGNING_LIFECYCLE_CONFLICT", 409),
+  #("SIGNING_CONFLICT", 409),
+  #("SIGNING_OFFER_NOT_ACCEPTED", 409),
+  #("SIGNING_PACKAGE_EXISTS", 409),
+  #("SIGNING_CANONICAL_REQUIRED", 409),
+  #("SIGNING_SUBJECT_REMOVED", 409),
+  #("SIGNING_DOCUMENT_REQUIRED", 422),
+  #("SIGNING_EVIDENCE_INVALID", 422),
+  #("SIGNING_PATHWAY_CLOSED", 422),
+  #("SIGNING_RECIPIENT_INVALID", 422),
+  #("SIGNING_STATE_UNKNOWN", 500),
+  #("SIGNING_STORE_MISSING", 500),
+]
+
+pub const signing =
+  Contract(
+    statuses: signing_statuses,
+    public_fields: [
+      "message", "field", "problem", "min", "max", "allowed", "expected",
+      "current", "expectedRev", "currentRev", "updatedBy", "updatedAt",
+      "reasons", "blockers", "lifecycle", "status", "parties",
+    ],
+    internal_message: "The Signing service cannot serve this request. This has been recorded.",
+    unmapped: "SIGNING_STATE_UNKNOWN",
+  )
