@@ -467,11 +467,14 @@ pub fn add_evidence(
   Ok(stored)
 }
 
-pub fn evidence(read: Read, id: String) -> Result(Option(Evidence), Fail(e)) {
+pub fn evidence(
+  read: Read,
+  evidence_id: id.EvidenceId,
+) -> Result(Option(Evidence), Fail(e)) {
   store.one(
     read,
     "SELECT " <> evidence_row.columns <> " FROM ver_evidence WHERE id = ?",
-    [sqlight.text(id)],
+    [id.evidence_sql(evidence_id)],
     evidence_row.decoder(),
   )
   |> result.map(option.from_result)
@@ -713,11 +716,14 @@ pub fn create_dispute(tx: Tx, d: Dispute) -> Result(Dispute, Fail(e)) {
   )
 }
 
-pub fn dispute(read: Read, id: String) -> Result(Option(Dispute), Fail(e)) {
+pub fn dispute(
+  read: Read,
+  dispute_id: id.DisputeId,
+) -> Result(Option(Dispute), Fail(e)) {
   store.one(
     read,
     "SELECT " <> dispute_row.columns <> " FROM ver_disputes WHERE id = ?",
-    [sqlight.text(id)],
+    [id.dispute_sql(dispute_id)],
     dispute_row.decoder(),
   )
   |> result.map(option.from_result)

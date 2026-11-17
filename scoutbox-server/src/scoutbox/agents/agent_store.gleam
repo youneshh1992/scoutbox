@@ -17,6 +17,7 @@ import scoutbox/agents/agent_rules.{
 }
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/agency_affiliation_history as affiliation_event_row
+import scoutbox/rows/agency_affiliation_history_tiers as tier_row
 import scoutbox/rows/agency_affiliations as affiliation_row
 import scoutbox/rows/agent_profile_facets as facet_row
 import scoutbox/rows/agent_profile_history as profile_event_row
@@ -632,8 +633,8 @@ pub fn affiliation_event(
   use _ <- result.try(affiliation_event_row.insert(tx, row))
   let tier_rows =
     list.append(
-      list.index_map(from, fn(t, i) { #("from", i, t) }),
-      list.index_map(to, fn(t, i) { #("to", i, t) }),
+      list.index_map(from, fn(t, i) { #(tier_row.From, i, t) }),
+      list.index_map(to, fn(t, i) { #(tier_row.To, i, t) }),
     )
   list.try_each(tier_rows, fn(t) {
     store.run(
@@ -641,7 +642,7 @@ pub fn affiliation_event(
       "INSERT INTO agency_affiliation_history_tiers (history_id, list, ord, tier) VALUES (?, ?, ?, ?)",
       [
         id.affiliation_event_sql(event_id),
-        sqlight.text(t.0),
+        sqlight.text(tier_row.list_value_to_string(t.0)),
         sqlight.int(t.1),
         sqlight.text(agency_tier.to_string(t.2)),
       ],
@@ -785,9 +786,9 @@ fn agreements_where(
 
 pub fn agreement_by_id(
   read: Read,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Result(Option(Agreement), Fail(e)) {
-  agreements_where(read, "id = ?", [sqlight.text(agreement_id)]) |> first
+  agreements_where(read, "id = ?", [id.agreement_sql(agreement_id)]) |> first
 }
 
 /// The agency's agreements, oldest first.

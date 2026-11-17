@@ -10,6 +10,8 @@ import gleam/string
 import scoutbox/agents/conflict.{type ConsentOutstanding}
 import scoutbox/platform/canonical.{type Value}
 import scoutbox/platform/secrets
+import scoutbox/rows/agent_transactions as tx_row
+import scoutbox/rows/id
 import scoutbox/rows/transaction_parties as party_row
 import scoutbox/vocab/context_outcome.{
   type ContextOutcome, Clear, InsufficientData, ManualRegulatoryReviewRequired,
@@ -143,6 +145,14 @@ pub type State {
   )
 }
 
+/// The pending reason a gate gives: a gate is one of two reasons that refuse before any evaluation.
+pub fn gate_reason(gate: tx_row.ComplianceGate) -> PendingReason {
+  case gate {
+    tx_row.FacetNotVerified -> pending_reason.FacetNotVerified
+    tx_row.JurisdictionUnsupported -> pending_reason.JurisdictionUnsupported
+  }
+}
+
 /// `complianceStateFrom`: the state an evaluation (or a gate that refused before one) gives.
 pub fn state_from(
   outcome: Option(ContextOutcome),
@@ -187,8 +197,8 @@ pub fn status_for(state: State) -> TransactionStatus {
 /// the party revision and the licence freshness.
 pub type Stored {
   Stored(
-    evaluation_id: Option(String),
-    gate: Option(PendingReason),
+    evaluation_id: Option(id.EvaluationId),
+    gate: Option(tx_row.ComplianceGate),
     evaluated_at: Int,
     pending_reason: Option(PendingReason),
     party_revision: String,
@@ -228,8 +238,8 @@ pub fn snapshot_view(
     Some(gate) -> #(
       None,
       case gate {
-        pending_reason.JurisdictionUnsupported -> ["POLICY_NOT_ENCODED"]
-        _ -> []
+        tx_row.JurisdictionUnsupported -> ["POLICY_NOT_ENCODED"]
+        tx_row.FacetNotVerified -> []
       },
       [],
       [],
@@ -242,9 +252,15 @@ pub fn snapshot_view(
           list.unique(e.reason_codes),
           e.consents_outstanding,
           e.policy_versions,
-          stored.evaluation_id,
+          option.map(stored.evaluation_id, id.evaluation_to_string),
         )
-        None -> #(None, [], [], [], stored.evaluation_id)
+        None -> #(
+          None,
+          [],
+          [],
+          [],
+          option.map(stored.evaluation_id, id.evaluation_to_string),
+        )
       }
   }
   let pending = stored.pending_reason

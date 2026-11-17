@@ -122,19 +122,22 @@ fn select(
   list.try_map(rows, assemble(read, _))
 }
 
-pub fn by_id(read: Read, aid: String) -> Result(Option(Assessment), Fail(e)) {
-  use found <- result.map(select(read, "id = ?", [sqlight.text(aid)]))
+pub fn by_id(
+  read: Read,
+  aid: id.AssessmentId,
+) -> Result(Option(Assessment), Fail(e)) {
+  use found <- result.map(select(read, "id = ?", [id.assessment_sql(aid)]))
   list.first(found) |> option.from_result
 }
 
 fn for_org_player(
   read: Read,
   org_id: id.OrgId,
-  player_id: String,
+  player_id: id.PlayerId,
 ) -> Result(List(Assessment), Fail(e)) {
   select(read, "org_id = ? AND player_id = ?", [
     id.org_sql(org_id),
-    sqlight.text(player_id),
+    id.player_sql(player_id),
   ])
 }
 
@@ -143,7 +146,7 @@ fn for_org_player(
 fn access_list(
   read: Read,
   a: OrgAccess,
-  player_id: String,
+  player_id: id.PlayerId,
 ) -> Result(List(Assessment), Fail(e)) {
   use mine <- result.map(for_org_player(read, a.org.id, player_id))
   case access.is_lead(a.user) {
@@ -335,7 +338,7 @@ pub fn list_for(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       let listed =
         store.read(ctx.store, fn(read) {
           use base <- result.try(case q.player_id, access.is_lead(a.user) {
-            Some(pid), _ -> access_list(read, a, pid)
+            Some(pid), _ -> access_list(read, a, id.player(pid))
             None, True -> select(read, "org_id = ?", [id.org_sql(a.org.id)])
             None, False ->
               select(read, "org_id = ? AND scout_user_id = ?", [
@@ -351,8 +354,7 @@ pub fn list_for(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                 Some(t) if t.row.org_id == a.org.id -> {
                   use pool <- result.map(case q.player_id {
                     Some(_) -> Ok(base)
-                    None ->
-                      access_list(read, a, id.player_to_string(t.row.player_id))
+                    None -> access_list(read, a, t.row.player_id)
                   })
                   Ok(
                     list.filter(pool, fn(x) {
@@ -670,7 +672,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             None -> Ok(Error(http.error(400, "NO_TEMPLATE")))
             Some(tmpl) -> {
               use first <- result.try(case b.second_opinion_of {
-                Some(sid) -> by_id(read, sid)
+                Some(sid) -> by_id(read, id.assessment(sid))
                 None -> Ok(None)
               })
               let independence = case b.second_opinion_of, first {
@@ -750,7 +752,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           history(tx, aid, a, "created", clock.now_ms()) |> room_routes.storage,
         )
         use stored <- result.map(
-          by_id(store.reading(tx), id.assessment_to_string(aid))
+          by_id(store.reading(tx), aid)
           |> room_routes.storage,
         )
         let assert Some(stored) = stored as "a new assessment reads back"
@@ -862,7 +864,7 @@ fn edit_shape() -> input.Shape(EditBody) {
 fn own(
   ctx: Ctx,
   a: OrgAccess,
-  aid: String,
+  aid: id.AssessmentId,
   next: fn(Assessment) -> Response,
 ) -> Response {
   case store.read(ctx.store, by_id(_, aid)) {
@@ -951,7 +953,12 @@ fn check_refs(
 
 /// `PUT /org/assessments/:id`: a draft's ratings, context and recommendation. Every field is checked before
 /// anything is written; the trial it belongs to is set when it is created.
-pub fn edit(ctx: Ctx, req: Request, a: OrgAccess, aid: String) -> Response {
+pub fn edit(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  aid: id.AssessmentId,
+) -> Response {
   use x <- own(ctx, a, aid)
   case x.row.scout_user_id == a.user.id, x.row.state {
     False, _ -> http.error(403, "NOT_YOUR_ASSESSMENT")
@@ -1221,7 +1228,7 @@ fn revise(
       }
     })
     use stored <- result.map(
-      by_id(store.reading(tx), id.assessment_to_string(x.row.id))
+      by_id(store.reading(tx), x.row.id)
       |> room_routes.storage,
     )
     let assert Some(stored) = stored as "a revised assessment reads back"
@@ -1231,7 +1238,7 @@ fn revise(
 }
 
 /// `POST /org/assessments/:id/submit`: every submitted assessment carries ratings and a recommendation.
-pub fn submit(ctx: Ctx, a: OrgAccess, aid: String) -> Response {
+pub fn submit(ctx: Ctx, a: OrgAccess, aid: id.AssessmentId) -> Response {
   use x <- own(ctx, a, aid)
   case
     x.row.scout_user_id == a.user.id,
@@ -1292,7 +1299,7 @@ pub fn submit(ctx: Ctx, a: OrgAccess, aid: String) -> Response {
           )),
         )
         use stored <- result.map(
-          by_id(store.reading(tx), id.assessment_to_string(x.row.id))
+          by_id(store.reading(tx), x.row.id)
           |> room_routes.storage,
         )
         let assert Some(stored) = stored as "a submitted assessment reads back"
@@ -1308,7 +1315,7 @@ pub fn submit(ctx: Ctx, a: OrgAccess, aid: String) -> Response {
 
 /// `GET /org/players/:id/assessment-compare`. "Not observed" never enters an average; observedCount is shown
 /// instead. Different template versions are not comparable, and no combined average is shown for them.
-pub fn compare(ctx: Ctx, a: OrgAccess, player_id: String) -> Response {
+pub fn compare(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
   case store.read(ctx.store, access_list(_, a, player_id)) {
     Error(e) -> http.internal(e)
     Ok(all) ->

@@ -128,9 +128,9 @@ pub fn moderation(ctx: Ctx, req: Request) -> Response {
 }
 
 /// `POST /admin/blocks/:id/lift`: the row is deleted (Q5, docs/decisions.md).
-pub fn lift(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn lift(ctx: Ctx, req: Request, block_id: id.BlockId) -> Response {
   use Nil <- http.body(req, input.nothing(), [])
-  let outcome = store.unit(ctx.store, fn(tx) { audit.lift_block(tx, id) })
+  let outcome = store.unit(ctx.store, fn(tx) { audit.lift_block(tx, block_id) })
   case outcome {
     Ok(Some(block)) ->
       http.json(200, json.object([#("lifted", audit.block_view(block))]))
@@ -152,8 +152,8 @@ type Action {
 
 /// `POST /admin/reports/:id/resolve`. The resolution, the organisation's suspension and the reporter's notice are
 /// one unit; a system escalation has no reporter to tell.
-pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
-  case store.read(ctx.store, audit.report_by_id(_, id)) {
+pub fn resolve(ctx: Ctx, req: Request, report_id: id.ReportId) -> Response {
+  case store.read(ctx.store, audit.report_by_id(_, report_id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(404, "REPORT_NOT_FOUND")
     Ok(Some(report)) if report.status != reports.PendingReview ->
@@ -186,7 +186,7 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
             store.unit(ctx.store, fn(tx) {
               use r <- result.try(audit.resolve_report(
                 tx,
-                id,
+                report_id,
                 outcome:,
                 at: now,
               ))

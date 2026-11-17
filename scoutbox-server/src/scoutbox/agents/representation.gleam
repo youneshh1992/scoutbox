@@ -54,9 +54,11 @@ pub fn for_client(
 
 pub fn by_id(
   read: Read,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Result(Option(Agreement), Fail(e)) {
-  use found <- result.map(select(read, "id = ?", [sqlight.text(agreement_id)]))
+  use found <- result.map(
+    select(read, "id = ?", [id.agreement_sql(agreement_id)]),
+  )
   list.first(found) |> option.from_result
 }
 

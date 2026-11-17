@@ -81,7 +81,10 @@ As built:
 - Arguments are followed through `let`s and same-module helpers, so a list built at a call and bound inside
   `offers.select` is still compared.
 - Text bound to an id or vocabulary column (`sqlight.text(id_string)`) is reported as *untyped* in `--verbose`,
-  not failed: it's a place where a typed id or `to_string` would help, not a bug. There are 43 today.
+  not failed: it's a place where a typed id or `to_string` would help, not a bug. There were 43 on the first
+  run; 42 are now typed (handlers take typed ids that the router mints, and vocabularies are bound through their
+  `to_string`). The one left is an agreement's policy versions, which are `String` throughout the agent domain
+  (`agent_rules`, `compliance_store`, the `conflict` rule and its generated tests): typing them is its own change.
 - Two extra rules fell out: binding NULL (or a `nullable`) to a NOT NULL column in a write, and comparing with a
   NULL argument using `=`/`IN`, which is never true.
 - Gleam decides between a module and a local variable of the same name by type (`id.player_sql(id)` reaches the

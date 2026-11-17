@@ -200,7 +200,11 @@ pub fn update_child(
 ///
 /// Not ported yet: the client-field and body refusals, and finalizing with the CV provider (moving to a service of
 /// its own): a player's own session answers 501.
-pub fn cv_finalize(ctx: Ctx, p: PlayerAccess, session: String) -> Response {
+pub fn cv_finalize(
+  ctx: Ctx,
+  p: PlayerAccess,
+  session: id.BoxSessionId,
+) -> Response {
   let owner = id.player_to_string(p.player.row.id)
   case limits.limited(ctx.limits, limits.BoxCvFinalize, owner, clock.now_ms()) {
     True ->
@@ -217,7 +221,7 @@ pub fn cv_finalize(ctx: Ctx, p: PlayerAccess, session: String) -> Response {
           store.one(
             read,
             "SELECT 1 FROM box_sessions WHERE id = ? AND player_id = ?",
-            [sqlight.text(session), id.player_sql(p.player.row.id)],
+            [id.box_session_sql(session), id.player_sql(p.player.row.id)],
             decode.at([0], decode.int),
           )
         })

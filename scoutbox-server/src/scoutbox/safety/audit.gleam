@@ -100,11 +100,14 @@ pub fn add_block(
 }
 
 /// Deletes the block; returns what it was, or `None` when there is no such block.
-pub fn lift_block(tx: Tx, id: String) -> Result(Option(Block), Fail(e)) {
+pub fn lift_block(
+  tx: Tx,
+  block_id: id.BlockId,
+) -> Result(Option(Block), Fail(e)) {
   store.write(
     tx,
     "DELETE FROM blocks WHERE id = ? RETURNING " <> block_row.columns,
-    [sqlight.text(id)],
+    [id.block_sql(block_id)],
     block_row.decoder(),
   )
   |> result.map(fn(rows) { list.first(rows) |> option.from_result })
@@ -203,11 +206,14 @@ pub fn file_report(
   report
 }
 
-pub fn report_by_id(read: Read, id: String) -> Result(Option(Report), Fail(e)) {
+pub fn report_by_id(
+  read: Read,
+  report_id: id.ReportId,
+) -> Result(Option(Report), Fail(e)) {
   store.one(
     read,
     "SELECT " <> report_row.columns <> " FROM reports WHERE id = ?",
-    [sqlight.text(id)],
+    [id.report_sql(report_id)],
     report_row.decoder(),
   )
   |> result.map(option.from_result)
@@ -216,7 +222,7 @@ pub fn report_by_id(read: Read, id: String) -> Result(Option(Report), Fail(e)) {
 /// Resolves a pending report once.
 pub fn resolve_report(
   tx: Tx,
-  id: String,
+  report_id: id.ReportId,
   outcome outcome: String,
   at at: Int,
 ) -> Result(Report, Fail(ReportError)) {
@@ -224,13 +230,13 @@ pub fn resolve_report(
     tx,
     "UPDATE reports SET status = 'resolved', outcome = ?, resolved_at = ? WHERE id = ? AND status = 'pending_review' RETURNING "
       <> report_row.columns,
-    [sqlight.text(outcome), sqlight.int(at), sqlight.text(id)],
+    [sqlight.text(outcome), sqlight.int(at), id.report_sql(report_id)],
     report_row.decoder(),
   ))
   case changed {
     [report] -> Ok(report)
     _ -> {
-      use found <- result.try(report_by_id(store.reading(tx), id))
+      use found <- result.try(report_by_id(store.reading(tx), report_id))
       case found {
         Some(_) -> store.refuse(AlreadyResolved)
         None -> store.refuse(ReportNotFound)

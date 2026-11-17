@@ -1232,7 +1232,7 @@ pub fn set_arrival(
 pub fn record_day_status(
   tx: Tx,
   t: Trial,
-  kind: String,
+  kind: status_event_row.Kind,
   at: Int,
   by_name: String,
   reason: String,
@@ -1250,7 +1250,7 @@ pub fn record_day_status(
       [
         id.trial_sql(t.row.id),
         sqlight.int(position),
-        sqlight.text(kind),
+        sqlight.text(status_event_row.kind_to_string(kind)),
         sqlight.int(at),
         sqlight.text(by_name),
         sqlight.text(reason),
@@ -1259,7 +1259,7 @@ pub fn record_day_status(
     ),
   )
   use _ <- result.try(case kind, new_date {
-    "postponed", Some(day) ->
+    status_event_row.Postponed, Some(day) ->
       store.run(
         tx,
         "UPDATE trials SET proposed_date = ?, report_due_at = ? WHERE id = ?",

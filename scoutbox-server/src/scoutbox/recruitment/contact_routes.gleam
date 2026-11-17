@@ -47,6 +47,7 @@ import scoutbox/recruitment/requests
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/id
 import scoutbox/rows/recruitment_contacts as row
 import scoutbox/safety/audit
@@ -1130,7 +1131,7 @@ fn send_now(
   let sent =
     store.unit(ctx.store, fn(tx) {
       use refused <- result.try(
-        delivery.consume_injected(tx, "contact") |> storage,
+        delivery.consume_injected(tx, injection_row.Contact) |> storage,
       )
       case refused {
         True -> {

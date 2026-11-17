@@ -130,9 +130,11 @@ fn select(
 
 pub fn by_id(
   read: Read,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Result(Option(Package), Fail(e)) {
-  use found <- result.map(select(read, "id = ?", [sqlight.text(package_id)]))
+  use found <- result.map(
+    select(read, "id = ?", [id.signing_package_sql(package_id)]),
+  )
   list.first(found) |> option.from_result
 }
 
@@ -173,10 +175,7 @@ pub fn reread(
   tx: Tx,
   package_id: id.SigningPackageId,
 ) -> Result(Package, Fail(e)) {
-  use found <- result.try(by_id(
-    store.reading(tx),
-    id.signing_package_to_string(package_id),
-  ))
+  use found <- result.try(by_id(store.reading(tx), package_id))
   case found {
     Some(p) -> Ok(p)
     None -> store.stale("the signing package is gone")

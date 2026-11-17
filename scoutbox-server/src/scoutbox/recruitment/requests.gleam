@@ -631,7 +631,7 @@ pub fn by_id(read: Read, id: id.RequestId) -> Result(Option(Request), Fail(e)) {
 /// Records the recipient's answer to a pending request.
 pub fn record_response(
   tx: Tx,
-  id: String,
+  request_id: id.RequestId,
   accept: Bool,
   by: party.Party,
   at: Int,
@@ -647,7 +647,7 @@ pub fn record_response(
       sqlight.text(row.status_to_string(status)),
       sqlight.int(at),
       sqlight.text(party.to_string(by)),
-      sqlight.text(id),
+      id.request_sql(request_id),
     ],
   )
 }

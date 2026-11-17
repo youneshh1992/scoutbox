@@ -229,14 +229,8 @@ fn stored_of(row: tx_row.Row) -> Option(transaction_rules.Stored) {
   use at <- option.then(row.compliance_evaluated_at)
   use revision <- option.map(row.compliance_party_revision)
   transaction_rules.Stored(
-    evaluation_id: option.map(
-      row.compliance_evaluation_id,
-      id.evaluation_to_string,
-    ),
-    gate: option.then(row.compliance_gate, fn(g) {
-      pending_reason.from_string(tx_row.compliance_gate_to_string(g))
-      |> option.from_result
-    }),
+    evaluation_id: row.compliance_evaluation_id,
+    gate: row.compliance_gate,
     evaluated_at: at,
     pending_reason: row.compliance_pending_reason,
     party_revision: revision,
@@ -378,12 +372,10 @@ fn safeguarding_problem(
   })
 }
 
-fn gate_pending(
-  problem: compliance_store.GateProblem,
-) -> pending_reason.PendingReason {
+fn gate_of(problem: compliance_store.GateProblem) -> tx_row.ComplianceGate {
   case problem {
-    compliance_store.Unsupported(..) -> pending_reason.JurisdictionUnsupported
-    _ -> pending_reason.FacetNotVerified
+    compliance_store.Unsupported(..) -> tx_row.JurisdictionUnsupported
+    _ -> tx_row.FacetNotVerified
   }
 }
 
@@ -418,15 +410,16 @@ pub fn recheck(
               list.map(reasons, fn(r) { r.code })
             _ -> []
           }
+          let gate = gate_of(problem)
           let state =
             transaction_rules.state_from(
               None,
-              Some(gate_pending(problem)),
+              Some(transaction_rules.gate_reason(gate)),
               codes,
               0,
               confirmed,
             )
-          snapshot(tx, t, state, None, [], by, now)
+          snapshot(tx, t, state, Gated(gate), [], by, now)
         }
         None -> {
           use ctx <- result.try(compliance_store.by_id(read, t.row.context_id))
@@ -466,7 +459,7 @@ pub fn recheck(
             tx,
             t,
             state,
-            Some(evaluation_id),
+            Evaluated(evaluation_id),
             result.policy_versions,
             by,
             now,
@@ -477,11 +470,17 @@ pub fn recheck(
   }
 }
 
+/// What a compliance snapshot rests on: an evaluation, or the gate that refused before one.
+type Basis {
+  Evaluated(id.EvaluationId)
+  Gated(tx_row.ComplianceGate)
+}
+
 fn snapshot(
   tx: Tx,
   t: Transaction,
   state: State,
-  evaluation_id: Option(id.EvaluationId),
+  basis: Basis,
   policy_versions: List(String),
   by: By,
   now: Int,
@@ -502,10 +501,13 @@ fn snapshot(
     })
   let stored =
     transaction_rules.Stored(
-      evaluation_id: option.map(evaluation_id, id.evaluation_to_string),
-      gate: case evaluation_id {
-        Some(_) -> None
-        None -> state.pending_reason
+      evaluation_id: case basis {
+        Evaluated(evaluation_id) -> Some(evaluation_id)
+        Gated(_) -> None
+      },
+      gate: case basis {
+        Evaluated(_) -> None
+        Gated(gate) -> Some(gate)
       },
       evaluated_at: now,
       pending_reason: state.pending_reason,

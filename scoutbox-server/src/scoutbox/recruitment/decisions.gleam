@@ -227,7 +227,8 @@ pub fn resolve_refs(
               "SELECT "
                 <> assessment_row.columns
                 <> " FROM assessments WHERE id = ?",
-              [sqlight.text(r.id)],
+              // The ref's kind says whose id it is.
+              [id.assessment_sql(id.assessment(r.id))],
               assessment_row.decoder(),
             ))
             case found {
@@ -286,7 +287,10 @@ pub fn resolve_refs(
               store.query(
                 read,
                 "SELECT claim_type, verification_status FROM evidence WHERE id = ? AND player_id = ? AND superseded_by_id IS NULL",
-                [sqlight.text(r.id), id.player_sql(player_id)],
+                [
+                  id.scouting_evidence_sql(id.scouting_evidence(r.id)),
+                  id.player_sql(player_id),
+                ],
                 {
                   use claim <- decode.field(0, decode.string)
                   use status <- decode.field(1, decode.string)
@@ -741,7 +745,7 @@ pub type AssessmentSnapshot {
     submitted: Int,
     withheld: Int,
     verdicts: List(#(String, Int)),
-    ids: List(String),
+    ids: List(id.AssessmentId),
   )
 }
 
@@ -836,7 +840,7 @@ pub fn create_formal(
       store.run(
         tx,
         "INSERT INTO room_decision_assessment_ids (decision_id, position, assessment_id) VALUES (?, ?, ?)",
-        [did, sqlight.int(p.1), sqlight.text(p.0)],
+        [did, sqlight.int(p.1), id.assessment_sql(p.0)],
       )
     }),
   )
@@ -1230,9 +1234,7 @@ pub fn snapshot_of(s: Summary) -> AssessmentSnapshot {
     submitted: list.length(s.submitted),
     withheld: s.withheld,
     verdicts: s.verdicts,
-    ids: s.submitted
-      |> list.map(fn(c) { id.assessment_to_string(c.row.id) })
-      |> list.take(20),
+    ids: s.submitted |> list.map(fn(c) { c.row.id }) |> list.take(20),
   )
 }
 

@@ -28,6 +28,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/dispatches as row
 import scoutbox/rows/guardians as guardian_row
 import scoutbox/rows/id
@@ -150,7 +151,7 @@ fn destinations(
         "SELECT "
           <> player_row.columns
           <> " FROM players WHERE id = ? AND deleted_at IS NULL",
-        n.audience_id,
+        id.player_sql(id.player(n.audience_id)),
         player_row.decoder(),
       ))
       let minor = case p {
@@ -180,7 +181,7 @@ fn destinations(
       use g <- result.map(one(
         read,
         "SELECT " <> guardian_row.columns <> " FROM guardians WHERE id = ?",
-        n.audience_id,
+        id.guardian_sql(id.guardian(n.audience_id)),
         guardian_row.decoder(),
       ))
       #([in_app, email(option.map(g, fn(g) { g.email }))], None)
@@ -189,7 +190,7 @@ fn destinations(
       use u <- result.map(one(
         read,
         "SELECT " <> staff_row.columns <> " FROM org_users WHERE id = ?",
-        n.audience_id,
+        id.org_user_sql(id.org_user(n.audience_id)),
         staff_row.decoder(),
       ))
       let out = case u {
@@ -207,13 +208,14 @@ fn destinations(
   }
 }
 
+/// The row `sql` finds for the recipient's id (`?` bound to `recipient`).
 fn one(
   read: Read,
   sql: String,
-  id: String,
+  recipient: sqlight.Value,
   decoder: decode.Decoder(a),
 ) -> Result(Option(a), Fail(e)) {
-  store.one(read, sql, [sqlight.text(id)], decoder)
+  store.one(read, sql, [recipient], decoder)
   |> result.map(option.from_result)
 }
 
@@ -325,7 +327,7 @@ fn fake_send(
   text: String,
   at: Int,
 ) -> Result(Result(String, String), Fail(e)) {
-  use failing <- result.try(consume_injected(tx, "email"))
+  use failing <- result.try(consume_injected(tx, injection_row.Email))
   case failing {
     True -> Ok(Error("injected provider failure"))
     False -> {
@@ -476,21 +478,22 @@ fn mirror_reads(ctx: Ctx) -> Int {
 
 // ------------------------------------------------------------------------------------------------- injected failures
 
-pub fn consume_injected(tx: Tx, channel: String) -> Result(Bool, Fail(e)) {
+pub fn consume_injected(
+  tx: Tx,
+  channel: injection_row.Channel,
+) -> Result(Bool, Fail(e)) {
   store.write(
     tx,
     "UPDATE delivery_fail_injections SET remaining = remaining - 1 WHERE channel = ? AND remaining > 0 RETURNING remaining",
-    [sqlight.text(channel)],
+    [sqlight.text(injection_row.channel_to_string(channel))],
     decode.at([0], decode.int),
   )
   |> result.map(fn(rows) { rows != [] })
 }
 
 type Injection {
-  Injection(channel: Option(String), count: Option(Int))
+  Injection(channel: Option(injection_row.Channel), count: Option(Int))
 }
-
-const injectable = ["email", "push", "contact", "trial", "decision"]
 
 /// `POST /admin/delivery/inject-failure`: the next sends on a channel fail at the provider, so the honest failure
 /// states can be exercised end to end.
@@ -498,20 +501,23 @@ pub fn inject_failure(ctx: Ctx, req: Request) -> Response {
   let shape = {
     use channel <- input.field(
       "channel",
-      input.nullish(input.one_of(list.map(injectable, fn(c) { #(c, c) }))),
+      input.nullish(input.one_of(injection_row.channel_pairs)),
     )
     use count <- input.field("count", input.nullish(input.whole_number(1, 20)))
     input.done(Injection(channel:, count:))
   }
   use body <- http.body(req, shape, [])
-  let channel = option.unwrap(body.channel, "email")
+  let channel = option.unwrap(body.channel, injection_row.Email)
   let count = option.unwrap(body.count, 1)
   case
     store.unit(ctx.store, fn(tx) {
       store.run(
         tx,
         "UPDATE delivery_fail_injections SET remaining = remaining + ? WHERE channel = ?",
-        [sqlight.int(count), sqlight.text(channel)],
+        [
+          sqlight.int(count),
+          sqlight.text(injection_row.channel_to_string(channel)),
+        ],
       )
       |> result.replace(Nil)
     })
@@ -523,7 +529,7 @@ pub fn inject_failure(ctx: Ctx, req: Request) -> Response {
           #(
             "injected",
             json.object([
-              #("channel", json.string(channel)),
+              #("channel", injection_row.channel_to_json(channel)),
               #("count", json.int(count)),
             ]),
           ),

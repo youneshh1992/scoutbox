@@ -56,11 +56,14 @@ pub type Application =
 
 // ------------------------------------------------------------------------------------------- the table
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Application), Fail(e)) {
+pub fn by_id(
+  read: Read,
+  request_id: id.RootRequestId,
+) -> Result(Option(Application), Fail(e)) {
   store.one(
     read,
     "SELECT " <> row.columns <> " FROM ver_root_requests WHERE id = ?",
-    [sqlight.text(id)],
+    [id.root_request_sql(request_id)],
     row.decoder(),
   )
   |> result.map(option.from_result)
@@ -545,7 +548,7 @@ fn checks_line(a: Application) -> String {
 fn with_secret(
   read: Read,
   req: Request,
-  id: String,
+  request_id: id.RootRequestId,
   body_secret: Option(String),
 ) -> Result(Option(Application), Fail(e)) {
   let query_secret =
@@ -555,7 +558,7 @@ fn with_secret(
     None -> query_secret
   }
   let hash = core.sha256_hex(secret)
-  use found <- result.map(by_id(read, id))
+  use found <- result.map(by_id(read, request_id))
   case found {
     Some(a) if a.applicant_secret_hash == hash -> found
     _ -> None
@@ -567,7 +570,11 @@ fn not_found() -> Response {
 }
 
 /// `POST /auth/org/verification/apply/:id/confirm-email`.
-pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn confirm_email(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use secret <- input.field("applicantSecret", input.nullish(input.text(64)))
     use code <- input.field("code", input.nullish(input.text(64)))
@@ -577,7 +584,7 @@ pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
   let now = clock.now_ms()
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(with_secret(read, req, id, secret))
+  use found <- result.try(with_secret(read, req, request_id, secret))
   case found {
     None -> stop(not_found())
     Some(a) -> {
@@ -633,7 +640,11 @@ pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
 }
 
 /// `POST /auth/org/verification/apply/:id/evidence`.
-pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn evidence(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use secret <- input.field("applicantSecret", input.nullish(input.text(64)))
     use data_url <- input.field(
@@ -653,7 +664,7 @@ pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
   }
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(with_secret(read, req, id, secret))
+  use found <- result.try(with_secret(read, req, request_id, secret))
   case found {
     None -> stop(not_found())
     Some(a) ->
@@ -725,7 +736,11 @@ pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
 
 /// `POST /auth/org/verification/apply/:id/submit`: a first administrator with no ScoutBox authority behind them is
 /// always a human decision.
-pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn submit(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use secret <- input.field("applicantSecret", input.nullish(input.text(64)))
     input.done(secret)
@@ -734,7 +749,7 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
   let now = clock.now_ms()
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(with_secret(read, req, id, secret))
+  use found <- result.try(with_secret(read, req, request_id, secret))
   case found {
     None -> stop(not_found())
     Some(a) if a.status != row.CollectingEvidence ->
@@ -820,7 +835,11 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
 }
 
 /// `GET /auth/org/verification/apply/:id/status?applicantSecret=…`.
-pub fn status(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn status(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use secret <- input.field("applicantSecret", input.optional(input.text(64)))
     input.done(secret)
@@ -828,7 +847,7 @@ pub fn status(ctx: Ctx, req: Request, id: String) -> Response {
   use secret <- http.query(req, shape, [])
   let hash = core.sha256_hex(option.unwrap(secret, ""))
   use read <- core.look(ctx)
-  use found <- result.try(by_id(read, id))
+  use found <- result.try(by_id(read, request_id))
   case found {
     Some(a) if a.applicant_secret_hash == hash -> {
       use reasons <- result.map(codes(read, a.id, code_row.ReviewReason))
@@ -873,7 +892,11 @@ fn reason_required() -> Response {
 
 /// `POST /admin/verification/root-requests/:id/approve`: the organisation is verified and its first root
 /// administrator established.
-pub fn approve(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn approve(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(400)))
     use link <- input.field("linkUserId", input.nullish(input.id()))
@@ -888,7 +911,7 @@ pub fn approve(ctx: Ctx, req: Request, id: String) -> Response {
   let reviewer = reviewer.of(req)
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(by_id(read, id))
+  use found <- result.try(by_id(read, request_id))
   case found, parsed {
     None, _ -> stop(not_found())
     _, Error(response) -> stop(response)
@@ -1353,7 +1376,11 @@ fn register(tx: Tx, a: Application, now: Int) -> Result(orgs.Org, Fail(e)) {
 }
 
 /// `POST /admin/verification/root-requests/:id/reject`.
-pub fn reject(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn reject(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(400)))
     input.done(reason)
@@ -1363,7 +1390,7 @@ pub fn reject(ctx: Ctx, req: Request, id: String) -> Response {
   let reviewer = reviewer.of(req)
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(by_id(read, id))
+  use found <- result.try(by_id(read, request_id))
   case found, parsed {
     None, _ -> stop(not_found())
     _, Error(response) -> stop(response)

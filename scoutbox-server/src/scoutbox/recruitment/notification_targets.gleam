@@ -226,7 +226,7 @@ fn offer(
   ref: String,
   now: Int,
 ) -> Result(Option(Json), Fail(e)) {
-  use found <- result.try(offers.by_id(read, ref))
+  use found <- result.try(offers.by_id(read, id.offer(ref)))
   case found {
     None -> Ok(None)
     Some(o) ->
@@ -313,14 +313,10 @@ fn signing(
   now: Int,
 ) -> Result(Option(Json), Fail(e)) {
   use package_id <- result.try(case by_row {
-    False -> Ok(Some(ref))
+    False -> Ok(Some(id.signing_package(ref)))
     True ->
       signings.by_id(read, id.signing(ref))
-      |> result.map(
-        option.then(_, fn(s) {
-          option.map(s.signing_package_id, id.signing_package_to_string)
-        }),
-      )
+      |> result.map(option.then(_, fn(s) { s.signing_package_id }))
   })
   use found <- result.try(case package_id {
     Some(pid) -> signing_packages.by_id(read, pid)
@@ -343,10 +339,7 @@ fn signing(
           case Some(p.row.org_id) == org {
             True -> room(read, Some(p.row.case_id), org, "signing")
             False -> {
-              use o <- result.try(offers.by_id(
-                read,
-                id.offer_to_string(p.row.offer_id),
-              ))
+              use o <- result.try(offers.by_id(read, p.row.offer_id))
               case o {
                 Some(o) ->
                   case

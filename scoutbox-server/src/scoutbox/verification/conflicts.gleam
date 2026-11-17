@@ -33,9 +33,9 @@ fn where(
 /// A user's declarations still in force.
 pub fn active_for_user(
   read: Read,
-  user_id: String,
+  user_id: id.OrgUserId,
 ) -> Result(List(Conflict), Fail(e)) {
-  where(read, "user_id = ? AND withdrawn_at IS NULL", [sqlight.text(user_id)])
+  where(read, "user_id = ? AND withdrawn_at IS NULL", [id.org_user_sql(user_id)])
 }
 
 pub fn for_org(
@@ -56,8 +56,11 @@ pub fn for_org_user(
   ])
 }
 
-pub fn by_id(read: Read, id: String) -> Result(Option(Conflict), Fail(e)) {
-  where(read, "id = ?", [sqlight.text(id)])
+pub fn by_id(
+  read: Read,
+  conflict_id: id.ConflictId,
+) -> Result(Option(Conflict), Fail(e)) {
+  where(read, "id = ?", [id.conflict_sql(conflict_id)])
   |> result.map(fn(rows) {
     case rows {
       [c, ..] -> option.Some(c)

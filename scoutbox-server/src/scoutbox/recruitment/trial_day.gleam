@@ -605,8 +605,8 @@ pub fn day_status(
         Ok(new_day) -> {
           let now = clock.now_ms()
           let kind = case postponed {
-            True -> "postponed"
-            False -> "cancelled"
+            True -> status_event_row.Postponed
+            False -> status_event_row.Cancelled
           }
           store.unit(ctx.store, fn(tx) {
             use fresh <- result.try(

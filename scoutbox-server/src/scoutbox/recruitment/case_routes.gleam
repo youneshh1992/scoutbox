@@ -38,6 +38,7 @@ import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
 import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/assessments as assessment_row
+import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/safety/audit
@@ -1675,7 +1676,12 @@ fn finalize_write(
             "recruitment_decision",
           )
           // The write refuses before anything is recorded.
-          case store.unit(ctx.store, delivery.consume_injected(_, "decision")) {
+          case
+            store.unit(ctx.store, delivery.consume_injected(
+              _,
+              injection_row.Decision,
+            ))
+          {
             Ok(True) ->
               refuse(
                 "DECISION_TRANSPORT_REFUSED",
@@ -2022,7 +2028,7 @@ pub fn agent_journey(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   use m <- agent_core.membership(ctx, a)
   use found <- agent_core.own_agreement(ctx, m, agreement_id)

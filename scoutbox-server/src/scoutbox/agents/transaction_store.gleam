@@ -320,10 +320,10 @@ pub fn record_compliance(
     tx,
     "UPDATE agent_transactions SET compliance_evaluation_id = ?, compliance_gate = ?, compliance_evaluated_at = ?, compliance_pending_reason = ?, compliance_verification_freshness = ?, compliance_party_revision = ?, re_evaluation_pending = 0, status = COALESCE(?, status), updated_at = ? WHERE id = ?",
     [
-      sqlight.nullable(sqlight.text, stored.evaluation_id),
+      sqlight.nullable(id.evaluation_sql, stored.evaluation_id),
       sqlight.nullable(
         sqlight.text,
-        option.map(stored.gate, pending_reason.to_string),
+        option.map(stored.gate, tx_row.compliance_gate_to_string),
       ),
       sqlight.int(stored.evaluated_at),
       sqlight.nullable(

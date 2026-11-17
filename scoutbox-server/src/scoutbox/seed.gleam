@@ -10,6 +10,7 @@ import gleam/result
 import gleam/string
 import scoutbox/platform/media
 import scoutbox/platform/store.{type Store}
+import scoutbox/rows/id
 import simplifile
 import sqlight
 import wisp
@@ -75,7 +76,7 @@ fn install_sample_clips(store: Store, priv: String, data_dir: String) -> Nil {
       store.one(
         read,
         "SELECT id FROM player_media WHERE player_id = ? AND title = ?",
-        [sqlight.text(player_id), sqlight.text(title)],
+        [id.player_sql(id.player(player_id)), sqlight.text(title)],
         decode.at([0], decode.string),
       )
     })

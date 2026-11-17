@@ -566,8 +566,30 @@ fn argument(ctx: Context, env: Env, e: glance.Expression) -> Arg {
         Ok("sqlight"), "float", _ -> FloatArg
         Ok("sqlight"), "bool", _ -> BoolArg
         Ok("sqlight"), "null", _ -> NullArg
-        Ok("sqlight"), "nullable", [encoder, _] ->
-          NullableArg(encoder_argument(ctx, env, encoder))
+        Ok("sqlight"), "nullable", [encoder, value] ->
+          case encoder_argument(ctx, env, encoder), unpipe(value) {
+            // `sqlight.nullable(sqlight.text, option.map(x, vocabulary.to_string))`
+            TextArg,
+              glance.Call(
+                function: glance.FieldAccess(_, glance.Variable(_, o), "map"),
+                arguments: [
+                  _,
+                  glance.UnlabelledField(glance.FieldAccess(
+                    _,
+                    glance.Variable(_, alias),
+                    name,
+                  )),
+                ],
+                ..,
+              )
+            ->
+              case imports(ctx, env, o, "map") {
+                Ok("gleam/option") ->
+                  NullableArg(converted(ctx, env, alias, name))
+                _ -> NullableArg(TextArg)
+              }
+            kind, _ -> NullableArg(kind)
+          }
         Ok(module), name, _ if module == id_module ->
           case string.ends_with(name, "_sql") {
             True -> IdArg(string.drop_end(name, 4))
@@ -581,24 +603,29 @@ fn argument(ctx: Context, env: Env, e: glance.Expression) -> Arg {
 
 /// What `sqlight.text(e)` binds: an id or a vocabulary value when `e` is its `to_string`, else text.
 fn text_argument(ctx: Context, env: Env, e: glance.Expression) -> Arg {
-  case e {
+  case unpipe(e) {
     glance.Call(
       function: glance.FieldAccess(_, glance.Variable(_, alias), name),
       ..,
-    ) ->
-      case imports(ctx, env, alias, name) {
-        Ok(module) if module == id_module ->
-          case string.ends_with(name, "_to_string") {
-            True -> IdArg(string.drop_end(name, 10))
-            False -> TextArg
-          }
-        Ok("scoutbox/rows/" <> _ as module)
-        | Ok("scoutbox/vocab/" <> _ as module) ->
-          case vocabulary(ctx, module, name) {
-            Ok(type_name) -> EnumArg(module, type_name)
-            Error(Nil) -> TextArg
-          }
-        _ -> TextArg
+    ) -> converted(ctx, env, alias, name)
+    _ -> TextArg
+  }
+}
+
+/// What text made by `alias.name` is: an id from `id.<name>_to_string`, a vocabulary value from its generated
+/// `to_string`, else plain text.
+fn converted(ctx: Context, env: Env, alias: String, name: String) -> Arg {
+  case imports(ctx, env, alias, name) {
+    Ok(module) if module == id_module ->
+      case string.ends_with(name, "_to_string") {
+        True -> IdArg(string.drop_end(name, 10))
+        False -> TextArg
+      }
+    Ok("scoutbox/rows/" <> _ as module)
+    | Ok("scoutbox/vocab/" <> _ as module) ->
+      case vocabulary(ctx, module, name) {
+        Ok(type_name) -> EnumArg(module, type_name)
+        Error(Nil) -> TextArg
       }
     _ -> TextArg
   }

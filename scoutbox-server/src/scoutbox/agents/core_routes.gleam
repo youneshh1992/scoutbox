@@ -510,7 +510,7 @@ pub type Found {
 pub fn own_agreement(
   ctx: Ctx,
   m: Member,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
   next: fn(Found) -> Response,
 ) -> Response {
   use found <- reading(ctx, fn(r) {
@@ -2987,7 +2987,7 @@ fn create_request(
       )
       |> storage,
     )
-    agent_store.agreement_by_id(r, id.agreement_to_string(agreement_id))
+    agent_store.agreement_by_id(r, agreement_id)
     |> storage
   })
   let assert Some(agreement) = agreement
@@ -2998,7 +2998,11 @@ fn create_request(
 }
 
 /// `GET /org/agent/clients/:id`.
-pub fn client(ctx: Ctx, a: OrgAccess, agreement_id: String) -> Response {
+pub fn client(
+  ctx: Ctx,
+  a: OrgAccess,
+  agreement_id: id.AgreementId,
+) -> Response {
   use m <- membership(ctx, a)
   use found <- own_agreement(ctx, m, agreement_id)
   let now = clock.now_ms()
@@ -3062,7 +3066,7 @@ pub fn terminate(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   use m <- membership(ctx, a)
   use <- require(m, "clients.terminate")
@@ -3221,7 +3225,7 @@ pub fn terminate(
 pub fn client_opportunities(
   ctx: Ctx,
   a: OrgAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   use m <- membership(ctx, a)
   use <- require(m, "clients.opportunities.read")
@@ -3436,7 +3440,7 @@ fn player_answer_shape(with_reason: Bool) -> input.Shape(PlayerAnswer) {
 fn players_agreement(
   ctx: Ctx,
   p: PlayerAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
   action: String,
   next: fn(Agreement) -> Response,
 ) -> Response {
@@ -3458,7 +3462,7 @@ pub fn answer(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
   answer: Answer,
 ) -> Response {
   let #(slot, to, change, notify_type, notify_text) = case answer {
@@ -3827,7 +3831,7 @@ pub fn sharing(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   case p.minor {
     True -> refuse("AGENT_ACTION_NOT_PERMITTED", [])

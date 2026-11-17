@@ -47,9 +47,9 @@ pub type DomainRequest =
 
 pub fn domain_request(
   read: Read,
-  id: String,
+  request_id: id.DomainRequestId,
 ) -> Result(Option(DomainRequest), Fail(e)) {
-  requests_where(read, "id = ?", [sqlight.text(id)])
+  requests_where(read, "id = ?", [id.domain_request_sql(request_id)])
   |> result.map(fn(rows) { list.first(rows) |> option.from_result })
 }
 
@@ -433,7 +433,7 @@ pub fn confirm_domain(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  id: String,
+  request_id: id.DomainRequestId,
 ) -> Response {
   let shape = {
     use code <- input.field("code", input.nullish(input.text(64)))
@@ -445,7 +445,7 @@ pub fn confirm_domain(
   use tx <- act(ctx)
   let read = store.reading(tx)
   use <- guard(read, access, ver_level.VerificationAdmin, False)
-  use found <- result.try(domain_request(read, id))
+  use found <- result.try(domain_request(read, request_id))
   case found {
     Some(r) if r.org_id == access.org.id ->
       case r.status, parsed {
@@ -1035,10 +1035,14 @@ pub fn list_conflicts(ctx: Ctx, access: OrgAccess) -> Response {
 }
 
 /// `POST /org/verification/conflicts/:id/withdraw`.
-pub fn withdraw_conflict(ctx: Ctx, access: OrgAccess, id: String) -> Response {
+pub fn withdraw_conflict(
+  ctx: Ctx,
+  access: OrgAccess,
+  conflict_id: id.ConflictId,
+) -> Response {
   let now = clock.now_ms()
   use tx <- act(ctx)
-  use found <- result.try(conflicts.by_id(store.reading(tx), id))
+  use found <- result.try(conflicts.by_id(store.reading(tx), conflict_id))
   case found {
     Some(c) if c.org_id == access.org.id && c.user_id == access.user.id ->
       case c.withdrawn_at {

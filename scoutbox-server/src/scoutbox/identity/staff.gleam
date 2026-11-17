@@ -135,10 +135,10 @@ pub fn for_org(
 /// The organisation's first current staff member, in creation order.
 pub fn first_active(
   read: Read,
-  org_id: String,
+  org_id: id.OrgId,
 ) -> Result(Option(Staff), Fail(e)) {
   first(read, "WHERE org_id = ? AND removed_at IS NULL ORDER BY rowid LIMIT 1", [
-    sqlight.text(org_id),
+    id.org_sql(org_id),
   ])
 }
 

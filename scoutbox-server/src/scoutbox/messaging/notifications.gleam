@@ -187,7 +187,7 @@ type PushPrefs {
 fn person_prefs(
   read: Read,
   kind: Audience,
-  id: String,
+  person_id: String,
   at: Int,
 ) -> Result(Option(PushPrefs), Fail(e)) {
   case kind {
@@ -195,7 +195,7 @@ fn person_prefs(
       store.one(
         read,
         "SELECT " <> player_row.columns <> " FROM players WHERE id = ?",
-        [sqlight.text(id)],
+        [id.player_sql(id.player(person_id))],
         player_row.decoder(),
       )
       |> result.map(fn(found) {
@@ -214,7 +214,7 @@ fn person_prefs(
       store.one(
         read,
         "SELECT " <> guardian_row.columns <> " FROM guardians WHERE id = ?",
-        [sqlight.text(id)],
+        [id.guardian_sql(id.guardian(person_id))],
         guardian_row.decoder(),
       )
       |> result.map(fn(found) {

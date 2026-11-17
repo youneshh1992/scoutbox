@@ -34,7 +34,7 @@ pub type Around {
 
 pub fn around(read: Read, p: Package) -> Result(Around, Fail(e)) {
   use room <- result.try(cases.room(read, p.row.case_id))
-  use offer <- result.try(offers.by_id(read, id.offer_to_string(p.row.offer_id)))
+  use offer <- result.try(offers.by_id(read, p.row.offer_id))
   use row <- result.try(signing_writer.for_package(read, p.row.id))
   use player <- result.map(players.by_id(read, p.row.player_id))
   Around(
@@ -179,10 +179,7 @@ pub fn canonical_contract(
     case found, s.signing_package_id {
       Some(_), _ | None, None -> Ok(found)
       None, Some(pid) -> {
-        use pkg <- result.map(signing_packages.by_id(
-          read,
-          id.signing_package_to_string(pid),
-        ))
+        use pkg <- result.map(signing_packages.by_id(read, pid))
         let mine = Some(s.id)
         case pkg {
           Some(p)

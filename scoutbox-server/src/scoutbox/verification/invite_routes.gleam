@@ -347,8 +347,11 @@ fn accept(
       ))
     Ok(token) -> {
       use found <- result.try(
+        // A token's ref is polymorphic: an invitation token's names its invitation.
         invites_where(read, "id = ?", [
-          sqlight.text(option.unwrap(token.ref_id, "")),
+          id.player_invite_sql(
+            id.player_invite(option.unwrap(token.ref_id, "")),
+          ),
         ]),
       )
       case found {

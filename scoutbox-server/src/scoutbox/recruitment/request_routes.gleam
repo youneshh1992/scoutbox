@@ -927,7 +927,7 @@ fn answer(
       )
       use _ <- result.try(requests.record_response(
         tx,
-        id.request_to_string(r.id),
+        r.id,
         accept,
         by.kind,
         now,

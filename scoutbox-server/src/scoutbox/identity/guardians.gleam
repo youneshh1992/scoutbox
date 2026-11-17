@@ -269,10 +269,12 @@ pub fn review_id_check(
       tx,
       "UPDATE idv_queue SET status = ? WHERE seq = (SELECT MIN(seq) FROM idv_queue WHERE guardian_id = ?)",
       [
-        sqlight.text(case approved {
-          True -> "approved"
-          False -> "revoked"
-        }),
+        sqlight.text(
+          idv_row.status_to_string(case approved {
+            True -> idv_row.Approved
+            False -> idv_row.Revoked
+          }),
+        ),
         id.guardian_sql(id),
       ],
     ),

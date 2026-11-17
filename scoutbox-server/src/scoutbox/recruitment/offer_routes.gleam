@@ -61,7 +61,6 @@ import scoutbox/vocab/offer_status.{Accepted, Draft, Issued}
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status
 import scoutbox/vocab/transaction_status
-import sqlight
 import wisp.{type Request, type Response}
 
 // --------------------------------------------------------------------------------------------------- helpers
@@ -230,7 +229,7 @@ fn room_for(
 fn offer_for(
   ctx: Ctx,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
   need: room_rules.RoomAction,
   now: Int,
   next: fn(Offer, Room, Option(room_rules.RoomRole)) -> Response,
@@ -345,9 +344,7 @@ fn case_audit(
 }
 
 fn reread(tx: Tx, offer_id: id.OfferId) -> Result(Offer, Fail(Response)) {
-  use found <- result.try(
-    offers.by_id(store.reading(tx), id.offer_to_string(offer_id)) |> storage,
-  )
+  use found <- result.try(offers.by_id(store.reading(tx), offer_id) |> storage)
   case found {
     Some(o) -> Ok(o)
     None -> store.refuse(state_unknown())
@@ -860,7 +857,8 @@ fn resolve_documents(
     case acc {
       Error(_) -> Ok(acc)
       Ok(out) -> {
-        use found <- result.map(vault_record(read, d.evidence_id))
+        // A document ref is the request's: its text names a vault record.
+        use found <- result.map(vault_record(read, id.evidence(d.evidence_id)))
         let mine = Some(org_id)
         case found {
           Some(ev) if ev.org_id == mine ->
@@ -890,12 +888,12 @@ fn resolve_documents(
 
 fn vault_record(
   read: Read,
-  evidence_id: String,
+  evidence_id: id.EvidenceId,
 ) -> Result(Option(evidence_row.Row), Fail(e)) {
   store.query(
     read,
     "SELECT " <> evidence_row.columns <> " FROM ver_evidence WHERE id = ?",
-    [sqlight.text(evidence_id)],
+    [id.evidence_sql(evidence_id)],
     evidence_row.decoder(),
   )
   |> result.map(fn(rows) { list.first(rows) |> option.from_result })
@@ -1235,7 +1233,12 @@ fn club_json_now(
 }
 
 /// `GET /org/offers/:id`.
-pub fn get(ctx: Ctx, req: Request, a: OrgAccess, offer_id: String) -> Response {
+pub fn get(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  offer_id: id.OfferId,
+) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, _, _ <- offer_for(ctx, a, offer_id, room_rules.OfferView, now)
   use view <- club_json_now(ctx, o, now)
@@ -1247,7 +1250,7 @@ pub fn history(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, _, _ <- offer_for(ctx, a, offer_id, room_rules.OfferView, now)
@@ -1277,7 +1280,7 @@ pub fn edit_draft(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, room, _ <- offer_for(ctx, a, offer_id, room_rules.OfferDraft, now)
@@ -1464,7 +1467,7 @@ pub fn issue(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, room, role <- offer_for(ctx, a, offer_id, room_rules.OfferIssue, now)
@@ -1542,7 +1545,7 @@ fn issue_checked(
       use rec <- result.try(recipients.resolve(rd, r.player_id, org, now))
       use docs_ok <- result.map(
         list.try_map(rev.documents, fn(d) {
-          vault_record(rd, id.evidence_to_string(d.evidence_id))
+          vault_record(rd, d.evidence_id)
           |> result.map(fn(ev) {
             case ev {
               Some(ev) -> ev.org_id == Some(r.org_id)
@@ -2008,7 +2011,7 @@ pub fn withdraw(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, room, role <- offer_for(ctx, a, offer_id, room_rules.OfferIssue, now)
@@ -2222,7 +2225,7 @@ pub fn revise(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o, room, _ <- offer_for(ctx, a, offer_id, room_rules.OfferDraft, now)
@@ -2734,14 +2737,14 @@ pub fn list_for(ctx: Ctx, req: Request, r: Recipient) -> Response {
 fn recipient_offer(
   ctx: Ctx,
   r: Recipient,
-  offer_id: String,
+  offer_id: id.OfferId,
   now: Int,
   next: fn(Offer) -> Response,
 ) -> Response {
   case read(ctx, recipient_offers(_, r, now)) {
     Error(response) -> response
     Ok(all) ->
-      case list.find(all, fn(o) { id.offer_to_string(o.row.id) == offer_id }) {
+      case list.find(all, fn(o) { o.row.id == offer_id }) {
         Ok(o) -> next(o)
         Error(Nil) -> not_found()
       }
@@ -2753,7 +2756,7 @@ pub fn read_one(
   ctx: Ctx,
   req: Request,
   r: Recipient,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use o <- recipient_offer(ctx, r, offer_id, now)
@@ -2802,7 +2805,7 @@ pub fn respond(
   ctx: Ctx,
   req: Request,
   r: Recipient,
-  offer_id: String,
+  offer_id: id.OfferId,
   accepted: Bool,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
@@ -3331,7 +3334,7 @@ pub fn share_agent(
   ctx: Ctx,
   req: Request,
   p: PlayerAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   let r = PlayerRecipient(p)
@@ -3400,7 +3403,10 @@ pub fn share_agent(
               case b.agreement_id {
                 None -> Ok(#(sole, ambiguous))
                 Some(named) -> {
-                  use a <- result.try(representation.by_id(rd, named))
+                  use a <- result.try(representation.by_id(
+                    rd,
+                    id.agreement(named),
+                  ))
                   case a {
                     Some(a) if a.row.client_id == client -> {
                       use basis <- result.map(representation.basis(
@@ -3503,7 +3509,7 @@ pub fn document(
   ctx: Ctx,
   req: Request,
   r: Recipient,
-  offer_id: String,
+  offer_id: id.OfferId,
   doc_id: String,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
@@ -3523,7 +3529,7 @@ pub fn document(
     Error(Nil) -> gone
     Ok(d) -> {
       let owner = Some(o.row.org_id)
-      case read(ctx, vault_record(_, id.evidence_to_string(d.evidence_id))) {
+      case read(ctx, vault_record(_, d.evidence_id)) {
         Error(response) -> response
         Ok(Some(ev)) if ev.org_id == owner -> {
           let blob = case ev.media_id {
@@ -3604,7 +3610,7 @@ pub fn agent_offers(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   use m <- agent_core.membership(ctx, a)
   use found <- agent_core.own_agreement(ctx, m, agreement_id)

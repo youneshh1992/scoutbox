@@ -787,7 +787,11 @@ fn registry_checked(
 // ------------------------------------------------------------------------------------------- evidence access
 
 /// `GET /admin/verification/evidence/:id`: Trust & Safety sees everything, every read logged.
-pub fn admin_evidence(ctx: Ctx, req: Request, evidence_id: String) -> Response {
+pub fn admin_evidence(
+  ctx: Ctx,
+  req: Request,
+  evidence_id: id.EvidenceId,
+) -> Response {
   let now = clock.now_ms()
   let _ = req
   use tx <- act(ctx)
@@ -846,7 +850,7 @@ pub fn org_evidence(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  evidence_id: String,
+  evidence_id: id.EvidenceId,
 ) -> Response {
   let now = clock.now_ms()
   use tx <- act(ctx)
@@ -938,7 +942,8 @@ pub fn case_view(ctx: Ctx, claim_id: id.ClaimId) -> Response {
         ),
       )
       use conflicts <- result.try(case c.subject_kind {
-        claim_row.User -> conflicts.active_for_user(read, c.subject_id)
+        claim_row.User ->
+          conflicts.active_for_user(read, id.org_user(c.subject_id))
         claim_row.Org -> Ok([])
       })
       use disputes <- result.try(records.disputes_for_claim(read, c.id))
@@ -1458,7 +1463,11 @@ pub fn domain_requests(ctx: Ctx) -> Response {
 }
 
 /// `POST /admin/verification/domain-requests/:id/decide`.
-pub fn decide_domain(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn decide_domain(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.DomainRequestId,
+) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(600)))
     use approve <- input.field("approve", input.required(input.boolean()))
@@ -1469,7 +1478,7 @@ pub fn decide_domain(ctx: Ctx, req: Request, id: String) -> Response {
   let rev = reviewer.of(req)
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(org_admin.domain_request(read, id))
+  use found <- result.try(org_admin.domain_request(read, request_id))
   case found, parsed {
     None, _ -> stop(http.error(404, "DOMAIN_REQUEST_NOT_FOUND"))
     _, Error(response) -> stop(response)
@@ -1621,7 +1630,11 @@ type ResolutionBody {
 
 /// `POST /admin/verification/disputes/:id/resolve`. A refused outcome (the person opened a new claim meanwhile)
 /// leaves the dispute open and nothing half-done.
-pub fn resolve_dispute(ctx: Ctx, req: Request, id: String) -> Response {
+pub fn resolve_dispute(
+  ctx: Ctx,
+  req: Request,
+  dispute_id: id.DisputeId,
+) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(300)))
     use action <- input.field(
@@ -1648,7 +1661,7 @@ pub fn resolve_dispute(ctx: Ctx, req: Request, id: String) -> Response {
   let rev = reviewer.of(req)
   use tx <- act(ctx)
   let read = store.reading(tx)
-  use found <- result.try(records.dispute(read, id))
+  use found <- result.try(records.dispute(read, dispute_id))
   case found {
     None -> stop(http.error(404, "DISPUTE_NOT_FOUND"))
     Some(d) if d.status != dispute_row.Open ->

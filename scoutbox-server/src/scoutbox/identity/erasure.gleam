@@ -193,7 +193,7 @@ fn redact_recruitment(
         <> in_trials,
       [p],
       {
-        use trial <- decode.field(0, decode.string)
+        use trial <- decode.field(0, id.trial_decoder())
         use position <- decode.field(1, decode.int)
         use detail <- decode.field(2, decode.string)
         decode.success(#(trial, position, detail))
@@ -207,7 +207,7 @@ fn redact_recruitment(
         "UPDATE trial_history SET detail_json = ? WHERE trial_id = ? AND position = ?",
         [
           sqlight.text(redacted_detail(d.2)),
-          sqlight.text(d.0),
+          id.trial_sql(d.0),
           sqlight.int(d.1),
         ],
       )

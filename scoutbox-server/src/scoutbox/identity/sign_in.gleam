@@ -357,10 +357,7 @@ fn provision(
   let role = input.filled(body.role)
   case user, role, credentialed {
     None, _, True -> {
-      use first <- result.try(staff.first_active(
-        store.reading(tx),
-        id.org_to_string(org.id),
-      ))
+      use first <- result.try(staff.first_active(store.reading(tx), org.id))
       use <- guard_unit(first != None, StaffNotProvisioned)
       let role = case role {
         Some(r) -> roles.is_lead_role(r)

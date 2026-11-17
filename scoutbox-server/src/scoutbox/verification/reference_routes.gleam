@@ -323,9 +323,11 @@ pub fn list_for_org(ctx: Ctx, access: OrgAccess) -> Response {
 fn own(
   read: Read,
   access: OrgAccess,
-  id: String,
+  reference_id: id.ReferenceId,
 ) -> Result(Option(Reference), Fail(e)) {
-  use found <- result.map(where(read, "id = ?", [sqlight.text(id)]))
+  use found <- result.map(
+    where(read, "id = ?", [id.reference_sql(reference_id)]),
+  )
   case found {
     [r] if r.org_id == access.org.id && r.coach_user_id == access.user.id ->
       Some(r)
@@ -338,7 +340,7 @@ pub fn withdraw(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  id: String,
+  reference_id: id.ReferenceId,
 ) -> Response {
   let shape = {
     use reason <- input.field("reason", input.nullish(input.text(300)))
@@ -347,7 +349,7 @@ pub fn withdraw(
   let parsed = http.parse_body(req, shape, [])
   let now = clock.now_ms()
   use tx <- act(ctx)
-  use found <- result.try(own(store.reading(tx), access, id))
+  use found <- result.try(own(store.reading(tx), access, reference_id))
   case found, parsed {
     None, _ -> stop(http.error(404, "REFERENCE_NOT_FOUND"))
     Some(r), _ if r.status != row.Active -> stop(http.error(409, "NOT_ACTIVE"))
@@ -411,7 +413,7 @@ pub fn correct(
   ctx: Ctx,
   req: Request,
   access: OrgAccess,
-  id: String,
+  reference_id: id.ReferenceId,
 ) -> Response {
   let shape = {
     use strengths <- input.field("strengths", input.nullish(input.text(500)))
@@ -425,7 +427,7 @@ pub fn correct(
   let parsed = http.parse_body(req, shape, [])
   let now = clock.now_ms()
   use tx <- act(ctx)
-  use found <- result.try(own(store.reading(tx), access, id))
+  use found <- result.try(own(store.reading(tx), access, reference_id))
   case found, parsed {
     None, _ -> stop(http.error(404, "REFERENCE_NOT_FOUND"))
     Some(old), _ if old.status != row.Active ->

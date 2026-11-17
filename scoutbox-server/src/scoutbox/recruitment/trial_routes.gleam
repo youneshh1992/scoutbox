@@ -60,6 +60,7 @@ import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/box_cam_cv_results as cv_row
 import scoutbox/rows/box_sessions as box_row
 import scoutbox/rows/case_history as history_row
+import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/orgs
@@ -641,7 +642,9 @@ fn transport_failed(
   message: String,
   next: fn() -> Response,
 ) -> Response {
-  case store.unit(ctx.store, delivery.consume_injected(_, "trial")) {
+  case
+    store.unit(ctx.store, delivery.consume_injected(_, injection_row.Trial))
+  {
     Ok(True) -> err("TRIAL_TRANSPORT_REFUSED", message, [])
     _ -> next()
   }
@@ -2432,11 +2435,14 @@ pub fn complete(
 
 const combine_disabled = "REAL_WORLD_VALIDATION_NOT_COMPLETED"
 
-fn box_session(rd: Read, sid: String) -> Result(Option(box_row.Row), Fail(e)) {
+fn box_session(
+  rd: Read,
+  sid: id.BoxSessionId,
+) -> Result(Option(box_row.Row), Fail(e)) {
   store.one(
     rd,
     "SELECT " <> box_row.columns <> " FROM box_sessions WHERE id = ?",
-    [sqlight.text(sid)],
+    [id.box_session_sql(sid)],
     box_row.decoder(),
   )
   |> result.map(option.from_result)
@@ -2459,10 +2465,7 @@ fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
   |> list.flat_map(fn(s) { list.map(s.evidence, fn(e) { #(s, e) }) })
   |> list.try_map(fn(pair) {
     let #(s, e) = pair
-    use found <- result.try(box_session(
-      rd,
-      id.box_session_to_string(e.box_session_id),
-    ))
+    use found <- result.try(box_session(rd, e.box_session_id))
     use cv <- result.map(latest_cv(
       rd,
       id.box_session_to_string(e.box_session_id),
@@ -2959,7 +2962,8 @@ fn link_authorisation(
     Some(bsid) -> {
       use gathered <- with_read(ctx, fn(rd) {
         use consented <- result.try(consent(rd, a, room.row.player_id))
-        use s <- result.map(box_session(rd, bsid))
+        // The request names the session: its text is the boundary.
+        use s <- result.map(box_session(rd, id.box_session(bsid)))
         #(consented, s)
       })
       case gathered {
@@ -3132,7 +3136,10 @@ pub fn accept_gate(
                   )
                 _ ->
                   case
-                    store.unit(ctx.store, delivery.consume_injected(_, "trial"))
+                    store.unit(ctx.store, delivery.consume_injected(
+                      _,
+                      injection_row.Trial,
+                    ))
                   {
                     Ok(True) ->
                       refuse(

@@ -441,10 +441,7 @@ fn notify_agent(
   text: String,
   at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use found <- result.try(offers.by_id(
-    store.reading(tx),
-    id.offer_to_string(p.row.offer_id),
-  ))
+  use found <- result.try(offers.by_id(store.reading(tx), p.row.offer_id))
   case found {
     Some(o) if o.row.org_id == p.row.org_id ->
       case o.row.agent_share_user_id {
@@ -513,7 +510,7 @@ type Loaded {
 fn package_for(
   ctx: Ctx,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
   need: Need,
   now: Int,
   next: fn(Loaded) -> Response,
@@ -1150,7 +1147,7 @@ pub fn start(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  offer_id: String,
+  offer_id: id.OfferId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   let found =
@@ -1528,7 +1525,7 @@ pub fn get(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, View, now)
@@ -1549,7 +1546,7 @@ pub fn history(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, View, now)
@@ -1571,7 +1568,7 @@ pub fn document(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, View, now)
@@ -1605,7 +1602,7 @@ pub fn edit_draft(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Manage, now)
@@ -1724,7 +1721,7 @@ pub fn attach(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Manage, now)
@@ -1794,7 +1791,7 @@ pub fn attach_executed(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Manage, now)
@@ -1869,7 +1866,7 @@ pub fn ready(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Manage, now)
@@ -2452,7 +2449,7 @@ pub fn club_party(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Lead, now)
@@ -2503,7 +2500,7 @@ pub fn complete(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Lead, now)
@@ -2882,7 +2879,7 @@ pub fn close(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
   action: Closure,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
@@ -3039,7 +3036,7 @@ pub fn supersede(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use l <- package_for(ctx, a, package_id, Manage, now)
@@ -3222,7 +3219,11 @@ pub fn supersede(
 }
 
 /// `POST /admin/signings/:id/void`: Trust & Safety voids a live signing, with a reason.
-pub fn admin_void(ctx: Ctx, req: Request, package_id: String) -> Response {
+pub fn admin_void(
+  ctx: Ctx,
+  req: Request,
+  package_id: id.SigningPackageId,
+) -> Response {
   let now = clock.request_ms(ctx.config, req)
   let who = reviewer.of(req)
   case read(ctx, signing_packages.by_id(_, package_id)) {
@@ -3435,18 +3436,14 @@ pub fn player_list(ctx: Ctx, req: Request, a: PlayerAccess) -> Response {
 fn player_package(
   ctx: Ctx,
   a: PlayerAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
   now: Int,
   next: fn(Package) -> Response,
 ) -> Response {
   case read(ctx, recipient_packages(_, a.player.row.id, now)) {
     Error(response) -> response
     Ok(ps) ->
-      case
-        list.find(ps, fn(p) {
-          id.signing_package_to_string(p.row.id) == package_id
-        })
-      {
+      case list.find(ps, fn(p) { p.row.id == package_id }) {
         Ok(p) -> next(p)
         Error(Nil) -> not_found()
       }
@@ -3458,7 +3455,7 @@ pub fn player_get(
   ctx: Ctx,
   req: Request,
   a: PlayerAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use p <- player_package(ctx, a, package_id, now)
@@ -3480,7 +3477,7 @@ pub fn player_document(
   ctx: Ctx,
   req: Request,
   a: PlayerAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use p <- player_package(ctx, a, package_id, now)
@@ -3508,7 +3505,7 @@ pub fn player_complete(
   ctx: Ctx,
   req: Request,
   a: PlayerAccess,
-  package_id: String,
+  package_id: id.SigningPackageId,
 ) -> Response {
   let now = clock.request_ms(ctx.config, req)
   use p <- player_package(ctx, a, package_id, now)
@@ -3572,7 +3569,7 @@ pub fn agent_signings(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
-  agreement_id: String,
+  agreement_id: id.AgreementId,
 ) -> Response {
   use m <- agent_core.membership(ctx, a)
   use found <- agent_core.own_agreement(ctx, m, agreement_id)
@@ -3658,10 +3655,7 @@ fn agent_items(
       use items <- result.try(
         list.try_fold(all, [], fn(out, p) {
           use ok <- result.try(signing_reads.sound(rd, p, now))
-          use offer <- result.try(offers.by_id(
-            rd,
-            id.offer_to_string(p.row.offer_id),
-          ))
+          use offer <- result.try(offers.by_id(rd, p.row.offer_id))
           let shared = case offer {
             Some(o) ->
               o.row.org_id == p.row.org_id

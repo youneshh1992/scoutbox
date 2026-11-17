@@ -133,14 +133,22 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { invite_routes.accept(ctx, req) })
         ["org", "verification", "apply"] ->
           only(req, Post, fn() { applications.apply(ctx, req) })
-        ["org", "verification", "apply", id, "confirm-email"] ->
-          only(req, Post, fn() { applications.confirm_email(ctx, req, id) })
-        ["org", "verification", "apply", id, "evidence"] ->
-          only(req, Post, fn() { applications.evidence(ctx, req, id) })
-        ["org", "verification", "apply", id, "submit"] ->
-          only(req, Post, fn() { applications.submit(ctx, req, id) })
-        ["org", "verification", "apply", id, "status"] ->
-          only(req, Get, fn() { applications.status(ctx, req, id) })
+        ["org", "verification", "apply", request_id, "confirm-email"] ->
+          only(req, Post, fn() {
+            applications.confirm_email(ctx, req, id.root_request(request_id))
+          })
+        ["org", "verification", "apply", request_id, "evidence"] ->
+          only(req, Post, fn() {
+            applications.evidence(ctx, req, id.root_request(request_id))
+          })
+        ["org", "verification", "apply", request_id, "submit"] ->
+          only(req, Post, fn() {
+            applications.submit(ctx, req, id.root_request(request_id))
+          })
+        ["org", "verification", "apply", request_id, "status"] ->
+          only(req, Get, fn() {
+            applications.status(ctx, req, id.root_request(request_id))
+          })
         ["player", "login"] ->
           only(req, Post, fn() { player_routes.login(ctx, req) })
         ["player", "signup"] ->
@@ -162,88 +170,110 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["rooms", ..path] -> rooms(ctx, req, org, path)
         ["agent", ..path] -> agent_org(ctx, req, org, path)
         ["offers", oid] ->
-          only(req, Get, fn() { offer_routes.get(ctx, req, org, oid) })
+          only(req, Get, fn() { offer_routes.get(ctx, req, org, id.offer(oid)) })
         ["offers", oid, "history"] ->
-          only(req, Get, fn() { offer_routes.history(ctx, req, org, oid) })
+          only(req, Get, fn() {
+            offer_routes.history(ctx, req, org, id.offer(oid))
+          })
         ["offers", oid, "signing"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.start(ctx, req, org, oid)
+            signing_routes.start(ctx, req, org, id.offer(oid))
           })
         ["signings", sid] ->
           case req.method {
-            Get -> signing_routes.get(ctx, req, org, sid)
+            Get -> signing_routes.get(ctx, req, org, id.signing_package(sid))
             Patch -> {
               use req <- contract.rerun_on_stale(req)
-              signing_routes.edit_draft(ctx, req, org, sid)
+              signing_routes.edit_draft(ctx, req, org, id.signing_package(sid))
             }
             _ -> not_found()
           }
         ["signings", sid, "history"] ->
-          only(req, Get, fn() { signing_routes.history(ctx, req, org, sid) })
+          only(req, Get, fn() {
+            signing_routes.history(ctx, req, org, id.signing_package(sid))
+          })
         ["signings", sid, "document"] ->
           case req.method {
-            Get -> signing_routes.document(ctx, req, org, sid)
+            Get ->
+              signing_routes.document(ctx, req, org, id.signing_package(sid))
             Post -> {
               use req <- contract.rerun_on_stale(req)
-              signing_routes.attach(ctx, req, org, sid)
+              signing_routes.attach(ctx, req, org, id.signing_package(sid))
             }
             _ -> not_found()
           }
         ["signings", sid, "executed-document"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.attach_executed(ctx, req, org, sid)
+            signing_routes.attach_executed(
+              ctx,
+              req,
+              org,
+              id.signing_package(sid),
+            )
           })
         ["signings", sid, "ready"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.ready(ctx, req, org, sid)
+            signing_routes.ready(ctx, req, org, id.signing_package(sid))
           })
         ["signings", sid, "parties", "club", "complete"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.club_party(ctx, req, org, sid)
+            signing_routes.club_party(ctx, req, org, id.signing_package(sid))
           })
         ["signings", sid, "complete"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.complete(ctx, req, org, sid)
+            signing_routes.complete(ctx, req, org, id.signing_package(sid))
           })
         ["signings", sid, "cancel"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.close(ctx, req, org, sid, signing_routes.Cancel)
+            signing_routes.close(
+              ctx,
+              req,
+              org,
+              id.signing_package(sid),
+              signing_routes.Cancel,
+            )
           })
         ["signings", sid, "void"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.close(ctx, req, org, sid, signing_routes.Void)
+            signing_routes.close(
+              ctx,
+              req,
+              org,
+              id.signing_package(sid),
+              signing_routes.Void,
+            )
           })
         ["signings", sid, "supersede"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.supersede(ctx, req, org, sid)
+            signing_routes.supersede(ctx, req, org, id.signing_package(sid))
           })
         ["offers", oid, "draft"] ->
           only(req, Patch, fn() {
             use req <- contract.rerun_on_stale(req)
-            offer_routes.edit_draft(ctx, req, org, oid)
+            offer_routes.edit_draft(ctx, req, org, id.offer(oid))
           })
         ["offers", oid, "issue"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            offer_routes.issue(ctx, req, org, oid)
+            offer_routes.issue(ctx, req, org, id.offer(oid))
           })
         ["offers", oid, "withdraw"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            offer_routes.withdraw(ctx, req, org, oid)
+            offer_routes.withdraw(ctx, req, org, id.offer(oid))
           })
         ["offers", oid, "revise"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            offer_routes.revise(ctx, req, org, oid)
+            offer_routes.revise(ctx, req, org, id.offer(oid))
           })
         ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
         ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
@@ -343,7 +373,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["players", id, "trust-profile"] ->
           only(req, Get, fn() { trust.org_view(ctx, org, id.player(id)) })
         ["players", pid, "assessment-compare"] ->
-          only(req, Get, fn() { assessments.compare(ctx, org, pid) })
+          only(req, Get, fn() { assessments.compare(ctx, org, id.player(pid)) })
         ["assessments"] ->
           case req.method {
             Get -> assessments.list_for(ctx, req, org)
@@ -353,10 +383,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["assessments", aid] ->
           only(req, Put, fn() {
             use req <- contract.rerun_on_stale(req)
-            assessments.edit(ctx, req, org, aid)
+            assessments.edit(ctx, req, org, id.assessment(aid))
           })
         ["assessments", aid, "submit"] ->
-          only(req, Post, fn() { assessments.submit(ctx, org, aid) })
+          only(req, Post, fn() {
+            assessments.submit(ctx, org, id.assessment(aid))
+          })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
@@ -465,19 +497,31 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { signing_routes.player_list(ctx, req, player) })
         ["signings", sid] ->
           only(req, Get, fn() {
-            signing_routes.player_get(ctx, req, player, sid)
+            signing_routes.player_get(ctx, req, player, id.signing_package(sid))
           })
         ["signings", sid, "document"] ->
           only(req, Get, fn() {
-            signing_routes.player_document(ctx, req, player, sid)
+            signing_routes.player_document(
+              ctx,
+              req,
+              player,
+              id.signing_package(sid),
+            )
           })
         ["signings", sid, "complete"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.player_complete(ctx, req, player, sid)
+            signing_routes.player_complete(
+              ctx,
+              req,
+              player,
+              id.signing_package(sid),
+            )
           })
         ["box-cam", "sessions", sid, "cv", "finalize"] ->
-          only(req, Post, fn() { box_prefs.cv_finalize(ctx, player, sid) })
+          only(req, Post, fn() {
+            box_prefs.cv_finalize(ctx, player, id.box_session(sid))
+          })
         ["box-cam", "prefs"] ->
           case req.method {
             Get -> box_prefs.show(ctx, player)
@@ -488,22 +532,24 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
           only(req, Post, fn() {
-            agent.answer(ctx, req, player, rid, agent.Confirm)
+            agent.answer(ctx, req, player, id.agreement(rid), agent.Confirm)
           })
         ["agent", "relationships", rid, "decline"] ->
           only(req, Post, fn() {
-            agent.answer(ctx, req, player, rid, agent.Decline)
+            agent.answer(ctx, req, player, id.agreement(rid), agent.Decline)
           })
         ["agent", "relationships", rid, "terminate"] ->
           only(req, Post, fn() {
-            agent.answer(ctx, req, player, rid, agent.End)
+            agent.answer(ctx, req, player, id.agreement(rid), agent.End)
           })
         ["agent", "relationships", rid, "dispute"] ->
           only(req, Post, fn() {
-            agent.answer(ctx, req, player, rid, agent.Dispute)
+            agent.answer(ctx, req, player, id.agreement(rid), agent.Dispute)
           })
         ["agent", "relationships", rid, "sharing"] ->
-          only(req, Patch, fn() { agent.sharing(ctx, req, player, rid) })
+          only(req, Patch, fn() {
+            agent.sharing(ctx, req, player, id.agreement(rid))
+          })
         ["account"] ->
           only(req, Delete, fn() { erasure.delete_account(ctx, player) })
         ["opportunity-board"] ->
@@ -522,7 +568,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.PlayerRecipient(player),
-              oid,
+              id.offer(oid),
             )
           })
         ["trials"] ->
@@ -568,7 +614,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.PlayerRecipient(player),
-              oid,
+              id.offer(oid),
               True,
             )
           })
@@ -579,14 +625,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.PlayerRecipient(player),
-              oid,
+              id.offer(oid),
               False,
             )
           })
         ["offers", oid, "share-agent"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            offer_routes.share_agent(ctx, req, player, oid)
+            offer_routes.share_agent(ctx, req, player, id.offer(oid))
           })
         ["offers", oid, "documents", doc] ->
           only(req, Get, fn() {
@@ -594,7 +640,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.PlayerRecipient(player),
-              oid,
+              id.offer(oid),
               doc,
             )
           })
@@ -753,7 +799,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.GuardianRecipient(guardian),
-              oid,
+              id.offer(oid),
             )
           })
         ["trials"] ->
@@ -814,7 +860,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.GuardianRecipient(guardian),
-              oid,
+              id.offer(oid),
               True,
             )
           })
@@ -825,7 +871,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.GuardianRecipient(guardian),
-              oid,
+              id.offer(oid),
               False,
             )
           })
@@ -835,7 +881,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               ctx,
               req,
               offer_routes.GuardianRecipient(guardian),
-              oid,
+              id.offer(oid),
               doc,
             )
           })
@@ -972,7 +1018,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["signings", sid, "void"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
-            signing_routes.admin_void(ctx, req, sid)
+            signing_routes.admin_void(ctx, req, id.signing_package(sid))
           })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
@@ -988,11 +1034,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["rooms", "overview"] ->
           only(req, Get, fn() { room_routes.admin_overview(ctx) })
         ["reports"] -> only(req, Get, fn() { console.reports(ctx, req) })
-        ["reports", id, "resolve"] ->
-          only(req, Post, fn() { console.resolve(ctx, req, id) })
+        ["reports", report_id, "resolve"] ->
+          only(req, Post, fn() {
+            console.resolve(ctx, req, id.report(report_id))
+          })
         ["blocks"] -> only(req, Get, fn() { console.blocks(ctx, req) })
-        ["blocks", id, "lift"] ->
-          only(req, Post, fn() { console.lift(ctx, req, id) })
+        ["blocks", block_id, "lift"] ->
+          only(req, Post, fn() { console.lift(ctx, req, id.block(block_id)) })
         ["moderation"] -> only(req, Get, fn() { console.moderation(ctx, req) })
         ["clubs"] -> only(req, Get, fn() { console.clubs(ctx, req) })
         ["guardians"] ->
@@ -1022,8 +1070,10 @@ fn verification_admin(ctx: Ctx, req: Request, path: List(String)) -> Response {
     ["queue"] -> only(req, Get, fn() { review.queue(ctx, req) })
     ["cases", id] ->
       only(req, Get, fn() { review.case_view(ctx, id.claim(id)) })
-    ["evidence", id] ->
-      only(req, Get, fn() { review.admin_evidence(ctx, req, id) })
+    ["evidence", evidence_id] ->
+      only(req, Get, fn() {
+        review.admin_evidence(ctx, req, id.evidence(evidence_id))
+      })
     ["claims", id, "approve"] ->
       only(req, Post, fn() { review.approve(ctx, req, id.claim(id)) })
     ["claims", id, "reject"] ->
@@ -1040,16 +1090,24 @@ fn verification_admin(ctx: Ctx, req: Request, path: List(String)) -> Response {
       })
     ["claims", id, "reinstate"] ->
       only(req, Post, fn() { review.reinstate(ctx, req, id.claim(id)) })
-    ["root-requests", id, "approve"] ->
-      only(req, Post, fn() { applications.approve(ctx, req, id) })
-    ["root-requests", id, "reject"] ->
-      only(req, Post, fn() { applications.reject(ctx, req, id) })
+    ["root-requests", request_id, "approve"] ->
+      only(req, Post, fn() {
+        applications.approve(ctx, req, id.root_request(request_id))
+      })
+    ["root-requests", request_id, "reject"] ->
+      only(req, Post, fn() {
+        applications.reject(ctx, req, id.root_request(request_id))
+      })
     ["domain-requests"] -> only(req, Get, fn() { review.domain_requests(ctx) })
-    ["domain-requests", id, "decide"] ->
-      only(req, Post, fn() { review.decide_domain(ctx, req, id) })
+    ["domain-requests", request_id, "decide"] ->
+      only(req, Post, fn() {
+        review.decide_domain(ctx, req, id.domain_request(request_id))
+      })
     ["disputes"] -> only(req, Get, fn() { review.disputes(ctx) })
-    ["disputes", id, "resolve"] ->
-      only(req, Post, fn() { review.resolve_dispute(ctx, req, id) })
+    ["disputes", dispute_id, "resolve"] ->
+      only(req, Post, fn() {
+        review.resolve_dispute(ctx, req, id.dispute(dispute_id))
+      })
     ["authorities", id, "claims"] ->
       only(req, Get, fn() { review.authority_claims(ctx, id) })
     ["authorities", id, "flag"] ->
@@ -1110,10 +1168,14 @@ fn verification_org(
         Post -> references.create(ctx, req, org)
         _ -> not_found()
       }
-    ["references", id, "withdraw"] ->
-      only(req, Post, fn() { references.withdraw(ctx, req, org, id) })
-    ["references", id, "correct"] ->
-      only(req, Post, fn() { references.correct(ctx, req, org, id) })
+    ["references", reference_id, "withdraw"] ->
+      only(req, Post, fn() {
+        references.withdraw(ctx, req, org, id.reference(reference_id))
+      })
+    ["references", reference_id, "correct"] ->
+      only(req, Post, fn() {
+        references.correct(ctx, req, org, id.reference(reference_id))
+      })
     ["player-invites"] ->
       case req.method {
         Get -> invites.list_invites(ctx, org)
@@ -1127,16 +1189,20 @@ fn verification_org(
       only(req, Post, fn() {
         review.submit_licence(ctx, req, org, id.claim(id))
       })
-    ["evidence", id] ->
-      only(req, Get, fn() { review.org_evidence(ctx, req, org, id) })
+    ["evidence", evidence_id] ->
+      only(req, Get, fn() {
+        review.org_evidence(ctx, req, org, id.evidence(evidence_id))
+      })
     ["domains"] ->
       case req.method {
         Get -> org_admin.domains(ctx, org)
         Post -> org_admin.add_domain(ctx, req, org)
         _ -> not_found()
       }
-    ["domains", id, "confirm"] ->
-      only(req, Post, fn() { org_admin.confirm_domain(ctx, req, org, id) })
+    ["domains", request_id, "confirm"] ->
+      only(req, Post, fn() {
+        org_admin.confirm_domain(ctx, req, org, id.domain_request(request_id))
+      })
     ["admins"] ->
       case req.method {
         Get -> org_admin.admins(ctx, org)
@@ -1155,8 +1221,10 @@ fn verification_org(
         Post -> org_admin.declare(ctx, req, org)
         _ -> not_found()
       }
-    ["conflicts", id, "withdraw"] ->
-      only(req, Post, fn() { org_admin.withdraw_conflict(ctx, org, id) })
+    ["conflicts", conflict_id, "withdraw"] ->
+      only(req, Post, fn() {
+        org_admin.withdraw_conflict(ctx, org, id.conflict(conflict_id))
+      })
     _ -> not_found()
   }
 }
@@ -1218,17 +1286,26 @@ fn agent_org(
     ["clients"] -> only(req, Get, fn() { agent.clients(ctx, org) })
     ["clients", "request"] ->
       only(req, Post, fn() { agent.request(ctx, req, org) })
-    ["clients", rid] -> only(req, Get, fn() { agent.client(ctx, org, rid) })
+    ["clients", rid] ->
+      only(req, Get, fn() { agent.client(ctx, org, id.agreement(rid)) })
     ["clients", rid, "terminate"] ->
-      only(req, Post, fn() { agent.terminate(ctx, req, org, rid) })
+      only(req, Post, fn() { agent.terminate(ctx, req, org, id.agreement(rid)) })
     ["clients", rid, "offers"] ->
-      only(req, Get, fn() { offer_routes.agent_offers(ctx, req, org, rid) })
+      only(req, Get, fn() {
+        offer_routes.agent_offers(ctx, req, org, id.agreement(rid))
+      })
     ["clients", rid, "signings"] ->
-      only(req, Get, fn() { signing_routes.agent_signings(ctx, req, org, rid) })
+      only(req, Get, fn() {
+        signing_routes.agent_signings(ctx, req, org, id.agreement(rid))
+      })
     ["clients", rid, "journey"] ->
-      only(req, Get, fn() { case_routes.agent_journey(ctx, req, org, rid) })
+      only(req, Get, fn() {
+        case_routes.agent_journey(ctx, req, org, id.agreement(rid))
+      })
     ["clients", rid, "opportunities"] ->
-      only(req, Get, fn() { agent.client_opportunities(ctx, org, rid) })
+      only(req, Get, fn() {
+        agent.client_opportunities(ctx, org, id.agreement(rid))
+      })
     ["opportunities"] -> only(req, Get, fn() { agent.opportunities(ctx, org) })
     ["inbox"] -> only(req, Get, fn() { agent.inbox(ctx, org) })
     _ -> not_found()

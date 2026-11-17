@@ -135,8 +135,11 @@ fn select(
   list.try_map(rows, assemble(read, _))
 }
 
-pub fn by_id(read: Read, offer_id: String) -> Result(Option(Offer), Fail(e)) {
-  use found <- result.map(select(read, "id = ?", [sqlight.text(offer_id)]))
+pub fn by_id(
+  read: Read,
+  offer_id: id.OfferId,
+) -> Result(Option(Offer), Fail(e)) {
+  use found <- result.map(select(read, "id = ?", [id.offer_sql(offer_id)]))
   list.first(found) |> option.from_result
 }
 
@@ -1003,6 +1006,8 @@ pub fn set_agent_share(
   offer_id: id.OfferId,
   share: Option(#(id.OrgUserId, id.AgreementId, id.PlayerId, Int)),
 ) -> Result(Nil, Fail(e)) {
+  // Only the player shares an Offer with their agent.
+  let shared_by = option.map(share, fn(_) { offer_row.Player })
   store.run(
     tx,
     "UPDATE recruitment_offers SET agent_share_user_id = ?, agent_share_agreement_id = ?, agent_share_at = ?, agent_share_by_kind = ?, agent_share_by_id = ? WHERE id = ?",
@@ -1010,7 +1015,10 @@ pub fn set_agent_share(
       sqlight.nullable(id.org_user_sql, option.map(share, fn(s) { s.0 })),
       sqlight.nullable(id.agreement_sql, option.map(share, fn(s) { s.1 })),
       sqlight.nullable(sqlight.int, option.map(share, fn(s) { s.3 })),
-      sqlight.nullable(sqlight.text, option.map(share, fn(_) { "player" })),
+      sqlight.nullable(
+        sqlight.text,
+        option.map(shared_by, offer_row.agent_share_by_kind_to_string),
+      ),
       sqlight.nullable(
         sqlight.text,
         option.map(share, fn(s) { id.player_to_string(s.2) }),
