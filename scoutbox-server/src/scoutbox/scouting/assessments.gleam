@@ -40,6 +40,7 @@ import scoutbox/rows/assessments as row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/safety/ledger
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/position
 import sqlight
 import wisp.{type Request, type Response}
@@ -253,7 +254,7 @@ fn recommendation_json(r: row.Row) -> Json {
   case r.recommendation_verdict {
     Some(v) ->
       json.object([
-        #("verdict", row.recommendation_verdict_to_json(v)),
+        #("verdict", case_outcome.to_json(v)),
         #("reasons", json.string(option.unwrap(r.recommendation_reasons, ""))),
       ])
     None -> json.null()
@@ -790,7 +791,7 @@ type EditBody {
   EditBody(
     ratings: Option(List(RatingInput)),
     context: Option(ContextInput),
-    recommendation: Option(#(row.RecommendationVerdict, Option(String))),
+    recommendation: Option(#(case_outcome.CaseOutcome, Option(String))),
   )
 }
 
@@ -851,7 +852,7 @@ fn edit_shape() -> input.Shape(EditBody) {
       input.object({
         use verdict <- input.field(
           "verdict",
-          input.required(input.one_of(row.recommendation_verdict_pairs)),
+          input.required(input.one_of(case_outcome.pairs)),
         )
         use reasons <- input.field("reasons", input.nullish(input.text(1000)))
         input.done(#(verdict, reasons))
@@ -1148,7 +1149,7 @@ fn revise(
           tx,
           "UPDATE assessments SET recommendation_verdict = ?, recommendation_reasons = ? WHERE id = ?",
           [
-            sqlight.text(row.recommendation_verdict_to_string(verdict)),
+            sqlight.text(case_outcome.to_string(verdict)),
             sqlight.text(option.unwrap(blank_to_none(reasons), "")),
             aid,
           ],

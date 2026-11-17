@@ -22,6 +22,7 @@ import scoutbox/discovery/org_feed
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
 import scoutbox/discovery/second_look
+import scoutbox/discovery/watchlists
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/support
@@ -60,6 +61,7 @@ import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/case_routes
+import scoutbox/recruitment/case_workspace
 import scoutbox/recruitment/contact_routes
 import scoutbox/recruitment/invoices
 import scoutbox/recruitment/lifecycle
@@ -320,6 +322,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["signings"] ->
           only(req, Get, fn() { signings.org_page(ctx, req, org.org.id) })
+        ["cases"] ->
+          only(req, Post, fn() { case_workspace.create(ctx, req, org) })
+        ["cases", cid, "stage"] ->
+          only(req, Post, fn() { case_workspace.set_stage(ctx, req, org, cid) })
+        ["cases", cid, "decision"] ->
+          only(req, Post, fn() { case_workspace.decide(ctx, req, org, cid) })
+        ["watchlists"] ->
+          only(req, Get, fn() { watchlists.list(ctx, req, org) })
         ["recruitment-briefs"] ->
           case req.method {
             Get -> nobody_missed.list_briefs(ctx, req, org)
@@ -1559,7 +1569,10 @@ fn rooms(
     ["summaries"], Get -> room_routes.summaries(ctx, req, org)
     [rid], Get -> room_routes.get(ctx, org, room(rid))
     [rid], Patch -> room_routes.edit(ctx, req, org, room(rid))
-    [rid, "status"], Post -> room_routes.move_status(ctx, req, org, room(rid))
+    [rid, "status"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      room_routes.move_status(ctx, req, org, room(rid))
+    }
     [rid, "snapshots"], Get -> room_routes.snapshots(ctx, org, room(rid))
     [rid, "activity"], Get -> room_routes.activity(ctx, req, org, room(rid))
     [rid, "comments"], Get -> room_routes.comments(ctx, req, org, room(rid))
@@ -1647,8 +1660,10 @@ fn rooms(
       handoffs.invite(ctx, req, org, room(rid))
     }
     [rid, "journey"], Get -> case_routes.journey(ctx, req, org, room(rid))
-    [rid, "lifecycle"], Post ->
+    [rid, "lifecycle"], Post -> {
+      use req <- contract.rerun_on_stale(req)
       case_routes.lifecycle_act(ctx, req, org, room(rid))
+    }
     [rid, "decision"], Get -> case_routes.decision(ctx, org, room(rid))
     [rid, "decision", "draft"], Post ->
       case_routes.start_draft(ctx, req, org, room(rid))

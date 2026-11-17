@@ -85,6 +85,8 @@ Every route below is exercised by a battery, except where marked.
 | Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login`; `/auth/sso/start` and `/callback` refuse in production (development: not ported) |
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
+| Case workspace | `POST /org/cases` (a plain case), `/org/cases/:id/stage` (refused on a case with a Room), `/org/cases/:id/decision` (a non-lead's sign waits for a lead's approval); each answers the whole case record |
+| Watchlists | `GET /org/watchlists` (the list only: no route here creates one) |
 | Second Look | `GET /org/second-look` (reconciled with the source records on every read), `/org/second-look/:id`, `/org/second-look/:id/changes`; `POST /org/second-look/:id/review`, `/dismiss`, `/reopen-room` (through the Rooms' own reopen path) |
 | Nobody Missed | `GET`/`POST /org/recruitment-briefs`, `GET`/`PATCH /org/recruitment-briefs/:id`, `GET /org/nobody-missed` (over the stored match facts, by cursor), `GET /org/evaluation-coverage`; `POST /org/nobody-missed/add-to-room`, `/review` and `/dismiss` (no battery) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |

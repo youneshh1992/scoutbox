@@ -203,6 +203,26 @@ requests.push(
   ['evaluation coverage', (s) => ['GET', '/org/evaluation-coverage', null, s.maria]],
   ['admin metrics (second look)', (s) => ['GET', '/admin/metrics', null, null, true]],
 );
+// The case workspace: a plain case through its stage and decisions, and its routes refusing a Room's case.
+for (const [k, srv] of [['ts', ts], ['gl', gl]]) {
+  S[k].tom = (await call(srv.base, 'POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'First-Team Scout' })).body.token;
+  S[k].plain = (await call(srv.base, 'POST', '/org/cases', { playerId: 'pl-martin', priority: 'low', deadline: '2099-01-01' }, S[k].tom)).body?.case?.id ?? 'none';
+}
+requests.push(
+  ['case stage', (s) => ['POST', `/org/cases/${s.plain}/stage`, { stage: 'observation', reason: 'watch him' }, s.tom]],
+  ['case stage bad', (s) => ['POST', `/org/cases/${s.plain}/stage`, { stage: 'nope' }, s.tom]],
+  ['case stage closed', (s) => ['POST', `/org/cases/${s.plain}/stage`, { stage: 'closed' }, s.tom]],
+  ['case sign (non-lead)', (s) => ['POST', `/org/cases/${s.plain}/decision`, { outcome: 'sign', reasons: 'ready' }, s.tom]],
+  ['case decision', (s) => ['POST', `/org/cases/${s.plain}/decision`, { outcome: 'monitor', reasons: 'keep watching' }, s.tom]],
+  ['case decision bad', (s) => ['POST', `/org/cases/${s.plain}/decision`, { outcome: 'maybe', reasons: '' }, s.tom]],
+  ['case unknown', (s) => ['POST', '/org/cases/case-999999/stage', { stage: 'review' }, s.tom]],
+  ['room case stage', (s) => ['POST', `/org/cases/${s.room}/stage`, { stage: 'trial' }, s.maria]],
+  ['room case decision', (s) => ['POST', `/org/cases/${s.room}/decision`, { outcome: 'pass', reasons: 'budget' }, s.maria]],
+  ['case for nobody', (s) => ['POST', '/org/cases', { playerId: 'pl-nobody' }, s.tom]],
+  ['case junk', (s) => ['POST', '/org/cases', { playerId: 'pl-martin', priority: 'mega' }, s.tom]],
+  ['watchlists', (s) => ['GET', '/org/watchlists', null, s.maria]],
+  ['watchlists bad status', (s) => ['GET', '/org/watchlists?status=gone', null, s.maria]],
+);
 let differing = 0;
 const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []);
 try {

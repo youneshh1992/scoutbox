@@ -42,13 +42,13 @@ import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agreement_scopes as scope_row
-import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/delivery_fail_injections as injection_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/safety/audit
 import scoutbox/vocab/audience
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/decision_evidence_kind
 import scoutbox/vocab/decision_outcome.{type DecisionOutcome}
 import scoutbox/vocab/room_status
@@ -374,6 +374,8 @@ fn act(
                 [#("status", room_status.to_json(room.status))],
               )
               store.unit(ctx.store, fn(tx) {
+                // The checks above read the Room before the unit: a request that moved it first wins.
+                use _ <- result.try(room_routes.still_at(tx, a, room))
                 use _ <- result.try(
                   case_lifecycle.apply(
                     tx,
@@ -682,7 +684,7 @@ pub fn decision(
 }
 
 fn assessment_verdict_json(v) -> Json {
-  assessment_row.recommendation_verdict_to_json(v)
+  case_outcome.to_json(v)
 }
 
 fn decision_evidence_kind_json(k) -> Json {

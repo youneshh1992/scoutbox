@@ -7,6 +7,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/room_status
 import scoutbox/vocab/source_context
 import sqlight
@@ -136,52 +137,6 @@ pub fn priority_decoder() -> decode.Decoder(Priority) {
   }
 }
 
-pub type DecisionOutcome {
-  Sign
-  Pass
-  Monitor
-}
-
-/// Each value with the text the column stores.
-pub const decision_outcome_pairs = [
-  #("sign", Sign),
-  #("pass", Pass),
-  #("monitor", Monitor),
-]
-
-pub fn decision_outcome_to_string(value: DecisionOutcome) -> String {
-  case value {
-    Sign -> "sign"
-    Pass -> "pass"
-    Monitor -> "monitor"
-  }
-}
-
-pub fn decision_outcome_from_string(
-  value: String,
-) -> Result(DecisionOutcome, Nil) {
-  case value {
-    "sign" -> Ok(Sign)
-    "pass" -> Ok(Pass)
-    "monitor" -> Ok(Monitor)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn decision_outcome_to_json(value: DecisionOutcome) -> Json {
-  json.string(decision_outcome_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn decision_outcome_decoder() -> decode.Decoder(DecisionOutcome) {
-  use value <- decode.then(decode.string)
-  case decision_outcome_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Sign, "DecisionOutcome")
-  }
-}
-
 pub type RoomPriority {
   RoomPriorityLow
   Normal
@@ -244,7 +199,7 @@ pub type Row {
     deadline_day: Option(String),
     deadline_at: Option(Int),
     restricted: Bool,
-    decision_outcome: Option(DecisionOutcome),
+    decision_outcome: Option(case_outcome.CaseOutcome),
     decision_reasons: Option(String),
     decision_by_user_id: Option(id.OrgUserId),
     decision_by_name: Option(String),
@@ -354,7 +309,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use restricted <- decode.field(11, sqlight.decode_bool())
   use decision_outcome <- decode.field(
     12,
-    decode.optional(decision_outcome_decoder()),
+    decode.optional(case_outcome.decoder()),
   )
   use decision_reasons <- decode.field(13, decode.optional(decode.string))
   use decision_by_user_id <- decode.field(
@@ -490,7 +445,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.int, row.deadline_at),
     sqlight.bool(row.restricted),
     sqlight.nullable(
-      fn(v) { sqlight.text(decision_outcome_to_string(v)) },
+      fn(v) { sqlight.text(case_outcome.to_string(v)) },
       row.decision_outcome,
     ),
     sqlight.nullable(sqlight.text, row.decision_reasons),

@@ -57,6 +57,7 @@ import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/scouting/evidence
 import scoutbox/vocab/audience
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party
 import scoutbox/vocab/position as positions
@@ -286,6 +287,23 @@ fn touched(
 
 fn reread(tx: Tx, a: OrgAccess, room_id: id.RecruitmentCaseId) {
   find(store.reading(tx), a, room_id)
+}
+
+/// Inside a unit, the Room as an act's checks read it before the unit: another request that moved it first makes
+/// this act stale, and its route runs again from the new state (`http.rerun_on_stale`).
+pub fn still_at(
+  tx: Tx,
+  a: OrgAccess,
+  room: Room,
+) -> Result(Room, Fail(Response)) {
+  use now_at <- result.try(reread(tx, a, room.row.id))
+  case room_view.rev_of(now_at).rev == room_view.rev_of(room).rev {
+    True -> Ok(now_at)
+    False ->
+      store.stale(
+        "the Room moved from rev " <> int.to_string(room_view.rev_of(room).rev),
+      )
+  }
 }
 
 fn room_body(tx: Tx, a: OrgAccess, room: Room, now: Int) {
@@ -1534,6 +1552,7 @@ fn apply_move(
       to,
     )
   store.unit(ctx.store, fn(tx) {
+    use _ <- result.try(still_at(tx, a, room))
     use snapshot <- result.try(case check.snapshot {
       True ->
         room_view.capture_snapshot(
@@ -1614,7 +1633,7 @@ fn apply_move(
           tx,
           room.row.id,
           cases.SignOff(
-            case_row.Sign,
+            case_outcome.Sign,
             case codes {
               [] -> "signed"
               _ -> string.join(codes, ", ")
@@ -1629,7 +1648,7 @@ fn apply_move(
           tx,
           room.row.id,
           cases.SignOff(
-            case_row.Pass,
+            case_outcome.Pass,
             string.join(codes, ", "),
             #(a.user.id, a.user.name),
             now,

@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 40 / 2320 | 0 / 191 | 5 to go |
-| recruitment | 19 | 17 | 15 | 519 / 4128 | 28 / 295 | 14 to go |
+| recruitment | 19 | 17 | 16 | 519 / 4128 | 28 / 295 | 14 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -76,7 +76,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | not yet neutral | 9 → 9 | 217 | 217 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/journeyPersistence` | not yet neutral | 2 → 2 | 65 | 65 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  |  | 16 / 2927 | 2 / 95 | not answered; 2927 cases pending; 93 hand-port calls |
+| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 16 / 2927 | 2 / 95 | 2927 cases pending; 93 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 8 / 151 | 6 / 31 | 151 cases pending; 25 hand-port calls |
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 0 / 82 | 0 / 23 | 82 cases pending; 23 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |

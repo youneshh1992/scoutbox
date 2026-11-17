@@ -17,12 +17,14 @@ import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal.{type Due}
 import scoutbox/recruitment/room_rules
+import scoutbox/rows/case_approvals as approval_row
 import scoutbox/rows/case_assignments as assignment_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/case_tasks as task_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/recruitment_cases as row
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/source_context.{type SourceContext}
 import scoutbox/vocab/task_state.{type TaskState}
@@ -54,13 +56,18 @@ pub fn by_staff(user_id: id.OrgUserId, name: String) -> By {
   By(history_row.Org, Some(id.org_user_to_string(user_id)), Some(name))
 }
 
-/// One history entry to write: an action and its detail.
+/// One history entry to write: an action and its detail, structured or (as the case workspace writes it) text.
 pub type Entry {
-  Entry(action: String, detail: Option(Json))
+  Entry(action: String, detail: Option(Json), text: Option(String))
 }
 
 pub fn entry(action: String, detail: List(#(String, Json))) -> Entry {
-  Entry(action, Some(json.object(detail)))
+  Entry(action, Some(json.object(detail)), None)
+}
+
+/// An entry whose detail is a line of text.
+pub fn text_entry(action: String, text: String) -> Entry {
+  Entry(action, None, Some(text))
 }
 
 // ---------------------------------------------------------------------------------------------------------- reads
@@ -552,6 +559,7 @@ pub fn record(
         by_id: by.id,
         by_name: by.name,
         detail_json: option.map(e.detail, json.to_string),
+        detail_text: e.text,
       ),
     )
   })
@@ -679,6 +687,119 @@ pub fn create(
     )
   use _ <- result.map(row.insert(tx, with_opening(r, opening, new.level)))
   case_id
+}
+
+/// A plain case: the case workspace's, with no Room.
+pub type PlainCase {
+  PlainCase(
+    org_id: id.OrgId,
+    player_id: id.PlayerId,
+    player_name: String,
+    vacancy_id: Option(String),
+    owner: #(id.OrgUserId, String),
+    stage: row.Stage,
+    priority: row.Priority,
+    deadline: Option(Due),
+    restricted: Bool,
+    at: Int,
+  )
+}
+
+pub fn create_plain(
+  tx: Tx,
+  new: PlainCase,
+) -> Result(id.RecruitmentCaseId, Fail(e)) {
+  use case_id <- result.try(id.next_recruitment_case(tx))
+  let #(deadline_day, deadline_at) = due_fields(new.deadline)
+  let r =
+    row.Row(
+      ..row.new(
+        id: case_id,
+        org_id: new.org_id,
+        player_id: new.player_id,
+        owner_user_id: new.owner.0,
+        stage: new.stage,
+        priority: new.priority,
+        restricted: new.restricted,
+        created_at: new.at,
+      ),
+      player_name: Some(new.player_name),
+      owner_name: Some(new.owner.1),
+      vacancy_id: new.vacancy_id,
+      deadline_day:,
+      deadline_at:,
+    )
+  use _ <- result.map(row.insert(tx, r))
+  case_id
+}
+
+/// A plain case's stage. A Room's stage follows its status (`move`) and is never written alone.
+pub fn set_stage(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  stage: row.Stage,
+) -> Result(Nil, Fail(e)) {
+  exactly_one(
+    tx,
+    "UPDATE recruitment_cases SET stage = ? WHERE id = ? AND room_status IS NULL RETURNING id",
+    [sqlight.text(row.stage_to_string(stage)), id.recruitment_case_sql(case_id)],
+  )
+}
+
+/// The workspace decision on a case, Room or not.
+pub type WorkspaceDecision {
+  WorkspaceDecision(
+    outcome: case_outcome.CaseOutcome,
+    reasons: String,
+    by: #(id.OrgUserId, String),
+    at: Int,
+  )
+}
+
+pub fn record_decision(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  d: WorkspaceDecision,
+) -> Result(Nil, Fail(e)) {
+  exactly_one(
+    tx,
+    "UPDATE recruitment_cases SET decision_outcome = ?, decision_reasons = ?, decision_by_user_id = ?, decision_by_name = ?, decision_approved_by_name = NULL, decision_at = ? WHERE id = ? RETURNING id",
+    [
+      sqlight.text(case_outcome.to_string(d.outcome)),
+      sqlight.text(d.reasons),
+      id.org_user_sql(d.by.0),
+      sqlight.text(d.by.1),
+      sqlight.int(d.at),
+      id.recruitment_case_sql(case_id),
+    ],
+  )
+}
+
+/// A sign decision a non-lead asked a recruitment lead to approve.
+pub fn request_approval(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  d: WorkspaceDecision,
+) -> Result(approval_row.Row, Fail(e)) {
+  use approval_id <- result.try(id.next_approval(tx))
+  use position <- result.try(next_position(tx, approval_row.table, case_id))
+  let r =
+    approval_row.Row(
+      case_id:,
+      position:,
+      id: approval_id,
+      decision_outcome: d.outcome,
+      decision_reasons: Some(d.reasons),
+      requested_by_user_id: Some(d.by.0),
+      requested_by_name: Some(d.by.1),
+      status: approval_row.Pending,
+      requested_at: d.at,
+      resolved_by_user_id: None,
+      resolved_by_name: None,
+      resolved_at: None,
+    )
+  use _ <- result.map(approval_row.insert(tx, r))
+  r
 }
 
 /// Gives a plain case its Room: a Room adopts the club's open case rather than open a second one.
@@ -1118,7 +1239,7 @@ pub fn link(
 /// The case's sign-off decision.
 pub type SignOff {
   SignOff(
-    outcome: row.DecisionOutcome,
+    outcome: case_outcome.CaseOutcome,
     reasons: String,
     by: #(id.OrgUserId, String),
     at: Int,
@@ -1134,7 +1255,7 @@ pub fn record_sign_off(
     tx,
     "UPDATE recruitment_cases SET decision_outcome = ?, decision_reasons = ?, decision_by_user_id = ?, decision_by_name = ?, decision_approved_by_name = NULL, decision_at = ? WHERE id = ?",
     [
-      sqlight.text(row.decision_outcome_to_string(s.outcome)),
+      sqlight.text(case_outcome.to_string(s.outcome)),
       sqlight.text(s.reasons),
       id.org_user_sql(s.by.0),
       sqlight.text(s.by.1),

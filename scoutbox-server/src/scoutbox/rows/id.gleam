@@ -170,6 +170,38 @@ pub fn next_agreement_event(tx: Tx) -> Result(AgreementEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(AgreementEventId)
 }
 
+/// An id of `case_approvals`.
+pub opaque type ApprovalId {
+  ApprovalId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn approval(text: String) -> ApprovalId {
+  ApprovalId(text)
+}
+
+pub fn approval_to_string(id: ApprovalId) -> String {
+  let ApprovalId(text) = id
+  text
+}
+
+pub fn approval_sql(id: ApprovalId) -> sqlight.Value {
+  sqlight.text(approval_to_string(id))
+}
+
+pub fn approval_json(id: ApprovalId) -> Json {
+  json.string(approval_to_string(id))
+}
+
+pub fn approval_decoder() -> decode.Decoder(ApprovalId) {
+  decode.map(decode.string, ApprovalId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_approval(tx: Tx) -> Result(ApprovalId, Fail(e)) {
+  ids.next(tx, "apr") |> result.map(ApprovalId)
+}
+
 /// An id of `assessments`.
 pub opaque type AssessmentId {
   AssessmentId(String)
@@ -419,6 +451,87 @@ pub fn brief_event_decoder() -> decode.Decoder(BriefEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_brief_event(tx: Tx) -> Result(BriefEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(BriefEventId)
+}
+
+/// An id of `case_budget_actuals`.
+pub opaque type BudgetActualId {
+  BudgetActualId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn budget_actual(text: String) -> BudgetActualId {
+  BudgetActualId(text)
+}
+
+pub fn budget_actual_to_string(id: BudgetActualId) -> String {
+  let BudgetActualId(text) = id
+  text
+}
+
+pub fn budget_actual_sql(id: BudgetActualId) -> sqlight.Value {
+  sqlight.text(budget_actual_to_string(id))
+}
+
+pub fn budget_actual_json(id: BudgetActualId) -> Json {
+  json.string(budget_actual_to_string(id))
+}
+
+pub fn budget_actual_decoder() -> decode.Decoder(BudgetActualId) {
+  decode.map(decode.string, BudgetActualId)
+}
+
+/// An id of `case_budget_lines`.
+pub opaque type BudgetLineId {
+  BudgetLineId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn budget_line(text: String) -> BudgetLineId {
+  BudgetLineId(text)
+}
+
+pub fn budget_line_to_string(id: BudgetLineId) -> String {
+  let BudgetLineId(text) = id
+  text
+}
+
+pub fn budget_line_sql(id: BudgetLineId) -> sqlight.Value {
+  sqlight.text(budget_line_to_string(id))
+}
+
+pub fn budget_line_json(id: BudgetLineId) -> Json {
+  json.string(budget_line_to_string(id))
+}
+
+pub fn budget_line_decoder() -> decode.Decoder(BudgetLineId) {
+  decode.map(decode.string, BudgetLineId)
+}
+
+/// An id of `case_budget_scenarios`.
+pub opaque type BudgetScenarioId {
+  BudgetScenarioId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn budget_scenario(text: String) -> BudgetScenarioId {
+  BudgetScenarioId(text)
+}
+
+pub fn budget_scenario_to_string(id: BudgetScenarioId) -> String {
+  let BudgetScenarioId(text) = id
+  text
+}
+
+pub fn budget_scenario_sql(id: BudgetScenarioId) -> sqlight.Value {
+  sqlight.text(budget_scenario_to_string(id))
+}
+
+pub fn budget_scenario_json(id: BudgetScenarioId) -> Json {
+  json.string(budget_scenario_to_string(id))
+}
+
+pub fn budget_scenario_decoder() -> decode.Decoder(BudgetScenarioId) {
+  decode.map(decode.string, BudgetScenarioId)
 }
 
 /// An id of `passport_career_entries`.

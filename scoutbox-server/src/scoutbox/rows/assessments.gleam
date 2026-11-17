@@ -7,6 +7,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/case_outcome
 import sqlight
 
 pub const table = "assessments"
@@ -109,54 +110,6 @@ pub fn state_decoder() -> decode.Decoder(State) {
   }
 }
 
-pub type RecommendationVerdict {
-  Sign
-  Monitor
-  Pass
-}
-
-/// Each value with the text the column stores.
-pub const recommendation_verdict_pairs = [
-  #("sign", Sign),
-  #("monitor", Monitor),
-  #("pass", Pass),
-]
-
-pub fn recommendation_verdict_to_string(
-  value: RecommendationVerdict,
-) -> String {
-  case value {
-    Sign -> "sign"
-    Monitor -> "monitor"
-    Pass -> "pass"
-  }
-}
-
-pub fn recommendation_verdict_from_string(
-  value: String,
-) -> Result(RecommendationVerdict, Nil) {
-  case value {
-    "sign" -> Ok(Sign)
-    "monitor" -> Ok(Monitor)
-    "pass" -> Ok(Pass)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn recommendation_verdict_to_json(value: RecommendationVerdict) -> Json {
-  json.string(recommendation_verdict_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn recommendation_verdict_decoder() -> decode.Decoder(RecommendationVerdict) {
-  use value <- decode.then(decode.string)
-  case recommendation_verdict_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Sign, "RecommendationVerdict")
-  }
-}
-
 pub type Row {
   Row(
     id: id.AssessmentId,
@@ -175,7 +128,7 @@ pub type Row {
     context_trial_id: Option(String),
     context_trial_session_id: Option(String),
     state: State,
-    recommendation_verdict: Option(RecommendationVerdict),
+    recommendation_verdict: Option(case_outcome.CaseOutcome),
     recommendation_reasons: Option(String),
     second_opinion_of_id: Option(id.AssessmentId),
     created_at: Int,
@@ -258,7 +211,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use state <- decode.field(15, state_decoder())
   use recommendation_verdict <- decode.field(
     16,
-    decode.optional(recommendation_verdict_decoder()),
+    decode.optional(case_outcome.decoder()),
   )
   use recommendation_reasons <- decode.field(17, decode.optional(decode.string))
   use second_opinion_of_id <- decode.field(
@@ -339,7 +292,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.context_trial_session_id),
     sqlight.text(state_to_string(row.state)),
     sqlight.nullable(
-      fn(v) { sqlight.text(recommendation_verdict_to_string(v)) },
+      fn(v) { sqlight.text(case_outcome.to_string(v)) },
       row.recommendation_verdict,
     ),
     sqlight.nullable(sqlight.text, row.recommendation_reasons),

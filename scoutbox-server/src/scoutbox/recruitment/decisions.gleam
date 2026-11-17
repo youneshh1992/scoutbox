@@ -27,6 +27,7 @@ import scoutbox/rows/case_decision_drafts as draft_row
 import scoutbox/rows/id
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/room_snapshot_source_refs as ref_row
+import scoutbox/vocab/case_outcome
 import scoutbox/vocab/decision_evidence_kind.{type DecisionEvidenceKind}
 import scoutbox/vocab/decision_outcome.{
   type DecisionOutcome, Hold, Progress, Reject,
@@ -286,7 +287,7 @@ pub fn resolve_refs(
                               "verdict",
                               json.nullable(
                                 a.recommendation_verdict,
-                                assessment_row.recommendation_verdict_to_json,
+                                case_outcome.to_json,
                               ),
                             ),
                             #(
@@ -1330,9 +1331,9 @@ pub fn summarise(shown: List(Counted), withheld: Int) -> Summary {
     drafts: list.count(shown, fn(c) { c.row.state == assessment_row.Draft }),
     withheld:,
     verdicts: [
-      #("sign", count(Some(assessment_row.Sign))),
-      #("monitor", count(Some(assessment_row.Monitor))),
-      #("pass", count(Some(assessment_row.Pass))),
+      #("sign", count(Some(case_outcome.Sign))),
+      #("monitor", count(Some(case_outcome.Monitor))),
+      #("pass", count(Some(case_outcome.Pass))),
       #("none", count(None)),
     ],
   )
@@ -1385,10 +1386,7 @@ pub fn summary_json(s: Summary) -> Json {
           #("submittedAt", json.nullable(a.submitted_at, json.int)),
           #(
             "verdict",
-            json.nullable(
-              a.recommendation_verdict,
-              assessment_row.recommendation_verdict_to_json,
-            ),
+            json.nullable(a.recommendation_verdict, case_outcome.to_json),
           ),
           #("trialId", json.nullable(a.context_trial_id, json.string)),
           #(
