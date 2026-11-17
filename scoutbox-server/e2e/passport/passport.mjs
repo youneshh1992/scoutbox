@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import {
   buildTimeline,
   clubHistory,
@@ -33,7 +33,7 @@ import {
 } from '../../domains/passport/shared.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(4900, 300, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m15-'));
 

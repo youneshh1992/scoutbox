@@ -570,8 +570,8 @@ Still to do:
 3. **Battery port ranges overlap.** In one full run of three, `recruitment/contacts` and
    `recruitment/signingsPersistence` failed together, consistent with two batteries drawing the same port from
    overlapping `pickPort` ranges (5600–5806 against 5700–5899, 5900–6099 against 5800–6006), so one battery's
-   requests reached another's server. Both passed in six reruns and in the next full run. Move the TypeScript
-   tree's batteries to `freePort()`, as the platform ones already are.
+   requests reached another's server. Both passed in six reruns and in the next full run. **Done:** every battery
+   now takes each server's port from `freePort()`, and `pickPort` is gone.
 4. **Decide the dirty I/O scheduler count** (`+SDio`) for production; with only `exec`, `open` and long statements
    dirty it matters less, but measure it.
 5. **Put `dev/perf.mjs` under a threshold** (in `e2e:check`, or a nightly run) so a slowdown like the one since

@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { readRows } from '../support/sqlRows.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
 import notificationPrefsSpec from '../support/spec/platform/notificationPrefs.json' with { type: 'json' };
@@ -35,7 +35,7 @@ const { RATE_LIMIT_POLICY } = rateLimitSpec;
 const SCHEMA = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m182-schema-')));
 const MIGRATIONS = SCHEMA.rows('data_migrations').map((m) => m.id);
 const SCHEMA_VERSION = Number(MIGRATIONS.toSorted().at(-1).slice(0, 4));
-const PORT = pickPort(5990, 8, [0, 10, 11, 13]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m182-'));
 
@@ -656,7 +656,7 @@ section('§30 — personal data stays off the surfaces that do not need it');
 section('§19 — the request log carries no personal data');
 {
   // A server with its request log on: what it prints for requests full of personal data and a secret.
-  const LPORT = PORT + 13;
+  const LPORT = await freePort();
   const LDATA = mkdtempSync(path.join(tmpdir(), 'sbx-logs-'));
   const logged = [];
   const proc = spawn(...serverCommand(), {
@@ -751,7 +751,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
 {
   serverProc.kill('SIGTERM');
   await sleep(800);
-  const PPORT = PORT + 10;
+  const PPORT = await freePort();
   const PBASE = `http://localhost:${PPORT}`;
   const PDATA = mkdtempSync(path.join(tmpdir(), 'sbx-m182prod-'));
   const prodEnv = {
@@ -781,7 +781,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   // fault-configured server exits on it can fail with EADDRINUSE before the
   // kernel releases the socket, and a check that sometimes does not run
   // protects nothing.
-  const PPORT2 = PORT + 11;
+  const PPORT2 = await freePort();
   const PBASE2 = `http://localhost:${PPORT2}`;
   let prodUp = false;
   let prodLog = '';

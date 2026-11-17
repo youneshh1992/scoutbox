@@ -18,7 +18,7 @@
 //             §17     G1–G15, the positive journeys
 //             §18–§19 notifications, events and the demo mirrors
 //             §20     a second boot: migration idempotence
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -102,7 +102,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(5940, 8, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m21-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

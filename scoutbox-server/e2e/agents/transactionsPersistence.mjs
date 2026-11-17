@@ -6,7 +6,7 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -391,7 +391,7 @@ section('3 — a real boot over that database');
 section('4 — a real workspace survives a restart byte for byte');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-live-'));
-  const port = pickPort(6860, 40, [0, 1]);
+  const port = await freePort();
   let s = await bootOn(dir, port);
   ok(s.up, 'a clean boot');
   let TX;
@@ -580,7 +580,7 @@ section('4 — a real workspace survives a restart byte for byte');
     'the shared rev token names a ROLE on disk, not a person (defect D2)',
   );
 
-  s = await bootOn(dir, port + 1);
+  s = await bootOn(dir, await freePort());
   ok(s.up, 'the server reboots over that database');
   if (s.up) {
     neg(
@@ -673,7 +673,6 @@ section('4 — a real workspace survives a restart byte for byte');
   }
   globalThis.LIVE_DIR = dir;
   globalThis.LIVE_TX = TX;
-  globalThis.LIVE_PORT = port;
 }
 
 // ============================================================ 5
@@ -760,7 +759,7 @@ section('5 — corruption on disk is contained and named by its effect, never re
     });
     sqlite.prepare('UPDATE compliance_contexts SET re_evaluation_pending = 1 WHERE id = ?').run(ctxId);
   });
-  const sp = await bootOn(dir, globalThis.LIVE_PORT + 3);
+  const sp = await bootOn(dir, await freePort());
   ok(sp.up, 'the server boots over a context flagged by a policy publication');
   if (sp.up) {
     const ana = (
@@ -791,7 +790,7 @@ section('5 — corruption on disk is contained and named by its effect, never re
   plant(dir, (_L, sqlite) =>
     sqlite.prepare('UPDATE agent_transactions SET compliance_party_revision = ? WHERE id = ?').run('f'.repeat(64), TX),
   );
-  const s = await bootOn(dir, globalThis.LIVE_PORT + 2);
+  const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the planted row');
   if (s.up) {
     const ana = (

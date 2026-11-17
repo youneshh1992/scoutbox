@@ -16,7 +16,7 @@
 // U rate limits · V idempotency · W terminal states · X Second Look · Y
 // privacy · Z boundary invariants.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,7 +60,7 @@ const LATEST_SCHEMA = Number(
     .slice(0, 4),
 ); // the latest table migration's number
 
-const PORT = pickPort(7800, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23jh-'));
 const S_NOTE = 'PRIVATE_HARDENING_NOTE_8801';

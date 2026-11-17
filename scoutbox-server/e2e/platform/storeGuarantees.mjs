@@ -9,7 +9,7 @@
 //           a bare database, and a restart that changes nothing.
 //
 // The archetype count and every lifecycle state projecting as itself are checked in scripts/rules/platform/storeGuarantees.mjs.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -182,11 +182,11 @@ writeFixture(BARE_DIR, { rows: { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER] } 
 
 // ===================================================================== part 1
 
-const PORT_BASE = pickPort(5200, 300, [0, 1, 2, 3]);
+const PORT_BASE = await freePort();
 
 section('§1 — a new database file: every table migration, no blob');
 const EMPTY_DIR = tempDir('fresh');
-const created = await bootOnce(EMPTY_DIR, { port: PORT_BASE + 2 });
+const created = await bootOnce(EMPTY_DIR, { port: await freePort() });
 {
   ok(created.up, `the server boots on an empty directory${created.up ? '' : `:\n${created.log.slice(-900)}`}`);
   const R = readRows(EMPTY_DIR);
@@ -218,7 +218,7 @@ section('§2 — the records are table rows and the id counter is a row of count
   const F = openFixture(dir);
   F.sql.prepare("DELETE FROM counters WHERE name = 'id'").run();
   F.close();
-  const without = await bootOnce(dir, { port: PORT_BASE + 3 });
+  const without = await bootOnce(dir, { port: await freePort() });
   neg(
     !without.up && without.exited != null && without.exited !== 0,
     'without its counter row the server refuses to start rather than mint ids it could not store',
@@ -296,7 +296,7 @@ section('§8 — a restart changes nothing');
   // Booting must not be a mutation: a server that rewrites the database merely by starting makes every restore
   // non-deterministic.
   const before = tableContent(BARE_DIR);
-  const again = await bootOnce(BARE_DIR, { port: PORT_BASE + 1 });
+  const again = await bootOnce(BARE_DIR, { port: await freePort() });
   ok(again.up, 'the server restarts on the database its own first boot produced');
   const after = tableContent(BARE_DIR);
   neg(after.json === before.json, 'and booting changed no table (sessions and the counter aside)');

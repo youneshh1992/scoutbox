@@ -7,7 +7,7 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -117,7 +117,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(6800, 150, [0, 1, 2, 3, 4]);
+const PORT = await freePort();
 const T0 = 1_700_000_000_000;
 // Reviewers and policy versions come from migration 0027 (which inserts the seeded versions); contexts, reviews
 // and consents from 0028.
@@ -552,7 +552,7 @@ section('3 — a real boot over that database');
 section('4 — clean boot → context → review → consent → revocation → stop → read back → reboot');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p4-'));
-  const port = PORT + 1;
+  const port = await freePort();
   let s = await bootOn(dir, port);
   ok(s.up, 'clean boot');
   const j = s.j;
@@ -779,7 +779,7 @@ section('4 — clean boot → context → review → consent → revocation → 
     !('transactionRoomId' in ctxRow) && !('offer' in ctxRow) && !('fee' in ctxRow),
     'the context row carries no room, offer or fee field',
   );
-  s = await bootOn(dir, port + 1);
+  s = await bootOn(dir, await freePort());
   ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `reboot at ${SCHEMA_VERSION}`);
   neg(
     stableJson(appliedMigrations(dir)) === stableJson(recordsAtStop),
@@ -978,7 +978,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   );
   writeFixture(dir, db);
   // First boot: the dev reviewers are seeded only into an EMPTY reviewer store — so the odd row is injected after that.
-  const s0 = await bootOn(dir, PORT + 2);
+  const s0 = await bootOn(dir, await freePort());
   ok(s0.up, 'a first boot seeds the dev reviewers (empty store)');
   const seeded = await s0.stop();
   ok(seeded.tsReviewers.length === 3, 'three dev reviewers on disk');
@@ -1012,7 +1012,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     `a reviewer row with status "enabled" (unknown) is refused by the repository, naming the row and the field (${refused?.message})`,
   );
   neg(readRecords(dir).tsReviewers.length === 3, 'and nothing was written: the three seeds are still the reviewers');
-  const s = await bootOn(dir, PORT + 3);
+  const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the corrupt rows');
   if (s.up) {
     neg(
@@ -1070,7 +1070,7 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     } finally {
       L.close();
     }
-    const s2 = await bootOn(dir, PORT + 4);
+    const s2 = await bootOn(dir, await freePort());
     ok(s2.up, 'the server boots over an EMPTY policy store');
     if (s2.up) {
       const snap = readRecords(dir);

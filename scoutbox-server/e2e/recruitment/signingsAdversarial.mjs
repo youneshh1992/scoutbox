@@ -19,7 +19,7 @@
 // Every refusal asserts its exact status AND code. Nothing here weakens a
 // gate.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
@@ -43,7 +43,7 @@ import { serverCommand, serverDir } from '../support/server.mjs';
 
 const { RATE_LIMIT_POLICY } = rateLimitSpec;
 
-const PORT = pickPort(4300, 300, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-signing-hardening-'));
 const H = 3_600_000;

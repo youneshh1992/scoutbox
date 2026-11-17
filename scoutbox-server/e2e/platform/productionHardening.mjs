@@ -10,7 +10,7 @@
 // Fifty numbered sections. More than half are negative: hardening that mostly
 // asserts happy paths has not hardened anything. The sections that check the rules in this process (§1, §2, §7, §8,
 // §11, §12, §15–§19, §40, §48–§50) are in scripts/rules/platform/productionHardening.mjs.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +20,7 @@ import discoverySpec from '../support/spec/discovery/shared.json' with { type: '
 import eventAudienceSpec from '../support/spec/platform/eventAudience.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(5960, 30, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m181-'));
 

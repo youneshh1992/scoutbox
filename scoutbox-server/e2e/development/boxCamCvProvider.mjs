@@ -28,7 +28,7 @@ import {
 } from '../../domains/development/boxcam/cv/eligibility.mjs';
 import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import { FRAME_LIMITS, FRAME_ENCODING } from '../../domains/development/boxcam/cv/policy.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import {
   sequence,
   jugglePath,
@@ -40,7 +40,7 @@ import {
 } from '../../domains/development/boxcam/cv/scenes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PORT = pickPort(4960, 200, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m22-'));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');

@@ -12,7 +12,7 @@
 // G notification targets · H lifecycle authority and contract truth ·
 // Q partial failure · Z boundary invariants (source scans).
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { openFixture, plantCase, legacyMoves } from '../support/sqlFixture.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(7400, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23jn-'));
 const S_NOTE = 'PRIVATE_JOURNEY_NOTE_7701';

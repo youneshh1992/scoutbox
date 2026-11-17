@@ -20,7 +20,7 @@
 // The pure groups (E/R, S, L/M) and H1 check the rules in this process, so they are in
 // scripts/rules/recruitment/offersAdversarial.mjs; the sections here drive the real routes.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +42,7 @@ const MIGRATIONS = (() => {
 })();
 const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
 
-const PORT = pickPort(6900, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23oh-'));
 const S_NOTE = 'PRIVATE_NOTE_H_7731';

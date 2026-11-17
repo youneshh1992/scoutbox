@@ -22,7 +22,7 @@
 // form (an entry that is not a record, a list that is not a list), is in
 // scripts/testRecruitment.mjs.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -166,7 +166,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5700, 200, [0, 1, 2, 3]);
+const PORT = await freePort();
 const H = 3_600_000;
 const T0 = 1_800_000_000_000; // 2027-01-15T08:00:00Z — inside the 2000–2100 window, in the future
 const NOW = Date.now(); // when the fixtures are installed: the migrated schema's own rows carry it
@@ -703,7 +703,7 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
   rows.recruitment_requests = rows.trials.map((t) => invitation(t.request_id, { case_id: 'case-x', trial_id: t.id }));
   write(CORRUPT_DIR, rows);
   const writtenCorrupt = stored(CORRUPT_DIR);
-  const s = await bootOn(CORRUPT_DIR, PORT + 1);
+  const s = await bootOn(CORRUPT_DIR, await freePort());
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with four trials, three of them corrupt rows');
   const lead = (
@@ -823,7 +823,7 @@ let REFUSED_DIR = null;
   }
 }
 {
-  const s = await bootOn(REFUSED_DIR, PORT + 2);
+  const s = await bootOn(REFUSED_DIR, await freePort());
   ok(s.up, 'a server started on the directory boots (the refused fixture left nothing behind)');
   if (s.up) await s.stop();
 }
@@ -833,7 +833,7 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
 {
   const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-clean-'));
   write(CLEAN_DIR, baseRows());
-  const s = await bootOn(CLEAN_DIR, PORT + 2);
+  const s = await bootOn(CLEAN_DIR, await freePort());
   const lead = (
     await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
   ).body;
@@ -876,7 +876,7 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
       snap1.recruitment_requests[0].invite_key === 'clean-inv',
     'the snapshot holds the scheduled trial, the case at trial_scheduled and the invitation key',
   );
-  const s2 = await bootOn(CLEAN_DIR, PORT + 3);
+  const s2 = await bootOn(CLEAN_DIR, await freePort());
   const lead2 = (
     await s2.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
   ).body;

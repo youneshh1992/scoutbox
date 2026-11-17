@@ -18,7 +18,7 @@
 //      the analytics funnel identical across a restart
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -74,7 +74,7 @@ process.on('exit', () => {
     }
   }
 });
-const PORT = pickPort(7600, 200, [0]);
+const PORT = await freePort();
 const DATA = mkdtempSync(path.join(tmpdir(), 'sbx-m23jnp-'));
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });

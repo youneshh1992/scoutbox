@@ -60,7 +60,7 @@ import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_POLICIES_TABLES } from '../../repositories/compliancePolicies.mjs';
 import { COMPLIANCE_RECORDS_MIGRATION, COMPLIANCE_RECORDS_TABLES } from '../../repositories/complianceRecords.mjs';
 import { readRecords } from '../../scripts/dataLayerFixture.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 const SCHEMA_VERSION = Number(
@@ -70,7 +70,7 @@ const SCHEMA_VERSION = Number(
     .slice(0, 4),
 );
 
-const PORT = pickPort(6500, 200, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m25-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

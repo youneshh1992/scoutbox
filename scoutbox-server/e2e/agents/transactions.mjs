@@ -11,7 +11,7 @@
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { clubRecords } from '../support/clubRecords.mjs';
 import { mkdtempSync } from 'node:fs';
@@ -76,7 +76,7 @@ import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_TABLES } from '../../r
 import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(6900, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m26-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

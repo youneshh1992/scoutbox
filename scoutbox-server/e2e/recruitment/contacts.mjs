@@ -31,7 +31,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import contactSpec from '../support/spec/recruitment/lifecycle/contact.json' with { type: 'json' };
@@ -55,7 +55,7 @@ const MIGRATIONS = (() => {
 })();
 const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
 
-const PORT = pickPort(5900, 200, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23c-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

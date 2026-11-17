@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openFixture } from '../support/sqlFixture.mjs';
 import { readRows, rows } from '../support/sqlRows.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 // The table migrations a new database records, as the migrated schema lists them.
@@ -164,7 +164,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(5900, 200, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 const TERMS = {

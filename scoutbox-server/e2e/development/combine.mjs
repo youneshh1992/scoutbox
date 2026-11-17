@@ -26,10 +26,10 @@ import {
   comparisonMatrix,
 } from '../../domains/development/boxcam/combineShared.mjs';
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(4900, 180, [0]); // never a fetch-blocked port
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m161-'));
 

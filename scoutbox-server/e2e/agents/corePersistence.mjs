@@ -21,7 +21,7 @@ import {
 } from '../../domains/agents/core/shared.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 let passed = 0;
@@ -111,7 +111,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(6500, 200, [0, 1, 2, 3, 4]); // never a fetch-blocked port
+const PORT = await freePort();
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()
@@ -361,7 +361,7 @@ section('3 — a real boot over it: the first member becomes the administrator')
 section('4 — clean boot → relationship → stop → read back → reboot');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p4-'));
-  const port = PORT + 1;
+  const port = await freePort();
   let s = await bootOn(dir, port);
   ok(s.up, 'clean boot');
   const tomas = (
@@ -443,7 +443,7 @@ section('4 — clean boot → relationship → stop → read back → reboot');
     !('trust' in row) && !('passport' in row) && !('offer' in row),
     'the row carries no trust, passport or offer field',
   );
-  s = await bootOn(dir, port + 1);
+  s = await bootOn(dir, await freePort());
   ok(s.up && (await s.j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `reboot at ${SCHEMA_VERSION}`);
   neg(
     stableJson(appliedMigrations(dir)) === stableJson(recordsAtStop),
@@ -584,7 +584,7 @@ section('5 — junk is refused by the typed write; what a typed row can hold is 
   db.representationAgreements = [unconfirmed];
   fixture(dir, db);
   const stored = stableJson(readRecords(dir).representationAgreements.find((r) => r.id === 'rep-y'));
-  const s = await bootOn(dir, PORT + 3);
+  const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the odd row');
   if (s.up) {
     const lead = (
@@ -684,7 +684,7 @@ section('6 — the sweep tells a current member once that a relationship is endi
   ];
   db.representationAgreements = [ending('rep-live', 'usr-lead', 'pl-a'), ending('rep-left', 'usr-staff', 'pl-b')];
   fixture(dir, db);
-  const s = await bootOn(dir, PORT + 4);
+  const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over two relationships ending within 30 days');
   if (s.up) {
     await sleep(500); // the sweep runs once at boot

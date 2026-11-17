@@ -30,7 +30,7 @@
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
@@ -58,7 +58,7 @@ const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table
 const localDay = (ms, timeZone) =>
   new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
 
-const PORT = pickPort(6100, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };

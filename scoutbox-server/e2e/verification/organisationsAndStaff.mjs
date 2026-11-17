@@ -9,11 +9,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { totp } from '../support/totp.mjs';
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const PORT = pickPort(4600, 300, [0, 300]); // never a fetch-blocked port
-const DOWN_PORT = PORT + 300;
+const PORT = await freePort();
+const DOWN_PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m14-'));
 

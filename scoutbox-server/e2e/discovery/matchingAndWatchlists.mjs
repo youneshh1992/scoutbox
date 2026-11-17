@@ -15,7 +15,7 @@
 // Structure:  §1–§9   in-process — the pure engines, the vocabulary, source sweeps
 //             §10–§22 HTTP against a fresh server
 //             §23     a second boot: restart idempotence
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,7 +80,7 @@ const SCHEMA_VERSION = Number(
     .at(-1)
     .slice(0, 4),
 );
-const PORT = pickPort(5940, 8, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m19-'));
 

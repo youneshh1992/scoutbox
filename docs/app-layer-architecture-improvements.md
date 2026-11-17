@@ -103,7 +103,7 @@ must not appear, a file that must exist):
 - **Registries**: an undeclared live event was already refused where it is broadcast; a notification type with no
   category is now refused where it is sent. The hand-kept `EMITTED_EVENTS` list is gone.
 - **Raw HTML in the apps**: Biome's `noDangerouslySetInnerHtml` runs in CI over every app file.
-- **Ports**: every suite draws its port through `pickPort` with the offsets it boots on.
+- **Ports**: every suite takes each server's port from `freePort()`, which the operating system hands out.
 
 The development-only reads are refused in production with `/__faults`. Shared battery helpers are in `e2e/support/`.
 The app promises the scans used to check, which need a test runner in the web apps, are listed in

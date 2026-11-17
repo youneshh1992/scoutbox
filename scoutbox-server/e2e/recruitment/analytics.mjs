@@ -15,7 +15,7 @@
 // The registry, the pure statistics and a dashboard over plain collections are checked in this process by the
 // rules suite (scripts/rules/recruitment/analytics.mjs), which runs the other numbered cases. Here: the migrated
 // schema, then HTTP against a fresh server, then a second boot.
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +34,7 @@ const { EVIDENCE_REASON_CODES } = cohortsSpec;
 const { DRILLDOWN_METRICS } = analyticsSpec;
 const { RATE_LIMIT_POLICY } = rateLimitSpec;
 
-const PORT = pickPort(5960, 8, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-'));
 /** The tables of a database and the table migrations it records. */

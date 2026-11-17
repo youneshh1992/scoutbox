@@ -13,7 +13,7 @@
 // X legacy · Y temporal · Z signing boundary. The adversarial cases are
 // marked `#n`. Every refusal asserts its exact status AND code.
 
-import { pickPort } from '../support/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
@@ -45,7 +45,7 @@ const [MIGRATIONS, SCHEMA_TABLES] = (() => {
 })();
 const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
 
-const PORT = pickPort(7100, 200, [0]);
+const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sg-'));
 const S_NOTE = 'PRIVATE_SIGNING_NOTE_8811';
