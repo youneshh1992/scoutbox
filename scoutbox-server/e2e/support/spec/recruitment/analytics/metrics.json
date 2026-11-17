@@ -1,0 +1,556 @@
+{
+  "$source": "domains/recruitment/analytics/metrics.mjs",
+  "METRICS": {
+    "pipeline_stage_counts": {
+      "id": "pipeline_stage_counts",
+      "family": "pipeline",
+      "name": "Rooms by status",
+      "unit": "rooms",
+      "semantics": "point_in_time",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "room.status"
+      ],
+      "ratio": false,
+      "limitation": "A status is where a room is, not how far it has travelled. A room that has sat in Watching for a year looks identical here to one opened this morning."
+    },
+    "funnel_progression": {
+      "id": "funnel_progression",
+      "family": "pipeline",
+      "name": "Stages reached",
+      "unit": "rooms",
+      "semantics": "window_entry",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "createdAt",
+        "history.at",
+        "history.action",
+        "history.detail.to"
+      ],
+      "ratio": true,
+      "limitation": "Rooms can be reopened, so this is not a one-way funnel: a room counts once for each stage it ever reached, not once per visit. A recent window is incomplete by construction — rooms opened last week have not had time to reach a signing."
+    },
+    "trial_process": {
+      "id": "trial_process",
+      "family": "pipeline",
+      "name": "Trial process",
+      "unit": "trials",
+      "semantics": "window_entry",
+      "sources": [
+        "requests",
+        "trials"
+      ],
+      "reads": [
+        "type",
+        "caseId",
+        "status",
+        "createdAt",
+        "respondedAt",
+        "acceptedAt",
+        "schedule.confirmedAt",
+        "completion.state",
+        "completion.at",
+        "subjectRemovedAt"
+      ],
+      "ratio": false,
+      "limitation": "These are counts of process steps in the window — invitations sent, accepted, schedules confirmed, trials completed, cancelled or declined — never how a trial went. No rate is built on them: a club that invites five players and completes three has not \"converted 60%\", it has run three trials."
+    },
+    "decision_outcomes": {
+      "id": "decision_outcomes",
+      "family": "pipeline",
+      "name": "Formal decisions",
+      "unit": "decisions",
+      "semantics": "window_entry",
+      "sources": [
+        "roomDecisions"
+      ],
+      "reads": [
+        "kind",
+        "state",
+        "outcome",
+        "createdAt",
+        "supersededById",
+        "roomId"
+      ],
+      "ratio": false,
+      "limitation": "Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people."
+    },
+    "journey_evidence_funnel": {
+      "id": "journey_evidence_funnel",
+      "family": "pipeline",
+      "name": "Journey stages (from the records)",
+      "unit": "rooms",
+      "semantics": "window_entry",
+      "sources": [
+        "recruitmentCases",
+        "recruitmentContacts",
+        "requests",
+        "trials",
+        "assessments",
+        "roomDecisions",
+        "recruitmentOffers",
+        "signingPackages",
+        "signings"
+      ],
+      "reads": [
+        "createdAt",
+        "caseId",
+        "orgId",
+        "playerId",
+        "status",
+        "deliveredAt",
+        "occurredAt",
+        "recordedAt",
+        "cancelledAt",
+        "type",
+        "acceptedAt",
+        "schedule.confirmedAt",
+        "completion.state",
+        "completion.at",
+        "state",
+        "submittedAt",
+        "kind",
+        "outcome",
+        "supersededById",
+        "roomId",
+        "revisions.status",
+        "revisions.issuedAt",
+        "revisions.respondedAt",
+        "signingPackageId",
+        "ts",
+        "history.action",
+        "history.detail.to"
+      ],
+      "ratio": false,
+      "limitation": "Each stage counts cases for which the record itself exists — a delivered contact, a completed trial, a submitted assessment, a finalized decision, an issued or answered Offer, a completed signing — not cases whose status merely says so. A case counts once per stage however many retries or revisions it carried. Cases whose history reached a stage with no record behind it are shown apart as \"history only\"; they are older cases, not progress. A recent window is incomplete by construction."
+    },
+    "exit_reason_mix": {
+      "id": "exit_reason_mix",
+      "family": "pipeline",
+      "name": "Why rooms ended",
+      "unit": "decisions",
+      "semantics": "window_completion",
+      "sources": [
+        "roomDecisions",
+        "recruitmentCases"
+      ],
+      "reads": [
+        "reasonCodes",
+        "createdAt",
+        "roomId"
+      ],
+      "ratio": true,
+      "limitation": "This is the reason the club recorded, not the reason that operated. A decision carrying codes in two categories counts in both, so the shares add up to more than 100%."
+    },
+    "time_to_first_decision": {
+      "id": "time_to_first_decision",
+      "family": "duration",
+      "name": "Time to first decision",
+      "unit": "days",
+      "semantics": "window_completion",
+      "sources": [
+        "recruitmentCases",
+        "roomDecisions"
+      ],
+      "reads": [
+        "createdAt",
+        "roomId"
+      ],
+      "distribution": true,
+      "limitation": "Rooms that never reached a decision are excluded, so this measures the rooms that got there. The number excluded is shown beside it."
+    },
+    "time_in_stage": {
+      "id": "time_in_stage",
+      "family": "duration",
+      "name": "Time spent in each stage",
+      "unit": "days",
+      "semantics": "window_completion",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "history.at",
+        "history.action",
+        "history.detail.from",
+        "history.detail.to"
+      ],
+      "distribution": true,
+      "limitation": "Only completed visits count. A stage where everything is stuck therefore looks fast, because only the rooms that escaped it are measured — Stalled rooms is the figure that catches that."
+    },
+    "time_to_trial_requested": {
+      "id": "time_to_trial_requested",
+      "family": "duration",
+      "name": "Time from opening to trial requested",
+      "unit": "days",
+      "semantics": "window_completion",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "createdAt",
+        "history.at",
+        "history.detail.to"
+      ],
+      "distribution": true,
+      "limitation": "A club that opens rooms late in its own process looks fast here. This measures the ScoutBox record, not the club’s thinking."
+    },
+    "time_trial_requested_to_completed": {
+      "id": "time_trial_requested_to_completed",
+      "family": "duration",
+      "name": "Trial requested to completed",
+      "unit": "days",
+      "semantics": "window_completion",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "history.at",
+        "history.detail.to"
+      ],
+      "distribution": true,
+      "limitation": "Guardian response, pitch availability and school holidays all live inside this number and cannot be separated from it."
+    },
+    "open_room_age": {
+      "id": "open_room_age",
+      "family": "duration",
+      "name": "Age of open rooms",
+      "unit": "days",
+      "semantics": "point_in_time",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "createdAt",
+        "room.status"
+      ],
+      "distribution": true,
+      "limitation": "Age is not neglect. A long-running room on a fourteen-year-old being tracked to sixteen is the product working as intended."
+    },
+    "stalled_rooms": {
+      "id": "stalled_rooms",
+      "family": "aging",
+      "name": "Rooms with no recent activity",
+      "unit": "rooms",
+      "semantics": "point_in_time",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "room.status",
+        "history.at"
+      ],
+      "ratio": false,
+      "limitation": "No activity in ScoutBox is not no activity. A scout who watched a player on Saturday and did not write it down produces a stalled room. This is a prompt to look, not a finding."
+    },
+    "overdue_trial_reports": {
+      "id": "overdue_trial_reports",
+      "family": "aging",
+      "name": "Trial reports past due",
+      "unit": "trials",
+      "semantics": "point_in_time",
+      "sources": [
+        "trials"
+      ],
+      "reads": [
+        "status",
+        "reportDueAt",
+        "orgId"
+      ],
+      "ratio": false,
+      "limitation": "This surfaces an obligation the server already enforces — unfiled reports block new trial requests. It adds no new judgement."
+    },
+    "decision_outstanding": {
+      "id": "decision_outstanding",
+      "family": "aging",
+      "name": "Offers with no recorded decision",
+      "unit": "rooms",
+      "semantics": "point_in_time",
+      "sources": [
+        "recruitmentCases",
+        "roomDecisions"
+      ],
+      "reads": [
+        "room.status",
+        "roomId"
+      ],
+      "ratio": false,
+      "limitation": "This reuses the Recruitment Room’s own readiness rule. If that rule is wrong, this is wrong in exactly the same way — deliberately, so there is one definition rather than two."
+    },
+    "terminal_with_recorded_decision": {
+      "id": "terminal_with_recorded_decision",
+      "family": "decision_record",
+      "name": "Endings with a recorded decision",
+      "unit": "rooms",
+      "semantics": "window_completion",
+      "sources": [
+        "recruitmentCases",
+        "roomDecisions"
+      ],
+      "reads": [
+        "room.status",
+        "history.at",
+        "history.detail.to",
+        "roomId",
+        "createdAt"
+      ],
+      "ratio": true,
+      "limitation": "Ending a room for a reason-required status records a decision automatically, so this rate is high by construction. Its value is in the exceptions."
+    },
+    "superseded_decision_rate": {
+      "id": "superseded_decision_rate",
+      "family": "decision_record",
+      "name": "Decisions later revised",
+      "unit": "decisions",
+      "semantics": "window_entry",
+      "sources": [
+        "roomDecisions"
+      ],
+      "reads": [
+        "createdAt",
+        "supersededById"
+      ],
+      "ratio": true,
+      "limitation": "Revising a decision is healthy. A high figure here is not a fault and is never coloured as one."
+    },
+    "evidence_limited_exits": {
+      "id": "evidence_limited_exits",
+      "family": "decision_record",
+      "name": "Endings limited by evidence",
+      "unit": "decisions",
+      "semantics": "window_completion",
+      "sources": [
+        "roomDecisions"
+      ],
+      "reads": [
+        "reasonCodes",
+        "createdAt"
+      ],
+      "ratio": true,
+      "limitation": "Association only. It does not follow that collecting the missing evidence would have changed any of these decisions."
+    },
+    "reopen_rate": {
+      "id": "reopen_rate",
+      "family": "decision_record",
+      "name": "Rooms reopened after ending",
+      "unit": "rooms",
+      "semantics": "window_entry",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "history.at",
+        "history.action",
+        "history.detail.from",
+        "history.detail.to"
+      ],
+      "ratio": true,
+      "limitation": "Reopening is intended behaviour — Second Look exists to cause it. High is not bad."
+    },
+    "briefs_live": {
+      "id": "briefs_live",
+      "family": "coverage",
+      "name": "Live recruitment briefs",
+      "unit": "briefs",
+      "semantics": "point_in_time",
+      "sources": [
+        "recruitmentBriefs"
+      ],
+      "reads": [
+        "status",
+        "activeFrom",
+        "activeUntil"
+      ],
+      "ratio": false,
+      "limitation": "A brief being live says nothing about whether anyone is working it."
+    },
+    "nobody_missed_backlog": {
+      "id": "nobody_missed_backlog",
+      "family": "coverage",
+      "name": "Unreviewed eligible players",
+      "unit": "reviews",
+      "semantics": "point_in_time",
+      "sources": [
+        "nobodyMissedReviews",
+        "recruitmentBriefs"
+      ],
+      "reads": [
+        "state",
+        "briefId"
+      ],
+      "ratio": false,
+      "limitation": "The backlog is a function of how wide the brief is. Widening a brief creates backlog without anyone having done anything wrong."
+    },
+    "nobody_missed_review_rate": {
+      "id": "nobody_missed_review_rate",
+      "family": "coverage",
+      "name": "Eligible players reviewed",
+      "unit": "reviews",
+      "semantics": "point_in_time",
+      "sources": [
+        "nobodyMissedReviews",
+        "recruitmentBriefs"
+      ],
+      "reads": [
+        "state",
+        "briefId"
+      ],
+      "ratio": true,
+      "limitation": "Dismissing a candidate counts as reviewing them. This measures that the club looked, not what it concluded."
+    },
+    "second_look_backlog": {
+      "id": "second_look_backlog",
+      "family": "coverage",
+      "name": "Open Second Look items",
+      "unit": "items",
+      "semantics": "point_in_time",
+      "sources": [
+        "secondLookItems"
+      ],
+      "reads": [
+        "status",
+        "createdAt"
+      ],
+      "ratio": false,
+      "limitation": "An expired item is not backlog — expiry is a designed outcome and is counted separately."
+    },
+    "second_look_response_time": {
+      "id": "second_look_response_time",
+      "family": "coverage",
+      "name": "Time to respond to Second Look",
+      "unit": "days",
+      "semantics": "window_completion",
+      "sources": [
+        "secondLookItems"
+      ],
+      "reads": [
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "distribution": true,
+      "limitation": "Items never touched are absent from this figure. Their count is shown beside it."
+    },
+    "room_source_mix": {
+      "id": "room_source_mix",
+      "family": "source",
+      "name": "Where rooms came from",
+      "unit": "rooms",
+      "semantics": "window_entry",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "createdAt",
+        "room.sourceContext"
+      ],
+      "ratio": true,
+      "limitation": "Direct is the fallback ScoutBox assigns to anything it does not recognise, so it is a residual bucket rather than a surface people used."
+    },
+    "source_stage_reach": {
+      "id": "source_stage_reach",
+      "family": "source",
+      "name": "Stages reached, by source",
+      "unit": "rooms",
+      "semantics": "window_entry",
+      "sources": [
+        "recruitmentCases"
+      ],
+      "reads": [
+        "createdAt",
+        "room.sourceContext",
+        "history.detail.to"
+      ],
+      "ratio": true,
+      "association": true,
+      "limitation": "Confounded by construction, and never a ranking of surfaces: sources are listed alphabetically. Most will be withheld for too few rooms, which is the correct outcome rather than a gap."
+    },
+    "active_watchlists": {
+      "id": "active_watchlists",
+      "family": "watchlist",
+      "name": "Active dynamic watchlists",
+      "unit": "watchlists",
+      "semantics": "point_in_time",
+      "sources": [
+        "dynamicWatchlists"
+      ],
+      "reads": [
+        "status"
+      ],
+      "ratio": false,
+      "limitation": "A big list is a wide set of criteria, nothing more."
+    },
+    "watchlist_membership_churn": {
+      "id": "watchlist_membership_churn",
+      "family": "watchlist",
+      "name": "Players entering and leaving lists",
+      "unit": "changes",
+      "semantics": "window_entry",
+      "sources": [
+        "watchlistHistory"
+      ],
+      "reads": [
+        "at",
+        "entered",
+        "exited"
+      ],
+      "ratio": false,
+      "limitation": "ScoutBox does not recompute watchlists in the background: membership is worked out when someone opens a list. This counts those recalculations, not the moment a player’s facts changed — a list nobody opens records no change at all."
+    }
+  },
+  "METRIC_IDS": [
+    "pipeline_stage_counts",
+    "funnel_progression",
+    "trial_process",
+    "decision_outcomes",
+    "journey_evidence_funnel",
+    "exit_reason_mix",
+    "time_to_first_decision",
+    "time_in_stage",
+    "time_to_trial_requested",
+    "time_trial_requested_to_completed",
+    "open_room_age",
+    "stalled_rooms",
+    "overdue_trial_reports",
+    "decision_outstanding",
+    "terminal_with_recorded_decision",
+    "superseded_decision_rate",
+    "evidence_limited_exits",
+    "reopen_rate",
+    "briefs_live",
+    "nobody_missed_backlog",
+    "nobody_missed_review_rate",
+    "second_look_backlog",
+    "second_look_response_time",
+    "room_source_mix",
+    "source_stage_reach",
+    "active_watchlists",
+    "watchlist_membership_churn"
+  ],
+  "FAMILY_IDS": [
+    "pipeline",
+    "duration",
+    "aging",
+    "decision_record",
+    "coverage",
+    "source",
+    "watchlist"
+  ],
+  "SMALL_N_MIN": 5,
+  "PERSON_DIMENSIONS": [
+    "scout",
+    "user",
+    "owner",
+    "lead_scout",
+    "leadScout",
+    "assignee",
+    "author",
+    "created_by",
+    "createdBy",
+    "player"
+  ],
+  "ASSOCIATION_NOTE": "ScoutBox observes that these records share this property and later reached this stage. It does not show that the property caused it: people choose where to look, and the players they find differ in ways ScoutBox does not measure."
+}

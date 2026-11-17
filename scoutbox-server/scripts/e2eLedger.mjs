@@ -60,6 +60,18 @@ export const NOTES = {
       },
     ],
   },
+  'recruitment/analytics': {
+    added: [
+      {
+        checks: 1,
+        why: "the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all sixty)",
+      },
+      {
+        checks: 1,
+        why: "the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one",
+      },
+    ],
+  },
   'recruitment/decisionsPersistence': {
     added: [
       {

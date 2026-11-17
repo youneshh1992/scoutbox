@@ -74,6 +74,16 @@ export const SPEC = {
   'domains/recruitment/lifecycle/trial.mjs': ['TRIAL_LIMITS', 'TRIAL_WORKFLOW_STATES'],
   'domains/recruitment/lifecycle/trialRoutes.mjs': ['TRIAL_INPUT_CODES'],
   'domains/recruitment/analytics/funnels.mjs': ['FUNNEL_STAGES'],
+  'domains/recruitment/analytics/metrics.mjs': [
+    'METRICS',
+    'METRIC_IDS',
+    'FAMILY_IDS',
+    'SMALL_N_MIN',
+    'PERSON_DIMENSIONS',
+    'ASSOCIATION_NOTE',
+  ],
+  'domains/recruitment/analytics/cohorts.mjs': ['EVIDENCE_REASON_CODES'],
+  'domains/recruitment/analytics/index.mjs': ['DRILLDOWN_METRICS'],
   'domains/recruitment/offers/errors.mjs': ['OFFER_ERROR_HTTP', 'PUBLIC_ERROR_FIELDS'],
   'domains/recruitment/offers/offer.mjs': [
     'OFFER_LIMITS',
