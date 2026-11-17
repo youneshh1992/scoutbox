@@ -187,7 +187,7 @@ fn case_decoder() -> decode.Decoder(Case) {
   )
   use versions <- decode.subfield(
     ["revisionInput", "policyVersions"],
-    decode.list(decode.string),
+    decode.list(id.policy_decoder()),
   )
   use blocked_ids <- decode.subfield(
     ["revisionInput", "blockedSubjectIds"],

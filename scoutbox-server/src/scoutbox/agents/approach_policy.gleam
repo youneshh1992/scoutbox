@@ -54,8 +54,8 @@ pub type Policy {
   Policy(row: policy_row.Row, rules: List(Rule))
 }
 
-pub fn policy_id(p: Policy) -> String {
-  id.policy_to_string(p.row.id)
+pub fn policy_id(p: Policy) -> id.PolicyId {
+  p.row.id
 }
 
 /// The published policy versions, in the order they were stored.
@@ -276,7 +276,7 @@ pub type Reason {
     rule_status: RuleStatus,
     regulator: Option(String),
     jurisdiction: Option(Jurisdiction),
-    policy_version: Option(String),
+    policy_version: Option(id.PolicyId),
     facet: Option(AgentFacet),
     member_association: Option(Jurisdiction),
     state: Option(FacetState),
@@ -585,6 +585,6 @@ pub fn reason_fields(r: Reason) -> List(#(String, json.Json)) {
     #("ruleStatus", rule_status.to_json(r.rule_status)),
     #("regulator", json.nullable(r.regulator, json.string)),
     #("jurisdiction", json.nullable(r.jurisdiction, jurisdiction.to_json)),
-    #("policyVersion", json.nullable(r.policy_version, json.string)),
+    #("policyVersion", json.nullable(r.policy_version, id.policy_json)),
   ]
 }

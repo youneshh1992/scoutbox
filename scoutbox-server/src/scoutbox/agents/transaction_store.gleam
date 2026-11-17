@@ -173,7 +173,7 @@ pub type Detail {
     visibility: Option(DocumentVisibility),
     count: Option(Int),
     reason_codes: Option(List(String)),
-    policy_versions: Option(List(String)),
+    policy_versions: Option(List(id.PolicyId)),
   )
 }
 
@@ -232,11 +232,7 @@ pub fn history(
   list.index_map(option.unwrap(detail.policy_versions, []), fn(pv, i) {
     event_pv_row.insert(
       tx,
-      event_pv_row.new(
-        history_id: event_id,
-        ord: i,
-        policy_version_id: id.policy(pv),
-      ),
+      event_pv_row.new(history_id: event_id, ord: i, policy_version_id: pv),
     )
   })
   |> result.all

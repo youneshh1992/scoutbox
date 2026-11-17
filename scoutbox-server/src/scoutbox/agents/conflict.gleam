@@ -14,6 +14,7 @@ import gleam/result
 import scoutbox/agents/approach_policy.{type Policy, type Rule}
 import scoutbox/platform/canonical.{type Value}
 import scoutbox/platform/secrets
+import scoutbox/rows/id
 import scoutbox/vocab/context_outcome.{
   type ContextOutcome, Clear, InsufficientData, ManualRegulatoryReviewRequired,
   PermittedDualRepresentationConsentRequired, ProhibitedConflict,
@@ -67,7 +68,7 @@ pub type Consent {
     party_role: Option(PartyRole),
     subject_id: Option(String),
     signatory: Option(Bool),
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
     full_particulars: Bool,
     legal_advice: Bool,
   )
@@ -98,7 +99,7 @@ pub type Reason {
     rule_status: RuleStatus,
     regulator: Option(String),
     jurisdiction: Option(String),
-    policy_version: Option(String),
+    policy_version: Option(id.PolicyId),
     override_rule_id: Option(String),
     agent_user_id: Option(String),
     party_role: Option(PartyRole),
@@ -123,7 +124,7 @@ pub type Evaluation {
     outcome: ContextOutcome,
     reasons: List(Reason),
     consents_outstanding: List(ConsentOutstanding),
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
     evaluated_at: Int,
     input_hash: String,
   )
@@ -215,7 +216,7 @@ fn sufficiency(
   context_id: String,
   first_act_at: Option(Int),
   require_particulars: Bool,
-  active_policy_ids: List(String),
+  active_policy_ids: List(id.PolicyId),
 ) -> Result(Nil, String) {
   let granted = c.status == "granted" && option.is_some(c.granted_at)
   case c.kind == "dual_representation" {
@@ -572,7 +573,7 @@ fn agent_parties(
   rule_text: fn(Entry, String) -> Option(String),
   input: Input,
   require_particulars: Bool,
-  active_policy_ids: List(String),
+  active_policy_ids: List(id.PolicyId),
 ) -> Acc {
   let acc =
     list.fold(own, acc, fn(acc, r) {
@@ -738,7 +739,7 @@ fn decided(
   rule_text: fn(Entry, String) -> Option(String),
   input: Input,
   require_particulars: Bool,
-  active_policy_ids: List(String),
+  active_policy_ids: List(id.PolicyId),
 ) -> Acc {
   let role_named = fn(name) {
     case name {
@@ -942,7 +943,11 @@ pub fn input_hash(input: Input) -> String {
     #("interests", canonical.Array([])),
     #(
       "policyVersions",
-      canonical.strings(list.map(input.policies, approach_policy.policy_id)),
+      canonical.strings(
+        list.map(input.policies, fn(p) {
+          id.policy_to_string(approach_policy.policy_id(p))
+        }),
+      ),
     ),
     #("missingPolicies", canonical.strings(input.missing)),
     #("now", canonical.Int(input.now)),

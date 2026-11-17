@@ -211,7 +211,7 @@ pub type Evaluated {
     outcome: ContextOutcome,
     reason_codes: List(String),
     consents_outstanding: List(ConsentOutstanding),
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
   )
 }
 
@@ -219,7 +219,7 @@ pub type View {
   View(
     evaluation_id: Option(String),
     evaluated_at: Int,
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
     consent_requirements: List(ConsentOutstanding),
     party_revision: String,
     state: State,
@@ -347,7 +347,7 @@ pub fn party_revision(
   representations: List(#(String, PartyRole, String, Option(String))),
   consents: List(#(String, String)),
   facet_states: Value,
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
   blocked_subject_ids: List(String),
   minor_subject_ids: List(String),
 ) -> String {
@@ -388,7 +388,7 @@ pub fn party_revision(
     ),
     #("consents", consents |> list.map(fn(c) { c.0 <> ":" <> c.1 }) |> sorted),
     #("facetStates", facet_states),
-    #("policyVersions", sorted(policy_versions)),
+    #("policyVersions", sorted(list.map(policy_versions, id.policy_to_string))),
     #("blockedSubjectIds", sorted(blocked_subject_ids)),
     #("minorSubjectIds", sorted(minor_subject_ids)),
   ])

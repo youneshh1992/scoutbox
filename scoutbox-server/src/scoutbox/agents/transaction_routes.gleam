@@ -481,7 +481,7 @@ fn snapshot(
   t: Transaction,
   state: State,
   basis: Basis,
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
   by: By,
   now: Int,
 ) -> Result(Nil, Fail(e)) {
@@ -943,7 +943,7 @@ fn compliance_json(
             True -> [
               #("evaluationId", json.nullable(v.evaluation_id, json.string)),
               #("contextId", id.compliance_context_json(r.context_id)),
-              #("policyVersions", json.array(v.policy_versions, json.string)),
+              #("policyVersions", json.array(v.policy_versions, id.policy_json)),
               #(
                 "verificationFreshness",
                 json.nullable(
@@ -1157,11 +1157,14 @@ fn gate_refusal(problem: compliance_store.GateProblem) -> Response {
                 #("code", json.string(r.code)),
                 #("ruleId", json.nullable(r.rule_id, json.string)),
                 #("ruleStatus", rule_status.to_json(r.rule_status)),
-                #("policyVersion", json.nullable(r.policy_version, json.string)),
+                #(
+                  "policyVersion",
+                  json.nullable(r.policy_version, id.policy_json),
+                ),
               ])
             }),
           ),
-          #("policyVersions", json.array(policy_versions, json.string)),
+          #("policyVersions", json.array(policy_versions, id.policy_json)),
         ],
       )
     compliance_store.FacetMissing(g) ->

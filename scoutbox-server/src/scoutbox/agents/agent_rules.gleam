@@ -76,7 +76,7 @@ pub type Agreement {
   Agreement(
     row: agreement_row.Row,
     scope: List(scope_row.Scope),
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
     history: List(event_row.Row),
   )
 }
@@ -519,7 +519,7 @@ fn event_detail(a: Agreement, h: event_row.Row) -> Json {
         #("scope", json.array(a.scope, scope_row.scope_to_json)),
         #("termMonths", json.int(a.row.term_months)),
         #("jurisdiction", jurisdiction.to_json(a.row.jurisdiction)),
-        #("policyVersions", json.array(a.policy_versions, json.string)),
+        #("policyVersions", json.array(a.policy_versions, id.policy_json)),
       ])
     event_row.RepresentationSharingChanged ->
       json.object(

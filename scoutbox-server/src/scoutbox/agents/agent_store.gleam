@@ -753,7 +753,7 @@ fn agreement(read: Read, row: agreement_row.Row) -> Result(Agreement, Fail(e)) {
     "agreement_id",
     aid,
     "ord",
-    decode.at([0], decode.string),
+    decode.at([0], id.policy_decoder()),
   ))
   use history <- result.map(children(
     read,
@@ -863,7 +863,7 @@ pub fn create_agreement(
   tx: Tx,
   row: agreement_row.Row,
   scope: List(scope_row.Scope),
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
   by: Actor,
 ) -> Result(Nil, Fail(e)) {
   use _ <- result.try(agreement_row.insert(tx, row))
@@ -887,7 +887,7 @@ pub fn create_agreement(
       store.run(
         tx,
         "INSERT INTO agreement_policy_versions (agreement_id, ord, policy_version_id) VALUES (?, ?, ?)",
-        [id.agreement_sql(row.id), sqlight.int(p.0), sqlight.text(p.1)],
+        [id.agreement_sql(row.id), sqlight.int(p.0), id.policy_sql(p.1)],
       )
     }),
   )

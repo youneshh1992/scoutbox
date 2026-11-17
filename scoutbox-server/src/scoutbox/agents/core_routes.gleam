@@ -2800,7 +2800,7 @@ fn propose(
                       #("reasons", reasons_json(decision.reasons)),
                       #(
                         "policyVersions",
-                        json.array(policy_versions, json.string),
+                        json.array(policy_versions, id.policy_json),
                       ),
                     ],
                   )
@@ -2868,7 +2868,7 @@ fn approach_review(
             "policyVersions",
             json.array(
               list.map(set.policies, approach_policy.policy_id),
-              json.string,
+              id.policy_json,
             ),
           ),
           #("reviewId", id.regulatory_review_json(review_id)),
@@ -2884,7 +2884,7 @@ fn approach_review(
             "policyVersions",
             json.array(
               list.map(set.policies, approach_policy.policy_id),
-              json.string,
+              id.policy_json,
             ),
           ),
           #("reviewId", id.regulatory_review_json(review_id)),
@@ -2904,7 +2904,7 @@ fn create_request(
   exclusive: Bool,
   key: Option(String),
   fp: String,
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
   now: Int,
 ) -> Response {
   let a = m.access

@@ -15,6 +15,7 @@ import scoutbox/agents/conflict.{
   Agent, Consent, ConsentOutstanding, Input, Party, Reason, Representation,
 }
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/support
 import scoutbox/vocab/context_outcome
 import scoutbox/vocab/context_type
@@ -74,7 +75,10 @@ fn consent() -> decode.Decoder(conflict.Consent) {
   use role <- decode.field("partyRole", party_role.decoder())
   use subject <- decode.subfield(["subject", "id"], decode.string)
   use signatory <- decode.subfield(["grantedBy", "signatory"], decode.bool)
-  use versions <- decode.field("policyVersions", decode.list(decode.string))
+  use versions <- decode.field(
+    "policyVersions",
+    decode.list(id.policy_decoder()),
+  )
   use full <- decode.subfield(
     ["particulars", "fullParticularsProvided"],
     decode.bool,
@@ -106,7 +110,10 @@ fn reason() -> decode.Decoder(conflict.Reason) {
   use status <- decode.field("ruleStatus", rule_status.decoder())
   use regulator <- decode.field("regulator", text)
   use jurisdiction <- decode.field("jurisdiction", text)
-  use version <- decode.field("policyVersion", text)
+  use version <- decode.field(
+    "policyVersion",
+    decode.optional(id.policy_decoder()),
+  )
   use override <- decode.field("overrideRuleId", text)
   use agent <- decode.field("agentUserId", text)
   use role <- decode.field("partyRole", decode.optional(party_role.decoder()))
@@ -191,7 +198,10 @@ fn case_decoder() -> decode.Decoder(Case) {
       decode.success(ConsentOutstanding(role, agent, kind, code))
     }),
   )
-  use versions <- decode.field("policyVersions", decode.list(decode.string))
+  use versions <- decode.field(
+    "policyVersions",
+    decode.list(id.policy_decoder()),
+  )
   use missing <- decode.field("missing", decode.list(decode.string))
   use hash <- decode.field("inputHash", decode.optional(decode.string))
   // A dict loses the object's key order; the hash sorts keys and the engine looks agents up, so it doesn't matter.

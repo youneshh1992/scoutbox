@@ -91,7 +91,7 @@ fn history(
   by: By,
   at: Int,
   evaluation_id: Option(id.EvaluationId),
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
 ) -> Result(Nil, Fail(e)) {
   use event_id <- result.try(id.next_context_event(tx))
   use ord <- result.try(next_ord(
@@ -121,11 +121,7 @@ fn history(
   list.index_map(policy_versions, fn(pv, i) {
     event_pv_row.insert(
       tx,
-      event_pv_row.new(
-        history_id: event_id,
-        ord: i,
-        policy_version_id: id.policy(pv),
-      ),
+      event_pv_row.new(history_id: event_id, ord: i, policy_version_id: pv),
     )
   })
   |> result.all
@@ -140,7 +136,7 @@ pub fn open(
   type_: ContextType,
   jurisdictions: List(String),
   transaction_id: id.TransactionId,
-  policy_versions: List(String),
+  policy_versions: List(id.PolicyId),
   by: By,
   at: Int,
 ) -> Result(id.ComplianceContextId, Fail(e)) {
@@ -432,11 +428,7 @@ pub fn record_evaluation(
     list.index_map(e.policy_versions, fn(pv, ord) {
       evaluation_pv_row.insert(
         tx,
-        evaluation_pv_row.new(
-          evaluation_id:,
-          ord:,
-          policy_version_id: id.policy(pv),
-        ),
+        evaluation_pv_row.new(evaluation_id:, ord:, policy_version_id: pv),
       )
     })
     |> result.all,
@@ -499,7 +491,7 @@ fn reason(
       rule_status: Some(r.rule_status),
       regulator: r.regulator,
       jurisdiction: r.jurisdiction,
-      policy_version_id: option.map(r.policy_version, id.policy),
+      policy_version_id: r.policy_version,
       state: r.state,
       agent_user_id: option.map(r.agent_user_id, id.org_user),
       party_role: option.map(r.party_role, party_role.to_string),
@@ -582,7 +574,7 @@ pub fn evaluated(
         read,
         "SELECT policy_version_id FROM compliance_evaluation_policy_versions WHERE evaluation_id = ? ORDER BY ord",
         [eid],
-        decode.at([0], decode.string),
+        decode.at([0], id.policy_decoder()),
       ))
       Some(transaction_rules.Evaluated(outcome, codes, consents, versions))
     }
@@ -593,12 +585,12 @@ pub fn evaluated(
 pub fn last_policy_versions(
   read: Read,
   context_id: id.ComplianceContextId,
-) -> Result(List(String), Fail(e)) {
+) -> Result(List(id.PolicyId), Fail(e)) {
   store.query(
     read,
     "SELECT v.policy_version_id FROM compliance_evaluation_policy_versions v WHERE v.evaluation_id = (SELECT id FROM compliance_evaluations WHERE context_id = ? ORDER BY position DESC LIMIT 1) ORDER BY v.ord",
     [id.compliance_context_sql(context_id)],
-    decode.at([0], decode.string),
+    decode.at([0], id.policy_decoder()),
   )
 }
 
@@ -626,7 +618,7 @@ pub type GateProblem {
   /// No encoded policy covers a jurisdiction (JURISDICTION_UNSUPPORTED).
   Unsupported(
     reasons: List(approach_policy.Reason),
-    policy_versions: List(String),
+    policy_versions: List(id.PolicyId),
   )
 }
 
@@ -635,7 +627,7 @@ fn declare(
   agent: id.OrgUserId,
   mas: List(String),
   now: Int,
-) -> Result(Option(#(approach_policy.Decision, List(String))), Fail(e)) {
+) -> Result(Option(#(approach_policy.Decision, List(id.PolicyId))), Fail(e)) {
   use profile <- result.try(agent_store.profile_for_user(read, agent))
   use policies <- result.map(approach_policy.published(read))
   use p <- option.map(profile)

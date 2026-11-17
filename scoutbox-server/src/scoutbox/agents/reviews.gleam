@@ -167,7 +167,7 @@ pub fn create(
           },
           regulator: r.regulator,
           jurisdiction: option.map(r.jurisdiction, jurisdiction.to_string),
-          policy_version_id: option.map(r.policy_version, id.policy),
+          policy_version_id: r.policy_version,
           facet: option.map(r.facet, agent_facet.to_string),
           member_association: option.map(
             r.member_association,
