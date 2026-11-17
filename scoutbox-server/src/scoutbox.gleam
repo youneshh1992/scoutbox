@@ -117,6 +117,7 @@ fn boot() -> Result(Nil, String) {
       fn(marker, resp) { live_routes.open(ctx, marker, resp) },
     )
     |> ewe.new
+    |> ewe.with_http1(wisp_ewe.http1_options())
     |> ewe.bind(to: "::")
     |> ewe.listening(on: config.port)
   let builder = case config.quiet_logs {

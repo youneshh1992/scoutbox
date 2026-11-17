@@ -31,6 +31,16 @@ const transport_limit = 32_000_000
 /// The most a request body may carry: the Express server's `express.json({ limit: '20mb' })`.
 pub const body_limit = 20_971_520
 
+/// Ewe discards a body the handler left unread, so the connection can be reused, but by default only up to 1 MiB.
+/// Past that it closes the connection while the client is still sending, and the client sees a reset instead of
+/// the answer: a 413 refused from the body's `Content-Length`, say. Node discards the body and answers.
+pub fn http1_options() -> ewe.Http1Options {
+  ewe.Http1Options(
+    ..ewe.default_http1_options(),
+    auto_drain_limit: transport_limit,
+  )
+}
+
 /// A route that answers with a server-sent event stream returns an ordinary response carrying `stream_header`,
 /// so the middleware treats it like any other; `stream` is then given that header's value and the response
 /// (without it) and opens the stream. Wisp's body type can't carry an ewe stream.
