@@ -28,4 +28,5 @@ export const BATTERIES = [
   'recruitment/signingsPersistence',
   'recruitment/analytics',
   'discovery/secondLookAndNobodyMissed',
+  'recruitment/decisions',
 ];
