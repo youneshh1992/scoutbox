@@ -571,7 +571,9 @@ Still to do:
    `recruitment/signingsPersistence` failed together, consistent with two batteries drawing the same port from
    overlapping `pickPort` ranges (5600–5806 against 5700–5899, 5900–6099 against 5800–6006), so one battery's
    requests reached another's server. Both passed in six reruns and in the next full run. **Done:** every battery
-   now takes each server's port from `freePort()`, and `pickPort` is gone.
+   now takes each server's port from `freePort()`, and `pickPort` is gone. But `recruitment/contacts` still fails
+   about one run in six on Gleam, run alone: X8's 21 MB body is refused from its `Content-Length` unread, and the
+   socket closes with the body still arriving, so the client sees a reset instead of the 413. Express drains it.
 4. **Decide the dirty I/O scheduler count** (`+SDio`) for production; with only `exec`, `open` and long statements
    dirty it matters less, but measure it.
 5. **Put `dev/perf.mjs` under a threshold** (in `e2e:check`, or a nightly run) so a slowdown like the one since
