@@ -1,10 +1,12 @@
-// `npm run e2e`: builds the Erlang release once, then runs the batteries (e2e/batteries.mjs) against it,
-// several at a time. Each battery boots its own server on a temporary DATA_DIR and its own port.
+// `npm run e2e`: builds the server once (`gleam build`), then runs the batteries (e2e/batteries.mjs) against it,
+// one per core at a time, the slowest of the last run first so that none starts at the end. Each battery boots its
+// own server on a temporary DATA_DIR and its own port.
 //
 //   npm run e2e                     every battery
 //   npm run e2e -- platform/staff   only those
 //   TEST_JOBS=1                     one at a time
 import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,23 +21,34 @@ if (unknown.length) {
   console.error(`e2e: not a battery or domain: ${unknown.join(', ')}`);
   process.exit(2);
 }
-const queue = BATTERIES.filter((b) => !requested.length || requested.some((r) => b === r || b.startsWith(`${r}/`)));
+// How long each battery took when it last ran: the order to start them in. Not committed; a missing or unreadable
+// file falls back to the list's order.
+const TIMES = path.join(SERVER_DIR, 'build', 'e2e-times.json');
+let times = {};
+try {
+  times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+} catch {
+  /* no times yet */
+}
+const queue = BATTERIES.filter(
+  (b) => !requested.length || requested.some((r) => b === r || b.startsWith(`${r}/`)),
+).sort((a, b) => (times[b] ?? 0) - (times[a] ?? 0));
 
-// The patched esqlite first (nothing to do when it is current): the release links its NIF.
+// The patched esqlite first (nothing to do when it is current): the build links its NIF.
 const esqlite = spawnSync(process.execPath, [path.join(SERVER_DIR, 'dev/esqlite.mjs')], { cwd: SERVER_DIR, encoding: 'utf8' });
 if (esqlite.status !== 0) {
   console.error(esqlite.stdout, esqlite.stderr);
   console.error('e2e: the patched esqlite did not build');
   process.exit(1);
 }
-const build = spawnSync('gleam', ['export', 'erlang-shipment'], { cwd: SERVER_DIR, encoding: 'utf8' });
+const build = spawnSync('gleam', ['build'], { cwd: SERVER_DIR, encoding: 'utf8' });
 if (build.status !== 0) {
   console.error(build.stdout, build.stderr);
-  console.error('e2e: the release did not build');
+  console.error('e2e: the server did not build');
   process.exit(1);
 }
 
-const jobs = Number(process.env.TEST_JOBS ?? Math.min(4, os.availableParallelism()));
+const jobs = Number(process.env.TEST_JOBS ?? os.availableParallelism());
 const results = [];
 const runOne = (name) =>
   new Promise((resolve) => {
@@ -51,6 +64,7 @@ const runOne = (name) =>
       console.log(`${ok ? '✓' : '✗'} ${name} (${secs}s)${ok ? `  ${summary}` : ''}`);
       if (!ok) console.log(log.replace(/^/gm, '    '));
       results.push({ name, ok });
+      times[name] = Number(secs);
       resolve();
     });
   });
@@ -61,6 +75,11 @@ await Promise.all(
     while (pending.length) await runOne(pending.shift());
   }),
 );
+try {
+  fs.writeFileSync(TIMES, `${JSON.stringify(times, null, 2)}\n`);
+} catch {
+  /* the order is only a convenience */
+}
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} batteries passed`);
 process.exit(failed.length ? 1 : 0);
