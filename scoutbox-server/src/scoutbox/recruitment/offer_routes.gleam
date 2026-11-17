@@ -385,37 +385,7 @@ type Moved {
   Moved(lifecycle: offers.Lifecycle, json: Json)
 }
 
-fn moved_applied(
-  action: String,
-  from: room_status.RoomStatus,
-  to,
-  at: Int,
-) -> Moved {
-  let from = room_status.to_string(from)
-  let to = room_status.to_string(to)
-  Moved(
-    offers.Lifecycle(
-      True,
-      Some(action),
-      Some(from),
-      Some(to),
-      at,
-      None,
-      None,
-      None,
-    ),
-    json.object([
-      #("applied", json.bool(True)),
-      #("action", json.string(action)),
-      #("from", json.string(from)),
-      #("to", json.string(to)),
-      #("at", json.int(at)),
-    ]),
-  )
-}
-
-/// Validates with the real evidence provider, then writes through the lifecycle writer. A refusal is returned,
-/// not raised: the caller decides whether it rolls the act back.
+/// Validates with the real evidence provider, then writes through the lifecycle writer (case_lifecycle.advance).
 fn advance(
   tx: Tx,
   room: Room,
@@ -427,85 +397,30 @@ fn advance(
   key_detail: List(#(String, Json)),
   at: Int,
 ) -> Result(Moved, Fail(e)) {
-  let assert Some(action) = case_lifecycle.action_named(action_name)
-    as "an Offer act names a lifecycle action"
-  let from = room_status.to_string(room.status)
-  use verdict <- result.try(case_lifecycle.check(
-    store.reading(tx),
+  use a <- result.map(case_lifecycle.advance(
+    tx,
     room,
-    action,
+    level,
+    action_name,
     role,
-    [],
+    mover,
+    trigger,
+    key_detail,
     at,
-    False,
   ))
-  case verdict {
-    Ok(allowed) -> {
-      use moved <- result.map(case_lifecycle.apply(
-        tx,
-        room,
-        level,
-        allowed.to,
-        [],
-        trigger,
-        mover,
-        case_lifecycle.status_detail(action_name, None, key_detail),
-        at,
-      ))
-      moved_applied(action_name, moved.0, moved.1, at)
-    }
-    Error(r) if r.error == "LIFECYCLE_NO_CHANGE" ->
-      Ok(Moved(
-        offers.Lifecycle(
-          False,
-          Some(action_name),
-          Some(from),
-          Some(from),
-          at,
-          Some("already_there"),
-          None,
-          None,
-        ),
-        json.object([
-          #("applied", json.bool(False)),
-          #("action", json.string(action_name)),
-          #("reason", json.string("already_there")),
-          #("from", json.string(from)),
-          #("to", json.string(from)),
-          #("at", json.int(at)),
-        ]),
-      ))
-    Error(r) -> {
-      let allowed =
-        list.key_find(r.fields, "allowed")
-        |> result.map(fn(_) {
-          room_rules.transitions(room.status) |> list.map(room_status.to_string)
-        })
-        |> result.unwrap([])
-      Ok(Moved(
-        offers.Lifecycle(
-          False,
-          Some(action_name),
-          Some(from),
-          None,
-          at,
-          Some(r.error),
-          Some(r.message),
-          Some(allowed),
-        ),
-        json.object([
-          #("applied", json.bool(False)),
-          #("action", json.string(action_name)),
-          #("reason", json.string(r.error)),
-          #("message", json.string(r.message)),
-          #("allowed", json.array(allowed, json.string)),
-          #("from", json.string(from)),
-          #("to", json.null()),
-          #("at", json.int(at)),
-        ]),
-      ))
-    }
-  }
+  Moved(
+    offers.Lifecycle(
+      a.applied,
+      Some(a.action),
+      Some(a.from),
+      a.to,
+      a.at,
+      a.reason,
+      a.message,
+      a.allowed,
+    ),
+    case_lifecycle.advanced_json(a),
+  )
 }
 
 // ---------------------------------------------------------------------------------------- notifications

@@ -568,3 +568,135 @@ pub fn status_detail(
     ..extra
   ]
 }
+
+// ------------------------------------------------------------------------------------------------ advance
+
+/// What the case did with an act's step (the Offer and signing acts' `advanceCase`): moved, already there, or
+/// refused with the lifecycle's reason. `to` is None when it did not move.
+pub type Advanced {
+  Advanced(
+    applied: Bool,
+    action: String,
+    from: String,
+    to: Option(String),
+    at: Int,
+    reason: Option(String),
+    message: Option(String),
+    allowed: Option(List(String)),
+  )
+}
+
+/// The step as the acts answer it, in the TypeScript server's key order for each outcome.
+pub fn advanced_json(a: Advanced) -> Json {
+  case a.applied, a.message {
+    True, _ ->
+      json.object([
+        #("applied", json.bool(True)),
+        #("action", json.string(a.action)),
+        #("from", json.string(a.from)),
+        #("to", json.nullable(a.to, json.string)),
+        #("at", json.int(a.at)),
+      ])
+    False, None ->
+      json.object([
+        #("applied", json.bool(False)),
+        #("action", json.string(a.action)),
+        #("reason", json.nullable(a.reason, json.string)),
+        #("from", json.string(a.from)),
+        #("to", json.nullable(a.to, json.string)),
+        #("at", json.int(a.at)),
+      ])
+    False, Some(message) ->
+      json.object([
+        #("applied", json.bool(False)),
+        #("action", json.string(a.action)),
+        #("reason", json.nullable(a.reason, json.string)),
+        #("message", json.string(message)),
+        #("allowed", json.array(option.unwrap(a.allowed, []), json.string)),
+        #("from", json.string(a.from)),
+        #("to", json.null()),
+        #("at", json.int(a.at)),
+      ])
+  }
+}
+
+/// Validates with the real evidence provider, then writes through the lifecycle writer. A refusal is returned,
+/// not raised: the caller decides whether it rolls the act back.
+pub fn advance(
+  tx: Tx,
+  room: Room,
+  level: orgs.Level,
+  action_name: String,
+  role: Option(RoomRole),
+  mover: Mover,
+  trigger: String,
+  key_detail: List(#(String, Json)),
+  at: Int,
+) -> Result(Advanced, Fail(e)) {
+  let assert Some(action) = action_named(action_name)
+    as "an act names a lifecycle action"
+  let from = room_status.to_string(room.status)
+  use verdict <- result.try(check(
+    store.reading(tx),
+    room,
+    action,
+    role,
+    [],
+    at,
+    False,
+  ))
+  case verdict {
+    Ok(allowed) -> {
+      use moved <- result.map(apply(
+        tx,
+        room,
+        level,
+        allowed.to,
+        [],
+        trigger,
+        mover,
+        status_detail(action_name, None, key_detail),
+        at,
+      ))
+      Advanced(
+        True,
+        action_name,
+        room_status.to_string(moved.0),
+        Some(room_status.to_string(moved.1)),
+        at,
+        None,
+        None,
+        None,
+      )
+    }
+    Error(r) if r.error == "LIFECYCLE_NO_CHANGE" ->
+      Ok(Advanced(
+        False,
+        action_name,
+        from,
+        Some(from),
+        at,
+        Some("already_there"),
+        None,
+        None,
+      ))
+    Error(r) -> {
+      let allowed =
+        list.key_find(r.fields, "allowed")
+        |> result.map(fn(_) {
+          room_rules.transitions(room.status) |> list.map(room_status.to_string)
+        })
+        |> result.unwrap([])
+      Ok(Advanced(
+        False,
+        action_name,
+        from,
+        None,
+        at,
+        Some(r.error),
+        Some(r.message),
+        Some(allowed),
+      ))
+    }
+  }
+}
