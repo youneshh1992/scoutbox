@@ -573,7 +573,8 @@ Still to do:
    requests reached another's server. Both passed in six reruns and in the next full run. **Done:** every battery
    now takes each server's port from `freePort()`, and `pickPort` is gone. But `recruitment/contacts` still fails
    about one run in six on Gleam, run alone: X8's 21 MB body is refused from its `Content-Length` unread, and the
-   socket closes with the body still arriving, so the client sees a reset instead of the 413. Express drains it.
+   socket closes with the body still arriving, so the client sees a reset instead of the 413. Express drains it. **Fixed:** ewe's `auto_drain_limit` (1 MiB by
+   default) is now the 32 MB transport limit, and 20 of 20 runs pass.
 4. **Decide the dirty I/O scheduler count** (`+SDio`) for production; with only `exec`, `open` and long statements
    dirty it matters less, but measure it.
 5. **Put `dev/perf.mjs` under a threshold** (in `e2e:check`, or a nightly run) so a slowdown like the one since
