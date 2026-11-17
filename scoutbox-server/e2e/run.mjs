@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BATTERIES } from './batteries.mjs';
+import { sweepStaleRuns } from './support/staleRuns.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..');
@@ -50,14 +51,25 @@ if (build.status !== 0) {
 
 const jobs = Number(process.env.TEST_JOBS ?? os.availableParallelism());
 const results = [];
+// Each battery's temporary directories go in a folder of its own (its TMPDIR, which os.tmpdir() reads), removed when
+// it exits; what earlier runs left behind is removed once it is a day old.
+sweepStaleRuns();
+const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-e2e-'));
+process.on('exit', () => fs.rmSync(runRoot, { recursive: true, force: true, maxRetries: 3 }));
 const runOne = (name) =>
   new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [path.join(HERE, `${name}.mjs`)], { cwd: SERVER_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
+    const tmp = fs.mkdtempSync(path.join(runRoot, `${name.replace(/[^\w-]/g, '_')}-`));
+    const child = spawn(process.execPath, [path.join(HERE, `${name}.mjs`)], {
+      cwd: SERVER_DIR,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+    });
     let log = '';
     child.stdout.on('data', (d) => (log += d));
     child.stderr.on('data', (d) => (log += d));
     child.on('close', (code) => {
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 3 });
       const ok = code === 0;
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       const summary = log.trim().split('\n').at(-1);
