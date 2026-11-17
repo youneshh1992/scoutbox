@@ -19,20 +19,21 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 import { freePort } from '../support/testPort.mjs';
-import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-const SCHEMA_VERSION = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
 import { DatabaseSync } from 'node:sqlite';
-import { openLayer, readRecords, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
+import {
+  openFixture,
+  plantCase,
+  legacyMoves,
+  SCHEMA_VERSION,
+  TABLE_MIGRATIONS,
+  DAY_MS,
+} from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 let passed = 0;
@@ -78,6 +79,15 @@ const PORT = await freePort();
 const DATA = mkdtempSync(path.join(tmpdir(), 'sbx-m23jnp-'));
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
+/** Every table's rows as stored: what a stopped server left on disk. */
+const stored = (dir) => {
+  const R = readRows(dir);
+  try {
+    return R.all();
+  } finally {
+    R.close();
+  }
+};
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
@@ -131,7 +141,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -147,13 +157,13 @@ const ledger = () => {
     sq.close();
   }
 };
-// With the server stopped, plant state through the repositories in one unit of work (`work` gets the data layer).
+// With the server stopped, plant rows in one transaction (`work` gets the fixture): all of it is written or none.
 const plantOn = (work) => {
-  const L = openLayer(DATA);
+  const F = openFixture(DATA);
   try {
-    return L.unit(() => work(L.layer, L));
+    return F.transaction(() => work(F));
   } finally {
-    L.close();
+    F.close();
   }
 };
 const LEDGER1 = ledger();
@@ -210,7 +220,10 @@ async function restartAndCompare(RID, label, expectStage, expectNext) {
   const before = fingerprint(await journey(RID));
   const pBefore = pfp(await playerJourney());
   const db = await S.stop();
-  ok(db !== null, `${label}: the store was persisted before the restart`);
+  ok(
+    db.recruitment_cases.some((k) => k.id === RID),
+    `${label}: the store was persisted before the restart`,
+  );
   S = await bootOn(DATA, PORT);
   ok(S.up, `${label}: rebooted`);
   await login();
@@ -447,8 +460,7 @@ section('2 — after the final reboot: agreement, uniqueness, nothing fabricated
     (await S.j('POST', '/player/availability', { contractStatus: 'free_agent' }, kola.token)).status === 409,
     'the canonical contract still owns the word after the reboot',
   );
-  const store = readRecords(DATA);
-  neg(!('recruitmentJourneys' in store) && !('recruitmentJourneyStates' in store), 'no journey store appeared on disk');
+  neg(!Object.keys(stored(DATA)).some((t) => /journey/.test(t)), 'no journey store appeared on disk');
 }
 
 // ================================================================ 3 — planted cases across five restarts
@@ -465,35 +477,58 @@ section('3 — legacy and corrupt cases across five restarts: untouched, never r
   const LSIGN = await mk('pl-tanaka');
   let db = await S.stop();
   // No act jumps a status or writes a legacy entry, so the plant is SQL (plantCase).
-  const plant = (L, id, chain, extraLast = {}, edit = {}) => {
-    const moves = legacyMoves(L.layer.recruitmentCases.cases.byId(id), chain, { prefix: 'hist-p8p', extraLast });
-    return plantCase(L, id, { ...moves, stage: moves.status === 'signed' ? 'closed' : 'review', ...edit });
+  const plant = (F, id, chain, extraLast = {}, edit = {}) => {
+    const moves = legacyMoves(F, id, chain, { prefix: 'hist-p8p', extraLast });
+    return plantCase(F, id, { ...moves, stage: moves.status === 'signed' ? 'closed' : 'review', ...edit });
   };
-  plantOn((layer, L) => {
-    plant(L, LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    plant(L, BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
-    layer.signingsFollowUps.signings.record({
+  plantOn((F) => {
+    plant(F, LEG, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
+    plant(F, BAD, ['contacted'], { contactId: 'rct-missing', trigger: 'contact:rct-missing' });
+    // A signing recorded before signings had packages: no user, no contract, outside the attribution window, with
+    // the follow-ups every recorded signing is given.
+    const ts = Date.now() - DAY;
+    F.insert('signings', {
       id: 'sign-p8p-legacy',
-      orgId: 'org-eastport',
-      playerId: 'pl-tanaka',
-      ts: Date.now() - DAY,
+      org_id: 'org-eastport',
+      player_id: 'pl-tanaka',
+      ts,
       method: 'LEGACY_RECORDED',
-      contract: null,
-      scoutUserId: 'legacy',
-      scoutName: 'Legacy',
-      insideAttributionWindow: false,
+      scout_name: 'Legacy',
+      inside_attribution_window: 0,
     });
-    plant(L, LSIGN, ['offer_consideration', 'offer_made', 'signed'], {}, { signingId: 'sign-p8p-legacy' });
+    for (const [milestone, days] of [
+      ['3m', 91],
+      ['6m', 182],
+      ['12m', 365],
+    ])
+      F.insert('follow_ups', {
+        id: `fup-p8p-${milestone}`,
+        signing_id: 'sign-p8p-legacy',
+        player_id: 'pl-tanaka',
+        org_id: 'org-eastport',
+        milestone,
+        due_at: ts + days * DAY_MS,
+        status: 'scheduled',
+        created_at: Date.now(),
+      });
+    plant(F, LSIGN, ['offer_consideration', 'offer_made', 'signed'], {}, { signingId: 'sign-p8p-legacy' });
   });
-  db = readRecords(DATA); // what the plant wrote: the restarts below must leave it exactly so
-  const snapshot = (kase) =>
-    JSON.stringify({
-      status: kase.room.status,
+  db = stored(DATA); // what the plant wrote: the restarts below must leave it exactly so
+  const of = (rows, id) => rows.filter((r) => r.case_id === id);
+  const snapshot = (all, id) => {
+    const kase = all.recruitment_cases.find((x) => x.id === id);
+    return JSON.stringify({
+      status: kase.room_status,
       stage: kase.stage,
-      rev: kase.room.rev,
-      history: kase.history.length,
-      links: kase.links,
+      rev: kase.room_rev,
+      history: of(all.case_history, id).length,
+      links: {
+        requests: of(all.case_request_links, id),
+        trials: of(all.case_trial_links, id),
+        signingId: kase.links_signing_id,
+      },
     });
+  };
   const fps = {};
   for (let i = 1; i <= 5; i += 1) {
     S = await bootOn(DATA, PORT);
@@ -528,16 +563,12 @@ section('3 — legacy and corrupt cases across five restarts: untouched, never r
       );
     }
     const d2 = await S.stop();
-    const same = ['LEG', 'BAD', 'LSIGN'].every(
-      (k) =>
-        snapshot(d2.recruitmentCases.find((x) => x.id === { LEG, BAD, LSIGN }[k])) ===
-        snapshot(db.recruitmentCases.find((x) => x.id === { LEG, BAD, LSIGN }[k])),
-    );
+    const same = [LEG, BAD, LSIGN].every((id) => snapshot(d2, id) === snapshot(db, id));
     neg(
       same &&
-        d2.recruitmentContacts.every((c) => c.caseId !== BAD) &&
-        d2.trials.every((t) => t.caseId !== LEG) &&
-        (d2.signingPackages ?? []).every((p) => p.caseId !== LSIGN),
+        d2.recruitment_contacts.every((c) => c.case_id !== BAD) &&
+        d2.trials.every((t) => t.case_id !== LEG) &&
+        d2.signing_packages.every((p) => p.case_id !== LSIGN),
       `restart ${i}: nothing repaired, nothing fabricated on disk`,
     );
   }
@@ -552,7 +583,7 @@ section('4 — the migration ledger on replay');
   const h = await fetch(`http://localhost:${PORT}/health`);
   ok(h.headers.get('x-scoutbox-schema') === String(SCHEMA_VERSION), `schema ${SCHEMA_VERSION} on the wire`);
   neg(
-    JSON.parse(LEDGER1).length === DATA_MIGRATIONS.length && ledger() === LEDGER1,
+    JSON.stringify(JSON.parse(LEDGER1).map((m) => m.id)) === JSON.stringify(TABLE_MIGRATIONS) && ledger() === LEDGER1,
     'no migration step applied on replay (the ledger is as boot 1 left it)',
   );
 }
@@ -571,7 +602,7 @@ section(
   const dashBefore = await dash();
   const stopStart = async (label) => {
     const db = await S.stop();
-    ok(db !== null, `${label}: persisted`);
+    ok(db.recruitment_cases.length > 0, `${label}: persisted`);
     S = await bootOn(DATA, PORT);
     ok(S.up, `${label}: rebooted`);
     await login();
@@ -595,72 +626,87 @@ section(
   await lifecycle(SP, 'startReview');
   let db = await S.stop();
   {
-    const advance = (L) =>
+    const advance = (F) =>
       plantCase(
-        L,
+        F,
         SP,
         legacyMoves(
-          L.layer.recruitmentCases.cases.byId(SP),
+          F,
+          SP,
           ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made'],
           { prefix: 'hist-p81p' },
         ),
       );
-    // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
+    // A REAL Offer (Kola's, copied) re-homed on this case with its current-revision pointer stale: every field is sound,
     // only the pointer is behind — it names revision 1 while revision 2 is out. (A pointer naming a revision the Offer
-    // does not hold at all is a row the tables cannot hold; that write is REFUSED, naming the row.)
-    const src = db.recruitmentOffers.find((o) => o.id === OID);
-    const clone = JSON.parse(JSON.stringify(src));
-    const { discardedByResponseId: _d, ...r0 } = clone.revisions[0];
-    const rev1 = {
-      ...r0,
-      id: 'rofr-p81p-1',
-      revisionNumber: 1,
-      status: 'ISSUED',
-      documents: [],
-      response: null,
-      respondedAt: null,
-      supersedesRevisionId: null,
-      supersededByRevisionId: null,
-      supersededAt: null,
-      recipientSnapshot: r0.recipientSnapshot ? { ...r0.recipientSnapshot, playerId: 'pl-martin' } : null,
-    };
-    Object.assign(clone, {
+    // does not hold at all is a row the tables cannot hold; that write is REFUSED.)
+    const src = db.recruitment_offers.find((o) => o.id === OID);
+    const r0 = db.offer_revisions.find((r) => r.offer_id === OID && r.position === 0);
+    const offerRow = (currentRevisionId) => ({
+      ...src,
       id: 'rof-p81p-stale',
-      caseId: SP,
-      playerId: 'pl-martin',
+      case_id: SP,
+      player_id: 'pl-martin',
       status: 'ISSUED',
-      responses: [],
-      readReceipts: [],
-      history: [],
-      agentShare: null,
-      lifecycle: null,
-      keys: { create: null, issue: [], withdraw: [], revise: [] },
-      revisions: [rev1, { ...rev1, id: 'rofr-p81p-2', revisionNumber: 2 }],
-      currentRevisionId: 'rofr-missing',
+      current_revision_id: currentRevisionId,
+      agent_share_user_id: null,
+      agent_share_agreement_id: null,
+      agent_share_at: null,
+      agent_share_by_kind: null,
+      agent_share_by_id: null,
+      create_key: null,
+      create_fp: null,
+      lifecycle_applied: null,
+      lifecycle_action: null,
+      lifecycle_reason: null,
+      lifecycle_message: null,
+      lifecycle_allowed_json: null,
+      lifecycle_from: null,
+      lifecycle_to: null,
+      lifecycle_at: null,
     });
-    const onDisk = JSON.stringify(readRecords(DATA).recruitmentOffers);
+    const revisionRow = (n) => ({
+      ...r0,
+      id: `rofr-p81p-${n}`,
+      offer_id: 'rof-p81p-stale',
+      position: n - 1,
+      revision_number: n,
+      status: 'ISSUED',
+      responded_at: null,
+      response_id: null,
+      supersedes_revision_id: null,
+      superseded_by_revision_id: null,
+      superseded_at: null,
+      discarded_by_response_id: null,
+      recipient_player_id: r0.recipient_type ? 'pl-martin' : r0.recipient_player_id,
+    });
+    const plantOffer = (currentRevisionId) =>
+      plantOn((F) => {
+        advance(F);
+        F.insert('recruitment_offers', offerRow(currentRevisionId));
+        F.insert('offer_revisions', revisionRow(1));
+        F.insert('offer_revisions', revisionRow(2));
+      });
+    const offersOnDisk = () => {
+      const all = stored(DATA);
+      return JSON.stringify([
+        all.recruitment_offers,
+        all.offer_revisions,
+        all.recruitment_cases.find((k) => k.id === SP),
+      ]);
+    };
+    const onDisk = offersOnDisk();
     let refused = null;
     try {
-      plantOn((layer, L) => {
-        advance(L);
-        layer.recruitmentContactsOffers.offers.create(clone);
-      });
+      plantOffer('rofr-missing');
     } catch (e) {
       refused = e;
     }
     neg(
-      !!refused &&
-        /recruitment_offers rof-p81p-stale currentRevisionId: rofr-missing is not a revision of this offer/.test(
-          refused.message,
-        ) &&
-        JSON.stringify(readRecords(DATA).recruitmentOffers) === onDisk,
-      `5.2 a pointer at a revision the Offer does not hold cannot be stored: the write refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`,
+      !!refused && /FOREIGN KEY constraint failed/.test(refused.message) && offersOnDisk() === onDisk,
+      `5.2 a pointer at a revision the Offer does not hold cannot be stored: the schema refuses the write, and nothing of it is kept (${String(refused?.message ?? 'no refusal').slice(0, 100)})`,
     );
-    clone.currentRevisionId = 'rofr-p81p-1';
-    plantOn((layer, L) => {
-      advance(L);
-      layer.recruitmentContactsOffers.offers.create(clone);
-    });
+    plantOffer('rofr-p81p-1');
   }
   S = await bootOn(DATA, PORT);
   ok(S.up, '5.2 booted on the planted store');
@@ -678,12 +724,12 @@ section(
         `5.2 a stale Offer pointer: integrity_error, RECORD_CORRUPT (the corrupt Offer names this case and is omitted, never a quiet legacy read), no current Offer, the act blocked (${jr.journey.integrity.join(',')})`,
       );
     db = await stopStart(`5.2 restart ${i}`);
-    const o = db.recruitmentOffers.find((x) => x.id === 'rof-p81p-stale');
+    const o = db.recruitment_offers.find((x) => x.id === 'rof-p81p-stale');
     neg(
       o &&
-        o.currentRevisionId === 'rofr-p81p-1' &&
-        o.revisions.length === 2 &&
-        db.recruitmentCases.find((x) => x.id === SP).room.status === 'offer_made',
+        o.current_revision_id === 'rofr-p81p-1' &&
+        db.offer_revisions.filter((r) => r.offer_id === o.id).length === 2 &&
+        db.recruitment_cases.find((x) => x.id === SP).room_status === 'offer_made',
       `5.2 restart ${i}: the pointer is still stale on disk (never repaired, never re-pointed)`,
     );
   }
@@ -739,13 +785,11 @@ section(
   );
   ok(sm.status === 200, '5.4 a canonical Contact delivered on the second case');
   db = await S.stop();
-  plantOn((layer, L) =>
+  plantOn((F) =>
     plantCase(
-      L,
+      F,
       MIX,
-      legacyMoves(layer.recruitmentCases.cases.byId(MIX), ['trial_requested', 'trial_scheduled', 'trial_completed'], {
-        prefix: 'hist-p81p',
-      }),
+      legacyMoves(F, MIX, ['trial_requested', 'trial_scheduled', 'trial_completed'], { prefix: 'hist-p81p' }),
     ),
   );
   S = await bootOn(DATA, PORT);
@@ -783,11 +827,9 @@ section(
   const SM = await mk('pl-imani');
   await lifecycle(SM, 'startReview');
   db = await S.stop();
-  plantOn((layer, L) =>
-    plantCase(L, SM, {
-      ...legacyMoves(layer.recruitmentCases.cases.byId(SM), ['offer_consideration', 'offer_made', 'signed'], {
-        prefix: 'hist-p81p',
-      }),
+  plantOn((F) =>
+    plantCase(F, SM, {
+      ...legacyMoves(F, SM, ['offer_consideration', 'offer_made', 'signed'], { prefix: 'hist-p81p' }),
       stage: 'closed',
       signingId: 'sign-p81p-missing',
     }),
@@ -817,7 +859,7 @@ section(
   db = await stopStart('5.5 signed mismatch');
   neg(
     fingerprint(await journey(SM)) === smBefore &&
-      db.recruitmentCases.find((x) => x.id === SM).links.signingId === 'sign-p81p-missing' &&
+      db.recruitment_cases.find((x) => x.id === SM).links_signing_id === 'sign-p81p-missing' &&
       !db.signings.some((r) => r.id === 'sign-p81p-missing'),
     '5.5 identical after the restart; the dangling link is neither repaired nor given a row',
   );

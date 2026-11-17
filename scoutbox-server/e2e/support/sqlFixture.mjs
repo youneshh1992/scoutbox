@@ -22,6 +22,14 @@ const SCHEMA_SQL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'sche
 export const DAY_MS = 86_400_000;
 /** The lifetime a session row is given when the fixture names no expiry (the server's default lifetime). */
 export const SESSION_TTL_MS = 30 * DAY_MS;
+/** The table migrations' ids in order: the ledger (`data_migrations`) a freshly migrated database holds. */
+export const TABLE_MIGRATIONS = [
+  ...fs
+    .readFileSync(SCHEMA_SQL, 'utf8')
+    .matchAll(/^INSERT INTO "data_migrations" \("id", "applied_at"\) VALUES \('([^']+)'/gm),
+].map((m) => m[1]);
+/** The schema version a server on this schema reports: the latest table migration's number. */
+export const SCHEMA_VERSION = Number(TABLE_MIGRATIONS.at(-1).slice(0, 4));
 /** The stored form of a bearer token: sessions keep its SHA-256, never the token. */
 export const tokenHash = (token) => createHash('sha256').update(String(token)).digest('hex');
 
