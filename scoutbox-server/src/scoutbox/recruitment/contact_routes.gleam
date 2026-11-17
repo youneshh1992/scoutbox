@@ -5,8 +5,7 @@
 //// A send's request row, Contact and lifecycle entry commit in one unit, so the case cannot say `contacted` while
 //// the Contact that justifies it was lost.
 ////
-//// Not ported yet: the live contact events, and the outbox record's id on a guardian's email copy (the copy is
-//// marked `local_outbox` once the mail is in the outbox).
+//// Not ported yet: the live contact events.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/int
@@ -26,9 +25,9 @@ import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/messaging/delivery
 import scoutbox/messaging/notifications
+import scoutbox/messaging/outbox
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
-import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
@@ -504,6 +503,9 @@ fn advance(
 ) -> Result(#(Contact, Moved), Fail(e)) {
   let assert Some(action) = case_lifecycle.action_named("recordContact")
     as "the contact act names a lifecycle action"
+  // The case as it is now: a concurrent send or external record may have moved it since the room was read.
+  use current <- result.try(cases.room(store.reading(tx), room.row.id))
+  let room = option.unwrap(current, room)
   use verdict <- result.try(case_lifecycle.check(
     store.reading(tx),
     room,
@@ -1096,9 +1098,14 @@ pub fn send(
   }
 }
 
+/// The guardian's courtesy copy: recorded in the outbox after the send commits, with the record's id on the copy.
+type Mail {
+  Mail(to: String, subject: String, text: String)
+}
+
 type Sent {
   SendFailed(Contact)
-  Sent(contact: Contact, moved: Moved, mail: Option(#(String, String)))
+  Sent(contact: Contact, moved: Moved, mail: Option(Mail))
 }
 
 fn send_now(
@@ -1170,17 +1177,28 @@ fn send_now(
         json.object([contact_json(failed), #("delivered", json.bool(False))]),
       )
     Ok(Sent(contact, moved, mail)) -> {
-      // The guardian's copy is in the outbox once the unit committed; its state is a later write of its own.
+      // The guardian's copy is sent once the unit committed; its record and state are a later write of their own.
       case mail {
-        Some(_) -> {
+        Some(m) -> {
+          let now = clock.now_ms()
           let _ =
-            store.unit(ctx.store, contacts.set_email_copy(
-              _,
-              c.row.id,
-              row.LocalOutbox,
-              None,
-              clock.now_ms(),
-            ))
+            store.unit(ctx.store, fn(tx) {
+              use mail_id <- result.try(outbox.append(
+                tx,
+                to: m.to,
+                subject: m.subject,
+                text: m.text,
+                secrets: [],
+                at: now,
+              ))
+              contacts.set_email_copy(
+                tx,
+                c.row.id,
+                row.LocalOutbox,
+                Some(id.mail_to_string(mail_id)),
+                now,
+              )
+            })
           Nil
         }
         None -> Nil
@@ -1338,35 +1356,31 @@ fn deliver(
       |> storage
     None -> Ok(Nil)
   })
-  case mail {
-    Some(#(email, guardian_name)) ->
-      store.emit(
-        tx,
-        effect.SendMail(
-          to: email,
-          subject: a.org.name
-            <> " has sent a message about "
-            <> player.row.name
-            <> " on ScoutBox",
-          text: "Hi "
-            <> guardian_name
-            <> ",\n\n"
-            <> a.org.name
-            <> " ("
-            <> case a.user.role {
-            "" -> "Scout"
-            r -> r
-          }
-            <> ": "
-            <> a.user.name
-            <> ") has sent a message about "
-            <> player.row.name
-            <> " in ScoutBox.\n\nOpen your ScoutBox guardian Inbox to read it and respond. Nothing about this contact happens outside ScoutBox unless you choose to accept it.",
-          secrets: [],
-        ),
+  let mail =
+    option.map(mail, fn(m) {
+      let #(email, guardian_name) = m
+      Mail(
+        to: email,
+        subject: a.org.name
+          <> " has sent a message about "
+          <> player.row.name
+          <> " on ScoutBox",
+        text: "Hi "
+          <> guardian_name
+          <> ",\n\n"
+          <> a.org.name
+          <> " ("
+          <> case a.user.role {
+          "" -> "Scout"
+          r -> r
+        }
+          <> ": "
+          <> a.user.name
+          <> ") has sent a message about "
+          <> player.row.name
+          <> " in ScoutBox.\n\nOpen your ScoutBox guardian Inbox to read it and respond. Nothing about this contact happens outside ScoutBox unless you choose to accept it.",
       )
-    None -> Nil
-  }
+    })
   Ok(Sent(stored, moved, mail))
 }
 

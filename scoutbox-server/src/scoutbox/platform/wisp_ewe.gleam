@@ -28,6 +28,9 @@ fn peer(connection: ewe.Connection) -> String {
 /// The most a request body can carry at the transport. Wisp enforces its own, smaller limit per request.
 const transport_limit = 32_000_000
 
+/// The most a request body may carry: the Express server's `express.json({ limit: '20mb' })`.
+pub const body_limit = 20_971_520
+
 /// A route that answers with a server-sent event stream returns an ordinary response carrying `stream_header`,
 /// so the middleware treats it like any other; `stream` is then given that header's value and the response
 /// (without it) and opens the stream. Wisp's body type can't carry an ewe stream.
@@ -41,7 +44,11 @@ pub fn handler(
     let connection = req.body
     // Wisp's request has no client address, so the adapter carries it in a header the client cannot set.
     let req = request.set_header(req, peer_header, peer(connection))
-    let conn = internal.make_connection(reader(req), secret_key_base)
+    let conn =
+      internal.Connection(
+        ..internal.make_connection(reader(req), secret_key_base),
+        max_body_size: body_limit,
+      )
     let req = request.set_body(req, conn)
     use <- exception.defer(fn() {
       let assert Ok(_) = wisp.delete_temporary_files(req)

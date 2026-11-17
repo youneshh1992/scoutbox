@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 9 | 8 | 441 / 716 | 15 / 110 | 16 to go |
+| recruitment | 19 | 11 | 10 | 444 / 956 | 15 / 159 | 16 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -69,8 +69,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `recruitment/analytics` | not yet neutral | 13 → 13 | 104 | 104 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/contacts` | not yet neutral | 10 → 10 | 366 | 366 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/contactsPersistence` | not yet neutral | 6 → 6 | 47 | 47 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 3 / 232 | 0 / 46 | 232 cases pending; 46 hand-port calls |
+| `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | not yet neutral | 9 → 9 | 249 | 249 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
@@ -151,6 +151,13 @@ ported by hand to a gleeunit test.
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | to do |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#memoryRateLimitProvider` | 1 | result.consume is a function | to do |
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 1 | args[] is undefined | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].contacts.byId is a function; args[].signings.byId is a function | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 9 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 | args[].evidence.check is a function | to do |
+| `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 2 | args[].contacts.byId is a function | to do |
+| `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 1 | args[].reads.signings.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/offers` | `domain.ts#isAdult` | 11 | args[] is a ; args[].dob is NaN | to do |
@@ -288,6 +295,18 @@ mapped, then `npm run cases`.
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#rateLimitedBody` | 2 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 180 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 10 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 6 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#normaliseClientKey` | 4 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 2 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactContent` | 8 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
+| `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 8 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 1 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 9 |
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 1 |

@@ -896,6 +896,165 @@
     ]
   },
   {
+    "battery": "recruitment/contacts",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#canContactAction",
+        "calls": 188,
+        "cases": 180,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactMilestone",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactRoleAllows",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#cooldownFor",
+        "calls": 8,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#normaliseClientKey",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#plainShared",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient",
+        "calls": 20,
+        "cases": 0,
+        "handPort": {
+          "args[].isAdult is a function": 20
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#validateContactContent",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#validateContactReply",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#validateExternalRecord",
+        "calls": 13,
+        "cases": 13,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 14,
+        "cases": 0,
+        "handPort": {
+          "args[].contacts.byId is a function": 13,
+          "args[].signings.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney",
+        "calls": 9,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.contacts.byId is a function": 8,
+          "args[].reads.signings.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].evidence.check is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomCan",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/contactsPersistence",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].contacts.byId is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.signings.byId is a function": 1
+        },
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "recruitment/decisionsPersistence",
     "functions": [
       {

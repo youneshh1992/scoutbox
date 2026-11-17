@@ -14,6 +14,7 @@ import gleam/regexp
 import gleam/string
 import scoutbox/platform/input
 import scoutbox/platform/temporal
+import scoutbox/platform/unicode
 import scoutbox/recruitment/recipients.{type Recipient}
 import scoutbox/recruitment/room_rules.{type RoomRole}
 import scoutbox/recruitment/trial_rules
@@ -191,15 +192,14 @@ pub fn can_act(
 
 // ---------------------------------------------------------------------------------------------------- content
 
-/// Shared content is stored inert: markup removed, control characters dropped, trimmed and cut to `max` UTF-16
-/// units, so no renderer can execute it. (A Gleam string can hold no lone surrogate, so none is left to drop.)
-///
-/// Not ported yet: NFC normalisation (OTP's `unicode:characters_to_nfc_binary` is an FFI this server avoids).
+/// Shared content is stored inert: NFC-normalised, markup removed, control characters dropped, trimmed and cut to
+/// `max` UTF-16 units, so no renderer can execute it. (A Gleam string can hold no lone surrogate: the JSON body's
+/// are dropped as it is parsed, `http.without_lone_surrogates`.)
 pub fn plain_shared(text: String, max: Int) -> String {
   let assert Ok(tags) = regexp.from_string("<[^>]*>|[<>]")
   let assert Ok(controls) =
     regexp.from_string("[\\x{0}-\\x{8}\\x{B}\\x{C}\\x{E}-\\x{1F}\\x{7F}]")
-  regexp.replace(tags, text, "")
+  regexp.replace(tags, unicode.nfc(text), "")
   |> regexp.replace(controls, _, "")
   |> string.trim
   |> input.utf16_take(max)

@@ -29,7 +29,7 @@ pub fn append(
   text text: String,
   secrets secrets: List(String),
   at at: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(id.MailId, Fail(e)) {
   let text =
     list.fold(secrets, text, fn(t, secret) {
       case secret {
@@ -53,6 +53,7 @@ pub fn append(
       delivered: Some(True),
     ),
   )
+  |> result.replace(id)
 }
 
 /// What the delivery centre's local fake provider accepted: the record is the send.

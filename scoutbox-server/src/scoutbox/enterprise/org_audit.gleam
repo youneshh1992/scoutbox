@@ -2,8 +2,8 @@
 //// other domains' histories. Entries say what happened and who did it, never content. Reason codes are the
 //// organisation's own structured vocabulary, so they are shown; the free text beside them is not.
 ////
-//// Not ported yet: the Contact, recruitment brief, dynamic watchlist and development plan sources, whose domains
-//// are not ported. Every source here is read whole, not paged in SQL.
+//// Not ported yet: the recruitment brief, dynamic watchlist and development plan sources, whose domains are not
+//// ported. Every source here is read whole, not paged in SQL.
 
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -26,6 +26,7 @@ import scoutbox/platform/json_text
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/case_history as history_row
+import scoutbox/rows/contact_history as contact_history_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/trial_history as trial_history_row
@@ -216,6 +217,71 @@ fn trial_rows(
   })
 }
 
+/// A contact's communications. A draft and its edits are not acts on anyone, so they are not shown.
+const contact_actions = [
+  "contact_sent", "contact_send_failed", "contact_external_recorded",
+  "contact_responded", "contact_cancelled",
+]
+
+fn contact_rows(
+  read: Read,
+  org: Org,
+  now: Int,
+) -> Result(List(agent_audit.Row), Fail(e)) {
+  use rows <- result.try(
+    store.query(
+      read,
+      "SELECT "
+        <> contact_history_row.qualified("h")
+        <> ", c.case_id, c.player_id FROM contact_history h JOIN recruitment_contacts c ON c.id = h.contact_id
+       WHERE c.org_id = ? ORDER BY h.at DESC, h.id DESC",
+      [id.org_sql(org.id)],
+      {
+        use h <- decode.then(contact_history_row.decoder())
+        use case_id <- decode.field(
+          contact_history_row.width,
+          id.recruitment_case_decoder(),
+        )
+        use player <- decode.field(
+          contact_history_row.width + 1,
+          id.player_decoder(),
+        )
+        decode.success(#(h, case_id, player))
+      },
+    ),
+  )
+  rows
+  |> list.filter(fn(r) { list.contains(contact_actions, { r.0 }.action) })
+  |> list.try_map(fn(r) {
+    let #(h, case_id, player) = r
+    use who <- result.map(subject(read, org, player, now))
+    agent_audit.Row(id.contact_event_to_string(h.id), h.at, [
+      #("id", id.contact_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", json.string(h.action)),
+      #("domain", json.string("recruitment_contact")),
+      #("actor", case h.by_kind {
+        Some(contact_history_row.Org) ->
+          json.object([
+            #("userId", json.nullable(h.by_user_id, id.org_user_json)),
+            #("name", json.nullable(h.by_name, json.string)),
+          ])
+        _ -> json.null()
+      }),
+      #(
+        "target",
+        json.object([
+          #("type", json.string("contact")),
+          #("id", id.contact_json(h.contact_id)),
+          #("roomId", id.recruitment_case_json(case_id)),
+          ..who
+        ]),
+      ),
+      #("detail", safe_detail(h.detail_json)),
+    ])
+  })
+}
+
 fn ledger_rows(read: Read, org: Org) -> Result(List(agent_audit.Row), Fail(e)) {
   use rows <- result.map(store.query(
     read,
@@ -319,12 +385,13 @@ pub fn feed(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         store.read(ctx.store, fn(r) {
           use rooms <- result.try(room_rows(r, a.org, now))
           use trials <- result.try(trial_rows(r, a.org, now))
+          use contacts <- result.try(contact_rows(r, a.org, now))
           use ledger <- result.try(ledger_rows(r, a.org))
           use agency <- result.map(case a.org.type_ {
             org_type.Agency -> agent_audit.rows(r, a.org, now)
             _ -> Ok([])
           })
-          list.flatten([rooms, trials, agency, ledger])
+          list.flatten([rooms, contacts, trials, agency, ledger])
         })
       {
         Error(failure) -> http.internal(failure)

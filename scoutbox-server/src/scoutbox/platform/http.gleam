@@ -1,11 +1,13 @@
 //// The HTTP contract every route shares: JSON responses, the error body, reading a JSON body and a query.
 
 import gleam/bit_array
+import gleam/bool
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/http/request
 import gleam/http/response
+import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/result
@@ -164,6 +166,32 @@ pub fn required(code: String, field: String) -> Response {
   )
 }
 
+fn too_large() -> Response {
+  json(
+    413,
+    json.object([
+      #("error", json.string("REQUEST_TOO_LARGE")),
+      #(
+        "message",
+        json.string("That request body is larger than this endpoint accepts."),
+      ),
+      #("requestId", json.null()),
+    ]),
+  )
+}
+
+/// A body that announces more than the limit is refused for its size, as the Express parser does before reading it.
+fn announced_too_large(req: Request) -> Bool {
+  case request.get_header(req, "content-length") {
+    Ok(n) ->
+      case int.parse(n) {
+        Ok(n) -> n > wisp.get_max_body_size(req)
+        Error(Nil) -> False
+      }
+    Error(Nil) -> False
+  }
+}
+
 fn malformed_json() -> Response {
   json(
     400,
@@ -195,6 +223,7 @@ fn read_json_text(req: Request) -> Result(#(String, Dynamic), Response) {
     Ok(ct) -> string.starts_with(string.lowercase(ct), "application/json")
     Error(Nil) -> False
   }
+  use <- bool.guard(is_json && announced_too_large(req), Error(too_large()))
   case is_json, wisp.read_body_bits(req) {
     False, _ -> Ok(#("", empty_object()))
     True, Error(Nil) -> Error(malformed_json())
@@ -205,7 +234,7 @@ fn read_json_text(req: Request) -> Result(#(String, Dynamic), Response) {
           case string.trim(text) {
             "" -> Ok(#(text, empty_object()))
             _ ->
-              case json.parse(text, decode.dynamic) {
+              case json.parse(without_lone_surrogates(text), decode.dynamic) {
                 Error(_) -> Error(malformed_json())
                 Ok(value) ->
                   case dynamic.classify(value) {
@@ -226,6 +255,70 @@ pub fn signed_body(
   case read_json_text(req) {
     Ok(#(text, value)) -> next(text, value)
     Error(response) -> response
+  }
+}
+
+/// JavaScript's JSON.parse accepts a `\u` escape naming half of a surrogate pair with no other half, and the
+/// TypeScript server's text cleaners then drop it. A Gleam string cannot hold one, so it is dropped before parsing:
+/// the same text the cleaners leave, where the JSON would otherwise be refused whole.
+fn without_lone_surrogates(text: String) -> String {
+  case string.contains(text, "\\ud") || string.contains(text, "\\uD") {
+    False -> text
+    True ->
+      case bit_array.to_string(scan(<<text:utf8>>, False, <<>>)) {
+        Ok(cleaned) -> cleaned
+        Error(Nil) -> text
+      }
+  }
+}
+
+fn scan(rest: BitArray, in_string: Bool, out: BitArray) -> BitArray {
+  case rest, in_string {
+    <<>>, _ -> out
+    <<"\"":utf8, tail:bits>>, _ ->
+      scan(tail, !in_string, <<out:bits, "\"":utf8>>)
+    <<"\\u":utf8, hex:bytes-size(4), tail:bits>>, True ->
+      case surrogate(hex) {
+        High ->
+          case tail {
+            <<"\\u":utf8, low:bytes-size(4), after:bits>> ->
+              case surrogate(low) {
+                Low ->
+                  scan(after, True, <<
+                    out:bits,
+                    "\\u":utf8,
+                    hex:bits,
+                    "\\u":utf8,
+                    low:bits,
+                  >>)
+                _ -> scan(tail, True, out)
+              }
+            _ -> scan(tail, True, out)
+          }
+        Low -> scan(tail, True, out)
+        NotSurrogate -> scan(tail, True, <<out:bits, "\\u":utf8, hex:bits>>)
+      }
+    <<"\\":utf8, c, tail:bits>>, True ->
+      scan(tail, True, <<out:bits, "\\":utf8, c>>)
+    <<b, tail:bits>>, _ -> scan(tail, in_string, <<out:bits, b>>)
+    _, _ -> out
+  }
+}
+
+type Surrogate {
+  High
+  Low
+  NotSurrogate
+}
+
+fn surrogate(hex: BitArray) -> Surrogate {
+  let value =
+    bit_array.to_string(hex)
+    |> result.try(int.base_parse(_, 16))
+  case value {
+    Ok(v) if v >= 0xD800 && v <= 0xDBFF -> High
+    Ok(v) if v >= 0xDC00 && v <= 0xDFFF -> Low
+    _ -> NotSurrogate
   }
 }
 

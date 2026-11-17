@@ -16,6 +16,7 @@ import scoutbox/development/combine
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
+import scoutbox/discovery/insights
 import scoutbox/discovery/org_feed
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
@@ -381,6 +382,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
+        ["insights"] -> only(req, Get, fn() { insights.show(ctx, player) })
         ["box-cam", "sessions", sid, "cv", "finalize"] ->
           only(req, Post, fn() { box_prefs.cv_finalize(ctx, player, sid) })
         ["box-cam", "prefs"] ->

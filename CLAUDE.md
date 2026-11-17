@@ -12,8 +12,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 ## Writing Gleam here
 
 - **Pure Gleam is always preferable.** Use Erlang FFI (`@external`) only when something is impossible in Gleam
-  and no maintained Gleam package covers it. Today `src/` has none. If you must add one: keep it in one small
-  module, document why Gleam can't do it, and test it directly, because the type checker can't see across FFI.
+  and no maintained Gleam package covers it. Today `src/` has one: `platform/unicode` (NFC, from OTP's tables).
+  If you must add one: keep it in one small module, document why Gleam can't do it, and test it directly,
+  because the type checker can't see across FFI.
 - **`gleam check` is the fast feedback loop.** It type-checks the whole project in well under a second, so run
   it after every change instead of `gleam build` or `gleam test`. Then `gleam format` and `gleam test`.
 - **Library APIs:** read the source in `scoutbox-server/build/packages/<package>/src/` instead of recalling it.

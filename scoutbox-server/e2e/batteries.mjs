@@ -21,4 +21,6 @@ export const BATTERIES = [
   'recruitment/trialsPersistence',
   'recruitment/trials',
   'recruitment/trialDatesMinorsAndErasure',
+  'recruitment/contactsPersistence',
+  'recruitment/contacts',
 ];

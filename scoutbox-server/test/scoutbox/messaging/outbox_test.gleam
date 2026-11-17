@@ -9,7 +9,7 @@ import scoutbox/support
 
 fn stored(secrets: List(String), text: String) -> String {
   let s = support.fresh_store(fn(_) { Nil })
-  let assert Ok(Nil) =
+  let assert Ok(_) =
     store.unit(s, outbox.append(
       _,
       to: "club@eastport.example",
