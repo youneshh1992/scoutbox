@@ -34,7 +34,6 @@ export const NOT_YET_NEUTRAL = [
   'development/combine',
   'development/hub',
   'discovery/matchingAndWatchlists',
-  'discovery/secondLookAndNobodyMissed',
   'operations/clubOperations',
   'passport/passport',
   'passport/trustScore',
