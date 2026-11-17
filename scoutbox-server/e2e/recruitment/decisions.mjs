@@ -1499,10 +1499,20 @@ section('C — the concurrency matrix: one truth per case, whatever the order');
   J.LEAVER_NAME = leaver.name;
   const c6 = await reviewed(maria.token, leaver.id);
   J.LEAVER_RID = c6;
+  // The leaver's case is C5's when no other adult is free, so it may already hold the decision C5 finalized: then
+  // this one replaces it, and the race is still against the deletion alone.
+  const held6 = (await surface(c6)).body.current;
   await draft(c6, { outcome: 'hold' });
   const tomasz = await playerLogin(leaver.id);
   const fd = await Promise.all([
-    finalize(c6, { expectedRev: 1 }),
+    held6
+      ? supersede(c6, {
+          expectedRev: 1,
+          supersedes: held6.id,
+          supersedesRev: held6.rev,
+          supersessionReason: 'The player is leaving.',
+        })
+      : finalize(c6, { expectedRev: 1 }),
     j('DELETE', '/player/account', undefined, tomasz.token),
   ]);
   const s6 = (await surface(c6)).body;
