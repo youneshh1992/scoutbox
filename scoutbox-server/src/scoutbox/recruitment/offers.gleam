@@ -24,6 +24,7 @@ import scoutbox/rows/offer_revisions as revision_row
 import scoutbox/rows/recruitment_offers as offer_row
 import scoutbox/vocab/offer_status.{type OfferStatus}
 import scoutbox/vocab/party
+import scoutbox/vocab/recruitment_actor_kind
 import sqlight
 
 // ---------------------------------------------------------------------------------------------------- reads
@@ -267,16 +268,24 @@ fn next_position(
 
 fn actor_parts(
   by: Actor,
-) -> #(event_row.ByKind, Option(String), Option(String)) {
+) -> #(
+  recruitment_actor_kind.RecruitmentActorKind,
+  Option(String),
+  Option(String),
+) {
   case by {
     Staff(user, name, _) -> #(
-      event_row.Org,
+      recruitment_actor_kind.Org,
       Some(id.org_user_to_string(user)),
       Some(name),
     )
-    Recipient(party.Player, who, name) -> #(event_row.Player, Some(who), name)
+    Recipient(party.Player, who, name) -> #(
+      recruitment_actor_kind.Player,
+      Some(who),
+      name,
+    )
     Recipient(party.Guardian, who, name) -> #(
-      event_row.Guardian,
+      recruitment_actor_kind.Guardian,
       Some(who),
       name,
     )

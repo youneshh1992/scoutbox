@@ -84,8 +84,8 @@ pub type Row {
     inside_attribution_window: Bool,
     method: Method,
     note: Option(String),
-    signing_package_id: Option(String),
-    signing_revision_id: Option(String),
+    signing_package_id: Option(id.SigningPackageId),
+    signing_revision_id: Option(id.SigningRevisionId),
     signing_revision_number: Option(Int),
     case_id: Option(id.RecruitmentCaseId),
     offer_id: Option(id.OfferId),
@@ -161,8 +161,14 @@ pub fn decoder() -> decode.Decoder(Row) {
   use inside_attribution_window <- decode.field(13, sqlight.decode_bool())
   use method <- decode.field(14, method_decoder())
   use note <- decode.field(15, decode.optional(decode.string))
-  use signing_package_id <- decode.field(16, decode.optional(decode.string))
-  use signing_revision_id <- decode.field(17, decode.optional(decode.string))
+  use signing_package_id <- decode.field(
+    16,
+    decode.optional(id.signing_package_decoder()),
+  )
+  use signing_revision_id <- decode.field(
+    17,
+    decode.optional(id.signing_revision_decoder()),
+  )
   use signing_revision_number <- decode.field(18, decode.optional(decode.int))
   use case_id <- decode.field(
     19,
@@ -235,8 +241,8 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.bool(row.inside_attribution_window),
     sqlight.text(method_to_string(row.method)),
     sqlight.nullable(sqlight.text, row.note),
-    sqlight.nullable(sqlight.text, row.signing_package_id),
-    sqlight.nullable(sqlight.text, row.signing_revision_id),
+    sqlight.nullable(id.signing_package_sql, row.signing_package_id),
+    sqlight.nullable(id.signing_revision_sql, row.signing_revision_id),
     sqlight.nullable(sqlight.int, row.signing_revision_number),
     sqlight.nullable(id.recruitment_case_sql, row.case_id),
     sqlight.nullable(id.offer_sql, row.offer_id),

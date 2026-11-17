@@ -230,7 +230,10 @@ pub fn evidence_fields(
           #("identifier", some_text(e.identifier)),
           #("licenceType", some_text(e.licence_type)),
           #("validUntil", some_text(e.registry_valid_until)),
-          #("signingPackageId", some_text(e.signing_package_id)),
+          #(
+            "signingPackageId",
+            option.map(e.signing_package_id, id.signing_package_json),
+          ),
           #(
             "signingDocumentKind",
             option.map(

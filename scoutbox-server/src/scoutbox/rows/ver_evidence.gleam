@@ -406,7 +406,7 @@ pub type Row {
     identifier: Option(String),
     licence_type: Option(String),
     registry_valid_until: Option(String),
-    signing_package_id: Option(String),
+    signing_package_id: Option(id.SigningPackageId),
     signing_document_kind: Option(SigningDocumentKind),
     label: Option(String),
     check_malware_scan: CheckMalwareScan,
@@ -488,7 +488,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   use identifier <- decode.field(17, decode.optional(decode.string))
   use licence_type <- decode.field(18, decode.optional(decode.string))
   use registry_valid_until <- decode.field(19, decode.optional(decode.string))
-  use signing_package_id <- decode.field(20, decode.optional(decode.string))
+  use signing_package_id <- decode.field(
+    20,
+    decode.optional(id.signing_package_decoder()),
+  )
   use signing_document_kind <- decode.field(
     21,
     decode.optional(signing_document_kind_decoder()),
@@ -560,7 +563,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.identifier),
     sqlight.nullable(sqlight.text, row.licence_type),
     sqlight.nullable(sqlight.text, row.registry_valid_until),
-    sqlight.nullable(sqlight.text, row.signing_package_id),
+    sqlight.nullable(id.signing_package_sql, row.signing_package_id),
     sqlight.nullable(
       fn(v) { sqlight.text(signing_document_kind_to_string(v)) },
       row.signing_document_kind,

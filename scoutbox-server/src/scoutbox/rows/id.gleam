@@ -2396,6 +2396,129 @@ pub fn signing_decoder() -> decode.Decoder(SigningId) {
   decode.map(decode.string, SigningId)
 }
 
+/// An id of `signing_documents`.
+pub opaque type SigningDocumentId {
+  SigningDocumentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn signing_document(text: String) -> SigningDocumentId {
+  SigningDocumentId(text)
+}
+
+pub fn signing_document_to_string(id: SigningDocumentId) -> String {
+  let SigningDocumentId(text) = id
+  text
+}
+
+pub fn signing_document_sql(id: SigningDocumentId) -> sqlight.Value {
+  sqlight.text(signing_document_to_string(id))
+}
+
+pub fn signing_document_json(id: SigningDocumentId) -> Json {
+  json.string(signing_document_to_string(id))
+}
+
+pub fn signing_document_decoder() -> decode.Decoder(SigningDocumentId) {
+  decode.map(decode.string, SigningDocumentId)
+}
+
+/// An id of `signing_history`.
+pub opaque type SigningEventId {
+  SigningEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn signing_event(text: String) -> SigningEventId {
+  SigningEventId(text)
+}
+
+pub fn signing_event_to_string(id: SigningEventId) -> String {
+  let SigningEventId(text) = id
+  text
+}
+
+pub fn signing_event_sql(id: SigningEventId) -> sqlight.Value {
+  sqlight.text(signing_event_to_string(id))
+}
+
+pub fn signing_event_json(id: SigningEventId) -> Json {
+  json.string(signing_event_to_string(id))
+}
+
+pub fn signing_event_decoder() -> decode.Decoder(SigningEventId) {
+  decode.map(decode.string, SigningEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_signing_event(tx: Tx) -> Result(SigningEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(SigningEventId)
+}
+
+/// An id of `signing_packages`.
+pub opaque type SigningPackageId {
+  SigningPackageId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn signing_package(text: String) -> SigningPackageId {
+  SigningPackageId(text)
+}
+
+pub fn signing_package_to_string(id: SigningPackageId) -> String {
+  let SigningPackageId(text) = id
+  text
+}
+
+pub fn signing_package_sql(id: SigningPackageId) -> sqlight.Value {
+  sqlight.text(signing_package_to_string(id))
+}
+
+pub fn signing_package_json(id: SigningPackageId) -> Json {
+  json.string(signing_package_to_string(id))
+}
+
+pub fn signing_package_decoder() -> decode.Decoder(SigningPackageId) {
+  decode.map(decode.string, SigningPackageId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_signing_package(tx: Tx) -> Result(SigningPackageId, Fail(e)) {
+  ids.next(tx, "spk") |> result.map(SigningPackageId)
+}
+
+/// An id of `signing_revisions`.
+pub opaque type SigningRevisionId {
+  SigningRevisionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn signing_revision(text: String) -> SigningRevisionId {
+  SigningRevisionId(text)
+}
+
+pub fn signing_revision_to_string(id: SigningRevisionId) -> String {
+  let SigningRevisionId(text) = id
+  text
+}
+
+pub fn signing_revision_sql(id: SigningRevisionId) -> sqlight.Value {
+  sqlight.text(signing_revision_to_string(id))
+}
+
+pub fn signing_revision_json(id: SigningRevisionId) -> Json {
+  json.string(signing_revision_to_string(id))
+}
+
+pub fn signing_revision_decoder() -> decode.Decoder(SigningRevisionId) {
+  decode.map(decode.string, SigningRevisionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_signing_revision(tx: Tx) -> Result(SigningRevisionId, Fail(e)) {
+  ids.next(tx, "spr") |> result.map(SigningRevisionId)
+}
+
 /// An id of `org_squad_members`.
 pub opaque type SquadEntryId {
   SquadEntryId(String)

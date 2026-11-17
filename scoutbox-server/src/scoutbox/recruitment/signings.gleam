@@ -18,6 +18,9 @@ import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
 import scoutbox/rows/signing_parties as party_row
 import scoutbox/rows/signings as row
+import scoutbox/vocab/recruitment_actor_kind
+import scoutbox/vocab/signing_method
+import scoutbox/vocab/signing_party_type
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -84,8 +87,14 @@ fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
     #("insideAttributionWindow", json.bool(s.inside_attribution_window)),
     #("method", row.method_to_json(s.method)),
     #("note", opt(s.note)),
-    #("signingPackageId", opt(s.signing_package_id)),
-    #("signingRevisionId", opt(s.signing_revision_id)),
+    #(
+      "signingPackageId",
+      json.nullable(s.signing_package_id, id.signing_package_json),
+    ),
+    #(
+      "signingRevisionId",
+      json.nullable(s.signing_revision_id, id.signing_revision_json),
+    ),
     #(
       "signingRevisionNumber",
       json.nullable(s.signing_revision_number, json.int),
@@ -106,10 +115,10 @@ fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
       "parties",
       json.array(parties, fn(p) {
         json.object([
-          #("partyType", party_row.party_type_to_json(p.party_type)),
-          #("method", json.nullable(p.method, party_row.method_to_json)),
+          #("partyType", signing_party_type.to_json(p.party_type)),
+          #("method", json.nullable(p.method, signing_method.to_json)),
           #("completedAt", json.nullable(p.completed_at, json.int)),
-          #("byKind", json.nullable(p.by_kind, party_row.by_kind_to_json)),
+          #("byKind", json.nullable(p.by_kind, recruitment_actor_kind.to_json)),
         ])
       }),
     ),

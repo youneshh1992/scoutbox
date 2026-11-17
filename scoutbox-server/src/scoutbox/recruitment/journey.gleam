@@ -30,7 +30,6 @@ import scoutbox/recruitment/trials
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
-import scoutbox/rows/offer_history as event_row
 import scoutbox/rows/orgs as org_row
 import scoutbox/rows/recruitment_cases as case_row
 import scoutbox/rows/recruitment_contacts as contact_row
@@ -41,6 +40,7 @@ import scoutbox/rows/trials as trial_row
 import scoutbox/vocab/decision_outcome
 import scoutbox/vocab/offer_status
 import scoutbox/vocab/party
+import scoutbox/vocab/recruitment_actor_kind
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/trial_actor_kind
 import scoutbox/vocab/trial_workflow_state
@@ -660,7 +660,7 @@ fn club(
               #("method", signing_row.method_to_json(s.method)),
               #(
                 "signingPackageId",
-                json.nullable(s.signing_package_id, json.string),
+                json.nullable(s.signing_package_id, id.signing_package_json),
               ),
             ])
           None -> json.null()
@@ -1924,13 +1924,13 @@ fn timeline_lines(
                     #("kind", json.string(h.action)),
                     #("at", json.int(h.at)),
                     #("by", case h.by_kind {
-                      Some(event_row.Org) ->
+                      Some(recruitment_actor_kind.Org) ->
                         json.nullable(h.by_name, json.string)
                       _ -> json.null()
                     }),
                     #(
                       "byKind",
-                      json.nullable(h.by_kind, event_row.by_kind_to_json),
+                      json.nullable(h.by_kind, recruitment_actor_kind.to_json),
                     ),
                     #("offerId", id.offer_json(o.row.id)),
                   ],

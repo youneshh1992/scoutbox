@@ -31,6 +31,7 @@ import scoutbox/vocab/offer_status.{
   Withdrawn,
 }
 import scoutbox/vocab/party
+import scoutbox/vocab/recruitment_actor_kind
 import scoutbox/vocab/room_status.{type RoomStatus}
 
 pub const policy_version = 1
@@ -1042,7 +1043,7 @@ pub fn history_view(o: Offer, for_recipient: Bool) -> List(Json) {
         None, None, None -> json.null()
         kind, _, name ->
           json.object([
-            #("kind", json.nullable(kind, event_row.by_kind_to_json)),
+            #("kind", json.nullable(kind, recruitment_actor_kind.to_json)),
             #("name", json.nullable(name, json.string)),
           ])
       }),
