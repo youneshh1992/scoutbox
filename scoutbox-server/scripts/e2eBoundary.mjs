@@ -37,7 +37,6 @@ export const NOT_YET_NEUTRAL = [
   'operations/clubOperations',
   'passport/passport',
   'passport/trustScore',
-  'recruitment/journeyAdversarial',
 ];
 
 /** Every boundary problem under e2e/, as messages. Empty when the boundary holds. */

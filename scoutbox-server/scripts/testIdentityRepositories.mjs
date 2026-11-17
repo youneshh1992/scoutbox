@@ -255,6 +255,7 @@ test('create: defaults fill the optional fields; junk is refused by field before
     [{ media: [{ id: 'm1' }] }, /media\[0\]\.title is absent/],
     [{ badges: [1] }, /badges\[0\] is a number, not text/],
     [{ facetField: true }, /unknown field facetField/],
+    [{ dob: 'not-a-date' }, /player pl-junk\): dob must be a YYYY-MM-DD date/],
   ])
     assert.throws(
       () => t.players.create({ id: 'pl-junk', name: 'Junk', dob: '1999-02-02', country: 'GB', ...fields }),

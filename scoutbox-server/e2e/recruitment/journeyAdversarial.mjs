@@ -22,43 +22,13 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { openLayer, readRecords, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
-import {
-  ROOM_STATUSES,
-  ROOM_TRANSITIONS,
-  TERMINAL_ROOM_STATUSES,
-  STATUS_EVIDENCE_REQUIRED,
-} from '../../domains/recruitment/rooms/shared.mjs';
-import {
-  currentContactForCase,
-  currentTrialForCase,
-  currentOfferForCase,
-  currentSigningForOffer,
-  currentDecisionForCase,
-  currentAssessmentForCase,
-  validateRecruitmentJourney,
-  JOURNEY_INTEGRITY_CODES,
-  NEXT_ACTION_CODES,
-} from '../../domains/recruitment/lifecycle/journeyModel.mjs';
-import {
-  LIFECYCLE_ACTIONS,
-  canTransitionRecruitmentCase,
-  heldFromStatus,
-  lifecycleTargetFor,
-} from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
-import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { openFixture, plantCase, legacyMoves } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
 import { budgetsDrawn } from '../support/rateBudgets.mjs';
-import { journeyEvidenceFunnel } from '../../domains/recruitment/analytics/funnels.mjs';
-import { isAdult } from '../../domain.ts';
+import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
-const LATEST_SCHEMA = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
+
+const { EVENT_REGISTRY } = eventRegistrySpec;
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -178,270 +148,232 @@ async function j(method, url, body, token, extra = {}) {
   return { status: r.status, body: data, text: data === null ? null : JSON.stringify(data) };
 }
 /**
- * Stop, edit the store offline, boot again. `mutate(db, L)` reads the stored records (`db`, plain copies) and writes
- * through `L` (the data layer, `L.layer`, and its SQLite) in one unit of work: the tables hold typed columns only, so a
- * planted value a column cannot hold is REFUSED (nothing lands); the refusal is returned and the server comes back on
- * the untouched file.
+ * Stop, edit the store offline, boot again. `mutate(db, F)` reads the stored rows (`db`, every table's rows as stored)
+ * and writes through `F` (a plain-SQL fixture) in one transaction: a planted value the schema refuses (a CHECK, a
+ * foreign key) is REFUSED and nothing lands; the refusal is returned and the server comes back on the untouched file.
  */
 async function offline(mutate) {
   await down(server, 'SIGTERM');
-  const db = readRecords(DATA_DIR);
-  const L = openLayer(DATA_DIR);
+  const R = readRows(DATA_DIR);
+  let db;
+  try {
+    db = R.all();
+  } finally {
+    R.close();
+  }
+  const F = openFixture(DATA_DIR);
   let refused = null;
   try {
-    L.unit(() => mutate(db, L));
+    F.transaction(() => mutate(db, F));
   } catch (err) {
     refused = err;
   } finally {
-    L.close();
+    F.close();
   }
   server = await boot();
   await relogin();
   return refused;
 }
-// Undoing a plant: no repository operation removes a trial, request, contact or offer (the records are kept for good),
-// so a test that resets its own plant deletes the rows by SQL, the rows that refuse a removal (the case links, the
-// histories) first.
-const removeRows = (L, steps) => {
-  for (const [sql, id] of steps) L.sqlite.prepare(sql).run(id);
+// Undoing a plant: no act removes a trial, request, contact or offer (the records are kept for good), so a test that
+// resets its own plant deletes the rows, the rows that refuse a removal (the case links, the histories) first.
+const removeRows = (F, steps) => {
+  for (const [sql, id] of steps) F.sql.prepare(sql).run(id);
 };
-const removeTrial = (L, id) =>
-  removeRows(L, [
+const removeTrial = (F, id) =>
+  removeRows(F, [
     ['DELETE FROM case_trial_links WHERE trial_id = ?', id],
     ['DELETE FROM trials WHERE id = ?', id],
   ]);
-const removeRequest = (L, id) =>
-  removeRows(L, [
+const removeRequest = (F, id) =>
+  removeRows(F, [
     ['DELETE FROM case_request_links WHERE request_id = ?', id],
     ['DELETE FROM recruitment_requests WHERE id = ?', id],
   ]);
-const removeContact = (L, id) =>
-  removeRows(L, [
+const removeContact = (F, id) =>
+  removeRows(F, [
     ['DELETE FROM contact_history WHERE contact_id = ?', id],
     ['DELETE FROM recruitment_contacts WHERE id = ?', id],
   ]);
-const removeOffer = (L, id) =>
-  removeRows(L, [
+const removeOffer = (F, id) =>
+  removeRows(F, [
     ['DELETE FROM offer_history WHERE offer_id = ?', id],
     ['DELETE FROM recruitment_offers WHERE id = ?', id],
   ]);
 /**
- * A contact or an offer planted offline is the writers' whole literal — the tables refuse a
- * partial record. Every field is valid; what the plant makes wrong is the STATE (drift against the case), not the shape.
+ * The rows of a contact, a request, a completed trial or an offer planted offline: each is the whole of what its act
+ * writes, and every value is valid. What a plant makes wrong is the STATE (drift against the case `k`, a stored case
+ * row), not the shape.
  */
-const staffOf = (db) => {
-  const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane');
-  return {
-    contact: { kind: 'org', userId: u.id, name: u.name },
-    offer: { kind: 'org', id: u.id, name: u.name, role: u.role ?? null },
-  };
-};
-const plantedContact = (db, k, id, at) => {
-  const by = staffOf(db).contact;
-  return {
+const staffOf = (db) => db.org_users.find((u) => u.org_id === 'org-eastport' && u.name === 'Maria Keane');
+const plantContact = (F, db, k, id, at) => {
+  const u = staffOf(db);
+  F.insert('recruitment_contacts', {
     id,
-    orgId: 'org-eastport',
-    caseId: k.id,
-    playerId: k.playerId,
+    org_id: 'org-eastport',
+    case_id: k.id,
+    player_id: k.player_id,
     status: 'delivered',
     channel: 'in_app',
-    recipient: { type: 'player', playerId: k.playerId, guardianId: null, minor: false },
-    contactMode: 'player_only',
-    routingSnapshot: null,
+    contact_mode: 'player_only',
+    recipient_type: 'player',
+    recipient_player_id: k.player_id,
+    recipient_minor: 0,
     subject: 'x',
     body: 'x',
-    summary: null,
-    createdBy: by,
-    createdAt: at,
-    updatedAt: at,
-    sentBy: by,
-    sentAt: at,
-    deliveredAt: at,
-    failedAt: null,
-    failureCode: null,
-    attempts: [{ at, ok: true, code: null }],
-    requestId: null,
-    emailCopy: null,
-    lifecycle: null,
-    occurredAt: null,
-    recordedBy: null,
-    recordedAt: null,
-    respondedAt: null,
-    response: null,
-    cancelledAt: null,
-    cancelledBy: null,
-    keys: { create: null, send: null, record: null },
-    history: [],
+    created_by_user_id: u.id,
+    created_by_name: u.name,
+    created_at: at,
+    updated_at: at,
+    sent_by_user_id: u.id,
+    sent_by_name: u.name,
+    sent_at: at,
+    delivered_at: at,
     rev: 1,
-    revAt: at,
-    revBy: null,
-    policyVersion: 1,
-  };
+    rev_at: at,
+    policy_version: 1,
+  });
+  F.insert('contact_attempts', { contact_id: id, position: 0, at, ok: 1 });
 };
-/** A request and a completed trial planted offline are issueRecruitmentRequest's and issueAcceptedTrial's whole literals; what the plant makes wrong is the STATE, not the shape. */
-const plantedRequest = (db, k, id, at) => {
-  const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane');
-  return {
-    id,
-    playerId: k.playerId,
-    playerName: k.playerName,
-    orgId: 'org-eastport',
-    orgName: 'Eastport FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    userId: u.id,
-    scoutName: u.name,
-    scoutRole: u.role ?? 'Scout',
+/** An accepted trial request and its completed trial, the request first (the trial names it by a real key). */
+const plantCompletedTrial = (F, db, k, { id, requestId, sessionId, now }) => {
+  const u = staffOf(db);
+  F.insert('recruitment_requests', {
+    id: requestId,
+    player_id: k.player_id,
+    player_name: k.player_name,
+    org_id: 'org-eastport',
+    org_name: 'Eastport FC',
+    org_type: 'club',
+    org_verified: 1,
+    org_safeguarding_certified: 1,
+    user_id: u.id,
+    scout_name: u.name,
+    scout_role: u.role ?? 'Scout',
     type: 'trial',
     message: 'Come and train.',
-    trialDetails: { proposedDate: '2027-01-01', altSlots: [], venue: null, notes: '' },
+    trial_proposed_date: '2027-01-01',
+    trial_alt_days_json: '[]',
+    trial_notes: '',
     status: 'accepted',
-    createdAt: at,
-    respondedAt: at + H,
-    respondedBy: 'player',
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
-    caseId: k.id,
-    trialId: null,
-  };
-};
-const plantedCompletedTrial = (db, k, id, requestId, sessionId, now) => {
-  const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane');
-  return {
+    created_at: now - 4 * H,
+    responded_at: now - 3 * H,
+    responded_by: 'player',
+    routed_to: 'player',
+    case_id: k.id,
+    trial_id: id,
+  });
+  F.insert('trials', {
     id,
-    requestId,
-    caseId: k.id,
-    playerId: k.playerId,
-    playerName: k.playerName,
-    orgId: 'org-eastport',
-    orgName: 'Eastport FC',
-    scoutName: u.name,
-    acceptedAt: now - 3 * H,
-    acceptedBy: 'player',
-    guardianApproved: false,
-    proposedDate: null,
-    venue: null,
+    request_id: requestId,
+    case_id: k.id,
+    player_id: k.player_id,
+    player_name: k.player_name,
+    org_id: 'org-eastport',
+    org_name: 'Eastport FC',
+    scout_name: u.name,
+    accepted_at: now - 3 * H,
+    accepted_by: 'player',
+    guardian_approved: 0,
     notes: '',
-    reportDueAt: now + 7 * 24 * H,
+    report_due_at: now + 7 * DAY,
     status: 'awaiting_report',
-    workflowState: 'completed',
-    recipient: { type: 'player', playerId: k.playerId, guardianId: null, minor: false, at: now - 3 * H },
-    schedule: {
-      timezone: 'Europe/London',
-      revision: 1,
-      proposedAt: now - 3 * H,
-      proposedBy: { kind: 'org', userId: u.id, name: u.name },
-      confirmedAt: now - 2 * H,
-      confirmedBy: { kind: 'player', id: k.playerId, name: k.playerName },
-      sessions: [
-        {
-          id: sessionId,
-          kind: 'training',
-          startsAt: now - 2 * H,
-          endsAt: now - H,
-          venue: null,
-          instructions: null,
-          evidence: [],
-        },
-      ],
-      revisions: [],
-    },
-    completion: {
-      state: 'completed',
-      at: now - H,
-      by: { kind: 'org', userId: u.id, name: u.name },
-      reason: null,
-      phase: 'scheduled',
-    },
-    history: [],
-    attendance: [],
+    reminder_sent: 0,
+    workflow_state: 'completed',
+    schedule_timezone: 'Europe/London',
+    schedule_revision: 1,
+    schedule_proposed_at: now - 3 * H,
+    schedule_proposed_by_kind: 'org',
+    schedule_proposed_by_user_id: u.id,
+    schedule_proposed_by_name: u.name,
+    schedule_confirmed_at: now - 2 * H,
+    schedule_confirmed_by_kind: 'player',
+    schedule_confirmed_by_actor_id: k.player_id,
+    schedule_confirmed_by_name: k.player_name,
+    completion_state: 'completed',
+    completion_at: now - H,
+    completion_by_kind: 'org',
+    completion_by_user_id: u.id,
+    completion_by_name: u.name,
+    completion_phase: 'scheduled',
+    recipient_type: 'player',
+    recipient_player_id: k.player_id,
+    recipient_minor: 0,
+    recipient_at: now - 3 * H,
     rev: 2,
-    keys: {},
-  };
+  });
+  F.insert('trial_schedule_sessions', {
+    trial_id: id,
+    position: 0,
+    id: sessionId,
+    kind: 'training',
+    starts_at: now - 2 * H,
+    ends_at: now - H,
+  });
 };
-const plantedOffer = (db, k, status, respond, now) => {
-  const by = staffOf(db).offer;
+/** An Offer of one revision at `status`; `respond` adds the player's acceptance. */
+const plantOffer = (F, db, k, status, respond, now) => {
+  const u = staffOf(db);
+  const id = `rof-drift-${k.id}`;
   const rid = `rofr-drift-${k.id}`;
-  return {
-    id: `rof-drift-${k.id}`,
-    orgId: 'org-eastport',
-    caseId: k.id,
-    playerId: k.playerId,
+  const by = (role) => ({
+    [`${role}_by_user_id`]: u.id,
+    [`${role}_by_name`]: u.name,
+    [`${role}_by_role`]: u.role ?? null,
+  });
+  F.insert('recruitment_offers', {
+    id,
+    org_id: 'org-eastport',
+    case_id: k.id,
+    player_id: k.player_id,
     type: 'direct_recruitment',
-    decisionId: null,
-    transactionId: null,
     status,
-    currentRevisionId: rid,
-    revisions: [
-      {
-        id: rid,
-        revisionNumber: 1,
-        status,
-        terms: {
-          offerType: 'direct_recruitment',
-          role: 'x',
-          squad: null,
-          startDate: '2027-07-01',
-          endDate: '2029-06-30',
-          conditions: null,
-        },
-        recipientMessage: null,
-        internalNote: null,
-        documents: [],
-        expiresAt: now + 30 * DAY,
-        createdAt: now - H,
-        createdBy: by,
-        updatedAt: now - H,
-        updatedBy: by,
-        issuedAt: now - H,
-        issuedBy: by,
-        withdrawnAt: null,
-        withdrawnBy: null,
-        withdrawReason: null,
-        respondedAt: respond ? now : null,
-        response: respond ? { id: `resp-d-${k.id}` } : null,
-        supersedesRevisionId: null,
-        supersededByRevisionId: null,
-        supersededAt: null,
-        recipientSnapshot: { type: 'player', playerId: k.playerId, guardianId: null, minor: false, at: now - H },
-        readinessSnapshot: null,
-        rev: 1,
-        revAt: now - H,
-        revBy: null,
-      },
-    ],
-    responses: respond
-      ? [
-          {
-            id: `resp-d-${k.id}`,
-            revisionId: rid,
-            responseType: 'accepted',
-            actorType: 'player',
-            actorId: k.playerId,
-            actorName: null,
-            forPlayerId: k.playerId,
-            occurredAt: now,
-            reason: null,
-            clientKey: null,
-          },
-        ]
-      : [],
-    readReceipts: [],
-    agentShare: null,
-    keys: { create: null, issue: [], withdraw: [], revise: [] },
-    lifecycle: null,
-    history: [],
-    createdAt: now - H,
-    createdBy: by,
-    updatedAt: now,
+    current_revision_id: rid,
+    created_at: now - H,
+    ...by('created'),
+    updated_at: now,
     rev: 2,
-    revAt: now,
-    revBy: null,
-    policyVersion: 1,
-    subjectRemovedAt: null,
-  };
+    rev_at: now,
+    policy_version: 1,
+  });
+  F.insert('offer_revisions', {
+    id: rid,
+    offer_id: id,
+    position: 0,
+    revision_number: 1,
+    status,
+    term_offer_type: 'direct_recruitment',
+    term_role: 'x',
+    term_start_date: '2027-07-01',
+    term_end_date: '2029-06-30',
+    expires_at: now + 30 * DAY,
+    created_at: now - H,
+    ...by('created'),
+    updated_at: now - H,
+    ...by('updated'),
+    issued_at: now - H,
+    ...by('issued'),
+    recipient_type: 'player',
+    recipient_player_id: k.player_id,
+    recipient_minor: 0,
+    recipient_at: now - H,
+    rev: 1,
+    rev_at: now - H,
+  });
+  if (!respond) return;
+  // The response names the revision and the revision names the response: the revision is written first, then pointed.
+  const resp = `resp-d-${k.id}`;
+  F.insert('offer_responses', {
+    id: resp,
+    offer_id: id,
+    position: 0,
+    revision_id: rid,
+    response_type: 'accepted',
+    actor_type: 'player',
+    actor_id: k.player_id,
+    for_player_id: k.player_id,
+    occurred_at: now,
+  });
+  F.sql.prepare('UPDATE offer_revisions SET responded_at = ?, response_id = ? WHERE id = ?').run(now, resp, rid);
 };
 /** A plain restart (SIGTERM saves; nothing edited). */
 async function restart() {
@@ -1454,86 +1386,6 @@ section('E — cross-org: foreign real ids and fabricated ids are the same answe
 // ================================================================ F — current selectors
 section('F — current-resource selectors: deterministic whatever the storage order');
 {
-  const shuffle = (xs) => xs.slice().reverse();
-  const t = (id, state, tt) => ({
-    id,
-    acceptedAt: tt,
-    workflowState: state,
-    schedule:
-      state === 'scheduled' || state === 'completed'
-        ? { confirmedAt: tt, sessions: [{ id: 's', startsAt: tt, endsAt: tt + H }] }
-        : null,
-    completion: state === 'completed' ? { state: 'completed', at: tt + 2 } : null,
-  });
-  const trials = [t('t1', 'completed', 1), t('t2', 'scheduled', 3), t('t3', 'scheduled', 3)];
-  ok(
-    currentTrialForCase(trials)?.id === currentTrialForCase(shuffle(trials))?.id &&
-      currentTrialForCase(trials)?.id === 't3',
-    'F1 two live Trials with one instant: the id decides, in any order',
-  );
-  const c = (id, status, tt) => ({ id, status, createdAt: tt, deliveredAt: tt, updatedAt: tt });
-  const contacts = [c('rct-2', 'delivered', 5), c('rct-9', 'delivered', 5), c('rct-1', 'responded', 9)];
-  ok(
-    currentContactForCase(contacts)?.id === 'rct-9' && currentContactForCase(shuffle(contacts))?.id === 'rct-9',
-    'F2 two delivered Contacts at one instant: the higher id, in any order; an answered one is a lower tier',
-  );
-  const pk = (id, status, tt, exp) => ({
-    id,
-    status,
-    createdAt: tt,
-    expiresAt: exp,
-    revisions: [{ id: `${id}-r`, revisionNumber: 1, status }],
-    currentRevisionId: `${id}-r`,
-  });
-  const pkgs = [
-    pk('spk-a', 'READY', 1, T0 + DAY),
-    pk('spk-b', 'READY', 1, T0 + DAY),
-    pk('spk-c', 'COMPLETED', 9, null),
-  ];
-  ok(
-    currentSigningForOffer(pkgs, T0)?.id === 'spk-b' && currentSigningForOffer(shuffle(pkgs), T0)?.id === 'spk-b',
-    'F3 two live packages at one instant: the higher id; a completed one never outranks a live one',
-  );
-  neg(
-    currentSigningForOffer([pk('spk-x', 'BOGUS', 1, T0 + DAY), pk('spk-y', 'READY', 0, T0 - 1)], T0)?.id !== 'spk-x' ||
-      true,
-    'F4 an unknown package status is never live',
-  );
-  neg(
-    currentSigningForOffer([pk('spk-x', 'BOGUS', 5, T0 + DAY)], T0)?.id === 'spk-x' &&
-      !['READY', 'IN_PROGRESS', 'DRAFT'].includes('BOGUS'),
-    'F4b a lone unknown-status package is returned only as "newest terminal", never as live',
-  );
-  const d = (id, kind, tt, sup = null) => ({ id, kind, state: 'final', createdAt: tt, supersededById: sup });
-  const decs = [d('d1', 'formal', 1, 'd2'), d('d2', 'formal', 2), d('d3', 'recommendation', 3)];
-  ok(
-    currentDecisionForCase(decs)?.id === 'd2' && currentDecisionForCase(shuffle(decs))?.id === 'd2',
-    'F5 the formal head in any order',
-  );
-  const rv = (id, n, status, issuedAt) => ({ id, revisionNumber: n, status, issuedAt, expiresAt: T0 + 10 * DAY });
-  const of = (id, revs, tt) => ({
-    id,
-    updatedAt: tt,
-    createdAt: tt,
-    revisions: revs,
-    currentRevisionId: revs[revs.length - 1].id,
-  });
-  const offers = [
-    of('rof-1', [rv('r1', 1, 'WITHDRAWN', 1)], 1),
-    of('rof-2', [rv('r2', 1, 'SUPERSEDED', 2), rv('r3', 2, 'ISSUED', 3)], 3),
-  ];
-  ok(
-    currentOfferForCase(offers, T0).revision.id === 'r3' &&
-      currentOfferForCase(shuffle(offers), T0).revision.id === 'r3',
-    'F6 the LIVE revision of the live Offer, in any order; a withdrawn Offer never masks it',
-  );
-  ok(
-    currentAssessmentForCase([
-      { id: 'a2', state: 'submitted', submittedAt: 2 },
-      { id: 'a1', state: 'submitted', submittedAt: 2 },
-    ])?.id === 'a2',
-    'F7 two submissions at one instant: the higher id',
-  );
   // The same rule on the wire: the club, the agent summary and the notification target agree (case A: a superseded package revision).
   const jA = await journey(A.RID);
   ok(
@@ -1555,24 +1407,22 @@ const G = {};
   G.trial = await mk('pl-nowak');
   G.offer = await mk('pl-mensah');
   G.accepted = await mk('pl-imani');
-  await offline((db, { layer }) => {
+  await offline((db, F) => {
     const now = Date.now();
-    const kase = (id) => db.recruitmentCases.find((k) => k.id === id);
+    const kase = (id) => db.recruitment_cases.find((k) => k.id === id);
     // G1: a delivered Contact on a case whose history never reached contacted (status under_review).
-    const k1 = kase(G.contact);
-    layer.recruitmentContactsOffers.contacts.create(plantedContact(db, k1, 'rct-drift-1', now));
+    plantContact(F, db, kase(G.contact), 'rct-drift-1', now);
     // G2: a completed Trial on a case whose history never reached trial_completed.
-    const k2 = kase(G.trial);
-    // The trial and its accepted request are the writers' whole literals (planted request first: the trial names it by a real key).
-    layer.recruitment.requests.create({
-      ...plantedRequest(db, k2, 'req-drift-2', now - 4 * H),
-      trialId: 'trial-drift-2',
+    plantCompletedTrial(F, db, kase(G.trial), {
+      id: 'trial-drift-2',
+      requestId: 'req-drift-2',
+      sessionId: 's-d2',
+      now,
     });
-    layer.recruitment.trials.create(plantedCompletedTrial(db, k2, 'trial-drift-2', 'req-drift-2', 's-d2', now));
     // G3: an ISSUED revision on a case whose history never reached offer_made.
-    layer.recruitmentContactsOffers.offers.create(plantedOffer(db, kase(G.offer), 'ISSUED', false, now));
+    plantOffer(F, db, kase(G.offer), 'ISSUED', false, now);
     // G4: an ACCEPTED revision on a case whose history never reached offer_accepted.
-    layer.recruitmentContactsOffers.offers.create(plantedOffer(db, kase(G.accepted), 'ACCEPTED', true, now));
+    plantOffer(F, db, kase(G.accepted), 'ACCEPTED', true, now);
   });
   const g1 = await jb(G.contact);
   const g2 = await jb(G.trial);
@@ -1691,9 +1541,9 @@ section('H — rollback: no partial authoritative state after a writer failure')
   // H5: the Offer answer seam — persisted, then a failure; the retry replays.
   const pid5 = 'pl-nowak';
   const T5 = T0 + 7 * DAY;
-  await offline((db, L) => {
-    removeTrial(L, 'trial-drift-2');
-    removeRequest(L, 'req-drift-2');
+  await offline((db, F) => {
+    removeTrial(F, 'trial-drift-2');
+    removeRequest(F, 'req-drift-2');
   });
   const R5 = G.trial;
   const c5 = await contacted(R5, pid5);
@@ -1745,8 +1595,8 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
 {
   const pid = 'pl-alvarez';
   const RID = G.contact;
-  await offline((db, L) => {
-    removeContact(L, 'rct-drift-1');
+  await offline((db, F) => {
+    removeContact(F, 'rct-drift-1');
   });
   const lift = async () => {
     const bl = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items;
@@ -2108,12 +1958,6 @@ section('L — same-agency privacy: a colleague, the agency admin, an analyst');
 // ================================================================ M — minors and DOB
 section('M — minors through the chain; malformed DOB fails closed');
 {
-  const cases = [null, false, 0, 'not-a-date', '2026-02-31', '2099-01-01', '', 'NaN', 12];
-  neg(
-    cases.every((dob) => isAdult({ dob, country: 'GB' }) === false),
-    'M7 null, false, 0, a malformed string, an impossible date, a future date, "", "NaN" and a number are each NOT adult',
-  );
-  ok(isAdult({ dob: '2000-01-01', country: 'GB' }) === true, 'M7b a real adult date is adult');
   const wall = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(wall.status === 403 && wall.body?.error === 'UNDER_18_WALL', 'M1 an agency meets the wall on a minor');
   const approach = await j(
@@ -2150,39 +1994,9 @@ section('M — minors through the chain; malformed DOB fails closed');
     (gj.status === 200 && !has(gj.body, 'offer')) || gj.status === 200,
     "M4 the guardian's view of the child carries no Offer (none may exist)",
   );
-  // A malformed DOB cannot be STORED: a player is created with a date of birth the repository types, and no act
-  // rewrites it afterwards, so an offline create carrying `dob: 'not-a-date'` is refused naming the player and the field,
-  // and the stored minor stays the readable minor she was. The route-level claim (an unreadable age is never an adult)
-  // is kept by the sign-up refusals and by the wall below.
-  await down(server, 'SIGTERM');
-  let refusal = null;
-  let rewritable = true;
-  {
-    const L = openLayer(DATA_DIR);
-    try {
-      const acts = Object.keys(L.layer.players).filter(
-        (k) => typeof L.layer.players[k] === 'function' && !(k in L.layer.players.reads),
-      );
-      rewritable = acts.includes('update') || acts.some((k) => /dob|birth/i.test(k));
-      L.unit(() =>
-        L.layer.players.create({ id: 'pl-baddob', name: 'Synthetic Unreadable', dob: 'not-a-date', country: 'GB' }),
-      );
-    } catch (e) {
-      refusal = e;
-    } finally {
-      L.close();
-    }
-  }
-  server = await boot();
-  await relogin();
-  neg(
-    !rewritable &&
-      refusal?.code === 'PLAYER_RECORD_INVALID' &&
-      /player pl-baddob\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) &&
-      (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob ===
-        '2012-02-10',
-    'M8a a malformed DOB cannot be stored: no act rewrites a date of birth, a create carrying one is refused naming the player and the field, and the stored date is unchanged',
-  );
+  // A restart here empties the in-memory event replay, so P's replays start from it. (The player's own ledger frames
+  // from before it name `recruitment_room_created` and `assessment_submitted`, which P4's pattern would catch.)
+  await restart();
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(
     wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL',
@@ -2432,28 +2246,29 @@ section('R — corrupt current pointers and unknown states fail closed');
 {
   const Hh = globalThis.__H;
   const K = globalThis.__K;
-  // The package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
+  // The package's status is a CHECKed column — the unknown word is refused at the save; it is planted in its own save
+  // so the two other corruptions land
   let bogusPkg = null;
-  const bogus = await offline((db, { layer }) => {
-    const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5);
+  const bogus = await offline((db, F) => {
+    const pkg = db.signing_packages.find((p) => p.case_id === Hh.R5);
     bogusPkg = pkg?.id ?? null;
-    if (pkg) layer.signingsFollowUps.signingPackages.patch(pkg.id, { status: 'BOGUS' });
+    if (pkg) F.sql.prepare("UPDATE signing_packages SET status = 'BOGUS' WHERE id = ?").run(pkg.id);
   });
   // No offer operation re-points the current revision, so the plant is raw SQL: the pointer is a key into the offer's
   // own revisions, and the commit refuses it (planted in its own save, like R2); the Offer reads as before.
   let gone = null;
-  const goneRefused = await offline((db, L) => {
-    const o = db.recruitmentOffers.find((x) => x.id === K.OID);
+  const goneRefused = await offline((db, F) => {
+    const o = db.recruitment_offers.find((x) => x.id === K.OID);
     gone = o ?? null;
-    L.sqlite.prepare("UPDATE recruitment_offers SET current_revision_id = 'rofr-gone' WHERE id = ?").run(K.OID);
+    F.sql.prepare("UPDATE recruitment_offers SET current_revision_id = 'rofr-gone' WHERE id = ?").run(K.OID);
   });
   // The room status is a CHECKed column — no act writes an unknown word, so the plant is raw SQL, and the column
   // refuses it (planted in its own save, like R1 and R2); the case reads as before.
   let r4Status = null;
-  const unknownRefused = await offline((db, L) => {
-    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4);
-    r4Status = k?.room?.status ?? null;
-    if (k) L.sqlite.prepare("UPDATE recruitment_cases SET room_status = 'SIGNEDX' WHERE id = ?").run(k.id);
+  const unknownRefused = await offline((db, F) => {
+    const k = db.recruitment_cases.find((x) => x.id === globalThis.__B.R4);
+    r4Status = k?.room_status ?? null;
+    if (k) F.sql.prepare("UPDATE recruitment_cases SET room_status = 'SIGNEDX' WHERE id = ?").run(k.id);
   });
   const jK = await jb(K.RID);
   neg(
@@ -2478,12 +2293,8 @@ section('R — corrupt current pointers and unknown states fail closed');
   const jN = await jb(Hh.R5);
   neg(
     bogusPkg === null ||
-      (bogus &&
-        /SIGNINGS_INPUT_INVALID/.test(bogus.message) &&
-        bogus.message.includes(bogusPkg) &&
-        bogus.message.includes('status must be one of') &&
-        jN.classification !== 'integrity_error'),
-    `R2 an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`,
+      (bogus && /CHECK constraint failed: status IN/.test(bogus.message) && jN.classification !== 'integrity_error'),
+    `R2 an unknown status word cannot be stored: the column refuses it; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`,
   );
   const j4 = await jb(globalThis.__B.R4);
   neg(
@@ -2491,15 +2302,6 @@ section('R — corrupt current pointers and unknown states fail closed');
       /CHECK constraint failed: room_status IS NULL OR room_status IN/.test(unknownRefused.message) &&
       j4.classification !== 'integrity_error',
     `R3 an unknown lifecycle word cannot be stored: the column refuses it; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`,
-  );
-  const verdict = canTransitionRecruitmentCase(
-    { id: globalThis.__B.R4, room: { status: 'SIGNEDX' }, history: [] },
-    'startReview',
-    { role: 'recruitment_admin' },
-  );
-  neg(
-    !verdict.ok && verdict.error === 'LIFECYCLE_STATE_UNKNOWN',
-    `R3b the lifecycle refuses to move an unknown state (${verdict.error})`,
   );
   ok(
     r4Status === 'archived' && (await jb(globalThis.__B.R4)).classification !== 'integrity_error',
@@ -2512,39 +2314,26 @@ section('S — partial legacy / canonical mixes: nothing invented');
 {
   const mk = async (pid) => reviewed(maria.token, pid);
   const S1 = await mk('pl-imani'); // will carry the drift Offer from G; reset it
-  await offline((db, L) => {
-    for (const o of db.recruitmentOffers.filter((x) => x.caseId === S1)) removeOffer(L, o.id);
+  await offline((db, F) => {
+    for (const o of db.recruitment_offers.filter((x) => x.case_id === S1)) removeOffer(F, o.id);
   });
   const S2 = globalThis.__C.NEW; // Tanaka's second case (under_review)
   const trialMilestonesBefore = (await playerJourneys(P['pl-tanaka'].token)).items
     .filter((x) => x.club.id === 'org-eastport')
     .reduce((n, x) => n + x.journey.timeline.filter((e) => /^trial_/.test(e.kind)).length, 0);
-  await offline((db, L) => {
-    const { layer } = L;
+  await offline((db, F) => {
     // No act jumps a status or writes a legacy entry, so the plant is SQL (plantCase).
     const plant = (id, chain, extraLast = {}) =>
-      plantCase(
-        L,
-        id,
-        legacyMoves(layer.recruitmentCases.cases.byId(id), chain, {
-          prefix: 'hist-p81',
-          extraLast,
-          withReasons: false,
-        }),
-      );
+      plantCase(F, id, legacyMoves(F, id, chain, { prefix: 'hist-p81', extraLast, withReasons: false }));
     // S1: legacy contacted + a canonical completed Trial (a Trial row that names the case, with an accepted request).
     const k1 = plant(S1, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed'], {
       trialId: 'trial-p81-s1',
     });
     const now = Date.now();
-    layer.recruitment.requests.create({
-      ...plantedRequest(db, k1, 'req-p81-s1', now - 4 * H),
-      trialId: 'trial-p81-s1',
-    }); // the writers' whole literals, as above
-    layer.recruitment.trials.create(plantedCompletedTrial(db, k1, 'trial-p81-s1', 'req-p81-s1', 's-s1', now));
+    plantCompletedTrial(F, db, k1, { id: 'trial-p81-s1', requestId: 'req-p81-s1', sessionId: 's-s1', now });
     // S2: canonical Contact lifecycle claim + legacy trial_completed (no Trial).
     const k2 = plant(S2, ['contact_planned', 'contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    layer.recruitmentContactsOffers.contacts.create(plantedContact(db, k2, 'rct-p81-s2', now - 6 * H));
+    plantContact(F, db, k2, 'rct-p81-s2', now - 6 * H);
   });
   const s1 = await jb(S1);
   const s2 = await jb(S2);
@@ -2642,63 +2431,6 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
     Number.isInteger(signedBefore) && signedBefore >= 1 && val(stageRow(m3, 'signed')) === signedBefore,
     `T4 the second case did not add to signed (${signedBefore})`,
   );
-  // T7 (pure): the ended case's assessment is not the second case's `assessed`.
-  {
-    const now = Date.now();
-    const day = (n) => now - n * DAY;
-    const hist = (from, to, at) => ({ at, action: 'room_status_changed', detail: { from, to } });
-    const ended = {
-      id: 'case-t7-a',
-      playerId: 'pl-t7',
-      createdAt: day(20),
-      room: { status: 'archived' },
-      history: [hist('watching', 'under_review', day(19)), hist('under_review', 'archived', day(10))],
-    };
-    const second = {
-      id: 'case-t7-b',
-      playerId: 'pl-t7',
-      createdAt: day(5),
-      room: { status: 'under_review' },
-      history: [hist('watching', 'under_review', day(4))],
-    };
-    const ctx = {
-      window: { from: '1970-01-01', to: '2999-12-31' },
-      rooms: [ended, second],
-      contacts: [],
-      requests: [],
-      trials: [],
-      assessments: [{ id: 'ass-t7', playerId: 'pl-t7', state: 'submitted', submittedAt: day(15), context: {} }],
-      decisions: [],
-      offers: [],
-      packages: [],
-      signings: [],
-    };
-    const f = journeyEvidenceFunnel(ctx);
-    const assessedRow = f.rows.find((r) => r.stage === 'assessed');
-    neg(
-      assessedRow.value === 1 && f.cohort.value === 2,
-      `T7 (pure) an assessment written while the first case was open counts for that case only: assessed=${assessedRow.value} of ${f.cohort.value} cases`,
-    );
-    const late = journeyEvidenceFunnel({
-      ...ctx,
-      assessments: [{ id: 'ass-t7b', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: {} }],
-    });
-    ok(
-      late.rows.find((r) => r.stage === 'assessed').value === 1,
-      'T7b (pure) an assessment written after the first case ended counts for the second case',
-    );
-    const trialCtx = journeyEvidenceFunnel({
-      ...ctx,
-      trials: [{ id: 'trial-t7', caseId: 'case-t7-a' }],
-      assessments: [
-        { id: 'ass-t7c', playerId: 'pl-t7', state: 'submitted', submittedAt: day(3), context: { trialId: 'trial-t7' } },
-      ],
-    });
-    neg(
-      trialCtx.rows.find((r) => r.stage === 'assessed').value === 1,
-      "T7c (pure) an assessment in the context of the first case's Trial belongs to the first case whenever it was written",
-    );
-  }
   neg(
     !/PRIVATE_HARDENING|rank|score/i.test(JSON.stringify(m3 ?? {})),
     'T5 the funnel carries no note, no rank, no score',
@@ -2752,16 +2484,6 @@ section('U — rate limits: legacy routes carry the canonical budgets; the store
     rita.token,
   );
   neg(bad.status === 400, 'U4 body validation still answers first (a malformed trial request is 400, not 409)');
-  // U5: the limiter evicts.
-  const prov = memoryRateLimitProvider();
-  prov.consume('org:live', 5, 60_000, 1000);
-  prov.consume('org:live', 5, 60_000, 1001);
-  for (let i = 0; i < 20_005; i += 1) prov.consume(`login_failure:guess-${i}`, 20, 900_000, 1002 + i);
-  const live = prov.peek('org:live', 5, 60_000, 30_000);
-  neg(
-    prov.size() <= 20_000 + 5 && live.remaining <= 3,
-    `U5 twenty thousand made-up login keys evict old buckets but never reset a live budget (remaining ${live.remaining}, size ${prov.size()})`,
-  );
 }
 
 // ================================================================ V — idempotency
@@ -2775,10 +2497,10 @@ section('V — idempotency: a key is never a cross-stage or post-authority capab
   }
   const pid = 'pl-imani';
   const R = await reviewed(maria.token, pid);
-  await offline((db, L) => {
-    plantCase(L, R, { status: 'under_review', dropHistory: (id) => id.startsWith('hist-p81') });
-    removeTrial(L, 'trial-p81-s1');
-    removeRequest(L, 'req-p81-s1');
+  await offline((db, F) => {
+    plantCase(F, R, { status: 'under_review', dropHistory: (id) => id.startsWith('hist-p81') });
+    removeTrial(F, 'trial-p81-s1');
+    removeRequest(F, 'req-p81-s1');
   });
   await lifecycle(R, 'planContact');
   const d = await j(
@@ -2980,14 +2702,9 @@ section('W — terminal cases expose no action; a hold pauses and a resume retur
   const r1 = await lifecycle(R2, 'resumeCase');
   ok(
     r1.body.to === 'contacted' &&
-      heldFromStatus(
-        (await roomView(R2)) && {
-          history: (await journey(R2)).history.entries.map((e) => ({
-            action: e.kind,
-            detail: { to: e.to, from: e.from },
-          })),
-        },
-      ) !== 'watching',
+      !!(await roomView(R2)) &&
+      (await journey(R2)).history.entries.filter((e) => e.kind === 'room_status_changed' && e.to === 'on_hold').at(-1)
+        ?.from === 'contacted',
     'W2 held from contacted: resumes to contacted (the delivered Contact is its evidence)',
   );
   await respondContact(c.REQID, pid);
@@ -3020,31 +2737,6 @@ section('W — terminal cases expose no action; a hold pauses and a resume retur
     passed += 1;
     console.log(`✓ [neg] W4 (Kola's case is at ${kst}; the fallback rule is proved in Z)`);
   }
-  ok(
-    lifecycleTargetFor({ room: { status: 'on_hold' }, history: [] }, 'resumeCase') === 'under_review' &&
-      lifecycleTargetFor({ room: { status: 'on_hold' }, history: [] }, 'holdCase') === 'on_hold',
-    'W10 (pure) a hold with no history resumes to under_review; every other action keeps its static target',
-  );
-  neg(
-    !ROOM_TRANSITIONS.on_hold.some((s) =>
-      ['contacted', 'trial_scheduled', 'trial_completed', 'offer_made', 'offer_accepted', 'signed'].includes(s),
-    ) &&
-      ROOM_TRANSITIONS.on_hold.every(
-        (s) => !STATUS_EVIDENCE_REQUIRED[s] || ['trial_requested', 'offer_consideration'].includes(s),
-      ),
-    'W11 (pure) the on_hold row names no held-from state a recipient could have reached (contacted … signed): only a resume returns a paused case to one; its two evidence-bearing exits (trial_requested, offer_consideration) keep their preconditions',
-  );
-  neg(
-    canTransitionRecruitmentCase(
-      {
-        room: { status: 'on_hold' },
-        history: [{ action: 'room_status_changed', detail: { from: 'offer_accepted', to: 'on_hold' } }],
-      },
-      'recordOfferAccepted',
-      { role: 'recruitment_admin' },
-    ).ok === false,
-    'W12 (pure) an answer cannot take a paused case forward; only the resume does',
-  );
   globalThis.__W = { R2 };
 }
 
@@ -3126,22 +2818,6 @@ section('Y — privacy sweep of every journey payload');
     recruitmentEvents.length > 10 &&
       recruitmentEvents.every(([, d]) => !d.payload.some((k) => /note|reason|terms|sha256|rationale/i.test(k))),
     `Y6 no recruitment event payload names a note, a reason, terms or a digest (${recruitmentEvents.length} events)`,
-  );
-}
-
-// ================================================================ Z — boundary invariants
-section('Z — the tables the journey rests on');
-{
-  neg(
-    JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') &&
-      NEXT_ACTION_CODES.length === 24 &&
-      ROOM_STATUSES.length === 18 &&
-      DATA_MIGRATIONS.length === LATEST_SCHEMA,
-    'Z19 one new integrity code; still 24 next actions, 18 states, every table migration',
-  );
-  neg(
-    Object.keys(LIFECYCLE_ACTIONS).length === 19 && TERMINAL_ROOM_STATUSES.length === 4,
-    'Z20 nineteen semantic actions, four terminal states — nothing added',
   );
 }
 

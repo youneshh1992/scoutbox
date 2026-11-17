@@ -35,6 +35,20 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'recruitment/journeyAdversarial': {
+    moved: [
+      {
+        checks: 1,
+        to: 'scripts/testPlatformHelpers.mjs',
+        why: "U5 drove the in-memory rate-limit provider in the battery's process to see it evict without resetting a live budget; that is a unit check of the provider.",
+      },
+      {
+        checks: 1,
+        to: 'scripts/testIdentityRepositories.mjs',
+        why: 'M8a created a player with a malformed date of birth through the players repository offline and checked the refusal and that the repository has no generic update; the column only checks the length, so the refusal is the repository\'s typing, a unit check of it (the create refusals list; "no generic update" was already there).',
+      },
+    ],
+  },
   'platform/contracts': {
     moved: [
       {

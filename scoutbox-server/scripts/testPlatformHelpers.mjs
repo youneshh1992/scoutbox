@@ -10,6 +10,7 @@ import {
   createRateLimiter,
   installRateLimitInspection,
   limitCheck,
+  memoryRateLimitProvider,
   refuseWhenLimited,
 } from '../domains/platform/rateLimit.mjs';
 import { createFaultLayer, parseFaultRules } from '../domains/platform/faults.mjs';
@@ -92,6 +93,16 @@ test('rate-limit checks: no limiter limits nothing; a limited action answers 429
   assert.equal(sent.status, 429);
   assert.equal(sent.body.error, 'RATE_LIMITED');
   assert.equal(sent.body.action, 'busy');
+});
+
+test('the in-memory limiter evicts old buckets past its cap and never resets a live budget', () => {
+  const prov = memoryRateLimitProvider();
+  prov.consume('org:live', 5, 60_000, 1000);
+  prov.consume('org:live', 5, 60_000, 1001);
+  for (let i = 0; i < 20_005; i += 1) prov.consume(`login_failure:guess-${i}`, 20, 900_000, 1002 + i);
+  const live = prov.peek('org:live', 5, 60_000, 30_000);
+  assert.ok(prov.size() <= 20_000 + 5, `size ${prov.size()}`);
+  assert.ok(live.remaining <= 3, `remaining ${live.remaining}`);
 });
 
 test('rate-limit inspection: each live bucket by action and key with what it spent; no route when not enabled', () => {
