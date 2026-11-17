@@ -66,6 +66,11 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   `audience_*`, `ref_id`, `by_*`) stay `String` for now.
 - SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
+- `npm run sql:check` (part of `e2e:check`) prepares every query whose SQL the source spells out against the
+  migrated schema, and checks its `?`s against the argument list when that is written out. It reads literals,
+  constants, row modules' `columns`/`table`/`qualified`, `let`s, and calls to helpers in the same module; SQL
+  built with `string.join` or passed in from another module isn't read (`gleam dev sql-check --verbose` lists
+  those). Prefer building a query from these, so it is checked.
 - A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
   TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
 - A battery's checks of the rules themselves live in the TypeScript tree's `scripts/rules/<domain>/<battery>.mjs`.

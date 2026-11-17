@@ -1,13 +1,17 @@
 //// `gleam dev [out]`: regenerate the row and vocabulary modules from priv/migrations into `out` (default
 //// `src`). Use `npm run codegen`, which also formats them; `npm run codegen:check` fails when the committed
-//// modules differ from what the migrations generate. Developer tooling only: nothing under dev/ ships.
+//// modules differ from what the migrations generate. `gleam dev sql-check [--verbose]` (`npm run sql:check`):
+//// prepare every query the source spells out against the migrated schema (`scoutbox/sql_check`). Developer
+//// tooling only: nothing under dev/ ships.
 
 import argv
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import scoutbox/codegen.{Ided, RefersTo, Shared, Untyped}
+import scoutbox/sql_check
 import simplifile
 
 /// The vocabularies several tables share, declared once. Each must be exactly some column's CHECK list.
@@ -1069,10 +1073,14 @@ pub fn schema() -> String {
 }
 
 pub fn main() -> Nil {
-  let out = case argv.load().arguments {
-    [out, ..] -> out
-    [] -> "src"
+  case argv.load().arguments {
+    ["sql-check", ..flags] -> check_sql(list.contains(flags, "--verbose"))
+    [out, ..] -> generate(out)
+    [] -> generate("src")
   }
+}
+
+fn generate(out: String) -> Nil {
   let schema = schema()
   let _ =
     simplifile.delete_all([out <> "/scoutbox/rows", out <> "/scoutbox/vocab"])
@@ -1083,4 +1091,59 @@ pub fn main() -> Nil {
     let assert Ok(_) = simplifile.write(path, g.source)
     io.println("wrote " <> path)
   })
+}
+
+fn check_sql(verbose: Bool) -> Nil {
+  let assert Ok(files) = simplifile.get_files("src")
+  let sources =
+    files
+    |> list.filter(string.ends_with(_, ".gleam"))
+    |> list.sort(string.compare)
+    |> list.map(fn(f) {
+      let assert Ok(source) = simplifile.read(f)
+      #(f, source)
+    })
+  let report = case sql_check.check(sources, schema()) {
+    Ok(report) -> report
+    Error(file) -> panic as { "sql-check: glance can't parse " <> file }
+  }
+  case verbose {
+    True ->
+      list.each(report.unresolved, fn(u) {
+        io.println(where(u.0) <> ": not spelt out: " <> u.1)
+      })
+    False -> Nil
+  }
+  list.each(report.problems, fn(p) {
+    io.println(where(p.site) <> ": " <> p.message)
+    io.println("  " <> string.replace(p.sql, "\n", "\n  "))
+  })
+  io.println(
+    "sql-check: "
+    <> int.to_string(report.checked)
+    <> " queries prepared against the schema; "
+    <> int.to_string(list.length(report.unresolved))
+    <> " not spelt out in the source"
+    <> case verbose {
+      True -> ""
+      False -> " (--verbose lists them)"
+    },
+  )
+  case report.problems {
+    [] -> Nil
+    problems ->
+      panic as {
+        "sql-check: " <> int.to_string(list.length(problems)) <> " problems"
+      }
+  }
+}
+
+fn where(site: sql_check.Site) -> String {
+  site.file
+  <> ":"
+  <> int.to_string(site.line)
+  <> case site.via {
+    Some(line) -> " (as called at line " <> int.to_string(line) <> ")"
+    None -> ""
+  }
 }

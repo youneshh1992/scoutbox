@@ -6,7 +6,7 @@ Ideas for making the server's SQL safer and its generated code more useful. They
 enums and CHECK bools. Its functions take a bare `sqlight.Connection`, which bypasses `Tx`/`Read` and our
 statement cache. And it can't express composed SQL. Some of its ideas are still worth taking.
 
-None of this is implemented. Each item needs agreement on its design first.
+#1 is implemented. Each of the others needs agreement on its design first.
 
 ## Where we stand
 
@@ -26,7 +26,7 @@ that ties each `?` to its column is reliable for simple shapes. It went wrong on
 
 ## 1. Check every static query against the schema
 
-**Cost:** low. **Value:** high.
+**Cost:** low. **Value:** high. **Status:** done: `npm run sql:check` (`dev/scoutbox/sql_check.gleam`).
 
 Add a dev check (`npm run sql:check`, run by `e2e:check`) that:
 
@@ -39,15 +39,15 @@ Add a dev check (`npm run sql:check`, run by `e2e:check`) that:
 4. Where the argument list is written out at the call site, it fails if the number of `?` placeholders differs
    from the list's length.
 
-This catches errors in branches no battery happens to run. A throwaway Python version of step 2 extracted 419
-of the 550 call sites. A `glance` version should also resolve module-local aliases (`columns`, `table` passed as
-parameters), which the throwaway one missed.
+This catches errors in branches no battery happens to run.
 
-Open questions:
-
-- Should a call the checker can't resolve be reported, or silently skipped? Reporting it makes coverage
-  visible, but most of those calls are intentionally dynamic.
-- Should it also `EXPLAIN` each statement and keep the plans? That could later flag full scans on hot paths.
+As built, the check also follows calls to functions in the same module, up to three deep. It binds their
+parameters to what each call passes, so helpers like `offers.select(read, "id = ?", args)` are checked once per
+distinct SQL their callers make, including the argument count. On the first run it prepared 858 statements and
+found no problems. 46 queries are left unresolved: SQL built with `string.join`, cursor clauses, placeholder
+lists built from a list's length, and helpers called from another module. Unresolved queries are counted in
+the summary and listed by `--verbose`, but never fail the check. Keeping `EXPLAIN` plans to flag full scans is
+left for later.
 
 ## 2. Catch arguments bound to the wrong column
 
