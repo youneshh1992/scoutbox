@@ -47,6 +47,14 @@ export const SPEC = {
     'TIMELINE_AUDIENCES',
   ],
   'domains/development/record.mjs': ['DRILLS'],
+  'domains/development/boxcam/drills.mjs': ['CAPABILITIES', 'DRILLS', 'PROVIDERS', 'LIVENESS_CHALLENGES'],
+  'domains/development/boxcam/shared.mjs': [
+    'SESSION_STATES',
+    'QUALITY',
+    'OBSERVATION_KINDS',
+    'STATE_COPY',
+    'DEV_ACTIVITY_NOTE',
+  ],
   'domains/development/objectives.mjs': ['DRILL_RECORDING'],
   'grassrootsJourney.mjs': ['PROGRAMME_TRACKS'],
   'domains/discovery/shared.mjs': [
