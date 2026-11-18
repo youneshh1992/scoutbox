@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 4 | 2 | 187 / 149 | 32 / 33 | 9 to go |
+| agents | 9 | 4 | 2 | 187 / 146 | 35 / 36 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -37,7 +37,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliance` | not yet neutral | 14 → 14 | 342 | 342 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
-| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 15 | 24 / 24 | 15 cases pending |
+| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 12 | 27 / 27 | 12 cases pending |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 1 | 8 / 8 | 1 cases pending |
 | `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
 | `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
@@ -136,6 +136,7 @@ ported by hand to a gleeunit test.
 | `agents/core` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 3 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | Gleam's types can't hold its arguments: an agreement without a status null | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#effectiveFacetState` | 2 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#normaliseScope` | 3 | Gleam's types can't hold its arguments: cannot print "commercial" as a List; Gleam's types can't hold its arguments: cannot print "x" as a value of scoutbox/rows/agreement_scopes.scope_pairs; Gleam's types can't hold its arguments: cannot print undefined as a List | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#normaliseTiers` | 1 | Gleam's types can't hold its arguments: cannot print "licensed_agent" as a List | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#agentTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 4 | args[] is undefined; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -240,7 +241,6 @@ mapped, then `npm run cases`.
 | Battery | Function | Cases |
 |---|---|---|
 | `agents/core` | `domains/agents/core/shared.mjs#newFacets` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#normaliseScope` | 3 |
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 |

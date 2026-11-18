@@ -173,7 +173,8 @@ pub fn decide(
           )
           use <- guard(
             case s.scopes {
-              Some(need) -> list.any(need, list.contains(a.scope, _))
+              Some(need) ->
+                list.any(need, list.contains(agent_rules.scope_of(a.scope), _))
               None -> True
             },
             Denied("SCOPE_INSUFFICIENT", "SCOPE"),

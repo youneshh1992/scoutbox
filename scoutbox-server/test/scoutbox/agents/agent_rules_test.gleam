@@ -15,10 +15,12 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import scoutbox/agents/agent_rules
+import scoutbox/agents/representation
 import scoutbox/platform/store
 import scoutbox/rows/agent_profile_facets as facet_row
 import scoutbox/rows/agent_profiles as profile_row
 import scoutbox/rows/agreement_history as event_row
+import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/id
 import scoutbox/rows/representation_agreements as agreement_row
 import scoutbox/support
@@ -328,4 +330,33 @@ pub fn the_projections_keep_the_dispute_reason_for_the_client_test() {
   assert list.key_find(for_client, "disputeReason")
     == Ok(json.string("PRIVATE_REASON_TEXT"))
   assert list.key_find(for_client, "pending") == Ok(json.bool(False))
+}
+
+// ------------------------------------------------------------------------------------------------- scope
+
+/// D4: TypeScript's `normaliseScope` cleans raw input (none named is employment, repeats and unknown scopes are
+/// dropped, a bare string is a list of one). Here the request route refuses all of that rather than cleaning it, so
+/// the rule only reads a stored scope: none stored reads as employment, and anything else as it is.
+pub fn a_stored_scope_reads_as_employment_when_there_is_none_test() {
+  assert agent_rules.scope_of([]) == [scope_row.Employment]
+  assert agent_rules.scope_of([scope_row.Transfer]) == [scope_row.Transfer]
+  assert agent_rules.scope_of([scope_row.Commercial, scope_row.Transfer])
+    == [scope_row.Commercial, scope_row.Transfer]
+  assert scope_row.scope_from_string("x") == Error(Nil)
+}
+
+/// The same read where other domains ask who acts for a client (`agentClientBasis`): an agreement stored with no
+/// scope row (a planted one; no route writes it) acts for employment, as in TypeScript.
+pub fn the_representation_basis_reads_a_missing_scope_as_employment_test() {
+  let s = planted()
+  assert stores(
+    s,
+    agreement_sql("rep-noscope", "'usr-lead'", "'active'", "1", "NULL"),
+  )
+  let assert Ok(basis) =
+    store.read(s, fn(read) {
+      representation.basis(read, id.org_user("usr-lead"), "pl-a", now)
+    })
+  assert basis.ok
+  assert basis.scope == ["employment"]
 }

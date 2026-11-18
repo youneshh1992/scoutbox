@@ -373,6 +373,15 @@ pub fn stored(s: agreement_row.Status) -> AgreementStatus {
   }
 }
 
+/// An agreement's scope as the rules read it (`normaliseScope`): one with none stored reads as employment, the scope
+/// a request is given when it names none. No route stores an agreement without a scope.
+pub fn scope_of(stored: List(scope_row.Scope)) -> List(scope_row.Scope) {
+  case stored {
+    [] -> [scope_row.Employment]
+    _ -> stored
+  }
+}
+
 pub fn term_end_at(start_at: Int, months: Int) -> Int {
   start_at + months * month_ms
 }

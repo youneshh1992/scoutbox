@@ -6,15 +6,17 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/agents/agent_rules
 import scoutbox/passport/trust
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/id
 import scoutbox/rows/representation_agreements as agreement_row
 import sqlight
 
 /// An agreement with its ordered scope.
 pub type Agreement {
-  Agreement(row: agreement_row.Row, scope: List(String))
+  Agreement(row: agreement_row.Row, scope: List(scope_row.Scope))
 }
 
 fn with_scope(read: Read, r: agreement_row.Row) -> Result(Agreement, Fail(e)) {
@@ -22,7 +24,7 @@ fn with_scope(read: Read, r: agreement_row.Row) -> Result(Agreement, Fail(e)) {
     read,
     "SELECT scope FROM agreement_scopes WHERE agreement_id = ? ORDER BY ord",
     [id.agreement_sql(r.id)],
-    decode.at([0], decode.string),
+    decode.at([0], scope_row.scope_decoder()),
   ))
   Agreement(r, scope)
 }
@@ -100,7 +102,13 @@ pub fn basis(
   let mine = list.filter(agreements, fn(a) { a.row.agent_user_id == agent })
   case list.find(mine, fn(a) { grants_access(a.row, agent, now) }) {
     Ok(a) ->
-      Basis(True, Some(a), a.scope, Some(a.row.agency_org_id), Some("active"))
+      Basis(
+        True,
+        Some(a),
+        list.map(agent_rules.scope_of(a.scope), scope_row.scope_to_string),
+        Some(a.row.agency_org_id),
+        Some("active"),
+      )
     Error(Nil) -> {
       // A dispute outranks an expiry, which outranks anything else.
       let rank = fn(st) {

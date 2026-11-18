@@ -137,9 +137,13 @@
       {
         "function": "domains/agents/core/shared.mjs#normaliseScope",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"commercial\" as a List": 1,
+          "Gleam's types can't hold its arguments: cannot print \"x\" as a value of scoutbox/rows/agreement_scopes.scope_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a List": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#normaliseTiers",
