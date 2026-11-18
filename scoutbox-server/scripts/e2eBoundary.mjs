@@ -28,7 +28,6 @@ export const NOT_YET_NEUTRAL = [
   'agents/crossApp',
   'agents/crossAppAdversarial',
   'agents/transactions',
-  'agents/transactionsPersistence',
   'development/boxCam',
   'development/combine',
   'development/hub',

@@ -11,38 +11,23 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { AGENT_TRANSACTIONS_MIGRATION } from '../../repositories/agentTransactions.mjs';
-import {
-  partyRevisionOf,
-  snapshotStaleness,
-  actorTransitionAllowed,
-  TRANSACTION_STATUSES,
-} from '../../domains/agents/transactions/transaction.mjs';
+import { openFixture, writeFixture, SCHEMA_VERSION, TABLE_MIGRATIONS } from '../support/sqlFixture.mjs';
+import { readRows, rows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
-const STEP = AGENT_TRANSACTIONS_MIGRATION;
-const SCHEMA_VERSION = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-);
+const STEP = '0029_agent_transactions';
 /** The table migrations recorded in a data directory's file, with when each ran. */
-const appliedMigrations = (dir) => {
-  const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+const appliedMigrations = (dir) => rows(dir, 'data_migrations').map((r) => ({ id: r.id, at: r.applied_at }));
+/** Every table's rows as stored. */
+const stored = (dir) => {
+  const R = readRows(dir);
   try {
-    return st
-      .prepare('SELECT id, applied_at FROM data_migrations ORDER BY id')
-      .all()
-      .map((r) => ({ id: r.id, at: r.applied_at }));
+    return R.all();
   } finally {
-    st.close();
+    R.close();
   }
 };
-const STORES = ['agentTransactions', 'transactionRepresentations', 'transactionDocuments'];
+const STORES = ['agent_transactions', 'transaction_representations', 'transaction_documents'];
 
 let passed = 0;
 let negatives = 0;
@@ -143,21 +128,21 @@ async function bootOn(dataDir, port) {
     },
   };
 }
-const fixture = (dir, collections) => writeFixture(dir, collections, { idCounter: 500_000 });
-/** Plant a state between boots through the repositories, as a route writes it, or with SQL for a state no route writes. */
+const fixture = (dir, tables) => writeFixture(dir, { rows: tables }, { idCounter: 500_000 });
+/** Plant a state between boots with plain SQL, in one transaction. */
 const plant = (dir, work) => {
-  const L = openLayer(dir);
+  const F = openFixture(dir);
   try {
-    return L.unit(() => work(L.layer, L.sqlite));
+    return F.transaction(() => work(F));
   } finally {
-    L.close();
+    F.close();
   }
 };
 
 // ============================================================ 1
 section('1 — migration 0029: registered once; the three stores are tables, EMPTY on a clean database');
 {
-  const ids = DATA_MIGRATIONS.map((m) => m.id);
+  const ids = TABLE_MIGRATIONS;
   ok(
     ids.filter((id) => id === STEP).length === 1 && SCHEMA_VERSION >= 29,
     `${STEP} is registered once; the current schema is ${SCHEMA_VERSION}`,
@@ -167,23 +152,22 @@ section('1 — migration 0029: registered once; the three stores are tables, EMP
     'every migration reaches a distinct schema version — no version is advanced twice',
   );
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-fresh-'));
-  const tables = readRecords(freshDir);
+  const tables = stored(freshDir);
   neg(
     STORES.every((s) => Array.isArray(tables[s]) && tables[s].length === 0),
     'all three tables start EMPTY — a transaction is a new concept and no existing record is reinterpreted as one',
   );
   neg(
-    !['offers', 'agencyInvoices'].some((n) => TABLE_BACKED.includes(n)),
+    !['offers', 'agency_invoices'].some((n) => n in tables),
     'no offer and no agency-invoice store exists (out of scope; the invoice store is deferred with its reason recorded)',
   );
   const recordsBefore = appliedMigrations(freshDir);
   ok(
-    stableJson(readRecords(freshDir)) === stableJson(tables) &&
+    stableJson(stored(freshDir)) === stableJson(tables) &&
       stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore),
     'reopening the file changes no table and records no migration again',
   );
-  for (const s of STORES)
-    ok(TABLE_BACKED.includes(s), `${s} is a table of the agent transactions repository, not a collection`);
+  for (const s of STORES) ok(s in tables, `${s} is a table of the agent transactions repository, not a collection`);
 }
 
 // ============================================================ 2
@@ -191,149 +175,122 @@ section('2 — a case, a context and an agreement: nothing moves, and nothing is
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-up-'));
   // A real database: players, orgs, staff, a recruitment case, an agreement, a compliance context; the seeded
-  // policies are rows of migration 0027.
-  const db = { orgs: [], players: [], guardians: [], users: [], recruitmentCases: [] };
-  db.orgs.push({
-    id: 'org-a',
-    name: 'Agency',
-    type: 'agency',
-    level: 'agency',
-    plan: 'Agency',
-    verified: false,
-    location: null,
-  });
-  db.players.push({
-    id: 'pl-1',
-    name: 'Adult Player',
-    dob: '1998-04-02',
-    country: 'GB',
-    city: 'London',
-    media: [],
-    attendance: [],
-    trialReports: [],
-    badges: [],
-    timeline: [],
-    medical: { shared: false, records: [], conditionStatus: 'unknown' },
-    level: 'amateur',
-    location: { lat: 51.5, lng: -0.1 },
-  });
-  db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
-  db.recruitmentCases.push({
-    id: 'case-1',
-    orgId: 'org-a',
-    playerId: 'pl-1',
-    playerName: 'Adult Player',
-    vacancyId: null,
-    ownerUserId: 'usr-1',
-    ownerName: 'Agency Agent',
-    stage: 'identified',
-    priority: 'medium',
-    deadline: null,
-    restricted: false,
-    assignments: [],
-    tasks: [],
-    approvals: [],
-    decision: null,
-    links: { requestIds: [], trialIds: [], signingId: null },
-    createdAt: 1,
-    history: [],
-    room: null,
-    decisionDraft: null,
-    transactionHandoff: null,
-    budget: null,
-    subjectRemovedAt: null,
-  }); // the workspace case literal (the typed table refuses a partial one)
-  // The context is a row of the compliance records, planted in the writer's whole literal.
-  db.complianceContexts = [
-    {
-      id: 'ctx-1',
-      agencyOrgId: 'org-a',
-      agentUserId: 'usr-1',
-      type: 'transfer',
-      jurisdictions: ['ENG'],
-      parties: [],
-      representations: [],
-      resolvedFacts: [],
-      reEvaluationPending: false,
-      reviewRejectedAt: null,
-      status: 'open',
-      openedAt: 1,
-      closedAt: null,
-      keys: {},
-      rev: 1,
-      revAt: 1,
-      revBy: null,
-      history: [],
-    },
-  ];
-  // The agreement is a row of the agent core, planted in the writer's whole literal (the typed create refuses a partial one).
-  db.representationAgreements = [
-    {
-      id: 'rep-1',
-      agentUserId: 'usr-1',
-      agencyOrgId: 'org-a',
-      clientKind: 'player',
-      clientId: 'pl-1',
-      jurisdiction: 'ENG',
-      exclusive: false,
-      termMonths: 12,
-      startAt: 1,
-      endAt: null,
-      status: 'active',
-      proposedAt: 1,
-      confirmedAt: 1,
-      confirmedBy: { kind: 'player', id: 'pl-1' },
-      declinedAt: null,
-      terminatedAt: null,
-      terminatedBy: null,
-      terminationReasonCode: null,
-      disputedAt: null,
-      disputeReason: null,
-      shareWithAgencyStaff: false,
-      scope: ['transfer'],
-      policyVersions: [],
-      keys: {},
-      createdAt: 1,
-      rev: 1,
-      revAt: 1,
-      revBy: null,
-      history: [],
-    },
-  ];
-  // A partial transaction record is not a row the typed table can hold: the repository refuses it, naming it.
+  // policies are rows of migration 0027. The rows are as the repositories wrote them in a probe run.
+  const db = {
+    orgs: [
+      { id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: 0, created_at: 1 },
+    ],
+    players: [
+      {
+        id: 'pl-1',
+        name: 'Adult Player',
+        birth_date: '1998-04-02',
+        country: 'GB',
+        city: 'London',
+        availability: 'not_seeking',
+        contract_status: 'unknown',
+        level: 'amateur',
+        lat: 51.5,
+        lng: -0.1,
+        medical_shared: 0,
+        medical_condition_status: 'unknown',
+        profile_signal: 30,
+      },
+    ],
+    // the agent the context and the agreement name, and the case's owner
+    org_users: [
+      { id: 'usr-1', org_id: 'org-a', name: 'Agency Agent', name_key: 'agency agent', role: 'Agent', created_at: 1 },
+    ],
+    recruitment_cases: [
+      {
+        id: 'case-1',
+        org_id: 'org-a',
+        player_id: 'pl-1',
+        player_name: 'Adult Player',
+        owner_user_id: 'usr-1',
+        owner_name: 'Agency Agent',
+        stage: 'identified',
+        priority: 'medium',
+        restricted: 0,
+        created_at: 1,
+      },
+    ],
+    compliance_contexts: [
+      {
+        id: 'ctx-1',
+        agency_org_id: 'org-a',
+        agent_user_id: 'usr-1',
+        type: 'transfer',
+        status: 'open',
+        re_evaluation_pending: 0,
+        opened_at: 1,
+        rev: 1,
+        rev_at: 1,
+      },
+    ],
+    compliance_context_jurisdictions: [{ context_id: 'ctx-1', ord: 0, member_association: 'ENG' }],
+    representation_agreements: [
+      {
+        id: 'rep-1',
+        agent_user_id: 'usr-1',
+        agency_org_id: 'org-a',
+        client_kind: 'player',
+        client_id: 'pl-1',
+        jurisdiction: 'ENG',
+        exclusive: 0,
+        term_months: 12,
+        start_at: 1,
+        status: 'active',
+        proposed_at: 1,
+        confirmed_at: 1,
+        confirmed_by_player_id: 'pl-1',
+        share_with_agency_staff: 0,
+        disclosure_club_presence: 0,
+        disclosure_contact_routing: 0,
+        disclosure_trial_visibility: 0,
+        created_at: 1,
+        rev: 1,
+        rev_at: 1,
+      },
+    ],
+    agreement_scopes: [{ agreement_id: 'rep-1', ord: 0, scope: 'transfer' }],
+  };
+  // A partial transaction record is not a row the typed table can hold: the schema refuses it.
   let refusedPartial = null;
+  const partialDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-partial-'));
   try {
-    fixture(mkdtempSync(path.join(tmpdir(), 'sbx-m26p-partial-')), {
-      ...db,
-      agentTransactions: [{ id: 'atx-partial' }],
-    });
+    fixture(partialDir, { ...db, agent_transactions: [{ id: 'atx-partial' }] });
   } catch (e) {
     refusedPartial = e;
   }
   neg(
-    refusedPartial?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-partial/.test(refusedPartial.message),
-    'a partial transaction record is refused by the repository, naming it — nothing is written',
+    /constraint failed: agent_transactions\./.test(refusedPartial?.message) &&
+      stored(partialDir).recruitment_cases.length === 0,
+    `a partial transaction record is refused by the schema — nothing is written (${refusedPartial?.message})`,
   );
   fixture(dir, db);
-  const back = readRecords(dir);
+  const back = stored(dir);
   neg(
     STORES.every((s) => back[s].length === 0),
     'no transaction row appears (the tables are empty until a route writes one)',
   );
-  const c = back.recruitmentCases.find((x) => x.id === 'case-1');
+  const c = back.recruitment_cases.find((x) => x.id === 'case-1');
   neg(
-    c && c.stage === 'identified' && c.transactionHandoff === null && !('transactionId' in c),
+    c &&
+      c.stage === 'identified' &&
+      !back.case_transaction_handoffs.some((h) => h.case_id === 'case-1') &&
+      !Object.keys(c).some((col) => /transaction/.test(col)),
     'the recruitment case did not become a transaction and gained no transaction field',
   );
-  const ctx = back.complianceContexts.find((x) => x.id === 'ctx-1');
+  const ctx = back.compliance_contexts.find((x) => x.id === 'ctx-1');
   neg(
-    ctx && ctx.status === 'open' && !ctx.transactionId && ctx.rev === 1,
+    ctx && ctx.status === 'open' && !ctx.transaction_id && ctx.rev === 1,
     'the compliance context is not reinterpreted as a transaction either',
   );
   neg(
-    back.representationAgreements.length === 1 &&
-      back.representationAgreements[0].status === 'active' &&
-      back.representationAgreements[0].rev === 1 &&
+    back.representation_agreements.length === 1 &&
+      back.representation_agreements[0].status === 'active' &&
+      back.representation_agreements[0].rev === 1 &&
       back.players.some((p) => p.id === 'pl-1'),
     'no agreement and no player row was touched',
   );
@@ -532,52 +489,60 @@ section('4 — a real workspace survives a restart byte for byte');
       .length;
     await s.stop();
   }
-  const snap = readRecords(dir);
+  const snap = stored(dir);
   const recordsAtStop = appliedMigrations(dir);
   ok(
-    snap &&
-      Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION &&
-      snap.agentTransactions.length === 1 &&
-      snap.transactionRepresentations.length === 1 &&
-      snap.transactionDocuments.length === 2,
+    Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION &&
+      snap.agent_transactions.length === 1 &&
+      snap.transaction_representations.length === 1 &&
+      snap.transaction_documents.length === 2,
     `the file holds one transaction, one representation binding and two document versions, at schema ${SCHEMA_VERSION}`,
   );
-  const row = snap.agentTransactions[0];
+  const row = snap.agent_transactions[0];
+  const of = (table, col = 'transaction_id') => snap[table].filter((r) => r[col] === row.id);
+  const parties = of('transaction_parties');
   ok(
     row.status === 'ON_HOLD' &&
-      row.holdReasonCode === 'awaiting_document' &&
-      row.parties.length === 2 &&
-      row.parties.every((p) => p.confirmedAt),
+      row.hold_reason_code === 'awaiting_document' &&
+      parties.length === 2 &&
+      parties.every((p) => p.confirmed_at),
     'the status, its reason code and both party confirmations are on disk',
   );
   // The snapshot names its evaluation row ('<context>#<n>'); the policy versions are that evaluation's own.
-  const ctxRow = snap.complianceContexts.find((c) => c.id === row.contextId);
-  const evaluation = ctxRow?.evaluations[Number(String(row.compliance?.evaluationId).split('#').pop()) - 1];
+  const evaluation = snap.compliance_evaluations.find(
+    (e) => e.id === row.compliance_evaluation_id && e.context_id === row.context_id,
+  );
   ok(
-    row.compliance?.evaluationId?.startsWith(`${row.contextId}#`) &&
-      row.compliance.partyRevision &&
-      evaluation?.policyVersions.length >= 1,
+    row.compliance_evaluation_id?.startsWith(`${row.context_id}#`) &&
+      row.compliance_party_revision &&
+      evaluation &&
+      snap.compliance_evaluation_policy_versions.filter((v) => v.evaluation_id === evaluation.id).length >= 1,
     'the compliance snapshot reference — the evaluation row of its context, the party revision and (through the evaluation) the policy versions — is on disk',
   );
   neg(
-    row.notes.length === 1 && row.terms.versions.length === 1 && row.history.length >= 8,
+    of('transaction_notes').length === 1 &&
+      of('transaction_terms_versions').length === 1 &&
+      of('transaction_history').length >= 8,
     'the scoped note, the recorded terms version and the append-only history are on disk',
   );
-  neg(row.keys && Object.keys(row.keys).length >= 2, 'the idempotency keys are on disk');
-  const chain = snap.transactionDocuments;
+  neg(of('transaction_keys').length + (row.create_key ? 1 : 0) >= 2, 'the idempotency keys are on disk');
+  const chain = snap.transaction_documents;
   neg(
-    chain.find((d) => d.version === 1).supersededBy === chain.find((d) => d.version === 2).id &&
-      chain.find((d) => d.version === 2).supersedes === chain.find((d) => d.version === 1).id,
-    'the document version chain is on disk in both directions — the old row was kept, never edited',
+    chain.find((d) => d.version === 2).supersedes_id === chain.find((d) => d.version === 1).id &&
+      snap.transaction_document_history.some(
+        (h) =>
+          h.document_id === chain.find((d) => d.version === 1).id && h.action === 'transaction_document_superseded',
+      ),
+    'the document version chain is on disk — the old row was kept and its supersession recorded, never edited',
   );
   neg(
-    !/AGENT_PRIVATE/.test(stableJson(snap.transactionDocuments)) &&
-      /ALL_TRANSACTION_PARTIES/.test(stableJson(snap.transactionDocuments)),
+    !/AGENT_PRIVATE/.test(stableJson(snap.transaction_documents)) &&
+      /ALL_TRANSACTION_PARTIES/.test(stableJson(snap.transaction_documents)),
     'each document carries the visibility class it was filed under',
   );
   neg(
-    row.revBy && row.revBy.name === 'Representing agent' && row.revBy.userId === null,
-    'the shared rev token names a ROLE on disk, not a person (defect D2)',
+    row.rev_by_label === 'Representing agent' && !Object.keys(row).some((c) => /^rev_by_(id|name)$/.test(c)),
+    'the shared rev token names a ROLE on disk, and the row has no column for a person (defect D2)',
   );
 
   s = await bootOn(dir, await freePort());
@@ -680,84 +645,79 @@ section('5 — corruption on disk is contained and named by its effect, never re
 {
   const dir = globalThis.LIVE_DIR;
   const TX = globalThis.LIVE_TX;
-  const db = readRecords(dir);
-  // Three corruptions are rows the typed tables cannot hold — the repository refuses each, naming it,
-  // and writes nothing (the fixture is one unit of work): (a) a transaction whose compliance context is gone, (b) a
-  // document whose transaction is gone, (c) a status nobody wrote.
-  const refusedWrite = (collections) => {
+  const db = stored(dir);
+  // Three corruptions are rows the typed tables cannot hold — the schema refuses each and the fixture's transaction
+  // writes nothing: (a) a transaction whose compliance context is gone, (b) a document whose transaction is gone,
+  // (c) a status nobody wrote.
+  const refusedWrite = (tables) => {
     try {
-      fixture(dir, collections);
+      fixture(dir, tables);
       return null;
     } catch (e) {
       return e;
     }
   };
   const copy = (over) => ({
-    ...structuredClone(db.agentTransactions[0]),
-    keys: {},
+    ...db.agent_transactions[0],
+    create_key: null,
+    create_fp: null,
     rev: 1,
-    notes: [],
-    terms: { versions: [] },
-    linkedThreads: [],
-    history: [],
     ...over,
   });
   const goneCtx = refusedWrite({
-    agentTransactions: [copy({ id: 'atx-ctxgone', contextId: 'ctx-gone', compliance: null })],
+    agent_transactions: [
+      copy({
+        id: 'atx-ctxgone',
+        context_id: 'ctx-gone',
+        compliance_evaluation_id: null,
+        compliance_evaluated_at: null,
+        compliance_verification_freshness: null,
+        compliance_party_revision: null,
+      }),
+    ],
   });
   neg(
-    goneCtx?.code === 'AGENT_TRANSACTIONS_REFERENCE_MISSING',
-    `(a) a transaction whose compliance context is gone is refused by the repository (${goneCtx?.message})`,
+    /FOREIGN KEY constraint failed/.test(goneCtx?.message),
+    `(a) a transaction whose compliance context is gone is refused by the schema (${goneCtx?.message})`,
   );
   const orphan = {
     id: 'txd-orphan',
-    transactionId: 'atx-gone',
-    documentType: 'mandate',
+    transaction_id: 'atx-gone',
+    document_type: 'mandate',
     visibility: 'ALL_TRANSACTION_PARTIES',
     label: 'Orphan',
     version: 1,
-    owner: { kind: 'agent', id: 'usr-x' },
-    ownerPartyRole: null,
-    uploadedBy: { kind: 'org', userId: 'usr-x', name: 'Ghost' },
-    createdAt: 1,
-    expiresAt: null,
-    evidenceRef: null,
-    supersedes: null,
-    supersededBy: null,
-    removedAt: null,
-    keys: {},
+    owner_kind: 'agent',
+    owner_id: 'usr-x',
+    uploaded_by_kind: 'org',
+    uploaded_by_id: 'usr-x',
+    uploaded_by_name: 'Ghost',
+    created_at: 1,
     rev: 1,
-    revAt: 1,
-    revBy: null,
-    history: [],
+    rev_at: 1,
   };
-  const orphaned = refusedWrite({ transactionDocuments: [orphan] });
+  const orphaned = refusedWrite({ transaction_documents: [orphan] });
   neg(
-    orphaned?.code === 'AGENT_TRANSACTIONS_REFERENCE_MISSING',
-    `(b) a document whose transaction is gone is refused by the repository — a document belongs to a transaction (${orphaned?.code})`,
+    /FOREIGN KEY constraint failed/.test(orphaned?.message),
+    `(b) a document whose transaction is gone is refused by the schema — a document belongs to a transaction (${orphaned?.message})`,
   );
-  const odd = refusedWrite({ agentTransactions: [copy({ id: 'atx-odd', status: 'HALF_WRITTEN' })] });
+  const odd = refusedWrite({ agent_transactions: [copy({ id: 'atx-odd', status: 'HALF_WRITTEN' })] });
   neg(
-    odd?.code === 'AGENT_TRANSACTIONS_INPUT_INVALID' && /atx-odd.*status/.test(odd.message),
-    `(c) a status nobody wrote is refused by the repository, naming the row (${odd?.message})`,
+    /CHECK constraint failed: status/.test(odd?.message),
+    `(c) a status nobody wrote is refused by the schema (${odd?.message})`,
   );
-  neg(stableJson(readRecords(dir)) === stableJson(db), 'and nothing of the refused writes is on disk');
+  neg(stableJson(stored(dir)) === stableJson(db), 'and nothing of the refused writes is on disk');
   // A policy version published for the jurisdiction flags the transaction's compliance context. The transaction
   // reads that flag — its snapshot is POLICY_CHANGED and authorises nothing until it is re-evaluated.
-  const ctxId = db.agentTransactions[0].contextId;
-  plant(dir, (L, sqlite) => {
-    L.complianceRecords.contexts.recordAct(ctxId, {
-      history: [
-        {
-          id: 'aud-plant-policy',
-          at: Date.now(),
-          action: 'compliance_context_policy_changed',
-          by: { kind: 'system', userId: null, name: 'policy publication' },
-          detail: { policyVersions: ['jp-eng-2026-27-1'] },
-        },
-      ],
-    });
-    sqlite.prepare('UPDATE compliance_contexts SET re_evaluation_pending = 1 WHERE id = ?').run(ctxId);
+  const ctxId = db.agent_transactions[0].context_id;
+  plant(dir, (F) => {
+    F.sql
+      .prepare(
+        `INSERT INTO compliance_context_history (id, context_id, ord, at, by_kind, by_name, action, detail_policy_version_id)
+         VALUES ('aud-plant-policy', ?, (SELECT COALESCE(MAX(ord) + 1, 0) FROM compliance_context_history WHERE context_id = ?), ?, 'system', 'policy publication', 'compliance_context_policy_changed', 'jp-eng-2026-27-1')`,
+      )
+      .run(ctxId, ctxId, Date.now());
+    F.sql.prepare('UPDATE compliance_contexts SET re_evaluation_pending = 1 WHERE id = ?').run(ctxId);
   });
   const sp = await bootOn(dir, await freePort());
   ok(sp.up, 'the server boots over a context flagged by a policy publication');
@@ -784,11 +744,11 @@ section('5 — corruption on disk is contained and named by its effect, never re
     );
     await sp.stop();
   }
-  plant(dir, (L) => L.complianceRecords.contexts.clearReEvaluation(ctxId));
+  plant(dir, (F) => F.sql.prepare('UPDATE compliance_contexts SET re_evaluation_pending = 0 WHERE id = ?').run(ctxId));
   // What a typed row CAN still carry is planted and judged on read: a snapshot taken under a party revision the current
   // facts no longer produce.
-  plant(dir, (_L, sqlite) =>
-    sqlite.prepare('UPDATE agent_transactions SET compliance_party_revision = ? WHERE id = ?').run('f'.repeat(64), TX),
+  plant(dir, (F) =>
+    F.sql.prepare('UPDATE agent_transactions SET compliance_party_revision = ? WHERE id = ?').run('f'.repeat(64), TX),
   );
   const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the planted row');
@@ -811,40 +771,12 @@ section('5 — corruption on disk is contained and named by its effect, never re
     const progress = await s.j('POST', `/org/agent/transactions/${TX}/status`, { to: 'ACTIVE' }, ana.token);
     neg(progress.status === 422, `it cannot be progressed (${progress.status} ${progress.body?.error})`);
     await s.stop();
-    const after = readRecords(dir);
+    const after = stored(dir);
     neg(
-      after.agentTransactions[0].compliance.partyRevision === 'f'.repeat(64),
+      after.agent_transactions[0].compliance_party_revision === 'f'.repeat(64),
       'the planted snapshot was not repaired on boot — the bytes are the bytes',
     );
   }
-}
-
-// ============================================================ pure staleness + machine
-section('pure — the staleness verdict and the machine are the same functions the routes use');
-{
-  const rev = partyRevisionOf({
-    parties: [],
-    agentUserId: 'a',
-    representations: [],
-    consents: [],
-    facetStates: {},
-    policyVersions: [],
-    blockedSubjectIds: [],
-    minorSubjectIds: [],
-  });
-  neg(
-    snapshotStaleness({ compliance: { evaluationId: 'e', partyRevision: 'different' } }, rev) === 'INPUTS_CHANGED',
-    'a snapshot taken under different inputs is INPUTS_CHANGED',
-  );
-  neg(
-    snapshotStaleness({}, rev) === 'NO_SNAPSHOT',
-    'no snapshot at all is NO_SNAPSHOT — the absence of an evaluation is never a clearance',
-  );
-  neg(
-    !actorTransitionAllowed('HALF_WRITTEN', 'ACTIVE') && !actorTransitionAllowed('ARCHIVED', 'ACTIVE'),
-    'an unknown status and an archived one authorise no transition',
-  );
-  ok(TRANSACTION_STATUSES.length === 10, 'the ten states the routes and this suite share');
 }
 
 const total = passed;
