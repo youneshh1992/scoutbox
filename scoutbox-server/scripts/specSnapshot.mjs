@@ -63,7 +63,7 @@ export const SPEC = {
   ],
   'domains/discovery/matching/criteria.mjs': ['MATCH_POLICY_VERSION', 'CRITERIA_SCHEMA_VERSION', 'LIMITS'],
   'domains/discovery/schemas.mjs': ['MATCH_SORTS', 'DEFAULT_MATCH_SORT'],
-  'domains/passport/shared.mjs': ['PROVENANCE', 'PROVENANCE_COPY'],
+  'domains/passport/shared.mjs': ['PROVENANCE', 'PROVENANCE_COPY', 'GAP_RULES_VERSION', 'GAP_RULE_TABLE'],
   'domains/recruitment/public.mjs': ['OPEN_ROOM_STATUSES'],
   'domains/recruitment/rooms/shared.mjs': [
     'ROOM_STATUSES',

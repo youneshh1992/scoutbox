@@ -26,7 +26,6 @@ export const NOT_YET_NEUTRAL = [
   'development/combine',
   'development/hub',
   'operations/clubOperations',
-  'passport/passport',
   'passport/trustScore',
 ];
 

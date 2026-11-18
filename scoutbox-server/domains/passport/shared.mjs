@@ -659,6 +659,8 @@ export const GAP_RULES = [
   { id: 'gap.identity_confirmed', v: 1, category: 'identity', test: (f) => !f.identityConfirmed },
   { id: 'gap.career_history', v: 1, category: 'career', test: (f) => f.historyRows === 0 },
 ];
+// The gap rules' data, without their tests: the table a client or another server reads.
+export const GAP_RULE_TABLE = GAP_RULES.map((r) => ({ id: r.id, version: r.v, category: r.category }));
 export function evaluateGaps(facts) {
   return GAP_RULES.filter((r) => r.test(facts)).map((r) => ({ id: r.id, version: r.v, category: r.category }));
 }
