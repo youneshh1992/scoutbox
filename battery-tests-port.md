@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 39 of 53 neutral]
+### Untangling [in progress: 42 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 34 batteries pass unchanged]
+### Porting, domain by domain [in progress: 35 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -116,7 +116,7 @@ of the product, so they aren't one slice.
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
-| Agents: core | 1 | the transaction workspace is partly in |
+| Agents: core, core persistence | 2 | the transaction workspace is partly in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -155,8 +155,15 @@ are for surprising facts or points that later work depends on, not implementatio
       were needed. The match engine is one set of modules (`discovery/matching/`), which Nobody Missed now shares.
       The org audit feed gained its brief and watchlist sources. Pending: the event registry's rules and `ageOn`
       (11 cases, with `dates`).
-3. **Agents**: the other 8 batteries. Clear `agents/core`'s pending cases too. `journeyAdversarial` and
-   `operations` also call `/org/agent`.
+3. **Agents**: the other 8 batteries. `journeyAdversarial` and `operations` also call `/org/agent`.
+   1. `agents/corePersistence` [**done**]. The agent sweep (expiry and stale-facet notices) runs at boot and with the
+      periodic sweeps; a marker that changes no row sends nothing, so a lost race is never a crash.
+   2. The agent core's rule cases [**done**: 182 generated; 15 pending have no Gleam counterpart (`newFacets`,
+      `normaliseScope`, `termMonthsOf`, `tiersOf`: Gleam refuses or types what TypeScript cleans)].
+   3. `agents/transactions` and `agents/transactionsPersistence` [untangled; port next]. The persistence battery
+      builds a whole workspace (representations, documents, terms, notes, holds), so it waits on the routes the
+      main battery needs. The transaction row keeps only `rev_by_label`: the schema has no column for a person.
+   4. `agents/compliance`, `compliancePersistence`, `adversarial`, `crossApp`, `crossAppAdversarial`: not untangled.
 4. `scouting/clubWorkflows`. It needs the uploads check first.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
