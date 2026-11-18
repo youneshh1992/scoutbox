@@ -82,7 +82,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   `npm run cases` records their calls to the rules (with the clock frozen); `dev/battery_cases/map.mjs` maps each
   ported rule to its Gleam and generates a gleeunit test per call into `test/scoutbox/battery/` (never edit those).
   `dev/battery_cases/report.json` lists each function's cases (generated or pending) and the calls to port by hand,
-  which go in `test/scoutbox/<domain>/`. `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
+  which go in `test/scoutbox/<domain>/`. A rule this server has nothing to play the role of (it refuses what the rule
+  cleans, or its types hold what the rule repairs) is closed in `NO_COUNTERPART` with its reason, not left pending.
+  `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
 - `LEDGER.md` (`npm run ledger`, checked by `e2e:check`) says, per TypeScript battery, where its checks went and what
   is left, and which domains are ported. Record a hand port in `HAND_PORTED` (`dev/battery_cases/map.mjs`).
 

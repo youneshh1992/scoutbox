@@ -132,7 +132,7 @@
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#normaliseScope",
@@ -180,14 +180,14 @@
         "calls": 9,
         "cases": 9,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#tiersOf",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#verificationGap",
@@ -244,7 +244,7 @@
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#verificationGap",

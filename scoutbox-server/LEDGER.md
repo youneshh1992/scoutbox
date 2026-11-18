@@ -9,7 +9,7 @@ are counted where they are written (calls of `ok`, `neg` and helpers built on th
 suite + moved − added.
 
 **A domain is ported when** every battery in it is untangled and answered here (`e2e:check` keeps the copies
-unchanged; `npm run e2e` shows they pass), its rules suites' recorded calls all have generated tests, every
+unchanged; `npm run e2e` shows they pass), its rules suites' recorded calls all have generated tests (or are closed, with a reason, as having no Gleam counterpart), every
 hand-port call has its Gleam test, and every check moved to a TypeScript unit suite has a reviewer's verdict.
 The three Box Cam analysis batteries are TypeScript only for good and don't count.
 
@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 4 | 2 | 187 / 146 | 35 / 36 | 9 to go |
+| agents | 9 | 4 | 2 | 187 / 133 | 35 / 36 | 7 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -37,8 +37,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliance` | not yet neutral | 14 → 14 | 342 | 342 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
-| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 12 | 27 / 27 | 12 cases pending |
-| `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 1 | 8 / 8 | 1 cases pending |
+| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
+| `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
 | `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
 | `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  |  | 5 / 128 | 0 / 1 | not answered; 128 cases pending; 1 hand-port calls |
@@ -240,10 +240,6 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
-| `agents/core` | `domains/agents/core/shared.mjs#newFacets` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
-| `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
@@ -475,3 +471,15 @@ mapped, then `npm run cases`.
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 2 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 25 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateVenue` | 3 |
+
+## Cases closed: no Gleam counterpart
+
+Rules `NO_COUNTERPART` in `dev/battery_cases/map.mjs` closes with a reason: this server has nothing that plays
+their role, so their recorded calls get no test.
+
+| Battery | Function | Cases | Why |
+|---|---|---|---|
+| `agents/core` | `domains/agents/core/shared.mjs#newFacets` | 1 | A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP. |
+| `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
+| `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 | A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used. |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 | A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP. |

@@ -1512,6 +1512,20 @@ export const MAP = {
  * The calls the recorder can't keep (report.json's `handPort`), by function: the Gleam test file that ports the
  * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
  */
+/**
+ * Rules with no Gleam counterpart, closed rather than pending: each reason says why this server has nothing that plays
+ * the rule's role (it refuses what the rule cleans, or its types already hold what the rule repairs). A function here
+ * has no entry in MAP, and its recorded calls get no test.
+ */
+export const NO_COUNTERPART = {
+  [`${AGENT}/shared.mjs#newFacets`]:
+    "A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP.",
+  [`${AGENT}/shared.mjs#termMonthsOf`]:
+    'No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one.',
+  [`${AGENT}/shared.mjs#tiersOf`]:
+    "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
+};
+
 export const HAND_PORTED = {
   ...Object.fromEntries(
     [

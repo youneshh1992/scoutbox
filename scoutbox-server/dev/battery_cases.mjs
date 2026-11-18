@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existing, generate, unprintable } from './battery_cases/generate.mjs';
-import { MAP } from './battery_cases/map.mjs';
+import { MAP, NO_COUNTERPART } from './battery_cases/map.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -110,7 +110,7 @@ function report(battery) {
           calls: f.calls,
           cases: f.cases.size,
           handPort: Object.fromEntries(Object.entries(f.handPort).sort(([a], [b]) => a.localeCompare(b))),
-          status: MAP[f.function] ? 'generated' : 'pending',
+          status: MAP[f.function] ? 'generated' : NO_COUNTERPART[f.function] ? 'closed' : 'pending',
         })),
     },
     cases,
@@ -149,6 +149,6 @@ for (const r of results.map((x) => x.report)) {
   const count = (status) => r.functions.filter((f) => f.status === status).reduce((n, f) => n + f.cases, 0);
   const hand = r.functions.reduce((n, f) => n + Object.values(f.handPort).reduce((a, b) => a + b, 0), 0);
   console.log(
-    `battery_cases: ${r.battery}: ${r.functions.length} functions, ${count('generated')} cases generated, ${count('pending')} pending, ${hand} calls to port by hand`,
+    `battery_cases: ${r.battery}: ${r.functions.length} functions, ${count('generated')} cases generated, ${count('pending')} pending, ${count('closed')} closed, ${hand} calls to port by hand`,
   );
 }
