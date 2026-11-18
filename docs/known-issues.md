@@ -105,3 +105,21 @@ package completed.
 
 **The question.** Should a close be refused while a package has every signature it needs, or while a signing is in
 progress? That is a product rule the single thread hid, since the completion always won there.
+
+### The policy view leaves out a rule's overrides and its own start date
+
+Found 2026-11-18 while porting `agents/compliancePersistence`. Ported as the TypeScript server behaves.
+
+**What it is.** `GET /ts/compliance/policies` (and the agent's and admin's policy lists, which share the view) gives
+each rule five fields: `ruleStatus`, `textStatus`, `note`, `params` and `sourceRef` (`policyPublic` in
+`domains/agents/compliance/policyRoutes.mjs`). A rule can also carry `overrides`, which name the national rule that
+takes its place in a jurisdiction (FIFA-12.8, 12.9 and 12.10 give way to ENG-6.3, 6.4 and 6.5), and its own
+`effectiveFrom` (FIFA-RSTP-2027 applies from 1 January 2027). Both are stored, the conflict engine and the policy
+rules use them, and `POST /ts/compliance/policies` accepts them, but no view returns them. So a Trust & Safety
+reviewer can't see why a FIFA rule doesn't decide an England case, and an administrator who submits a version
+can't check what was stored. `scoutbox-server/src/scoutbox/agents/policy_routes.gleam` returns the same five fields.
+
+**The question.** Should the view return `overrides` and a rule's `effectiveFrom`? If it should, change both servers
+together and check the admin app's rules table first. If they were left out on purpose, say why in the view.
+`agents/compliancePersistence` compares the seeded rules with the snapshot through the stored rows, because the view
+doesn't carry them whole.
