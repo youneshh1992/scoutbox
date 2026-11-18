@@ -1,10 +1,9 @@
 //// A club's opportunities (domains/scouting/journeys.mjs, the opportunity board): publishing one, the club's own
 //// list, and the eligibility the board applies (routeHelpers.mjs `checkEligibility`). The board itself is
-//// `scouting/opportunity_board`.
+//// `scouting/opportunity_board`; applications and closing are `scouting/opportunity_applications`.
 ////
-//// Not ported yet: applications (a player's or guardian's, withdrawal, the club's outcome and its reminder),
-//// closing an opportunity, the structured requirements' route (`PUT /org/opportunities/:id/structured-requirements`)
-//// and the `opportunities` live event.
+//// Not ported yet: the structured requirements' route (`PUT /org/opportunities/:id/structured-requirements`) and
+//// the `opportunities` live event.
 
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
@@ -191,7 +190,7 @@ fn page_for_org(
 
 /// Per opportunity, its live (not withdrawn) applications and the unanswered ones (repository
 /// `applicationCounts`). An opportunity nobody applied to is absent: read it as 0 and 0.
-fn application_counts(
+pub fn application_counts(
   read: Read,
   ids: List(id.OpportunityId),
 ) -> Result(Dict(id.OpportunityId, #(Int, Int)), Fail(e)) {
@@ -585,7 +584,7 @@ pub fn fields(o: Opportunity) -> List(#(String, Json)) {
 }
 
 /// Open to applications: published and not past its deadline.
-fn is_open(r: row.Row, today: String) -> Bool {
+pub fn is_open(r: row.Row, today: String) -> Bool {
   r.status == row.Published && string.compare(r.deadline, today) != order.Lt
 }
 

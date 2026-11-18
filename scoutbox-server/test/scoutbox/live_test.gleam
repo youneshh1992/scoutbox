@@ -91,6 +91,7 @@ const samples = [
   live_event.OfferResponded("org-1", "case-1", "rof-1", None),
   live_event.AssessmentSubmitted("org-1", "ass-1"),
   live_event.Feedback("pl-1"),
+  live_event.Applications("pl-1"),
   live_event.WatchlistChanged(live_event.WatchlistCreated, "org-1", "wl-1"),
   live_event.WatchlistChanged(live_event.WatchlistUpdated, "org-1", "wl-1"),
   live_event.WatchlistChanged(

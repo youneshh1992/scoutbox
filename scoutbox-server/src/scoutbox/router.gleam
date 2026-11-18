@@ -98,6 +98,7 @@ import scoutbox/scouting/assessments
 import scoutbox/scouting/board_routes
 import scoutbox/scouting/coaches
 import scoutbox/scouting/opportunities
+import scoutbox/scouting/opportunity_applications as applies
 import scoutbox/scouting/passport_routes
 import scoutbox/scouting/shadow
 import scoutbox/scouting/squad_invites
@@ -791,6 +792,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Post -> opportunities.create(ctx, req, org)
             _ -> not_found()
           }
+        ["opportunities", oid, "applications"] ->
+          only(req, Get, fn() {
+            applies.list_for_opportunity(ctx, req, org, id.opportunity(oid))
+          })
+        ["opportunities", oid, "close"] ->
+          only(req, Post, fn() {
+            applies.close(ctx, req, org, id.opportunity(oid))
+          })
+        ["applications", aid, "outcome"] ->
+          only(req, Post, fn() {
+            applies.outcome(ctx, req, org, id.application(aid))
+          })
         ["friendlies"] ->
           only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
         ["searches"] ->
@@ -1022,6 +1035,16 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Delete, fn() { erasure.delete_account(ctx, player) })
         ["opportunity-board"] ->
           only(req, Get, fn() { board_routes.player_board(ctx, req, player) })
+        ["opportunities", oid, "apply"] ->
+          only(req, Post, fn() {
+            applies.player_apply(ctx, req, player, id.opportunity(oid))
+          })
+        ["applications"] ->
+          only(req, Get, fn() { applies.player_list(ctx, player) })
+        ["applications", aid, "withdraw"] ->
+          only(req, Post, fn() {
+            applies.player_withdraw(ctx, req, player, id.application(aid))
+          })
         ["offers"] ->
           only(req, Get, fn() {
             offer_routes.list_for(
@@ -1231,6 +1254,22 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["guardian", ..rest] -> {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
+        ["children", cid, "opportunities", oid, "apply"] ->
+          only(req, Post, fn() {
+            applies.guardian_apply(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+              id.opportunity(oid),
+            )
+          })
+        ["applications"] ->
+          only(req, Get, fn() { applies.guardian_list(ctx, guardian) })
+        ["applications", aid, "withdraw"] ->
+          only(req, Post, fn() {
+            applies.guardian_withdraw(ctx, req, guardian, id.application(aid))
+          })
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))

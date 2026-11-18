@@ -194,8 +194,10 @@ are for surprising facts or points that later work depends on, not implementatio
    reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
    as a drawing (docs/known-issues.md). The case workspace is whole (reading one, assigning, completing tasks,
    approvals' answers, links), and so is tactical fit: the setup, vacancies and their candidates, the shadow
-   squad, the squad planner, the grassroots squad and match days. The battery now stops at its opportunities section
-   (applying). A save refused after the TypeScript server minted a new role's id still burns that id there, so id
+   squad, the squad planner, the grassroots squad and match days. The opportunities section is whole: applying (an adult
+   for themselves, a guardian for a child), withdrawing, the club's list and answer, and closing; every response
+   matches the TypeScript server's, notifications included. The `applications` live event reaches no stream, as
+   `feedback` doesn't. The battery now stops at its campaigns section. A save refused after the TypeScript server minted a new role's id still burns that id there, so id
    numbers drift between the servers; no battery reads them.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.

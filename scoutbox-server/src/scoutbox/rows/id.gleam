@@ -202,6 +202,38 @@ pub fn next_application(tx: Tx) -> Result(ApplicationId, Fail(e)) {
   ids.next(tx, "apl") |> result.map(ApplicationId)
 }
 
+/// An id of `application_history`.
+pub opaque type ApplicationEventId {
+  ApplicationEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn application_event(text: String) -> ApplicationEventId {
+  ApplicationEventId(text)
+}
+
+pub fn application_event_to_string(id: ApplicationEventId) -> String {
+  let ApplicationEventId(text) = id
+  text
+}
+
+pub fn application_event_sql(id: ApplicationEventId) -> sqlight.Value {
+  sqlight.text(application_event_to_string(id))
+}
+
+pub fn application_event_json(id: ApplicationEventId) -> Json {
+  json.string(application_event_to_string(id))
+}
+
+pub fn application_event_decoder() -> decode.Decoder(ApplicationEventId) {
+  decode.map(decode.string, ApplicationEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_application_event(tx: Tx) -> Result(ApplicationEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ApplicationEventId)
+}
+
 /// An id of `case_approvals`.
 pub opaque type ApprovalId {
   ApprovalId(String)
