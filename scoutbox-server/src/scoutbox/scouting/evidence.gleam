@@ -1,49 +1,28 @@
 //// A player's football evidence records (`evidence`, with its media, disputes and history; domains/scouting/
 //// passport.mjs): each claim with its provenance, how it was checked, by whom and when.
 ////
-//// Not ported yet: the player's and guardian's own claims, corrections, corroboration, disputes and their
-//// resolution, the Passport evidence summary and the `evidence` live event. A club records a claim here
-//// (`POST /org/players/:id/evidence`); the Room and the Trust Score read them.
+//// The records and their acts live here; the routes that file, correct, corroborate and dispute them are in
+//// `scouting/passport_routes`. Not ported yet: the `evidence` live event.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/app.{type Ctx}
-import scoutbox/identity/access.{type OrgAccess}
+import gleam/string
 import scoutbox/identity/players.{type Player}
-import scoutbox/platform/clock
-import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
-import scoutbox/platform/temporal
 import scoutbox/rows/evidence as row
+import scoutbox/rows/evidence_disputes as dispute_row
 import scoutbox/rows/evidence_history as history_row
 import scoutbox/rows/id
-import scoutbox/safety/audit
-import scoutbox/safety/moderate
 import sqlight
-import wisp.{type Request, type Response}
 
 pub type Evidence {
   Evidence(row: row.Row, media_ids: List(id.MediaId), open_disputes: Int)
 }
-
-const label_max = 120
-
-const value_text_max = 120
-
-const units_max = 20
-
-const season_max = 20
-
-const note_max = 300
-
-const method_max = 80
-
-const media_per_claim = 50
 
 const day_ms = 86_400_000
 
@@ -121,6 +100,8 @@ pub fn create(
   tier: row.VerificationStatus,
   method: Option(String),
   reviewer: Option(#(String, String)),
+  correction_of: Option(id.ScoutingEvidenceId),
+  history: #(String, Option(String)),
   at: Int,
 ) -> Result(Evidence, Fail(e)) {
   use evidence_id <- result.try(id.next_scouting_evidence(tx))
@@ -145,19 +126,19 @@ pub fn create(
       season: claim.season,
       source_kind: source.kind,
       source_id: source.id,
-      source_name: source.name,
+      source_name: stored_name(source.name),
       observed_at: claim.observed_at,
       recorded_at: at,
       verification_status: tier,
       verification_method: method,
       reviewer_id: option.map(reviewer, fn(r) { r.0 }),
-      reviewer_name: option.map(reviewer, fn(r) { r.1 }),
+      reviewer_name: option.map(reviewer, fn(r) { stored_name(r.1) }),
       reviewed_at: option.map(reviewer, fn(_) { at }),
       expires_at: case claim.claim_type {
         row.Availability -> Some(at + 90 * day_ms)
         _ -> None
       },
-      correction_of_id: None,
+      correction_of_id: correction_of,
       superseded_by_id: None,
       note: claim.note,
     )
@@ -176,26 +157,299 @@ pub fn create(
       )
     }),
   )
-  use event_id <- result.try(id.next_evidence_event(tx))
-  use _ <- result.map(history_row.insert(
+  use _ <- result.map(log(
     tx,
-    history_row.Row(
-      id: event_id,
-      evidence_id:,
-      position: 0,
-      at:,
-      by_kind: Some(case source.kind {
-        row.Player -> history_row.Player
-        row.Guardian -> history_row.Guardian
-        row.Org -> history_row.Org
-      }),
-      by_id: Some(source.id),
-      by_name: Some(source.name),
-      action: "created",
-      detail: Some(row.verification_status_to_string(tier)),
-    ),
+    evidence_id,
+    source_by(source.kind),
+    source.id,
+    source.name,
+    history.0,
+    history.1,
+    at,
   ))
   Evidence(r, media, 0)
+}
+
+/// Who a source is, as a history entry names them.
+pub fn source_by(kind: row.SourceKind) -> history_row.ByKind {
+  case kind {
+    row.Player -> history_row.Player
+    row.Guardian -> history_row.Guardian
+    row.Org -> history_row.Org
+  }
+}
+
+/// A history entry at the end of the record's history. Names are cut to the column's 200 characters and the
+/// detail to its 500 (passport.mjs `logged`).
+pub fn log(
+  tx: Tx,
+  evidence_id: id.ScoutingEvidenceId,
+  by_kind: history_row.ByKind,
+  by_id: String,
+  by_name: String,
+  action: String,
+  detail: Option(String),
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use event_id <- result.try(id.next_evidence_event(tx))
+  store.run(
+    tx,
+    "INSERT INTO evidence_history (id, evidence_id, position, at, by_kind, by_id, by_name, action, detail) SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, ?, ?, ? FROM evidence_history WHERE evidence_id = ?",
+    [
+      id.evidence_event_sql(event_id),
+      id.scouting_evidence_sql(evidence_id),
+      sqlight.int(at),
+      sqlight.text(history_row.by_kind_to_string(by_kind)),
+      sqlight.text(by_id),
+      sqlight.text(stored_name(by_name)),
+      sqlight.text(action),
+      sqlight.nullable(
+        sqlight.text,
+        option.map(detail, string.slice(_, 0, 500)),
+      ),
+      id.scouting_evidence_sql(evidence_id),
+    ],
+  )
+}
+
+/// A name as the evidence tables store it: at most 200 characters (passport.mjs `storedName`). Names come from
+/// other domains, so they are shortened rather than refused.
+pub fn stored_name(name: String) -> String {
+  input.utf16_take(name, 200)
+}
+
+/// Every record of a player, superseded ones too, oldest first: the Passport.
+pub fn for_player(
+  read: Read,
+  player_id: id.PlayerId,
+) -> Result(List(Evidence), Fail(e)) {
+  use rows <- result.try(store.query(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM evidence WHERE player_id = ? ORDER BY rowid",
+    [id.player_sql(player_id)],
+    row.decoder(),
+  ))
+  list.try_map(rows, with_children(read, _))
+}
+
+/// A self-reported, current record takes a reviewer's tier, once. `Ok(False)` when it was already verified or
+/// superseded.
+pub fn corroborate(
+  tx: Tx,
+  evidence_id: id.ScoutingEvidenceId,
+  tier: row.VerificationStatus,
+  method: String,
+  reviewer: #(String, String),
+  at: Int,
+) -> Result(Bool, Fail(e)) {
+  store.write(
+    tx,
+    "UPDATE evidence SET verification_status = ?, verification_method = ?, reviewer_id = ?, reviewer_name = ?, reviewed_at = ? WHERE id = ? AND verification_status = 'self_reported' AND superseded_by_id IS NULL RETURNING id",
+    [
+      sqlight.text(row.verification_status_to_string(tier)),
+      sqlight.text(method),
+      sqlight.text(reviewer.0),
+      sqlight.text(stored_name(reviewer.1)),
+      sqlight.int(at),
+      id.scouting_evidence_sql(evidence_id),
+    ],
+    decode.success(Nil),
+  )
+  |> result.map(fn(changed) { changed != [] })
+}
+
+/// A record is superseded once, by a correction of it. `Ok(False)` when another correction came first.
+pub fn supersede(
+  tx: Tx,
+  evidence_id: id.ScoutingEvidenceId,
+  by: id.ScoutingEvidenceId,
+) -> Result(Bool, Fail(e)) {
+  store.write(
+    tx,
+    "UPDATE evidence SET superseded_by_id = ? WHERE id = ? AND superseded_by_id IS NULL RETURNING id",
+    [id.scouting_evidence_sql(by), id.scouting_evidence_sql(evidence_id)],
+    decode.success(Nil),
+  )
+  |> result.map(fn(changed) { changed != [] })
+}
+
+/// The record's verification set back to self-reported by Trust & Safety, after an upheld dispute.
+pub fn downgrade(
+  tx: Tx,
+  evidence_id: id.ScoutingEvidenceId,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE evidence SET verification_status = 'self_reported', verification_method = 'downgraded after dispute', reviewer_id = 'admin', reviewer_name = 'Trust & Safety', reviewed_at = ? WHERE id = ?",
+    [sqlight.int(at), id.scouting_evidence_sql(evidence_id)],
+  )
+}
+
+// ------------------------------------------------------------------------------------------- disputes
+
+pub type Dispute =
+  dispute_row.Row
+
+/// A dispute filed open, at the end of the record's disputes.
+pub fn file_dispute(
+  tx: Tx,
+  evidence_id: id.ScoutingEvidenceId,
+  by_kind: dispute_row.ByKind,
+  by_id: String,
+  by_name: String,
+  reason: String,
+  at: Int,
+) -> Result(Dispute, Fail(e)) {
+  use dispute_id <- result.try(id.next_evidence_dispute(tx))
+  use rows <- result.try(store.write(
+    tx,
+    "INSERT INTO evidence_disputes ("
+      <> dispute_row.columns
+      <> ") SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, ?, ?, 'open', NULL, NULL, NULL FROM evidence_disputes WHERE evidence_id = ? RETURNING "
+      <> dispute_row.columns,
+    [
+      id.evidence_dispute_sql(dispute_id),
+      id.scouting_evidence_sql(evidence_id),
+      sqlight.int(at),
+      sqlight.text(dispute_row.by_kind_to_string(by_kind)),
+      sqlight.text(by_id),
+      sqlight.text(stored_name(by_name)),
+      sqlight.text(reason),
+      id.scouting_evidence_sql(evidence_id),
+    ],
+    dispute_row.decoder(),
+  ))
+  let assert [d] = rows
+  Ok(d)
+}
+
+pub fn dispute_by_id(
+  read: Read,
+  dispute_id: id.EvidenceDisputeId,
+) -> Result(Option(Dispute), Fail(e)) {
+  store.one(
+    read,
+    "SELECT " <> dispute_row.columns <> " FROM evidence_disputes WHERE id = ?",
+    [id.evidence_dispute_sql(dispute_id)],
+    dispute_row.decoder(),
+  )
+  |> result.map(option.from_result)
+}
+
+/// An open dispute resolved, once. `Ok(None)` when it was resolved first.
+pub fn resolve_dispute(
+  tx: Tx,
+  dispute_id: id.EvidenceDisputeId,
+  outcome: dispute_row.ResolutionOutcome,
+  note: Option(String),
+  at: Int,
+) -> Result(Option(Dispute), Fail(e)) {
+  store.write(
+    tx,
+    "UPDATE evidence_disputes SET status = 'resolved', resolution_outcome = ?, resolution_note = ?, resolved_at = ? WHERE id = ? AND status = 'open' RETURNING "
+      <> dispute_row.columns,
+    [
+      sqlight.text(dispute_row.resolution_outcome_to_string(outcome)),
+      sqlight.nullable(sqlight.text, note),
+      sqlight.int(at),
+      id.evidence_dispute_sql(dispute_id),
+    ],
+    dispute_row.decoder(),
+  )
+  |> result.map(fn(rows) { list.first(rows) |> option.from_result })
+}
+
+pub fn dispute_view(d: Dispute) -> Json {
+  json.object(dispute_fields(d))
+}
+
+fn dispute_fields(d: Dispute) -> List(#(String, Json)) {
+  [
+    #("id", id.evidence_dispute_json(d.id)),
+    #("at", json.int(d.filed_at)),
+    #(
+      "by",
+      json.object([
+        #("kind", dispute_row.by_kind_to_json(d.by_kind)),
+        #("id", json.string(d.by_id)),
+        #("name", json.string(d.by_name)),
+      ]),
+    ),
+    #("reason", json.string(d.reason)),
+    #("status", dispute_row.status_to_json(d.status)),
+    #("resolution", case d.resolution_outcome {
+      None -> json.null()
+      Some(outcome) ->
+        json.object([
+          #("outcome", dispute_row.resolution_outcome_to_json(outcome)),
+          #("note", json.nullable(d.resolution_note, json.string)),
+          #("at", json.nullable(d.resolved_at, json.int)),
+        ])
+    }),
+  ]
+}
+
+/// The Trust & Safety queue, oldest first, by offset: each dispute with its record's id, player, label and tier.
+/// `all` includes resolved disputes.
+pub fn dispute_page(
+  read: Read,
+  all: Bool,
+  limit: Int,
+  offset: Int,
+) -> Result(Json, Fail(e)) {
+  let which = case all {
+    True -> ""
+    False -> " WHERE d.status = 'open'"
+  }
+  use total <- result.try(store.one(
+    read,
+    "SELECT COUNT(*) FROM evidence_disputes d" <> which,
+    [],
+    decode.at([0], decode.int),
+  ))
+  use items <- result.map(
+    store.query(
+      read,
+      "SELECT "
+        <> dispute_row.qualified("d")
+        <> ", e.player_id, e.label, e.verification_status FROM evidence_disputes d JOIN evidence e ON e.id = d.evidence_id"
+        <> which
+        <> " ORDER BY d.filed_at, d.rowid LIMIT ? OFFSET ?",
+      [sqlight.int(limit), sqlight.int(offset)],
+      {
+        use d <- decode.then(dispute_row.decoder())
+        use player_id <- decode.field(dispute_row.width, id.player_decoder())
+        use label <- decode.field(dispute_row.width + 1, decode.string)
+        use tier <- decode.field(
+          dispute_row.width + 2,
+          row.verification_status_decoder(),
+        )
+        decode.success(#(d, player_id, label, tier))
+      },
+    ),
+  )
+  json.object([
+    #("total", json.int(result.unwrap(total, 0))),
+    #("limit", json.int(limit)),
+    #("offset", json.int(offset)),
+    #(
+      "items",
+      json.array(items, fn(item) {
+        let #(d, player_id, label, tier) = item
+        json.object(
+          list.append(dispute_fields(d), [
+            #("evidenceId", id.scouting_evidence_json(d.evidence_id)),
+            #("playerId", id.player_json(player_id)),
+            #("label", json.string(label)),
+            #("tier", row.verification_status_to_json(tier)),
+          ]),
+        )
+      }),
+    ),
+  ])
 }
 
 pub fn value_json(r: row.Row) -> Json {
@@ -266,161 +520,4 @@ pub fn view(e: Evidence, now: Int) -> Json {
     #("openDisputes", json.int(e.open_disputes)),
     #("superseded", json.bool(option.is_some(r.superseded_by_id))),
   ])
-}
-
-type ClubClaim {
-  ClubClaim(
-    claim_type: row.ClaimType,
-    label: Option(String),
-    value: Option(input.NumberOrText),
-    units: Option(String),
-    season: Option(String),
-    note: Option(String),
-    media_ids: Option(List(String)),
-    observed_at: Option(Option(temporal.Due)),
-    method: Option(String),
-  )
-}
-
-/// `POST /org/players/:id/evidence`: a club records a claim it assessed itself.
-pub fn club_submit(
-  ctx: Ctx,
-  req: Request,
-  a: OrgAccess,
-  player_id: id.PlayerId,
-) -> Response {
-  let now = clock.now_ms()
-  case store.read(ctx.store, players.for_org(_, player_id, a.org, now)) {
-    Error(e) -> http.internal(e)
-    Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
-    Ok(Some(#(_, access))) if !access.visible || access.blocked ->
-      http.error(403, "NOT_VISIBLE")
-    Ok(Some(#(p, _))) -> {
-      let shape = {
-        use claim_type <- input.field(
-          "claimType",
-          input.required(input.one_of(row.claim_type_pairs)),
-        )
-        use label <- input.field("label", input.nullish(input.text(label_max)))
-        use value <- input.field(
-          "value",
-          input.nullish(input.number_or_text(value_text_max)),
-        )
-        use units <- input.field("units", input.nullish(input.text(units_max)))
-        use season <- input.field(
-          "season",
-          input.nullish(input.text(season_max)),
-        )
-        use note <- input.field("note", input.nullish(input.text(note_max)))
-        use media_ids <- input.field(
-          "mediaIds",
-          input.nullish(input.items(input.id(), media_per_claim)),
-        )
-        use observed_at <- input.field(
-          "observedAt",
-          input.optional(input.due_date()),
-        )
-        use method <- input.field(
-          "method",
-          input.nullish(input.text(method_max)),
-        )
-        input.done(ClubClaim(
-          claim_type:,
-          label:,
-          value:,
-          units:,
-          season:,
-          note:,
-          media_ids:,
-          observed_at:,
-          method:,
-        ))
-      }
-      use body <- http.body(req, shape, [#("claimType", "CLAIM_TYPE_INVALID")])
-      case input.filled(body.label) {
-        None -> http.required("LABEL_REQUIRED", "label")
-        Some(label) -> {
-          let note = input.filled(body.note)
-          let context = fn(kind) {
-            audit.Context(
-              kind:,
-              player_id: Some(p.row.id),
-              org_id: None,
-              user_id: None,
-              channel_id: None,
-              request_id: None,
-            )
-          }
-          use <- moderate_maybe(ctx, note, context("evidence_note"))
-          use <- moderate.or_refuse(ctx, label, context("evidence_label"))
-          // Evidence of something that has not happened is not evidence.
-          let observed =
-            option.map(option.flatten(body.observed_at), temporal.start)
-          case observed {
-            Some(ms) if ms > now + 5 * 60_000 ->
-              http.json(
-                400,
-                json.object([
-                  #("error", json.string("DATE_INVALID")),
-                  #("field", json.string("observedAt")),
-                  #(
-                    "message",
-                    json.string("An observation cannot be dated in the future."),
-                  ),
-                ]),
-              )
-            _ -> {
-              let claim =
-                Claim(
-                  claim_type: body.claim_type,
-                  label:,
-                  value: body.value,
-                  units: input.filled(body.units),
-                  season: input.filled(body.season),
-                  note:,
-                  media_ids: body.media_ids
-                    |> option.unwrap([])
-                    |> list.unique
-                    |> list.map(id.media),
-                  observed_at: observed,
-                )
-              let method =
-                option.or(input.filled(body.method), Some("club_assessment"))
-              let saved =
-                store.unit(ctx.store, fn(tx) {
-                  create(
-                    tx,
-                    p,
-                    claim,
-                    Source(row.Org, id.org_to_string(a.org.id), a.org.name),
-                    row.ClubAssessed,
-                    method,
-                    Some(#(id.org_user_to_string(a.user.id), a.user.name)),
-                    now,
-                  )
-                })
-              // Not ported yet: the `evidence` live event.
-              case saved {
-                Ok(e) ->
-                  http.json(201, json.object([#("evidence", view(e, now))]))
-                Error(failure) -> http.internal(failure)
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-fn moderate_maybe(
-  ctx: Ctx,
-  text: Option(String),
-  context: audit.Context,
-  next: fn() -> Response,
-) -> Response {
-  case text {
-    Some(t) -> moderate.or_refuse(ctx, t, context, next)
-    None -> next()
-  }
 }

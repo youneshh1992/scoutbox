@@ -23,6 +23,7 @@ import scoutbox/development/box_prefs
 import scoutbox/development/combine
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
+import scoutbox/development/vouches
 import scoutbox/discovery/directory
 import scoutbox/discovery/insights
 import scoutbox/discovery/matching_routes
@@ -85,6 +86,7 @@ import scoutbox/recruitment/signing_routes
 import scoutbox/recruitment/signings
 import scoutbox/recruitment/trial_day
 import scoutbox/recruitment/trial_routes
+import scoutbox/rows/coach_affiliations as affiliation_row
 import scoutbox/rows/evidence_suggestions as suggestion_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -94,8 +96,10 @@ import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
 import scoutbox/scouting/assessments
 import scoutbox/scouting/board_routes
-import scoutbox/scouting/evidence
+import scoutbox/scouting/coaches
 import scoutbox/scouting/opportunities
+import scoutbox/scouting/passport_routes
+import scoutbox/scouting/squad_invites
 import scoutbox/verification/applications
 import scoutbox/verification/club_checks
 import scoutbox/verification/console_routes as verification_console
@@ -125,6 +129,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         False -> not_found()
       }
     ["health"] -> only(req, Get, fn() { health(ctx) })
+    ["vouch", "submit"] -> only(req, Post, fn() { vouches.submit(ctx, req) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
     ["meta"] -> only(req, Get, operator.meta)
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
@@ -456,8 +461,60 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["players", id, "evidence"] ->
           only(req, Post, fn() {
-            evidence.club_submit(ctx, req, org, id.player(id))
+            passport_routes.club_submit(ctx, req, org, id.player(id))
           })
+        ["players", id, "passport"] ->
+          only(req, Get, fn() {
+            passport_routes.org_passport(ctx, org, id.player(id))
+          })
+        ["evidence", eid, "corroborate"] ->
+          only(req, Post, fn() {
+            passport_routes.corroborate(
+              ctx,
+              req,
+              org,
+              id.scouting_evidence(eid),
+            )
+          })
+        ["evidence", eid, "dispute"] ->
+          only(req, Post, fn() {
+            passport_routes.org_dispute(
+              ctx,
+              req,
+              org,
+              id.scouting_evidence(eid),
+            )
+          })
+        ["coaches"] ->
+          case req.method {
+            Get -> coaches.list_for_org(ctx, org)
+            Post -> coaches.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["coaches", aid, "end"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            coaches.close(
+              ctx,
+              req,
+              org,
+              id.coach_affiliation(aid),
+              affiliation_row.Ended,
+            )
+          })
+        ["coaches", aid, "revoke"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            coaches.close(
+              ctx,
+              req,
+              org,
+              id.coach_affiliation(aid),
+              affiliation_row.Revoked,
+            )
+          })
+        ["squad", "invite"] ->
+          only(req, Post, fn() { squad_invites.invite(ctx, req, org) })
         ["players", id, "evidence-gaps"] ->
           only(req, Get, fn() { evidence_gaps.gaps(ctx, org, id.player(id)) })
         ["combine", "protocols"] ->
@@ -744,6 +801,38 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["player", ..rest] -> {
       use player <- access.player_session(ctx, req)
       case rest {
+        ["passport"] ->
+          only(req, Get, fn() { passport_routes.player_passport(ctx, player) })
+        ["evidence"] ->
+          only(req, Post, fn() {
+            passport_routes.player_submit(ctx, req, player)
+          })
+        ["evidence", eid, "correct"] ->
+          only(req, Post, fn() {
+            passport_routes.player_correct(
+              ctx,
+              req,
+              player,
+              id.scouting_evidence(eid),
+            )
+          })
+        ["evidence", eid, "dispute"] ->
+          only(req, Post, fn() {
+            passport_routes.player_dispute(
+              ctx,
+              req,
+              player,
+              id.scouting_evidence(eid),
+            )
+          })
+        ["squad-invites"] ->
+          only(req, Get, fn() { squad_invites.player_list(ctx, player) })
+        ["squad-invites", iid, "respond"] ->
+          only(req, Post, fn() {
+            squad_invites.player_respond(ctx, req, player, id.squad_invite(iid))
+          })
+        ["vouches", "request"] ->
+          only(req, Post, fn() { vouches.player_request(ctx, req, player) })
         ["inbox"] ->
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["football-passport"] ->
@@ -1068,6 +1157,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["guardian", ..rest] -> {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
+        ["children", cid, "passport"] ->
+          only(req, Get, fn() {
+            passport_routes.guardian_passport(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "evidence"] ->
+          only(req, Post, fn() {
+            passport_routes.guardian_submit(ctx, req, guardian, id.player(cid))
+          })
+        ["children", cid, "vouches", "request"] ->
+          only(req, Post, fn() {
+            vouches.guardian_request(ctx, req, guardian, id.player(cid))
+          })
+        ["squad-invites"] ->
+          only(req, Get, fn() { squad_invites.guardian_list(ctx, guardian) })
+        ["squad-invites", iid, "respond"] ->
+          only(req, Post, fn() {
+            squad_invites.guardian_respond(
+              ctx,
+              req,
+              guardian,
+              id.squad_invite(iid),
+            )
+          })
         ["verification", "org", id] ->
           only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
@@ -1387,6 +1499,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["admin", ..rest] -> {
       use <- access.admin(ctx, req)
       case rest {
+        ["evidence", "disputes"] ->
+          only(req, Get, fn() { passport_routes.admin_disputes(ctx, req) })
+        ["evidence", "disputes", did, "resolve"] ->
+          only(req, Post, fn() {
+            passport_routes.admin_resolve(ctx, req, id.evidence_dispute(did))
+          })
+        ["vouches", vid, "withdraw"] ->
+          only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
         ["verification", ..path] -> verification_admin(ctx, req, path)
         ["compliance", "reviews"] ->
           only(req, Get, fn() { compliance.admin_review_queue(ctx, req) })

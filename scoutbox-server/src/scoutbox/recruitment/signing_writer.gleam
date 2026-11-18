@@ -5,7 +5,6 @@
 ////
 //// Not ported yet: the live 'players' event.
 
-import gleam/dynamic/decode
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -18,7 +17,6 @@ import scoutbox/identity/players.{type Player}
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/ids
-import scoutbox/platform/input
 import scoutbox/platform/operator
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/invoices
@@ -31,6 +29,7 @@ import scoutbox/rows/players as player_row
 import scoutbox/rows/signing_parties as signing_party_row
 import scoutbox/rows/signings as signing_row
 import scoutbox/safety/ledger
+import scoutbox/scouting/squad
 import scoutbox/vocab/audience
 import scoutbox/vocab/availability
 import scoutbox/vocab/playing_level
@@ -44,8 +43,6 @@ pub type Completion {
 }
 
 /// The squad row's name limit (clubSetup.ts CLUB_SETUP_LIMITS.name).
-const squad_name_max = 200
-
 pub type Written {
   Written(signing: signing_row.Row, duplicate: Bool)
 }
@@ -426,29 +423,14 @@ fn join_squad(
   player: Player,
   at: Int,
 ) -> Result(Nil, Fail(e)) {
-  use present <- result.try(store.query(
-    store.reading(tx),
-    "SELECT 1 FROM org_squad_members WHERE org_id = ? AND player_id = ?",
-    [id.org_sql(org_id), id.player_sql(player.row.id)],
-    decode.success(Nil),
-  ))
-  case present {
-    [_, ..] -> Ok(Nil)
-    [] -> {
-      use entry <- result.try(id.next_squad_entry(tx))
-      squad_row.insert(
-        tx,
-        squad_row.Row(
-          id: entry,
-          org_id:,
-          player_id: Some(player.row.id),
-          name: input.utf16_take(player.row.name, squad_name_max),
-          position: option.map(player.row.position, position.to_string),
-          source: squad_row.Signing,
-          approved_by_label: None,
-          added_at: at,
-        ),
-      )
-    }
-  }
+  squad.join(
+    tx,
+    org_id,
+    player.row.id,
+    player.row.name,
+    option.map(player.row.position, position.to_string),
+    squad_row.Signing,
+    None,
+    at,
+  )
 }

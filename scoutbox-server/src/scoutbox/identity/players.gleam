@@ -34,8 +34,10 @@ import scoutbox/rows/player_season_history as season_row
 import scoutbox/rows/player_timeline as timeline_row
 import scoutbox/rows/players as row
 import scoutbox/rows/trial_reports as report_row
+import scoutbox/rows/vouches as vouch_row
 import scoutbox/rules/age
 import scoutbox/rules/visibility.{type Access}
+import scoutbox/verification/vouch_view
 import scoutbox/vocab/availability
 import scoutbox/vocab/foot
 import scoutbox/vocab/playing_level
@@ -61,6 +63,8 @@ pub type Player {
     medical_records: List(medical_row.Row),
     programme_completed: List(completion_row.Row),
     trial_reports: List(report_row.Row),
+    /// Every coach reference, oldest first: published, pending and withdrawn.
+    vouches: List(vouch_row.Row),
   )
 }
 
@@ -205,6 +209,20 @@ pub fn with_lists(
     fn(r) { r.player_id },
     ids,
   ))
+  use vouches <- result.try(
+    store.query(
+      read,
+      "SELECT "
+        <> vouch_row.columns
+        <> " FROM vouches WHERE player_id IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+      [ids_json(ids, id.player_json)],
+      vouch_row.decoder(),
+    )
+    |> result.map(fn(rows) {
+      list.group(rows, fn(x) { x.player_id })
+      |> dict.map_values(fn(_, rs) { list.reverse(rs) })
+    }),
+  )
   // The reports on the players' trials, in filing order (ties in trial order).
   use reports <- result.map(
     store.query(
@@ -238,6 +256,7 @@ pub fn with_lists(
       medical_records: of(medical, r.id),
       programme_completed: of(completions, r.id),
       trial_reports: of(reports, r.id),
+      vouches: of(vouches, r.id),
     )
   })
 }
@@ -333,6 +352,11 @@ pub fn count(read: Read) -> Result(Int, Fail(e)) {
 }
 
 // ----------------------------------------------------------------------------------------------- rules
+
+/// The references every profile view shows: published, and not withdrawn by Trust & Safety.
+pub fn published_vouches(p: Player) -> List(vouch_row.Row) {
+  list.filter(p.vouches, vouch_view.shown)
+}
 
 pub fn is_adult(p: Player, now: Int) -> Bool {
   age.is_adult(p.row.birth_date, p.row.country, now)
@@ -976,10 +1000,11 @@ pub fn org_fields(
       False -> []
     },
     // Coach references travel with grassroots-journey players.
-    // Not ported yet: the vouches belong to verification.
     case r.level == playing_level.Pro {
       True -> []
-      False -> [#("vouches", json.preprocessed_array([]))]
+      False -> [
+        #("vouches", json.array(published_vouches(p), vouch_view.view)),
+      ]
     },
   ])
 }

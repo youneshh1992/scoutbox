@@ -723,6 +723,78 @@ pub fn next_claim(tx: Tx) -> Result(ClaimId, Fail(e)) {
   ids.next(tx, "vclm") |> result.map(ClaimId)
 }
 
+/// An id of `coach_affiliations`.
+pub opaque type CoachAffiliationId {
+  CoachAffiliationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn coach_affiliation(text: String) -> CoachAffiliationId {
+  CoachAffiliationId(text)
+}
+
+pub fn coach_affiliation_to_string(id: CoachAffiliationId) -> String {
+  let CoachAffiliationId(text) = id
+  text
+}
+
+pub fn coach_affiliation_sql(id: CoachAffiliationId) -> sqlight.Value {
+  sqlight.text(coach_affiliation_to_string(id))
+}
+
+pub fn coach_affiliation_json(id: CoachAffiliationId) -> Json {
+  json.string(coach_affiliation_to_string(id))
+}
+
+pub fn coach_affiliation_decoder() -> decode.Decoder(CoachAffiliationId) {
+  decode.map(decode.string, CoachAffiliationId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_coach_affiliation(tx: Tx) -> Result(CoachAffiliationId, Fail(e)) {
+  ids.next(tx, "aff") |> result.map(CoachAffiliationId)
+}
+
+/// An id of `coach_affiliation_history`.
+pub opaque type CoachAffiliationEventId {
+  CoachAffiliationEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn coach_affiliation_event(text: String) -> CoachAffiliationEventId {
+  CoachAffiliationEventId(text)
+}
+
+pub fn coach_affiliation_event_to_string(
+  id: CoachAffiliationEventId,
+) -> String {
+  let CoachAffiliationEventId(text) = id
+  text
+}
+
+pub fn coach_affiliation_event_sql(
+  id: CoachAffiliationEventId,
+) -> sqlight.Value {
+  sqlight.text(coach_affiliation_event_to_string(id))
+}
+
+pub fn coach_affiliation_event_json(id: CoachAffiliationEventId) -> Json {
+  json.string(coach_affiliation_event_to_string(id))
+}
+
+pub fn coach_affiliation_event_decoder() -> decode.Decoder(
+  CoachAffiliationEventId,
+) {
+  decode.map(decode.string, CoachAffiliationEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_coach_affiliation_event(
+  tx: Tx,
+) -> Result(CoachAffiliationEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(CoachAffiliationEventId)
+}
+
 /// An id of `combine_attempts`.
 pub opaque type CombineAttemptId {
   CombineAttemptId(String)
@@ -1375,6 +1447,11 @@ pub fn evidence_dispute_json(id: EvidenceDisputeId) -> Json {
 
 pub fn evidence_dispute_decoder() -> decode.Decoder(EvidenceDisputeId) {
   decode.map(decode.string, EvidenceDisputeId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_evidence_dispute(tx: Tx) -> Result(EvidenceDisputeId, Fail(e)) {
+  ids.next(tx, "dsp") |> result.map(EvidenceDisputeId)
 }
 
 /// An id of `evidence_history`.
@@ -3339,6 +3416,38 @@ pub fn next_squad_entry(tx: Tx) -> Result(SquadEntryId, Fail(e)) {
   ids.next(tx, "sq") |> result.map(SquadEntryId)
 }
 
+/// An id of `squad_invites`.
+pub opaque type SquadInviteId {
+  SquadInviteId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn squad_invite(text: String) -> SquadInviteId {
+  SquadInviteId(text)
+}
+
+pub fn squad_invite_to_string(id: SquadInviteId) -> String {
+  let SquadInviteId(text) = id
+  text
+}
+
+pub fn squad_invite_sql(id: SquadInviteId) -> sqlight.Value {
+  sqlight.text(squad_invite_to_string(id))
+}
+
+pub fn squad_invite_json(id: SquadInviteId) -> Json {
+  json.string(squad_invite_to_string(id))
+}
+
+pub fn squad_invite_decoder() -> decode.Decoder(SquadInviteId) {
+  decode.map(decode.string, SquadInviteId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_squad_invite(tx: Tx) -> Result(SquadInviteId, Fail(e)) {
+  ids.next(tx, "sqi") |> result.map(SquadInviteId)
+}
+
 /// An id of `case_tasks`.
 pub opaque type TaskId {
   TaskId(String)
@@ -4051,6 +4160,38 @@ pub fn ver_token_decoder() -> decode.Decoder(VerTokenId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_ver_token(tx: Tx) -> Result(VerTokenId, Fail(e)) {
   ids.next(tx, "vtk") |> result.map(VerTokenId)
+}
+
+/// An id of `vouches`.
+pub opaque type VouchId {
+  VouchId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn vouch(text: String) -> VouchId {
+  VouchId(text)
+}
+
+pub fn vouch_to_string(id: VouchId) -> String {
+  let VouchId(text) = id
+  text
+}
+
+pub fn vouch_sql(id: VouchId) -> sqlight.Value {
+  sqlight.text(vouch_to_string(id))
+}
+
+pub fn vouch_json(id: VouchId) -> Json {
+  json.string(vouch_to_string(id))
+}
+
+pub fn vouch_decoder() -> decode.Decoder(VouchId) {
+  decode.map(decode.string, VouchId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_vouch(tx: Tx) -> Result(VouchId, Fail(e)) {
+  ids.next(tx, "vch") |> result.map(VouchId)
 }
 
 /// An id of `dynamic_watchlists`.

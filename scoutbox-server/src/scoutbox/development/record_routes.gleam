@@ -27,6 +27,7 @@ import scoutbox/rules/journey
 import scoutbox/rules/time_zones
 import scoutbox/safety/audit
 import scoutbox/safety/moderate
+import scoutbox/verification/vouch_view
 import scoutbox/vocab/availability
 import scoutbox/vocab/playing_level
 import wisp.{type Request, type Response}
@@ -73,7 +74,7 @@ pub fn me(p: PlayerAccess) -> Response {
         }),
         #("pathway", journey.pathway(player)),
         #("programme", journey.programme(player, now)),
-        #("vouches", json.preprocessed_array([])),
+        #("vouches", json.array(player.vouches, vouch_view.view)),
       ]),
     ),
   )
