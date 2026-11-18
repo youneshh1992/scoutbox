@@ -24,7 +24,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 14 | 14 | 9 | 52 / 2261 | 67 / 239 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
-| scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
+| scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
 ## Batteries
@@ -88,7 +88,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 1 / 105 | 0 / 6 | 105 cases pending; 6 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
-| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 238 |  | 26 moved |  |  |  | not answered |
+| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 238 |  | 26 moved | yes |  |  | **done** |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
 

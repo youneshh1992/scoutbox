@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 42 batteries pass unchanged]
+### Porting, domain by domain [in progress: 43 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -117,6 +117,7 @@ of the product, so they aren't one slice.
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
+| Scouting: club workflows | 1 | **ported** |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -187,22 +188,16 @@ are for surprising facts or points that later work depends on, not implementatio
       rest waits for the Passport port. `/player/applications` isn't ported, so crossApp's G8 passes vacuously here.
       The agent contract gives a field's own code only to a field the request declares (`declaredCodes`): an unknown
       `clientKey` is `AGENT_INPUT_INVALID`.
-4. `scouting/clubWorkflows`. Opportunity creation, the club's list and the
-   board's club rows are in, and match the TypeScript server response for response. The structured requirements
-   are not. The battery now passes as far as its cases section (assigning): the list
-   queries, template versions, published feedback, video segments and playlists are in. The `feedback` live event
-   reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
-   as a drawing (docs/known-issues.md). The case workspace is whole (reading one, assigning, completing tasks,
-   approvals' answers, links), and so is tactical fit: the setup, vacancies and their candidates, the shadow
-   squad, the squad planner, the grassroots squad and match days. The opportunities section is whole: applying (an adult
-   for themselves, a guardian for a child), withdrawing, the club's list and answer, and closing; every response
-   matches the TypeScript server's, notifications included. The `applications` live event reaches no stream, as
-   `feedback` doesn't. Campaigns are in (publishing, the lists, submitting with the file checks, the review queue and
-   review) and so is the drill guidance, whose library is now snapshotted (`spec/development/`). Uploading moved out to
-   its own battery, `platform/uploads` (resumable sessions, media links, captions: 26 checks), which stays off
-   `BATTERIES` with the upload subsystem; the campaign plants its clip as an upload stores it. A move to another
-   battery needs no reviewer's verdict in the ledger. The battery now stops at its development section. A save refused after the TypeScript server minted a new role's id still burns that id there, so id
-   numbers drift between the servers; no battery reads them.
+4. `scouting/clubWorkflows` [**done**: the scouting domain is ported]. Every section's responses match the TypeScript
+   server's, notifications included. The `feedback` and `applications` live events reach no stream on either server
+   (the registry calls them org-private but names no org), and a list is accepted as a drawing (docs/known-issues.md).
+   Uploading moved out to its own battery, `platform/uploads` (26 checks), which stays off `BATTERIES` with the upload
+   subsystem; a move to another battery needs no reviewer's verdict in the ledger. A save refused after the TypeScript
+   server minted a new role's id still burns that id there, so id numbers drift between the servers; no battery reads
+   them. Signing follow-ups (`operations/follow_ups`) run at boot, every sweep and on `/admin/sweep`; the rest of the
+   TypeScript sweep (application reminders, trial-feedback escalation, the completed-trial assessment reminder,
+   upload clean-up) is marked `Not ported yet:` there, for `operations/clubOperations`. The benchmarks' position
+   groups come from the newly snapshotted `PROGRAMME_TRACKS` (`spec/grassrootsJourney.json`).
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.

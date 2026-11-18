@@ -15,6 +15,7 @@ import scoutbox/messaging/delivery
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/outbox
 import scoutbox/messaging/push
+import scoutbox/operations/follow_ups
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/effect.{type Effect, Live, SendMail, SendPush}
@@ -113,6 +114,7 @@ fn boot() -> Result(Nil, String) {
   // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped. A trial's
   // reminder markers are rows too, so the boot pass re-sends nothing.
   let _ = delivery.sweep(ctx)
+  let _ = follow_ups.sweep(ctx, clock.now_ms())
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
   process.spawn(fn() { sweeping(ctx) })
@@ -137,13 +139,14 @@ fn boot() -> Result(Nil, String) {
 }
 
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
-/// warnings, the trial reminders, the match facts whose time-only change is due, and the agent core's expiry and
+/// warnings, the signing follow-ups, the trial reminders, the match facts whose time-only change is due, and the agent core's expiry and
 /// stale-verification notices.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
   let _ = webhooks.sweep(ctx)
   let _ = verification_review.sweep(ctx)
+  let _ = follow_ups.sweep(ctx, clock.now_ms())
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = match_facts.sweep(ctx.store)
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())

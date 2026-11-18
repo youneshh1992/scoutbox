@@ -43,4 +43,5 @@ export const BATTERIES = [
   'agents/adversarial',
   'agents/crossApp',
   'agents/crossAppAdversarial',
+  'scouting/clubWorkflows',
 ];

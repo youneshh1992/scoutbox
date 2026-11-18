@@ -1,0 +1,146 @@
+{
+  "$source": "grassrootsJourney.mjs",
+  "PROGRAMME_TRACKS": {
+    "attack": {
+      "key": "attack",
+      "label": "Attacking track",
+      "positions": [
+        "ST",
+        "CF",
+        "RW",
+        "LW",
+        "CAM"
+      ],
+      "sessions": [
+        {
+          "id": "atk-sprint",
+          "day": "Mon",
+          "title": "Sprint ladder — top-end pace",
+          "drillId": "drill-sprint-ladder"
+        },
+        {
+          "id": "atk-finish",
+          "day": "Wed",
+          "title": "Shooting arc — 20 finishes",
+          "drillId": "drill-shooting-arc"
+        },
+        {
+          "id": "atk-touch",
+          "day": "Fri",
+          "title": "First touch under fatigue",
+          "drillId": "drill-first-touch"
+        },
+        {
+          "id": "atk-match",
+          "day": "Sat",
+          "title": "Match or small-sided game (log attendance)",
+          "drillId": null
+        }
+      ]
+    },
+    "midfield": {
+      "key": "midfield",
+      "label": "Midfield track",
+      "positions": [
+        "CM",
+        "CDM",
+        "RB",
+        "LB",
+        "RWB",
+        "LWB"
+      ],
+      "sessions": [
+        {
+          "id": "mid-pass",
+          "day": "Mon",
+          "title": "Passing gates — both feet",
+          "drillId": "drill-passing-gates"
+        },
+        {
+          "id": "mid-touch",
+          "day": "Wed",
+          "title": "First touch — wall rebounds",
+          "drillId": "drill-first-touch"
+        },
+        {
+          "id": "mid-sprint",
+          "day": "Fri",
+          "title": "Repeat sprints — recovery runs",
+          "drillId": "drill-sprint-ladder"
+        },
+        {
+          "id": "mid-match",
+          "day": "Sat",
+          "title": "Match or small-sided game (log attendance)",
+          "drillId": null
+        }
+      ]
+    },
+    "defence": {
+      "key": "defence",
+      "label": "Defensive track",
+      "positions": [
+        "CB"
+      ],
+      "sessions": [
+        {
+          "id": "def-sprint",
+          "day": "Mon",
+          "title": "Recovery sprints",
+          "drillId": "drill-sprint-ladder"
+        },
+        {
+          "id": "def-pass",
+          "day": "Wed",
+          "title": "Passing gates — building out",
+          "drillId": "drill-passing-gates"
+        },
+        {
+          "id": "def-touch",
+          "day": "Fri",
+          "title": "First touch under pressure",
+          "drillId": "drill-first-touch"
+        },
+        {
+          "id": "def-match",
+          "day": "Sat",
+          "title": "Match or small-sided game (log attendance)",
+          "drillId": null
+        }
+      ]
+    },
+    "keeper": {
+      "key": "keeper",
+      "label": "Goalkeeper track",
+      "positions": [
+        "GK"
+      ],
+      "sessions": [
+        {
+          "id": "gk-feet",
+          "day": "Mon",
+          "title": "Distribution — passing gates",
+          "drillId": "drill-passing-gates"
+        },
+        {
+          "id": "gk-hands",
+          "day": "Wed",
+          "title": "Handling — wall rebounds",
+          "drillId": "drill-first-touch"
+        },
+        {
+          "id": "gk-power",
+          "day": "Fri",
+          "title": "Explosive steps — sprint ladder",
+          "drillId": "drill-sprint-ladder"
+        },
+        {
+          "id": "gk-match",
+          "day": "Sat",
+          "title": "Match or shot-stopping session (log attendance)",
+          "drillId": null
+        }
+      ]
+    }
+  }
+}

@@ -19,6 +19,7 @@ import scoutbox/agents/transaction_party_routes as party_lanes
 import scoutbox/agents/transaction_routes
 import scoutbox/agents/transaction_ts_routes
 import scoutbox/app.{type Ctx}
+import scoutbox/development/benchmarks
 import scoutbox/development/box_prefs
 import scoutbox/development/combine
 import scoutbox/development/drill_guidance
@@ -64,6 +65,7 @@ import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
+import scoutbox/operations/follow_ups
 import scoutbox/passport/football_passport
 import scoutbox/passport/trust
 import scoutbox/platform/clock
@@ -571,6 +573,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["players", pid, "objectives"] ->
           only(req, Get, fn() { objectives.org_list(ctx, org, id.player(pid)) })
+        ["followups"] ->
+          only(req, Get, fn() { follow_ups.org_list(ctx, req, org) })
+        ["followups", fid, "report"] ->
+          only(req, Post, fn() {
+            follow_ups.report(ctx, req, org, id.follow_up(fid))
+          })
         ["reassessments", rid, "outcome"] ->
           only(req, Post, fn() {
             objectives.outcome(ctx, req, org, id.reassessment(rid))
@@ -1076,6 +1084,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Post -> objectives.player_create(ctx, req, player)
             _ -> not_found()
           }
+        ["followups"] ->
+          only(req, Get, fn() { follow_ups.player_list(ctx, player) })
+        ["followups", fid, "respond"] ->
+          only(req, Post, fn() {
+            follow_ups.player_respond(ctx, req, player, id.follow_up(fid))
+          })
+        ["benchmarks"] ->
+          only(req, Get, fn() { benchmarks.player(ctx, player) })
+        ["football-category"] ->
+          only(req, Post, fn() {
+            follow_ups.football_category(ctx, req, player)
+          })
         ["objectives", oid, "progress"] ->
           only(req, Post, fn() {
             objectives.progress(ctx, req, player, id.objective(oid))
@@ -1336,6 +1356,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))
+          })
+        ["followups"] ->
+          only(req, Get, fn() { follow_ups.guardian_list(ctx, guardian) })
+        ["followups", fid, "respond"] ->
+          only(req, Post, fn() {
+            follow_ups.guardian_respond(ctx, req, guardian, id.follow_up(fid))
           })
         ["children", cid, "objectives"] ->
           case req.method {
@@ -1709,6 +1735,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
         ["drill-guidance"] ->
           only(req, Get, fn() { drill_guidance.admin_list(ctx) })
+        ["sweep"] -> only(req, Post, fn() { follow_ups.admin_sweep(ctx, req) })
+        ["outcomes"] -> only(req, Get, fn() { follow_ups.admin_outcomes(ctx) })
+        ["followups", fid] ->
+          only(req, Post, fn() {
+            follow_ups.admin_due_at(ctx, req, id.follow_up(fid))
+          })
         ["staff-checks"] ->
           only(req, Get, fn() { trial_day.staff_checks(ctx, req) })
         ["staff-checks", tid, sid] ->

@@ -1682,6 +1682,38 @@ pub fn next_fixture(tx: Tx) -> Result(FixtureId, Fail(e)) {
   ids.next(tx, "fix") |> result.map(FixtureId)
 }
 
+/// An id of `follow_ups`.
+pub opaque type FollowUpId {
+  FollowUpId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn follow_up(text: String) -> FollowUpId {
+  FollowUpId(text)
+}
+
+pub fn follow_up_to_string(id: FollowUpId) -> String {
+  let FollowUpId(text) = id
+  text
+}
+
+pub fn follow_up_sql(id: FollowUpId) -> sqlight.Value {
+  sqlight.text(follow_up_to_string(id))
+}
+
+pub fn follow_up_json(id: FollowUpId) -> Json {
+  json.string(follow_up_to_string(id))
+}
+
+pub fn follow_up_decoder() -> decode.Decoder(FollowUpId) {
+  decode.map(decode.string, FollowUpId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_follow_up(tx: Tx) -> Result(FollowUpId, Fail(e)) {
+  ids.next(tx, "fup") |> result.map(FollowUpId)
+}
+
 /// An id of `friendlies`.
 pub opaque type FriendlyId {
   FriendlyId(String)
@@ -2696,6 +2728,11 @@ pub fn outcome_report_json(id: OutcomeReportId) -> Json {
 
 pub fn outcome_report_decoder() -> decode.Decoder(OutcomeReportId) {
   decode.map(decode.string, OutcomeReportId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_outcome_report(tx: Tx) -> Result(OutcomeReportId, Fail(e)) {
+  ids.next(tx, "out") |> result.map(OutcomeReportId)
 }
 
 /// An id of `players`.

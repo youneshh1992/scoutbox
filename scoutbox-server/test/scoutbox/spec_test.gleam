@@ -11,6 +11,7 @@ import gleam/string
 import scoutbox/agents/core_routes
 import scoutbox/agents/policy_routes
 import scoutbox/agents/transaction_routes
+import scoutbox/development/benchmarks.{Drill}
 import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
@@ -20,6 +21,7 @@ import scoutbox/recruitment/analytics/funnels
 import scoutbox/recruitment/analytics/metrics
 import scoutbox/recruitment/domain_errors
 import scoutbox/vocab/notification_category
+import scoutbox/vocab/position
 import simplifile
 
 fn snapshot(file: String, decoder: decode.Decoder(a)) -> a {
@@ -273,4 +275,44 @@ pub fn drill_library_test() {
       decode.at(["DRILL_RECORDING"], decode.dict(decode.string, decode.string)),
     )
   assert dict.from_list(drill_guidance.recording) == snapshot_recording
+}
+
+/// The drill library's names, metrics, units and directions, drill by drill in order.
+pub fn drill_details_test() {
+  let drills =
+    snapshot(
+      "development/record.json",
+      decode.at(
+        ["DRILLS"],
+        decode.list({
+          use id <- decode.field("id", decode.string)
+          use name <- decode.field("name", decode.string)
+          use metric <- decode.field("metric", decode.string)
+          use unit <- decode.field("unit", decode.string)
+          use lower_is_better <- decode.field("lowerIsBetter", decode.bool)
+          decode.success(Drill(id:, name:, metric:, unit:, lower_is_better:))
+        }),
+      ),
+    )
+  assert benchmarks.drills == drills
+}
+
+/// The programme tracks' position groups, each in order.
+pub fn programme_tracks_test() {
+  let tracks =
+    snapshot(
+      "grassrootsJourney.json",
+      decode.at(
+        ["PROGRAMME_TRACKS"],
+        decode.dict(
+          decode.string,
+          decode.at(["positions"], decode.list(decode.string)),
+        ),
+      ),
+    )
+  let declared =
+    list.map(benchmarks.tracks, fn(t) {
+      #(t.0, list.map(t.1, position.to_string))
+    })
+  assert dict.from_list(declared) == tracks
 }

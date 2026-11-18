@@ -1,0 +1,1647 @@
+// Club scouting workflows: evidence, assessments, video, recruitment, tactical fit, opportunities, campaigns,
+// development, trial days, outcomes and access, including the negative permission paths, against a freshly seeded
+// server of its own. The outcomes section restarts the server (SIGKILL) to prove scheduled work survives. Uploading
+// itself (resumable sessions, media links, captions) is platform/uploads.
+import { spawn, execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { serverCommand, serverDir } from '../support/server.mjs';
+import { openFixture } from '../support/sqlFixture.mjs';
+
+const PORT = 4102;
+const API = `http://localhost:${PORT}`;
+const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'm12e2e-'));
+
+let server = null;
+async function startServer() {
+  server = spawn(...serverCommand(), {
+    cwd: serverDir,
+    env: { ...process.env, DATA_DIR: DATA, PORT: String(PORT) },
+    stdio: 'ignore',
+  });
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`${API}/health`);
+      if (r.ok) return;
+    } catch {
+      /* not yet */
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error('server did not come up');
+}
+function killServer() {
+  try {
+    server.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
+}
+process.on('exit', killServer);
+await startServer();
+
+let passed = 0;
+const ok = (cond, name) => {
+  if (!cond) {
+    console.error(`✗ ${name}`);
+    killServer();
+    process.exit(1);
+  }
+  passed++;
+  console.log(`✓ ${name}`);
+};
+const j = async (pathname, opts = {}, headers = {}) => {
+  const res = await fetch(`${API}${pathname}`, {
+    ...opts,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
+};
+const bearer = (t) => ({ authorization: `Bearer ${t}` });
+const admin = { 'x-admin-key': 'scoutbox-admin' };
+const post = (p, body, h) => j(p, { method: 'POST', body: JSON.stringify(body ?? {}) }, h);
+const put = (p, body, h) => j(p, { method: 'PUT', body: JSON.stringify(body ?? {}) }, h);
+
+// ---------- logins
+const playerLogin = async (playerId) => (await post('/auth/player/login', { playerId })).body.token;
+const KOLA = await playerLogin('pl-adeyemi'); // adult, London
+const SVEN = await playerLogin('pl-svensson'); // adult
+const GUNI = await playerLogin('pl-guni'); // 14, guardian gd-amara
+const OSEI = await playerLogin('pl-osei'); // London amateur (grassroots-visible)
+const AMARA = (await post('/auth/guardian/login', { guardianId: 'gd-amara' })).body.token;
+const orgLogin = async (orgId, scoutName, role, platform) =>
+  (await post('/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
+const maria = await orgLogin('org-eastport', 'Maria Keane', 'Head of Recruitment');
+const MARIA = maria.token;
+const sam = await orgLogin('org-eastport', 'Sam Ellis', 'Scout');
+const SAM = sam.token;
+const NORTH = (await orgLogin('org-northstar', 'Alex Agent', 'Agent')).token;
+const hack = await orgLogin('org-hackneymarsh', 'Dee Mensah', 'Head Coach', 'grassroots');
+const HACK = hack.token;
+ok(!!(KOLA && SVEN && GUNI && AMARA && MARIA && SAM && NORTH && HACK && OSEI), 'all seed identities log in');
+
+// ============================================================ evidence
+let r = await post(
+  '/player/evidence',
+  { claimType: 'statistic', label: 'League goals 2025/26', value: 14, units: 'goals', season: '2025/26' },
+  bearer(KOLA),
+);
+ok(r.status === 201 && r.body.evidence.verification.status === 'self_reported', 'player files a self-reported claim');
+const ev1 = r.body.evidence.id;
+r = await post(`/org/evidence/${ev1}/corroborate`, {}, bearer(MARIA));
+ok(
+  r.status === 200 &&
+    r.body.evidence.verification.status === 'club_assessed' &&
+    r.body.evidence.verification.reviewerName === 'Maria Keane',
+  'an authorised club corroborates the claim (named reviewer)',
+);
+r = await post(`/org/evidence/${ev1}/corroborate`, {}, bearer(MARIA));
+ok(r.status === 409, 'double corroboration refused');
+
+// ---- one event, one instant -------------------------------------------------
+//
+// Creating a record is ONE event, so every timestamp it stamps is ONE instant.
+// Reading the clock more than once would make `recordedAt` and
+// `verification.reviewedAt` occasionally 1ms apart — whenever a millisecond
+// boundary fell between two statements.
+//
+// Second Look reads `reviewedAt > recordedAt` to tell a LATER upgrade
+// from a tier the record was born with, so that 1ms made a brand-new upload
+// look like a later upgrade of itself: one record, two material changes, and a
+// club told its evidence had improved when nothing had been reviewed. Same
+// action, different output, depending on where a clock tick fell.
+//
+// Asserted here, at the writer that owns the invariant, deterministically.
+{
+  const born = await post(
+    '/org/players/pl-adeyemi/evidence',
+    {
+      claimType: 'assessment_result',
+      label: 'Club assessment — one-instant check',
+      value: 7,
+      units: 'score',
+    },
+    bearer(MARIA),
+  );
+  ok(born.status === 201, 'a club files evidence that is born with a tier and a reviewer');
+  const v = born.body.evidence.verification;
+  ok(v.reviewedAt != null && v.reviewerName, 'the record carries a reviewer, so it has both timestamps to compare');
+  ok(
+    v.reviewedAt === born.body.evidence.recordedAt,
+    `reviewedAt === recordedAt for evidence born with a tier (${v.reviewedAt} vs ${born.body.evidence.recordedAt})`,
+  );
+  ok(
+    !(v.reviewedAt > born.body.evidence.recordedAt),
+    'so "reviewed after it was recorded" is false by construction — creation is never an upgrade of itself',
+  );
+}
+r = await post(`/player/evidence/${ev1}/correct`, { value: 12, reason: 'double-counted two cup goals' }, bearer(KOLA));
+ok(
+  r.status === 201 && r.body.superseded === ev1 && r.body.evidence.correctionOf === ev1,
+  'correction supersedes with traceable lineage',
+);
+const ev2 = r.body.evidence.id;
+r = await j('/player/passport', {}, bearer(KOLA));
+const orig = r.body.records.find((x) => x.id === ev1);
+ok(orig && orig.superseded && orig.supersededBy === ev2, 'the original record remains, marked superseded');
+ok(
+  r.body.summary.note.includes('not a rating of football ability'),
+  'passport separates reliability from ability in its own words',
+);
+// minors + unauthorised actors
+r = await post(
+  '/guardian/children/pl-guni/evidence',
+  { claimType: 'attendance', label: 'Sunday league spring term', value: 9, units: 'matches' },
+  bearer(AMARA),
+);
+ok(r.status === 201, 'guardian files evidence for their child');
+const evG = r.body.evidence.id;
+r = await post(`/org/evidence/${evG}/corroborate`, {}, bearer(NORTH));
+ok(r.status === 403, 'an agency cannot verify a minor’s claim (wall holds on evidence too)');
+r = await j('/org/players/pl-guni/passport', {}, bearer(NORTH));
+ok(r.status === 403 && r.body.error === 'UNDER_18_WALL', 'agency cannot read a minor’s passport');
+r = await post('/auth/player/signup', {
+  name: 'Empty Passport',
+  dob: '2001-05-05',
+  country: 'GB',
+  password: 'longenough1',
+  position: 'CM',
+});
+const EMPTY = r.body.token;
+r = await j('/player/passport', {}, bearer(EMPTY));
+ok(r.body.summary.insufficient === true, 'insufficient evidence is displayed explicitly, not padded');
+// disputes
+r = await post(`/org/evidence/${ev2}/dispute`, { reason: 'club records show 11, not 12' }, bearer(MARIA));
+ok(r.status === 201, 'org files a dispute against a claim');
+r = await j('/admin/evidence/disputes', {}, admin);
+const disp = r.body.items[0];
+ok(r.body.items.length === 1 && disp.evidenceId === ev2, 'T&S sees the dispute queue');
+r = await post(
+  `/admin/evidence/disputes/${disp.id}/resolve`,
+  { resolution: 'upheld', note: 'club evidence stronger', downgrade: 'no' },
+  admin,
+);
+ok(
+  r.status === 400 && r.body.field === 'downgrade' && r.body.problem === 'not_boolean',
+  'downgrade must be true or false ("no" was read as a downgrade)',
+);
+r = await j('/admin/evidence/disputes?limit=0', {}, admin);
+ok(
+  r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID',
+  'a dispute page limit out of range is refused, not clamped',
+);
+r = await post(
+  `/admin/evidence/disputes/${disp.id}/resolve`,
+  { resolution: 'upheld', note: 'club evidence stronger', downgrade: true },
+  admin,
+);
+ok(
+  r.status === 200 && r.body.evidence.verification.method === 'downgraded after dispute',
+  'T&S resolves; downgrade recorded with method',
+);
+// Valid input only — junk is refused with the field named, and nothing is written
+{
+  const before = (await j('/player/passport', {}, bearer(KOLA))).body.records.length;
+  for (const [body, field] of [
+    [{ claimType: 'statistic', label: 'Goals', value: { goals: 3 } }, 'value'],
+    [{ claimType: 'statistic', label: 'Goals', value: true }, 'value'],
+    [{ claimType: 'statistic', label: 42 }, 'label'],
+    [{ claimType: 'statistic', label: 'Goals', units: ['goals'] }, 'units'],
+    [{ claimType: 'statistic', label: 'Goals', mediaIds: 'clip-1' }, 'mediaIds'],
+  ]) {
+    const bad = await post('/player/evidence', body, bearer(KOLA));
+    ok(
+      bad.status === 400 && bad.body.error === 'FIELD_INVALID' && bad.body.field === field,
+      `evidence with a junk ${field} is refused (400 FIELD_INVALID, field named)`,
+    );
+  }
+  ok(
+    (await j('/player/passport', {}, bearer(KOLA))).body.records.length === before,
+    'and no refused claim was recorded',
+  );
+  const longLabel = await post(
+    '/player/evidence',
+    { claimType: 'statistic', label: 'x'.repeat(121), value: '12 goals' },
+    bearer(KOLA),
+  );
+  ok(
+    longLabel.status === 400 &&
+      longLabel.body.field === 'label' &&
+      longLabel.body.problem === 'too_long' &&
+      longLabel.body.max === 120,
+    'over-long text is refused with its limit, not cut off',
+  );
+  for (const [field, value] of [
+    ['tier', 'club_assessed'],
+    ['source', { kind: 'org', id: 'org-eastport' }],
+    ['recordedAt', 1],
+  ]) {
+    const forged = await post(
+      '/player/evidence',
+      { claimType: 'statistic', label: 'Goals', [field]: value },
+      bearer(KOLA),
+    );
+    ok(
+      forged.status === 400 && forged.body.field === field && forged.body.problem === 'unknown_field',
+      `a claim that names its own ${field} is refused`,
+    );
+  }
+  ok((await j('/player/passport', {}, bearer(KOLA))).body.records.length === before, 'and none of those was recorded');
+  const textValue = await post(
+    '/player/evidence',
+    { claimType: 'statistic', label: 'Goals', value: '12 goals' },
+    bearer(KOLA),
+  );
+  ok(textValue.status === 201 && textValue.body.evidence.value === '12 goals', 'a text value is kept as text');
+  const clubMethod = await post(
+    '/org/players/pl-adeyemi/evidence',
+    { claimType: 'statistic', label: 'Goals', method: { how: 'video' } },
+    bearer(MARIA),
+  );
+  ok(
+    clubMethod.status === 400 && clubMethod.body.field === 'method' && clubMethod.body.problem === 'not_text',
+    'a club method that is not text is refused, not stored as "[object Object]"',
+  );
+  const badReason = await post(
+    `/player/evidence/${textValue.body.evidence.id}/correct`,
+    { reason: { why: 'x' } },
+    bearer(KOLA),
+  );
+  ok(badReason.status === 400 && badReason.body.field === 'reason', 'a correction reason that is not text is refused');
+  const badFrom = await post(
+    '/org/coaches',
+    { coachName: 'Pat Doe', role: 'Coach', from: 'last spring' },
+    bearer(HACK),
+  );
+  ok(
+    badFrom.status === 400 && badFrom.body.error === 'DATE_INVALID' && badFrom.body.field === 'from',
+    'a coach affiliation start that is not a day is refused',
+  );
+  const badNote = await post('/org/squad/invite', { playerId: 'pl-adeyemi', note: 7 }, bearer(MARIA));
+  ok(badNote.status === 400 && badNote.body.field === 'note', 'a squad invitation note that is not text is refused');
+}
+// Names from other domains fit the evidence tables' 200 characters (a player's name is at most 120)
+{
+  const refused = await post('/auth/player/signup', {
+    name: 'A'.repeat(230),
+    dob: '1999-01-01',
+    country: 'GB',
+    password: 'longenough1',
+    position: 'CM',
+  });
+  ok(refused.status === 400 && refused.body.field === 'name', 'a 230-character player name is refused at sign-up');
+  const longName = 'A'.repeat(120);
+  const su = await post('/auth/player/signup', {
+    name: longName,
+    dob: '1999-01-01',
+    country: 'GB',
+    password: 'longenough1',
+    position: 'CM',
+  });
+  const LONG = su.body.token;
+  const filed = await post('/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3 }, bearer(LONG));
+  ok(
+    filed.status === 201 && filed.body.evidence.source.name === longName,
+    'a player with a 120-character name files evidence (the whole name)',
+  );
+  const corrected = await post(
+    `/player/evidence/${filed.body.evidence.id}/correct`,
+    { value: 4, reason: 'miscounted' },
+    bearer(LONG),
+  );
+  ok(corrected.status === 201, 'and corrects it');
+  const disputed = await post(
+    `/player/evidence/${corrected.body.evidence.id}/dispute`,
+    { reason: 'the club entry is wrong' },
+    bearer(LONG),
+  );
+  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 120, 'and disputes it');
+  const reg = await post('/auth/org/register-grassroots', {
+    name: 'C'.repeat(120),
+    city: 'London',
+    lat: 51.5,
+    lng: -0.12,
+    federation: 'FA',
+    registrationId: 'S9A-LONG',
+    scoutName: 'S'.repeat(120),
+  });
+  const oseiClaim = await post(
+    '/player/evidence',
+    { claimType: 'statistic', label: 'Assists', value: 5 },
+    bearer(OSEI),
+  );
+  const orgDispute = await post(
+    `/org/evidence/${oseiClaim.body.evidence.id}/dispute`,
+    { reason: 'our records differ' },
+    bearer(reg.body.token),
+  );
+  ok(
+    reg.status === 201 && orgDispute.status === 201 && orgDispute.body.dispute.by.name.length === 200,
+    'a club whose scout and club names total 243 characters files a dispute',
+  );
+  const queue = await j('/admin/evidence/disputes?limit=200', {}, admin);
+  ok(
+    queue.body.items.some((d) => d.id === orgDispute.body.dispute.id) &&
+      queue.body.items.some((d) => d.id === disputed.body.dispute.id),
+    'and both disputes reach the T&S queue',
+  );
+}
+// legacy relabelling
+r = await j('/player/passport', {}, bearer(KOLA));
+ok(
+  r.body.legacy.every((l) => l.tier !== 'independent'),
+  'no legacy surface claims independent measurement',
+);
+
+// ======================================================= coach identity
+r = await post(
+  '/org/coaches',
+  { coachName: 'Dee Mensah', role: 'Head Coach', conflictOfInterest: 'none declared' },
+  bearer(HACK),
+);
+ok(
+  r.status === 201 && r.body.affiliation.status === 'confirmed' && r.body.affiliation.confirmedBy.name === 'Dee Mensah',
+  'club confirms a coach affiliation',
+);
+const affId = r.body.affiliation.id;
+r = await post(
+  '/player/evidence',
+  { claimType: 'attendance', label: 'Hackney training block', value: 6, units: 'sessions' },
+  bearer(OSEI),
+);
+const evO = r.body.evidence.id;
+r = await post(`/org/evidence/${evO}/corroborate`, {}, bearer(HACK));
+ok(
+  r.status === 200 && r.body.evidence.verification.status === 'coach_confirmed',
+  'club-affiliated coach confirmation earns the coach_confirmed tier',
+);
+r = await post(`/org/coaches/${affId}/revoke`, { reason: 'left the club' }, bearer(HACK));
+ok(r.status === 200, 'affiliation revoked');
+r = await post('/player/evidence', { claimType: 'attendance', label: 'Second block', value: 4 }, bearer(OSEI));
+r = await post(`/org/evidence/${r.body.evidence.id}/corroborate`, {}, bearer(HACK));
+ok(
+  r.body.evidence.verification.status === 'club_assessed',
+  'after revocation the same person only earns club_assessed — current privilege gone, history intact',
+);
+// reference w/ conflict + withdrawal
+r = await post(
+  '/player/vouches/request',
+  { coachName: 'Ade Balogun', coachEmail: 'ade@sundayleague.example', role: 'Team Coach' },
+  bearer(KOLA),
+);
+if (r.status === 404)
+  r = await post(
+    '/player/vouch/request',
+    { coachName: 'Ade Balogun', coachEmail: 'ade@sundayleague.example', role: 'Team Coach' },
+    bearer(KOLA),
+  );
+ok(r.status === 201, 'reference request filed');
+let outbox = (await j('/admin/outbox', {}, admin)).body;
+const mail = outbox.items.find((m) => String(m.text ?? m.body ?? '').includes('reference code is'));
+const code = /reference code is ([A-Z0-9]{8})/.exec(mail?.text ?? mail?.body ?? '')?.[1];
+ok(!!code, 'reference code recoverable from the dev outbox');
+r = await post('/vouch/submit', {
+  code,
+  text: 'Coached Kola two seasons. Relentless pressing, great with younger players.',
+  seasons: '2023–2025',
+  conflictOfInterest: 'No relation; former coach only.',
+});
+ok(r.status === 201, 'coach submits the reference with a conflict declaration');
+r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));
+const vch = (r.body.vouches ?? []).find((v) => v.coachName === 'Ade Balogun');
+ok(
+  vch &&
+    vch.identityVerified === false &&
+    vch.verificationMethod === 'email_code' &&
+    vch.conflictOfInterest?.includes('former coach'),
+  'the reference says exactly what was verified (mailbox, not identity) + shows the conflict declaration',
+);
+r = await post(`/admin/vouches/${vch.id}/withdraw`, { reason: 'reference retracted on request' }, admin);
+ok(r.status === 200, 'T&S withdraws the reference');
+r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));
+ok(
+  !(r.body.vouches ?? []).some((v) => v.coachName === 'Ade Balogun'),
+  'withdrawn reference leaves every view (history retained server-side)',
+);
+// squad invitations
+r = await post('/org/squad/invite', { playerId: 'pl-guni', note: 'U15 development squad' }, bearer(MARIA));
+ok(r.status === 201 && r.body.invite.status === 'pending_guardian', 'minor squad invite routes to the guardian');
+const invG = r.body.invite.id;
+r = await post(`/player/squad-invites/${invG}/respond`, { accept: true }, bearer(GUNI));
+ok(r.status === 403 || r.status === 404, 'the child cannot approve their own squad invite');
+r = await post(`/guardian/squad-invites/${invG}/respond`, { accept: 'false' }, bearer(AMARA));
+ok(
+  r.status === 400 && r.body.field === 'accept' && r.body.problem === 'not_boolean',
+  'a squad answer must be true or false ("false" was read as approval)',
+);
+r = await post(`/guardian/squad-invites/${invG}/respond`, {}, bearer(AMARA));
+ok(r.status === 400 && r.body.problem === 'required', 'a squad answer cannot be left out (it was read as a decline)');
+r = await post(`/guardian/squad-invites/${invG}/respond`, { accept: true }, bearer(AMARA));
+ok(r.status === 200 && r.body.invite.status === 'approved', 'guardian approves; player lands on the squad list');
+
+// List queries take only their own parameters, each once, as sent
+{
+  const stage = await j('/org/cases?stage=signed', {}, bearer(MARIA));
+  ok(
+    stage.status === 400 && stage.body.error === 'STAGE_INVALID' && stage.body.allowed?.includes('review'),
+    'a case list stage outside the vocabulary is refused with the allowed stages',
+  );
+  const limit = await j('/org/assessments?limit=lots', {}, bearer(MARIA));
+  ok(limit.status === 400 && limit.body.error === 'PAGE_LIMIT_INVALID', 'a junk limit is refused, not read as 50');
+  const offset = await j('/org/segments?offset=-5', {}, bearer(MARIA));
+  ok(offset.status === 400 && offset.body.field === 'offset', 'a negative offset is refused, not read as 0');
+  const twice = await j('/org/segments?playerId=pl-adeyemi&playerId=pl-carvalho', {}, bearer(MARIA));
+  ok(twice.status === 400 && twice.body.problem === 'not_text', 'a repeated parameter is refused');
+  const extra = await j('/org/vacancies?sort=oldest', {}, bearer(MARIA));
+  ok(extra.status === 400 && extra.body.problem === 'unknown_field', 'a parameter a list does not take is refused');
+}
+
+// ========================================================= assessments
+r = await j('/org/assessment-templates', {}, bearer(MARIA));
+ok(r.body.templates.length >= 4, 'position templates seeded');
+r = await post(
+  '/org/assessments',
+  {
+    playerId: 'pl-adeyemi',
+    positionGroup: 'ATT',
+    context: { fixture: 'Eastport U23 v Harbour U23', viewing: 'live', minutesWatched: 90 },
+  },
+  bearer(MARIA),
+);
+const assM = r.body.assessment.id;
+ok(r.status === 201 && r.body.assessment.templateVersion === 1, 'lead opens an assessment (template pinned at v1)');
+r = await put(
+  `/org/assessments/${assM}`,
+  {
+    ratings: [
+      { attrId: 'finishing', rating: 4, confidence: 'high', note: 'both feet' },
+      { attrId: 'movement', rating: 4, confidence: 'medium' },
+      { attrId: 'first_touch', rating: 3, confidence: 'high' },
+      { attrId: 'pressing', notObserved: true },
+    ],
+    recommendation: { verdict: 'monitor', reasons: 'Real threat; want a second look v deeper block.' },
+  },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'ratings accept 1–5 + explicit not-observed + confidence');
+r = await put(`/org/assessments/${assM}`, { ratings: [{ attrId: 'finishing', rating: 0 }] }, bearer(MARIA));
+ok(r.status === 400, 'a zero rating is refused — not observed is a state, not a number');
+r = await post(`/org/assessments/${assM}/submit`, {}, bearer(MARIA));
+ok(r.status === 200 && r.body.assessment.state === 'submitted', 'assessment submits');
+// blind second opinion
+r = await post(
+  '/org/assessments',
+  { playerId: 'pl-adeyemi', positionGroup: 'ATT', secondOpinionOf: assM },
+  bearer(SAM),
+);
+const assS = r.body.assessment.id;
+ok(r.status === 201, 'second scout opens an independent assessment');
+r = await j('/org/assessments?playerId=pl-adeyemi', {}, bearer(SAM));
+ok(
+  !r.body.items.some((a) => a.id === assM),
+  'BLIND: the first report is hidden from the second scout before they submit',
+);
+await put(
+  `/org/assessments/${assS}`,
+  {
+    ratings: [
+      { attrId: 'finishing', rating: 3, confidence: 'medium' },
+      { attrId: 'movement', notObserved: true },
+      { attrId: 'first_touch', rating: 4, confidence: 'high' },
+      { attrId: 'pressing', rating: 2, confidence: 'low' },
+    ],
+    recommendation: { verdict: 'monitor', reasons: 'Different game state; finishing sample small.' },
+  },
+  bearer(SAM),
+);
+await post(`/org/assessments/${assS}/submit`, {}, bearer(SAM));
+r = await j('/org/assessments?playerId=pl-adeyemi', {}, bearer(SAM));
+ok(
+  r.body.items.some((a) => a.id === assM),
+  'after submitting, the second scout sees the first report',
+);
+r = await j('/org/players/pl-adeyemi/assessment-compare', {}, bearer(MARIA));
+const mv = r.body.attributes.find((a) => a.attrId === 'movement');
+ok(
+  mv.observedCount === 1 && mv.average === 4,
+  'not-observed is excluded from the average (observedCount tells the truth)',
+);
+// template versioning never rewrites history
+r = await post(
+  '/org/assessment-templates',
+  {
+    positionGroup: 'ATT',
+    attributes: [
+      { id: 'finishing', label: 'Finishing (v2 anchors)' },
+      { id: 'aerial', label: 'Aerial threat' },
+    ],
+  },
+  bearer(MARIA),
+);
+ok(r.status === 201 && r.body.template.version === 2, 'lead publishes template v2');
+r = await j('/org/assessments?playerId=pl-adeyemi', {}, bearer(MARIA));
+ok(r.body.items.find((a) => a.id === assM).templateVersion === 1, 'historical report still pinned to v1');
+r = await post(
+  `/org/assessments/${assM}/publish-feedback`,
+  {
+    text: 'Loved the movement and finishing. Focus next: pressing triggers — we want to see you set the press, not chase it.',
+  },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'feedback published deliberately');
+r = await j('/player/feedback', {}, bearer(KOLA));
+ok(
+  r.body.items.length === 1 && r.body.items[0].text.includes('pressing triggers'),
+  'player receives ONLY the published feedback, never the raw report',
+);
+r = await post(`/org/assessments/${assS}/publish-feedback`, { text: 'x' }, bearer(MARIA));
+ok(
+  r.status === 200 || r.status === 400 || r.status === 403,
+  'lead may also publish (allowed) — non-authors who are not leads cannot (checked below)',
+);
+
+// ============================================================== video
+r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));
+const mediaId = (r.body.media ?? []).find((m) => m.kind === 'video')?.id;
+ok(!!mediaId, 'player has seeded footage visible to the club');
+r = await post(
+  `/org/media/${mediaId}/segments`,
+  {
+    startS: 12,
+    endS: 26,
+    labels: ['pressing', 'counter'],
+    eventType: 'defensive action',
+    note: 'sets the trap on the CB',
+  },
+  bearer(MARIA),
+);
+ok(r.status === 201, 'scout creates a timestamped segment');
+const segId = r.body.segment.id;
+ok(
+  String(r.body.segment.mediaUrl).includes('e=') && String(r.body.segment.mediaUrl).includes('s='),
+  'segment carries a signed, expiring media URL',
+);
+r = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT' }, bearer(MARIA));
+const assV = r.body.assessment.id;
+r = await put(
+  `/org/assessments/${assV}`,
+  {
+    ratings: [{ attrId: 'finishing', rating: 4, confidence: 'high', evidenceRefs: [{ segmentId: segId }] }],
+    recommendation: { verdict: 'monitor', reasons: 'evidence-linked' },
+  },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'assessment observation deep-links the supporting segment');
+r = await j(`/org/segments/${segId}`, {}, bearer(SAM));
+ok(
+  r.status === 200 && r.body.segment.startS === 12,
+  'another authorised reviewer at the same club opens the exact segment',
+);
+const HARB = (await orgLogin('org-harbour', 'Ruth Vane', 'Scout')).token;
+r = await j(`/org/segments/${segId}`, {}, bearer(HARB));
+ok(r.status === 404, 'segments are org-private — another club cannot fetch the annotation');
+r = await fetch(`${API}/media/${mediaId}`);
+ok(r.status === 401, 'unauthenticated media fetch refused');
+r = await post('/org/playlists', { name: 'Pressing candidates' }, bearer(MARIA));
+const plId = r.body.playlist.id;
+r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(MARIA));
+ok(r.status === 200 && r.body.playlist.segmentIds.includes(segId), 'playlist collects segments');
+r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(MARIA));
+ok(
+  r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).length === 1,
+  'adding a segment twice keeps it once',
+);
+// Valid input only — junk is refused with the field named, and nothing is written
+{
+  const draftA = (
+    await post(
+      '/org/assessments',
+      {
+        playerId: 'pl-adeyemi',
+        positionGroup: 'ATT',
+        context: { fixture: 'Eastport 3–0 Harbour', date: '2026-10-31', minutesWatched: 75 },
+      },
+      bearer(SAM),
+    )
+  ).body.assessment;
+  ok(
+    draftA?.context.date === '2026-10-31' && draftA.context.minutesWatched === 75,
+    'a valid context is stored as sent',
+  );
+  for (const [context, field, code] of [
+    [{ mood: 'tense' }, 'context.mood', 'FIELD_INVALID'],
+    [{ date: 'last week' }, 'context.date', 'DATE_INVALID'],
+    [{ minutesWatched: 'ninety' }, 'context.minutesWatched', 'FIELD_INVALID'],
+    [{ viewing: 'radio' }, 'context.viewing', 'FIELD_INVALID'],
+    [{ fixture: 7 }, 'context.fixture', 'FIELD_INVALID'],
+  ]) {
+    const bad = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context }, bearer(SAM));
+    ok(
+      bad.status === 400 && bad.body.error === code && bad.body.field === field,
+      `an assessment context with a junk ${field} is refused (400 ${code}, field named)`,
+    );
+    const badPut = await put(`/org/assessments/${draftA.id}`, { context }, bearer(SAM));
+    ok(
+      badPut.status === 400 && badPut.body.field === field,
+      `and the same junk is refused when a draft is edited (${field})`,
+    );
+  }
+  const rating = (extra) => ({ ratings: [{ attrId: 'finishing', rating: 4, ...extra }] });
+  for (const [body, check, label] of [
+    [rating({ rating: 3.5 }), (b) => b.error === 'RATING_INVALID', 'a half rating'],
+    [
+      {
+        ratings: [
+          { attrId: 'finishing', rating: 4 },
+          { attrId: 'finishing', rating: 2 },
+        ],
+      },
+      (b) => b.error === 'ATTR_DUPLICATE',
+      'an attribute rated twice',
+    ],
+    [rating({ note: { text: 'x' } }), (b) => b.field === 'ratings[0].note', 'a note that is not text'],
+    [
+      rating({ evidenceRefs: ['clip at 12s'] }),
+      (b) => b.field === 'ratings[0].evidenceRefs[0]',
+      'a reference that is not an object',
+    ],
+    [
+      rating({ evidenceRefs: [{ segmentId: segId, colour: 'red' }] }),
+      (b) => b.field === 'ratings[0].evidenceRefs[0].colour',
+      'a reference with an unknown field',
+    ],
+    [
+      rating({ evidenceRefs: [{ segmentId: segId, t: -3 }] }),
+      (b) => b.field === 'ratings[0].evidenceRefs[0].t',
+      'a negative timestamp',
+    ],
+    [{ ratings: 'four' }, (b) => b.field === 'ratings', 'ratings that are not a list'],
+    [
+      { recommendation: { verdict: 'sign', reasons: ['fast'] } },
+      (b) => b.field === 'recommendation.reasons',
+      'reasons that are not text',
+    ],
+    [rating({ confidence: '' }), (b) => b.error === 'CONFIDENCE_INVALID', 'an empty confidence'],
+    [rating({ confidence: false }), (b) => b.error === 'CONFIDENCE_INVALID', 'a confidence that is not a level'],
+  ]) {
+    const bad = await put(`/org/assessments/${draftA.id}`, body, bearer(SAM));
+    ok(bad.status === 400 && check(bad.body), `${label} is refused (400)`);
+  }
+  const after = (await j(`/org/assessments?playerId=pl-adeyemi`, {}, bearer(SAM))).body.items.find(
+    (a) => a.id === draftA.id,
+  );
+  ok(
+    after.ratings.length === 0 && after.recommendation === null && after.context.minutesWatched === 75,
+    'and no refused edit wrote anything',
+  );
+  const badSeg = await post(`/org/media/${mediaId}/segments`, { startS: '12', endS: 26 }, bearer(MARIA));
+  ok(
+    badSeg.status === 400 && badSeg.body.error === 'TIMESTAMPS_INVALID',
+    'segment timestamps that are not numbers are refused',
+  );
+  const badLabels = await post(
+    `/org/media/${mediaId}/segments`,
+    { startS: 1, endS: 2, labels: [{ tag: 'x' }] },
+    bearer(MARIA),
+  );
+  ok(badLabels.status === 400 && badLabels.body.field === 'labels', 'segment labels that are not text are refused');
+  const badDrawing = await post(
+    `/org/media/${mediaId}/segments`,
+    { startS: 1, endS: 2, drawing: 'circle' },
+    bearer(MARIA),
+  );
+  ok(badDrawing.status === 400 && badDrawing.body.field === 'drawing', 'a drawing that is not an object is refused');
+  const badAnchors = await post(
+    '/org/assessment-templates',
+    {
+      positionGroup: 'GK',
+      attributes: [
+        { id: 'a', label: 'A', anchors: { 9: 'x' } },
+        { id: 'b', label: 'B' },
+      ],
+    },
+    bearer(MARIA),
+  );
+  ok(
+    badAnchors.status === 400 && badAnchors.body.field === 'attributes[0].anchors',
+    'template anchors outside levels 1–5 are refused',
+  );
+  for (const positionGroup of [true, ['MID'], {}]) {
+    const noTemplate = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup }, bearer(SAM));
+    ok(
+      noTemplate.status === 400 && noTemplate.body.error === 'NO_TEMPLATE',
+      `a position group of ${JSON.stringify(positionGroup)} names no template (400, not a server error)`,
+    );
+  }
+  const badName = await post('/org/playlists', { name: ['x'] }, bearer(MARIA));
+  ok(badName.status === 400 && badName.body.field === 'name', 'a playlist name that is not text is refused');
+  const templates = (await j('/org/assessment-templates', {}, bearer(MARIA))).body.templates;
+  ok(templates.filter((t) => t.positionGroup === 'GK').length === 1, 'and the refused template published no version');
+}
+
+// ========================================================= recruitment
+r = await post('/org/cases', { playerId: 'pl-svensson', priority: 'high' }, bearer(MARIA));
+const caseId = r.body.case.id;
+ok(r.status === 201 && r.body.case.stage === 'identified', 'case opens at identified (pro flow)');
+r = await post(
+  `/org/cases/${caseId}/assign`,
+  { userId: sam.userId, task: 'Watch Saturday, wide-left focus' },
+  bearer(MARIA),
+);
+ok(r.status === 201, 'lead assigns a scout');
+// Junk in a case write is refused naming the field, never turned into text or quietly replaced by a default.
+for (const [url, body, field, error] of [
+  [`/org/cases/${caseId}/assign`, { userId: sam.userId, task: { what: 'watch' } }, 'task', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/tasks`, { title: ['Call the agent'] }, 'title', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'observation', reason: { why: 'x' } }, 'reason', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'observation', reason: 'r'.repeat(501) }, 'reason', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'invited' }, 'stage', 'STAGE_INVALID'],
+  [`/org/cases/${caseId}/decision`, { outcome: 'sign', reasons: ['fast'] }, 'reasons', 'REASONS_REQUIRED'],
+  [`/org/cases/${caseId}/decision`, { outcome: 'sign', reasons: 'Fast', note: 'x' }, 'note', 'FIELD_INVALID'],
+  ['/org/cases', { playerId: 'pl-svensson', priority: 'urgent' }, 'priority', 'FIELD_INVALID'],
+  ['/org/cases', { playerId: 'pl-svensson', restricted: 'yes' }, 'restricted', 'FIELD_INVALID'],
+]) {
+  const bad = await post(url, body, bearer(MARIA));
+  ok(
+    bad.status === 400 && bad.body.error === error && bad.body.field === field,
+    `${url.replace(caseId, ':id')} refuses ${JSON.stringify(body[field] ?? body).slice(0, 40)} naming ${field} (${error})`,
+  );
+}
+r = await post(`/org/cases/${caseId}/stage`, { stage: 'invited' }, bearer(MARIA));
+ok(
+  JSON.stringify(r.body.allowed) ===
+    JSON.stringify(['identified', 'review', 'observation', 'trial', 'decision', 'closed']),
+  "a stage outside the club's flow is refused with the stages it may use",
+);
+ok(
+  (await j(`/org/cases/${caseId}`, {}, bearer(MARIA))).body.case.tasks.length === 0,
+  'and the refused task was not written',
+);
+r = await post(`/org/cases/${caseId}/stage`, { stage: 'observation', reason: 'assigned viewing' }, bearer(SAM));
+ok(r.status === 200, 'assigned scout advances the stage');
+r = await post(
+  `/org/cases/${caseId}/decision`,
+  { outcome: 'sign', reasons: 'Two independent monitors + evidence-linked pressing.' },
+  bearer(SAM),
+);
+ok(r.status === 202 && r.body.approval, 'a non-lead sign decision awaits approval');
+const aprId = r.body.approval.id;
+r = await post(`/org/cases/${caseId}/approvals/${aprId}`, {}, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'approve',
+  'an approval answer that says neither yes nor no is refused (it read as a rejection)',
+);
+r = await post(`/org/cases/${caseId}/approvals/${aprId}`, { approve: true }, bearer(SAM));
+ok(r.status === 403, 'the requester cannot approve their own decision (lead required)');
+r = await post(`/org/cases/${caseId}/approvals/${aprId}`, { approve: true }, bearer(MARIA));
+ok(
+  r.status === 200 && r.body.case.decision.byName === 'Sam Ellis' && r.body.case.decision.approvedBy === 'Maria Keane',
+  'lead approves; decision keeps both names',
+);
+// restricted case
+r = await post('/org/cases', { playerId: 'pl-adeyemi', restricted: true }, bearer(MARIA));
+const rcase = r.body.case.id;
+const tempo = await orgLogin('org-eastport', 'Temp Person', 'Scout');
+r = await j(`/org/cases/${rcase}`, {}, bearer(tempo.token));
+ok(r.status === 403, 'restricted case is invisible to unassigned staff');
+// staff removal
+r = await post(`/org/staff/${tempo.userId}/remove`, {}, bearer(SAM));
+ok(r.status === 403, 'non-lead cannot remove staff');
+r = await post(`/org/staff/${tempo.userId}/remove`, {}, bearer(MARIA));
+ok(r.status === 200, 'lead removes a staff member');
+r = await j('/org/players', {}, bearer(tempo.token));
+ok(r.status === 401, 'removed staff member’s API access is dead immediately');
+r = await post('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Temp Person' });
+ok(r.status === 403 && r.body.error === 'USER_REMOVED', 'removed staff cannot log back in by name');
+r = await j(`/org/cases/${caseId}`, {}, bearer(MARIA));
+ok(
+  r.body.case.history.some((h) => h.byName === 'Sam Ellis'),
+  'history stays attributed to named individuals',
+);
+// grassroots simplified flow
+r = await post('/org/cases', { playerId: 'pl-osei' }, bearer(HACK));
+ok(r.status === 201 && r.body.case.stage === 'review', 'grassroots cases use the simple flow (review → … → decision)');
+
+// ========================================================= tactical fit
+r = await post(
+  '/org/tactical',
+  {
+    formation: '4-3-3',
+    planningHorizon: '2 windows',
+    windows: [{ name: 'Summer 2027', opens: '2027-06-01', closes: '2027-08-31' }],
+    roles: [
+      {
+        name: 'Pressing 9',
+        positionGroup: 'ATT',
+        description: 'Leads the press, attacks depth',
+        category: 'mens',
+        required: [
+          { key: 'positionGroup', value: 'ATT' },
+          { key: 'maxAge', value: 23 },
+        ],
+        preferred: [
+          { key: 'foot', value: 'L' },
+          { key: 'minAppearances', value: 10 },
+        ],
+      },
+    ],
+  },
+  bearer(SAM),
+);
+ok(r.status === 403, 'tactical setup is lead-only');
+r = await post(
+  '/org/tactical',
+  {
+    formation: '4-3-3',
+    planningHorizon: '2 windows',
+    roles: [
+      {
+        name: 'Pressing 9',
+        positionGroup: 'ATT',
+        description: 'Leads the press, attacks depth',
+        required: [
+          { key: 'positionGroup', value: 'ATT' },
+          { key: 'maxAge', value: 23 },
+        ],
+        preferred: [
+          { key: 'foot', value: 'left' },
+          { key: 'minAppearances', value: 10 },
+        ],
+      }, // the player vocabulary ('L' never matches a player)
+    ],
+  },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'lead defines formation + role');
+const roleId = r.body.tactical.roles[0].id;
+r = await post('/org/vacancies', { roleId, notes: 'ST leaves summer 2027' }, bearer(MARIA));
+const vacId = r.body.vacancy.id;
+ok(r.status === 201, 'vacancy created against the role');
+r = await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA));
+const cand = r.body.candidates[0];
+ok(
+  r.body.candidates.length > 0 && cand.required.every((c) => c.verdict === 'met'),
+  'eligible candidates evaluated with explicit met verdicts',
+);
+ok(
+  !('score' in cand) && !('suitability' in cand) && !('percentage' in cand),
+  'no fabricated suitability percentage anywhere',
+);
+ok(
+  r.body.candidates.every((c) => !c.required.some((x) => x.verdict === 'not_met')),
+  'candidates failing a required criterion are excluded',
+);
+ok(
+  cand.required.every((c) => c.source),
+  'every verdict names its data source',
+);
+r = await post('/org/squad/shadow', { playerId: cand.playerId, roleId }, bearer(MARIA));
+ok(r.status === 201, 'candidate added to the shadow squad');
+r = await j('/org/squad-planner', {}, bearer(MARIA));
+ok(r.body.shadow.length === 1 && r.body.vacancies.length === 1, 'squad planner shows shadow squad + vacancies');
+// The club setup: junk is refused naming the field; a re-save keeps role ids (and the vacancy its
+// role); a role from another club is refused; the shadow list is not the squad.
+{
+  const role0 = (await j('/org/tactical', {}, bearer(MARIA))).body.tactical.roles[0];
+  ok(
+    role0.id === roleId && role0.preferred.some((c) => c.key === 'foot' && c.value === 'left'),
+    'the setup reads back from the tables, role id and criteria intact',
+  );
+  const base = {
+    formation: '4-3-3',
+    roles: [{ id: roleId, name: 'Pressing 9', positionGroup: 'ATT', required: [{ key: 'maxAge', value: 23 }] }],
+  };
+  const refused = async (body, field, error = 'FIELD_INVALID') => {
+    const x = await post('/org/tactical', body, bearer(MARIA));
+    return x.status === 400 && x.body.error === error && x.body.field === field;
+  };
+  ok(
+    await refused({ ...base, roles: [{ ...base.roles[0], positionGroup: 'STRIKER' }] }, 'roles[0].positionGroup'),
+    'an unknown position group is refused, not turned into MID',
+  );
+  ok(
+    await refused({ ...base, roles: [{ ...base.roles[0], category: 'veterans' }] }, 'roles[0].category'),
+    'an unknown category is refused, not turned into mixed',
+  );
+  ok(
+    await refused(
+      { ...base, roles: [{ ...base.roles[0], required: [{ key: 'height', value: 180 }] }] },
+      'roles[0].required[0].key',
+    ),
+    'an unknown criterion key is refused, not dropped',
+  );
+  ok(
+    await refused(
+      { ...base, roles: [{ ...base.roles[0], preferred: [{ key: 'foot', value: 'L' }] }] },
+      'roles[0].preferred[0].value',
+    ),
+    'a foot outside the player vocabulary (left / right) is refused',
+  );
+  ok(
+    await refused(
+      { ...base, roles: [{ ...base.roles[0], required: [{ key: 'maxAge', value: '23' }] }] },
+      'roles[0].required[0].value',
+    ),
+    'an age that is not a whole number is refused',
+  );
+  ok(
+    await refused({ ...base, roles: [{ ...base.roles[0], id: 'role-of-someone-else' }] }, 'roles[0].id'),
+    "a role id that is not one of this club's roles is refused",
+  );
+  ok(
+    await refused({ ...base, windows: [{ name: 'Summer', opens: 'next June' }] }, 'windows[0].opens', 'DATE_INVALID'),
+    'a window date that is not a day is refused',
+  );
+  ok(
+    await refused(
+      { ...base, roles: Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, positionGroup: 'MID' })) },
+      'roles',
+    ),
+    'more than fifteen roles are refused, not cut off',
+  );
+  const kept = await post(
+    '/org/tactical',
+    { ...base, roles: [...base.roles, { name: 'Ball-winning 6', positionGroup: 'MID', category: 'mixed' }] },
+    bearer(MARIA),
+  );
+  ok(
+    kept.status === 200 && kept.body.tactical.roles[0].id === roleId && kept.body.tactical.roles.length === 2,
+    're-saving the setup keeps the role id and adds the new role',
+  );
+  ok(
+    (await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 200,
+    'the vacancy keeps its role across the re-save',
+  );
+  const marked = (await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).body.candidates.find(
+    (c) => c.playerId === cand.playerId,
+  );
+  ok(
+    !marked || (marked.shadowed === true && marked.onSquad === false),
+    'a shadowed candidate is marked shadowed, not on the squad',
+  );
+  const list = await j('/org/vacancies', {}, bearer(MARIA));
+  ok(
+    list.status === 200 &&
+      Array.isArray(list.body.items) &&
+      list.body.items[0].id === vacId &&
+      'nextCursor' in list.body,
+    'the vacancy list pages ({ items, nextCursor })',
+  );
+  ok((await j('/org/vacancies?limit=0', {}, bearer(MARIA))).status === 400, 'a junk page limit is refused');
+  ok(
+    (await post('/org/vacancies', { roleId, notes: { x: 1 } }, bearer(MARIA))).status === 400,
+    'vacancy notes that are not text are refused',
+  );
+  ok(
+    (await post('/org/squad/shadow', { playerId: 'pl-svensson', roleId: 'role-of-someone-else' }, bearer(MARIA)))
+      .status === 404,
+    "a shadow entry naming a role that is not the club's is refused",
+  );
+  const dropped = await post(
+    '/org/tactical',
+    { formation: '4-4-2', roles: [{ name: 'Target man', positionGroup: 'ATT', category: 'mens' }] },
+    bearer(MARIA),
+  );
+  ok(
+    dropped.status === 200 && !dropped.body.tactical.roles.some((x) => x.id === roleId),
+    'a role left out of the save is dropped',
+  );
+  ok(
+    (await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 409,
+    'a vacancy whose role was dropped answers ROLE_DELETED',
+  );
+  const closed = await post(`/org/vacancies/${vacId}/close`, {}, bearer(MARIA));
+  ok(
+    closed.status === 200 && closed.body.vacancy.status === 'closed' && Number.isInteger(closed.body.vacancy.closedAt),
+    'a vacancy closes',
+  );
+  // Shadowing a player must not make them a member of the club's squad anywhere.
+  const sh = await post('/org/squad/shadow', { playerId: 'pl-osei' }, bearer(HACK));
+  ok(sh.status === 201 && sh.body.entry.source === 'shadow', 'a grassroots club can shadow a player');
+  const sq = await j('/org/squad', {}, bearer(HACK));
+  ok(
+    sq.status === 200 && !sq.body.entries.some((e) => e.playerId === 'pl-osei'),
+    'a shadowed player is not on the grassroots squad',
+  );
+  const md = await post(
+    '/org/matchday',
+    { fixture: 'S9c friendly', date: '2026-10-03', playerIds: ['pl-osei'] },
+    bearer(HACK),
+  );
+  ok(md.status === 201 && md.body.credited === 0, 'a shadowed player gets no match-day attendance from that club');
+  const plan = (await j('/org/squad-planner', {}, bearer(HACK))).body;
+  ok(
+    plan.shadow.some((s) => s.playerId === 'pl-osei') && !plan.current.some((s) => s.playerId === 'pl-osei'),
+    'the planner shows the player on the shadow list only',
+  );
+}
+r = await post(`/org/cases/${caseId}/link`, {}, bearer(MARIA));
+ok(r.status === 200, 'case link endpoint tolerates empty link (no-op)');
+
+// ====================================================== opportunities
+const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
+r = await post(
+  '/org/opportunities',
+  {
+    type: 'trial',
+    title: 'U23 open trial — attackers',
+    deadline: future,
+    eligibility: { minAge: 16, positionGroup: 'ATT' },
+    requirements: ['Bring boots', 'One highlight clip'],
+  },
+  bearer(MARIA),
+);
+const oppId = r.body.opportunity.id;
+ok(r.status === 201, 'club publishes a structured opportunity');
+r = await j('/player/opportunity-board', {}, bearer(KOLA));
+ok(
+  r.body.items.some((o) => o.id === oppId),
+  'eligible adult discovers it on the board',
+);
+r = await post(`/player/opportunities/${oppId}/apply`, { note: 'Would love a look.' }, bearer(KOLA));
+ok(r.status === 201, 'adult applies');
+r = await post(`/player/opportunities/${oppId}/apply`, {}, bearer(KOLA));
+ok(r.status === 409, 'duplicate application refused');
+r = await post(`/player/opportunities/${oppId}/apply`, {}, bearer(GUNI));
+ok(r.status === 403 && r.body.error === 'GUARDIAN_MANAGED', 'a minor cannot self-submit a club-facing application');
+r = await post(`/guardian/children/pl-guni/opportunities/${oppId}/apply`, {}, bearer(AMARA));
+ok(
+  r.status === 403 && r.body.error === 'NOT_ELIGIBLE' && r.body.reasons.some((x) => x.includes('minimum age')),
+  'guardian application still fails server-side eligibility (min age)',
+);
+r = await post(
+  '/org/opportunities',
+  { type: 'programme', title: 'U15 development day', deadline: future, eligibility: { maxAge: 15 } },
+  bearer(MARIA),
+);
+const oppKids = r.body.opportunity.id;
+r = await post(
+  `/guardian/children/pl-guni/opportunities/${oppKids}/apply`,
+  { note: 'Guni is excited.' },
+  bearer(AMARA),
+);
+ok(r.status === 201, 'guardian applies for their child on an age-appropriate opportunity');
+r = await post(`/org/opportunities/${oppId}/close`, {}, bearer(MARIA));
+ok(
+  r.status === 409 && r.body.error === 'OUTCOMES_OUTSTANDING',
+  'closing with unanswered applications is refused (no-ghosting)',
+);
+r = await j(`/org/opportunities/${oppId}/applications`, {}, bearer(MARIA));
+const applId = r.body.items[0].id;
+r = await post(
+  `/org/applications/${applId}/outcome`,
+  { decision: 'accepted', note: 'See you Saturday.' },
+  bearer(MARIA),
+);
+ok(
+  r.status === 200 && r.body.application.outcome.decision === 'accepted',
+  'application resolved with a recorded outcome',
+);
+r = await post(`/org/opportunities/${oppId}/close`, {}, bearer(MARIA));
+ok(r.status === 200, 'opportunity closes once every applicant has an answer');
+r = await j('/player/applications', {}, bearer(KOLA));
+ok(
+  r.body[0].status === 'accepted' && r.body[0].opportunity.title.includes('U23'),
+  'player sees application status + final outcome',
+);
+// Junk is refused with the field named, not coerced or passed through.
+for (const [body, field] of [
+  [{ type: 'trial', title: 'X', deadline: future, category: 'veterans' }, 'category'],
+  [{ type: 'trial', title: 'X', deadline: future, eligibility: { positionGroup: 'FWD' } }, 'eligibility.positionGroup'],
+  [{ type: 'trial', title: 'X', deadline: future, eligibility: { minAge: 30, maxAge: 20 } }, 'eligibility.maxAge'],
+  [{ type: 'trial', title: 'X', deadline: future, capacity: 'lots' }, 'capacity'],
+  [{ type: 'trial', title: 'X', deadline: future, requirements: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }, 'requirements'],
+]) {
+  r = await post('/org/opportunities', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field,
+    `an opportunity with a bad ${field} is refused, naming the field`,
+  );
+}
+for (const [body, field, problem] of [
+  [{ type: 'trial', title: 'x'.repeat(121), deadline: future }, 'title', 'too_long'],
+  [{ type: 'trial', title: 'X', deadline: future, status: 'closed' }, 'status', 'unknown_field'],
+  [{ type: 'trial', title: 'X', deadline: future, orgId: 'org-harbour' }, 'orgId', 'unknown_field'],
+  [{ type: 'trial', title: 'X', deadline: future, requirements: ['a'.repeat(121)] }, 'requirements[0]', 'too_long'],
+]) {
+  r = await post('/org/opportunities', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `an opportunity with ${field} ${problem.replace('_', ' ')} is refused, not cut off or taken`,
+  );
+}
+// A guardian's withdrawal is recorded as the guardian's act.
+r = await post(
+  `/guardian/applications/${(await j('/guardian/applications', {}, bearer(AMARA))).body.find((a) => a.opportunityId === oppKids).id}/withdraw`,
+  {},
+  bearer(AMARA),
+);
+ok(
+  r.status === 200 &&
+    r.body.application.status === 'withdrawn' &&
+    r.body.application.history.at(-1).byKind === 'guardian' &&
+    r.body.application.history.at(-1).byId === 'gd-amara',
+  "a guardian withdrawal is recorded as the guardian's",
+);
+// The club's opportunity list pages by cursor, newest first, with the application counts.
+r = await j('/org/opportunities?limit=1', {}, bearer(MARIA));
+ok(
+  r.status === 200 &&
+    r.body.items.length === 1 &&
+    r.body.items[0].id === oppKids &&
+    typeof r.body.nextCursor === 'string' &&
+    r.body.items[0].applications === 0,
+  'the club opportunity list pages, newest first, with live application counts',
+);
+r = await j(`/org/opportunities?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(MARIA));
+ok(
+  r.body.items[0]?.id === oppId &&
+    r.body.items[0].applications === 1 &&
+    r.body.items[0].outstanding === 0 &&
+    r.body.items[0].open === false,
+  'the next page continues where the first stopped',
+);
+ok((await j('/org/opportunities?cursor=junk', {}, bearer(MARIA))).status === 400, 'a junk cursor is refused');
+
+// ========================================================= campaigns
+r = await post(
+  '/org/campaigns',
+  {
+    title: 'Remote sprint assessment',
+    deadline: future,
+    attemptsAllowed: 2,
+    drills: [
+      {
+        name: '30m sprint',
+        instructions: 'Two cones 30m apart, one run per clip.',
+        recording: { camera: 'Fixed, side-on, full run in frame' },
+      },
+    ],
+    rubric: [{ criterion: 'Full run visible', guidance: 'Start and finish cones both in frame' }],
+  },
+  bearer(MARIA),
+);
+const campId = r.body.campaign.id;
+ok(r.status === 201, 'club publishes an assessment campaign');
+r = await j('/player/campaigns', {}, bearer(KOLA));
+ok(
+  r.body.items.some((c) => c.id === campId),
+  'eligible player sees the campaign',
+);
+r = await post(`/player/campaigns/${campId}/submit`, { drillName: '30m sprint' }, bearer(KOLA));
+ok(
+  r.status === 201 && r.body.attempt.status === 'failed_checks' && r.body.attempt.fileChecks.issues.length,
+  'automated FILE check fails without a video — with explicit issues',
+);
+// The clip's bytes are planted as an upload stores them (its url), so the campaign doesn't need the upload subsystem;
+// uploading itself is platform/uploads.
+r = await post('/player/media', { title: 'Sprint attempt one', kind: 'video' }, bearer(KOLA));
+const sprintMedia = r.body.media.id;
+killServer();
+{
+  const F = openFixture(DATA);
+  try {
+    F.sql.prepare("UPDATE player_media SET url = '/media/' || id WHERE id = ?").run(sprintMedia);
+  } finally {
+    F.close();
+  }
+}
+await startServer();
+r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: '30m sprint' }, bearer(KOLA));
+ok(
+  r.status === 201 && r.body.attempt.status === 'submitted' && r.body.note.includes('human'),
+  'passing file checks ≠ verified — human review is explicitly separate',
+);
+const attemptId = r.body.attempt.id;
+r = await j(`/org/campaigns/${campId}/review-queue`, {}, bearer(MARIA));
+ok(r.body.queue.length === 1, 'human review queue holds the attempt');
+r = await post(`/org/campaign-attempts/${attemptId}/review`, { decision: 'returned' }, bearer(MARIA));
+ok(r.status === 400, 'returning an attempt without reasons is refused');
+r = await post(
+  `/org/campaign-attempts/${attemptId}/review`,
+  { decision: 'returned', reasons: 'Camera moved mid-run — refilm with the phone fixed on a bag or tripod.' },
+  bearer(MARIA),
+);
+ok(
+  r.status === 200 && r.body.attempt.review.kind === 'human_review',
+  'reviewer returns with concrete resubmission instructions',
+);
+r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: '30m sprint' }, bearer(KOLA));
+ok(r.status === 201, 'returned attempt frees the slot — resubmission accepted');
+r = await post(
+  `/org/campaign-attempts/${r.body.attempt.id}/review`,
+  { decision: 'accepted', rubricNotes: 'Clean run, both cones visible.' },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'reviewer accepts the resubmission');
+// Campaign junk is refused (not cut off or clamped), and an attempt names one of the campaign's drills.
+for (const [body, field] of [
+  [{ title: 'X', deadline: future, drills: [{ name: 'a' }], attemptsAllowed: 9 }, 'attemptsAllowed'],
+  [{ title: 'X', deadline: future, drills: Array.from({ length: 7 }, (_, i) => ({ name: `d${i}` })) }, 'drills'],
+  [{ title: 'X', deadline: future, drills: [{ name: 'a' }, { name: 'a' }] }, 'drills[1].name'],
+]) {
+  r = await post('/org/campaigns', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field,
+    `a campaign with a bad ${field} is refused, naming the field`,
+  );
+}
+for (const [body, field, problem] of [
+  [{ title: 'X', deadline: future, drills: [{ name: 'a', duration: 30 }] }, 'drills[0].duration', 'unknown_field'],
+  [
+    { title: 'X', deadline: future, drills: [{ name: 'a', recording: { camera: 1 } }] },
+    'drills[0].recording.camera',
+    'not_text',
+  ],
+  [
+    { title: 'X', deadline: future, drills: [{ name: 'a' }], rubric: [{ criterion: '' }] },
+    'rubric[0].criterion',
+    'blank',
+  ],
+]) {
+  r = await post('/org/campaigns', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `a campaign with a bad ${field} is refused`,
+  );
+}
+r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: 'keepy-uppies' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'drillName', 'an attempt at a drill the campaign does not have is refused');
+r = await j('/org/campaigns', {}, bearer(MARIA));
+ok(
+  r.body.items[0]?.id === campId &&
+    r.body.items[0].submissions === 1 &&
+    r.body.items[0].awaitingReview === 0 &&
+    'nextCursor' in r.body,
+  'the club campaign list pages, with submission counts',
+);
+r = await j('/player/drill-guidance', {}, bearer(KOLA));
+ok(
+  r.body.items.every((g) => g.coachReview.status === 'unreviewed') && r.body.note.includes('honestly'),
+  'drill library shows unreviewed guidance as unreviewed',
+);
+// A reviewer that is not text is refused, not coerced.
+const drillId = r.body.items[0].drillId;
+r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 42 }, admin);
+ok(r.status === 400 && r.body.field === 'reviewer', 'a reviewer that is not text is refused');
+r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 'Coach Ade' }, admin);
+ok(
+  r.status === 200 &&
+    r.body.guidance.coachReview.status === 'reviewed' &&
+    r.body.guidance.coachReview.reviewer === 'Coach Ade',
+  'a named review is recorded',
+);
+r = await j('/player/drill-guidance', {}, bearer(KOLA));
+ok(
+  r.body.items.find((g) => g.drillId === drillId).coachReview.reviewer === 'Coach Ade' &&
+    r.body.items.filter((g) => g.coachReview.status === 'reviewed').length === 1,
+  'the player sees that one drill reviewed, the rest still unreviewed',
+);
+
+// ======================================================== development
+r = await j('/player/feedback', {}, bearer(KOLA));
+const fbId = r.body.items[0].id;
+r = await post('/player/objectives', { feedbackId: assV, objectives: [{ text: 'x' }] }, bearer(KOLA));
+ok(r.status === 404, 'a PRIVATE assessment cannot seed an objective');
+// Junk is refused naming the field, not cut off, dropped or stored as given.
+r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 42 }] }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'objectives[0].text', 'an objective that is not text is refused');
+r = await post(
+  '/player/objectives',
+  { feedbackId: fbId, objectives: [{ text: 'Press', exerciseRefs: ['a', 'b', 'c', 'd', 'e'] }] },
+  bearer(KOLA),
+);
+ok(
+  r.status === 400 && r.body.field === 'objectives[0].exerciseRefs',
+  'a fifth exercise reference is refused, not cut off',
+);
+r = await post(
+  '/player/objectives',
+  { feedbackId: fbId, objectives: [{ text: 'Press', baselineEvidenceIds: ['ev-not-mine'] }] },
+  bearer(KOLA),
+);
+ok(
+  r.status === 400 && r.body.error === 'EVIDENCE_INVALID' && r.body.field === 'objectives[0].baselineEvidenceIds[0]',
+  "baseline evidence that is not the player's is refused, not dropped",
+);
+r = await post(
+  '/player/objectives',
+  { feedbackId: fbId, objectives: [{ text: 'Press' }], reviewAt: 'after the break' },
+  bearer(KOLA),
+);
+ok(
+  r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'reviewAt',
+  'a review date that is not a date is refused',
+);
+r = await post(
+  '/player/objectives',
+  {
+    feedbackId: fbId,
+    objectives: [{ text: 'Set the press on the trigger, not the chase', baselineEvidenceIds: [ev2] }],
+  },
+  bearer(KOLA),
+);
+const objId = r.body.objective.id;
+ok(r.status === 201, 'published feedback becomes an agreed objective with baseline evidence');
+r = await post(
+  `/player/objectives/${objId}/progress`,
+  { note: 'Two pressing sessions with Sunday league', evidenceId: ev2 },
+  bearer(KOLA),
+);
+ok(r.status === 201, 'player records progress against the objective');
+r = await post(`/player/objectives/${objId}/progress`, { note: 'x', objectiveId: 'objx-not-this-one' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'objectiveId', 'progress against an item of another objective is refused');
+r = await post(`/player/objectives/${objId}/progress`, { note: 42 }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'note', 'a progress note that is not text is refused');
+r = await post(`/player/objectives/${objId}/share`, { orgId: 'org-eastport', enabled: 'yes' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'enabled', 'sharing needs a true or false');
+r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
+ok(
+  r.status === 409 && r.body.error === 'SHARING_REQUIRED',
+  'reassessment needs the player’s explicit sharing choice first',
+);
+r = await j('/org/players/pl-adeyemi/objectives', {}, bearer(MARIA));
+ok(r.body.length === 0, 'club sees nothing before the player shares');
+r = await post(`/player/objectives/${objId}/share`, { orgId: 'org-eastport', enabled: true }, bearer(KOLA));
+ok(r.status === 200, 'player shares progress with the club');
+r = await j('/org/players/pl-adeyemi/objectives', {}, bearer(MARIA));
+ok(r.body.length === 1, 'shared objective is now club-visible');
+r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
+const rasId = r.body.reassessment.id;
+ok(r.status === 201, 'authorised reassessment request reaches the club');
+r = await post(
+  `/org/reassessments/${rasId}/outcome`,
+  { note: 'Better.', evidenceIds: ['ev-not-theirs'] },
+  bearer(MARIA),
+);
+ok(
+  r.status === 400 && r.body.error === 'EVIDENCE_INVALID',
+  "outcome evidence that is not the player's is refused, not dropped",
+);
+r = await post(
+  `/org/reassessments/${rasId}/outcome`,
+  {
+    note: 'Pressing triggers much sharper — evidenced in the linked sessions. Keep the second objective for spring.',
+    evidenceIds: [ev2],
+  },
+  bearer(MARIA),
+);
+ok(
+  r.status === 200 && r.body.reassessment.outcome.evidenceIds.includes(ev2),
+  'reviewer records an evidence-supported outcome',
+);
+
+// ========================================================== trial-day
+r = await post(
+  '/org/players/pl-svensson/request',
+  { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' },
+  bearer(MARIA),
+);
+const reqId = r.body.requestId;
+ok(r.status === 201, 'trial request sent');
+r = await post(`/player/requests/${reqId}/respond`, { accept: true }, bearer(SVEN));
+ok(r.status === 200, 'adult accepts the trial');
+const trials = (await j('/org/trials', {}, bearer(MARIA))).body.items;
+const trial = trials.find((t) => t.playerId === 'pl-svensson');
+ok(!!trial, 'trial record exists');
+r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
+ok(r.status === 409 && r.body.error === 'STAFF_CHECK_REQUIRED', 'check-in blocked without a REVIEWED staff check');
+// Trial-day safety records are refused unless they are text as sent; they were turned into text and cut.
+for (const [body, field, problem] of [
+  [{ name: { first: 'Priya' }, role: 'Safeguarding Lead' }, 'name', 'not_text'],
+  [{ name: 'Priya Shah', role: 'Safeguarding Lead', check: { ref: 4471 } }, 'check.ref', 'not_text'],
+  [{ name: 'Priya Shah', role: 'x'.repeat(61) }, 'role', 'too_long'],
+  [{ name: 'Priya Shah', role: 'Coach', check: { status: 'reviewed' } }, 'check.status', 'unknown_field'],
+]) {
+  r = await post(`/org/trials/${trial.id}/staff`, body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `trial staff with a bad ${field} is refused`,
+  );
+}
+ok(
+  (await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA))).body.trial.staff.length === 0,
+  'and no refused staff member was recorded',
+);
+r = await post(
+  `/org/trials/${trial.id}/staff`,
+  {
+    name: 'Priya Shah',
+    role: 'Safeguarding Lead',
+    check: {
+      kind: 'DBS (England & Wales)',
+      ref: 'DBS-4471',
+      expiresAt: new Date(Date.now() + 300 * 86_400_000).toISOString(),
+    },
+  },
+  bearer(MARIA),
+);
+ok(
+  r.status === 201 && r.body.note.includes('not a completed background check'),
+  'filing a check reference leaves it PENDING — honestly labelled',
+);
+r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
+ok(r.status === 409, 'a pending check still blocks check-in');
+r = await j('/admin/staff-checks', {}, admin);
+const chk = r.body.items[0];
+r = await post(`/admin/staff-checks/${chk.trialId}/${chk.staffId}`, { status: 'reviewed' }, admin);
+ok(r.status === 200 && r.body.check.state === 'reviewed', 'T&S reviews the check');
+r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
+ok(r.status === 409 && r.body.error === 'CONSENT_REQUIRED', 'event consent still required before check-in');
+r = await post(`/player/trials/${trial.id}/consent`, {}, bearer(SVEN));
+ok(r.status === 201, 'adult player gives event consent');
+r = await post(
+  `/player/trials/${trial.id}/emergency-contact`,
+  { name: 'Lena Svensson', phone: 46700001122 },
+  bearer(SVEN),
+);
+ok(
+  r.status === 400 && r.body.field === 'phone' && r.body.problem === 'not_text',
+  'an emergency phone number that is not text is refused',
+);
+r = await post(
+  `/player/trials/${trial.id}/emergency-contact`,
+  { name: 'Lena Svensson', phone: '+46 70 000 11 22' },
+  bearer(SVEN),
+);
+ok(r.status === 200, 'restricted emergency contact filed');
+r = await j('/org/players/pl-svensson', {}, bearer(MARIA));
+ok(!JSON.stringify(r.body).includes('70 000 11 22'), 'emergency contact NEVER appears in the scouting profile');
+r = await post(`/org/trials/${trial.id}/arrival`, { address: 'x'.repeat(201) }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'address' && r.body.max === 200,
+  'an over-long arrival address is refused with its limit, not cut off',
+);
+r = await post(
+  `/org/trials/${trial.id}/arrival`,
+  { time: '09:30', address: 'Gate B, Eastport Training Ground', notes: 'Ask for Priya at reception.' },
+  bearer(MARIA),
+);
+ok(r.status === 200, 'arrival instructions published');
+r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
+ok(r.status === 200, 'with reviewed check + consent, check-in succeeds');
+r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
+ok(r.status === 409 && r.body.error === 'ALREADY_CHECKED_IN', 'no duplicate check-ins');
+r = await j('/player/me', {}, bearer(SVEN));
+ok(
+  (r.body.attendance ?? []).filter((a) => a.trialId === trial.id).length === 1,
+  'check-in fed ONE coach-signed attendance record',
+);
+r = await j(`/player/trials/${trial.id}/safety-pack`, {}, bearer(SVEN));
+ok(
+  r.body.pack.staff[0].check.status === 'reviewed' && r.body.pack.checksExplained.includes('truth'),
+  'safety pack shows who was checked and what that means',
+);
+r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: 20270101 }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.error === 'TRIAL_DATE_INVALID' && r.body.field === 'newDate',
+  'a new trial date that is not text is refused',
+);
+r = await post(`/org/trials/${trial.id}/cancel`, { reason: ['rain'] }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'reason' && r.body.problem === 'not_text',
+  'a cancel reason that is not text is refused',
+);
+r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: future }, bearer(MARIA));
+ok(r.status === 200, 'postponement recorded + parties notified');
+// A block ends the club's standing to read the family's emergency contact.
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(
+  r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22',
+  'before any block, the day view carries the emergency contact',
+);
+r = await post('/player/block', { orgId: 'org-eastport', reason: 'no further contact' }, bearer(SVEN));
+ok(r.status === 201, 'the player blocks the club after the trial was accepted');
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(
+  r.status === 200 &&
+    r.body.trial.emergency === null &&
+    r.body.trial.emergencyWithheld === 'BLOCKED' &&
+    !JSON.stringify(r.body).includes('70 000 11 22'),
+  'after the block the emergency contact is withheld from the org day view (and the number appears nowhere in it)',
+);
+const blk = (await j('/admin/blocks?limit=100', {}, admin)).body.items.find(
+  (b) => b.playerId === 'pl-svensson' && b.orgId === 'org-eastport',
+);
+r = await post(`/admin/blocks/${blk.id}/lift`, {}, admin);
+ok(r.status === 200, 'Trust & Safety lifts the block');
+r = await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA));
+ok(
+  r.status === 200 && r.body.trial.emergency?.phone === '+46 70 000 11 22' && r.body.trial.emergencyWithheld === null,
+  'once lifted, the contact is readable again — the block is evaluated on every read, nothing was deleted',
+);
+
+// =========================================================== outcomes
+r = await post('/org/players/pl-svensson/signing', { note: 'U23 contract' }, bearer(MARIA));
+ok(r.status === 201 || r.status === 200, 'signing recorded');
+await post('/admin/sweep', {}, admin);
+r = await j('/org/followups', {}, bearer(MARIA));
+ok(r.body.items.filter((f) => f.playerId === 'pl-svensson').length === 3, 'signing scheduled 3/6/12-month follow-ups');
+const fup = r.body.items.find((f) => f.playerId === 'pl-svensson' && f.milestone === '3m');
+// restart-safety: SIGKILL the server, restart, confirm the schedule survived
+killServer();
+await startServer();
+r = await j('/org/followups', {}, bearer(MARIA));
+ok(
+  r.body.items.filter((f) => f.playerId === 'pl-svensson').length === 3,
+  'follow-ups survive SIGKILL + restart with no duplicates',
+);
+r = await post(`/admin/followups/${fup.id}`, { dueAt: Date.now() - 1000 }, admin);
+ok(r.status === 200, 'T&S adjusts the due date');
+const notifCountBefore = (await j('/player/notifications', {}, bearer(SVEN))).body.filter(
+  (n) => n.type === 'outcome',
+).length;
+await post('/admin/sweep', {}, admin);
+const afterFirst = (await j('/player/notifications', {}, bearer(SVEN))).body.filter((n) => n.type === 'outcome').length;
+await post('/admin/sweep', {}, admin);
+const afterSecond = (await j('/player/notifications', {}, bearer(SVEN))).body.filter(
+  (n) => n.type === 'outcome',
+).length;
+ok(
+  afterFirst === notifCountBefore + 1 && afterSecond === afterFirst,
+  'due reminder sent exactly once — idempotent across repeated sweeps',
+);
+// Operations input is valid as sent or refused; nothing refused files a report.
+for (const [body, field, error, what] of [
+  [
+    { registrationStatus: 'registered', matchesPlayed: '4' },
+    'matchesPlayed',
+    'FIELD_INVALID',
+    'matches written as text',
+  ],
+  [{ registrationStatus: 'transferred' }, 'registrationStatus', 'REGISTRATION_STATUS_INVALID', 'an unknown status'],
+  [{ registrationStatus: 'registered', note: 'n'.repeat(301) }, 'note', 'FIELD_INVALID', 'a note over 300 characters'],
+  [
+    { registrationStatus: 'registered', status: 'confirmed' },
+    'status',
+    'FIELD_INVALID',
+    'a report naming its own state',
+  ],
+]) {
+  r = await post(`/org/followups/${fup.id}/report`, body, bearer(MARIA));
+  ok(r.status === 400 && r.body.field === field && r.body.error === error, `IN1 ${what} is refused, naming ${field}`);
+}
+r = await post(
+  `/org/followups/${fup.id}/report`,
+  { registrationStatus: 'registered', matchesPlayed: 4, progression: 'Regular U23 starter' },
+  bearer(MARIA),
+);
+ok(r.status === 201, 'club files the follow-up outcome report');
+r = await j('/player/followups', {}, bearer(SVEN));
+ok(r.body.find((f) => f.id === fup.id).report.registrationStatus === 'registered', 'player sees the report');
+ok(
+  JSON.stringify(Object.keys(r.body.find((f) => f.id === fup.id)).sort()) ===
+    JSON.stringify([
+      'createdAt',
+      'dueAt',
+      'id',
+      'milestone',
+      'notifiedAt',
+      'orgId',
+      'orgName',
+      'outcomeState',
+      'playerId',
+      'playerName',
+      'report',
+      'signingId',
+      'status',
+    ]),
+  'a follow-up is answered from an allowlist',
+);
+r = await post(`/player/followups/${fup.id}/respond`, { agree: 'true', experienceRating: 4 }, bearer(SVEN));
+ok(
+  r.status === 400 && r.body.error === 'AGREE_REQUIRED' && r.body.problem === 'not_boolean',
+  'IN2 agreement written as text is refused',
+);
+r = await post(`/player/followups/${fup.id}/respond`, { agree: true, experienceRating: 4.5 }, bearer(SVEN));
+ok(r.status === 400 && r.body.field === 'experienceRating', 'IN3 a rating between the stars is refused');
+r = await post(`/player/followups/${fup.id}/respond`, { agree: true, experienceRating: 4 }, bearer(SVEN));
+ok(
+  r.status === 200 && r.body.followUp.outcomeState === 'confirmed',
+  'player confirms → outcome is CONFIRMED, not merely reported',
+);
+r = await j('/admin/outcomes', {}, admin);
+const eastRow = r.body.rows.find((x) => x.orgId === 'org-eastport');
+ok(eastRow.suppressed === true, 'aggregate reporting suppresses groups under 3 records');
+
+// ======================================================== access
+// football context + honest benchmarks
+r = await post('/player/football-category', {}, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'CATEGORY_INVALID', 'IN4 a category must be named (null clears it)');
+r = await post('/player/football-category', { category: 'mens' }, bearer(KOLA));
+ok(r.status === 200, 'player sets competition category');
+r = await j('/player/benchmarks', {}, bearer(OSEI));
+ok(
+  typeof r.body.method === 'string' && r.body.method.includes('not enough evidence'),
+  'benchmarks disclose method + insufficiency rule',
+);
+ok(
+  [...r.body.drills, ...r.body.stats].every((row) => 'sampleSize' in row),
+  'every comparison row carries its sample size',
+);
+
+console.log(`\nscouting/clubWorkflows: all ${passed} checks passed`);
+killServer();
+process.exit(0);

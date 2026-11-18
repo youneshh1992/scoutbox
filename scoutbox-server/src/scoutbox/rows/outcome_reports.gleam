@@ -123,7 +123,7 @@ pub fn status_decoder() -> decode.Decoder(Status) {
 pub type Row {
   Row(
     id: id.OutcomeReportId,
-    follow_up_id: String,
+    follow_up_id: id.FollowUpId,
     signing_id: id.SigningId,
     player_id: id.PlayerId,
     org_id: id.OrgId,
@@ -142,7 +142,7 @@ pub type Row {
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
   id id: id.OutcomeReportId,
-  follow_up_id follow_up_id: String,
+  follow_up_id follow_up_id: id.FollowUpId,
   signing_id signing_id: id.SigningId,
   player_id player_id: id.PlayerId,
   org_id org_id: id.OrgId,
@@ -171,7 +171,7 @@ pub fn new(
 /// Reads `columns`, in order.
 pub fn decoder() -> decode.Decoder(Row) {
   use id <- decode.field(0, id.outcome_report_decoder())
-  use follow_up_id <- decode.field(1, decode.string)
+  use follow_up_id <- decode.field(1, id.follow_up_decoder())
   use signing_id <- decode.field(2, id.signing_decoder())
   use player_id <- decode.field(3, id.player_decoder())
   use org_id <- decode.field(4, id.org_decoder())
@@ -209,7 +209,7 @@ pub const insert_sql =
 pub fn values(row: Row) -> List(sqlight.Value) {
   [
     id.outcome_report_sql(row.id),
-    sqlight.text(row.follow_up_id),
+    id.follow_up_sql(row.follow_up_id),
     id.signing_sql(row.signing_id),
     id.player_sql(row.player_id),
     id.org_sql(row.org_id),
