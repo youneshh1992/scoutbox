@@ -46,6 +46,8 @@ export const SPEC = {
     'DOCUMENT_VISIBILITY',
     'TIMELINE_AUDIENCES',
   ],
+  'domains/development/record.mjs': ['DRILLS'],
+  'domains/development/objectives.mjs': ['DRILL_RECORDING'],
   'domains/discovery/shared.mjs': [
     'POSITIONS',
     'TRUST_BANDS',
