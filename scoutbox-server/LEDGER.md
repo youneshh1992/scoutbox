@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 1 | 1 | 0 / 216 | 0 / 1 | 9 to go |
+| agents | 9 | 2 | 2 | 0 / 224 | 0 / 2 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -38,7 +38,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/compliance` | not yet neutral | 14 → 14 | 342 | 342 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 0 / 216 | 0 / 1 | 216 cases pending; 1 hand-port calls |
-| `agents/corePersistence` | not yet neutral | 4 → 4 | 47 | 47 |  |  |  |  |  | not untangled; not answered |
+| `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 8 | 0 / 1 | 8 cases pending; 1 hand-port calls |
 | `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
 | `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
 | `agents/transactions` | not yet neutral | 11 → 11 | 370 | 370 |  |  |  |  |  | not untangled; not answered |
@@ -129,6 +129,7 @@ ported by hand to a gleeunit test.
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
 | `agents/core` | `domains/agents/core/shared.mjs#can` | 1 | args[] is undefined | to do |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 1 | args[] is undefined | to do |
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
@@ -248,6 +249,12 @@ mapped, then `npm run cases`.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#agentTransitionAllowed` | 1 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 3 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 1 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#effectiveFacetState` | 1 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#verificationGap` | 1 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |

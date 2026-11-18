@@ -168,6 +168,55 @@
     ]
   },
   {
+    "battery": "agents/corePersistence",
+    "functions": [
+      {
+        "function": "domains/agents/core/shared.mjs#agentTransitionAllowed",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#clientTransitionAllowed",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveFacetState",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#newFacets",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#verificationGap",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "discovery/matchingAndWatchlists",
     "functions": [
       {

@@ -35,4 +35,5 @@ export const BATTERIES = [
   'recruitment/journeyAdversarial',
   'discovery/exposureCalibrationAndCoverage',
   'discovery/matchingAndWatchlists',
+  'agents/corePersistence',
 ];

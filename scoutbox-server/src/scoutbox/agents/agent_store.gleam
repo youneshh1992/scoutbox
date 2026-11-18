@@ -233,6 +233,39 @@ pub fn profiles_for_agency(
   profiles_where(read, "agency_org_id = ? ORDER BY rowid", [id.org_sql(org)])
 }
 
+/// Profiles holding a VERIFIED facet whose re-check date passed by `now` and whose agent was not yet told (the
+/// sweep).
+pub fn profiles_stale_unnotified(
+  read: Read,
+  now: Int,
+) -> Result(List(Profile), Fail(e)) {
+  profiles_where(
+    read,
+    "id IN (SELECT profile_id FROM agent_profile_facets WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL AND recheck_at <= ?) ORDER BY rowid",
+    [sqlight.int(now)],
+  )
+}
+
+/// The sweep told the agent this facet went STALE: whether this call marked it (False when it was already marked).
+pub fn mark_stale_notified(
+  tx: Tx,
+  facet: facet_row.Row,
+  at: Int,
+) -> Result(Bool, Fail(e)) {
+  store.write(
+    tx,
+    "UPDATE agent_profile_facets SET stale_notified_at = ? WHERE profile_id = ? AND facet = ? AND member_association = ? AND stale_notified_at IS NULL RETURNING 1",
+    [
+      sqlight.int(at),
+      id.agent_profile_sql(facet.profile_id),
+      sqlight.text(agent_facet.to_string(facet.facet)),
+      sqlight.text(jurisdiction.to_string(facet.member_association)),
+    ],
+    decode.at([0], decode.int),
+  )
+  |> result.map(fn(changed) { changed != [] })
+}
+
 /// Every profile, newest first, by cursor (the shared-key oversight list).
 pub fn profile_page(
   read: Read,
@@ -836,6 +869,35 @@ pub fn agreement_by_request_key(
     [id.org_sql(org), id.org_user_sql(agent), sqlight.text(key)],
   )
   |> first
+}
+
+/// Active agreements ending within `window` of `now` whose agent was not yet told (the sweep), soonest first.
+pub fn agreements_expiring_unnotified(
+  read: Read,
+  now: Int,
+  window: Int,
+) -> Result(List(Agreement), Fail(e)) {
+  agreements_where(
+    read,
+    "status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL AND end_at > ? AND end_at <= ? ORDER BY end_at",
+    [sqlight.int(now), sqlight.int(now + window)],
+  )
+}
+
+/// The sweep told the agent the relationship ends soon: whether this call marked it (False when it was already
+/// marked).
+pub fn mark_expiry_notified(
+  tx: Tx,
+  agreement_id: id.AgreementId,
+  at: Int,
+) -> Result(Bool, Fail(e)) {
+  store.write(
+    tx,
+    "UPDATE representation_agreements SET expiry_notified_at = ? WHERE id = ? AND expiry_notified_at IS NULL RETURNING 1",
+    [sqlight.int(at), id.agreement_sql(agreement_id)],
+    decode.at([0], decode.int),
+  )
+  |> result.map(fn(changed) { changed != [] })
 }
 
 /// Every agreement, newest first, by cursor (the shared-key oversight list).

@@ -6,6 +6,7 @@ import gleam/erlang/process
 import gleam/io
 import gleam/result
 import gleam/string
+import scoutbox/agents/agent_sweep
 import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
 import scoutbox/integrations/webhooks
@@ -108,6 +109,7 @@ fn boot() -> Result(Nil, String) {
   // reminder markers are rows too, so the boot pass re-sends nothing.
   let _ = delivery.sweep(ctx)
   let _ = trial_routes.remind(ctx, clock.now_ms())
+  let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
@@ -130,7 +132,8 @@ fn boot() -> Result(Nil, String) {
 }
 
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
-/// warnings, the trial reminders and the match facts whose time-only change is due.
+/// warnings, the trial reminders, the match facts whose time-only change is due, and the agent core's expiry and
+/// stale-verification notices.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
@@ -138,6 +141,7 @@ fn sweeping(ctx: Ctx) -> Nil {
   let _ = verification_review.sweep(ctx)
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = match_facts.sweep(ctx.store)
+  let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
   sweeping(ctx)
 }
 
