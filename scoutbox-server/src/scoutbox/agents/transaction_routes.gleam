@@ -3059,7 +3059,7 @@ fn attach_in_unit(
               a.user.id,
               reviews.ContextSubject(
                 context_id: c.row.id,
-                transaction_id: id.transaction_to_string(t.row.id),
+                transaction_id: Some(id.transaction_to_string(t.row.id)),
                 representation_id: None,
                 party_role: b.party_role,
               ),
@@ -3095,7 +3095,7 @@ fn attach_in_unit(
                 a.user.id,
                 reviews.ContextSubject(
                   context_id: c.row.id,
-                  transaction_id: id.transaction_to_string(t.row.id),
+                  transaction_id: Some(id.transaction_to_string(t.row.id)),
                   representation_id: Some(id.representation_to_string(rep_id)),
                   party_role: b.party_role,
                 ),

@@ -21,6 +21,7 @@ import scoutbox/rows/regulatory_review_history as event_row
 import scoutbox/rows/regulatory_review_reasons as reason_row
 import scoutbox/rows/regulatory_reviews as review_row
 import scoutbox/vocab/agent_facet.{type AgentFacet}
+import scoutbox/vocab/agreement_status
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind.{type ComplianceActorKind}
 import scoutbox/vocab/context_outcome
@@ -259,7 +260,8 @@ fn finish(
 pub type ContextSubject {
   ContextSubject(
     context_id: id.ComplianceContextId,
-    transaction_id: String,
+    /// None for an agent's own context.
+    transaction_id: Option(String),
     representation_id: Option(String),
     party_role: party_role.PartyRole,
   )
@@ -289,7 +291,7 @@ pub fn create_for_context(
       subject_context_id: Some(id.compliance_context_to_string(
         subject.context_id,
       )),
-      subject_transaction_id: Some(subject.transaction_id),
+      subject_transaction_id: subject.transaction_id,
       subject_representation_id: subject.representation_id,
       subject_party_role: Some(subject.party_role),
       snapshot_outcome: Some(outcome),
@@ -437,6 +439,10 @@ pub type Review {
     reasons: List(reason_row.Row),
     policy_versions: List(id.PolicyId),
     evidence_refs: List(String),
+    /// Each reason's listed values: its position, the list's name and the value.
+    reason_items: List(#(Int, String, String)),
+    /// The review that reconsiders this one, worked out on read.
+    superseded_by: Option(id.RegulatoryReviewId),
   )
 }
 
@@ -456,13 +462,32 @@ fn load(read: Read, r: review_row.Row) -> Result(Review, Fail(e)) {
     [rid],
     decode.at([0], id.policy_decoder()),
   ))
-  use refs <- result.map(store.query(
+  use refs <- result.try(store.query(
     read,
     "SELECT ref FROM regulatory_review_evidence_refs WHERE review_id = ? ORDER BY ord",
     [rid],
     decode.at([0], decode.string),
   ))
-  Review(r, reasons, pvs, refs)
+  use items <- result.try(
+    store.query(
+      read,
+      "SELECT reason_ord, list, value FROM regulatory_review_reason_items WHERE review_id = ? ORDER BY reason_ord, list, ord",
+      [rid],
+      {
+        use ord <- decode.field(0, decode.int)
+        use which <- decode.field(1, decode.string)
+        use value <- decode.field(2, decode.string)
+        decode.success(#(ord, which, value))
+      },
+    ),
+  )
+  use by <- result.map(store.query(
+    read,
+    "SELECT id FROM regulatory_reviews WHERE supersedes_id = ? ORDER BY rowid LIMIT 1",
+    [rid],
+    decode.at([0], id.regulatory_review_decoder()),
+  ))
+  Review(r, reasons, pvs, refs, items, list.first(by) |> option.from_result)
 }
 
 pub fn by_id(
@@ -479,6 +504,22 @@ pub fn by_id(
     Ok(r) -> load(read, r) |> result.map(Some)
     Error(Nil) -> Ok(None)
   }
+}
+
+/// The agency's review items, oldest first.
+pub fn for_agency(
+  read: Read,
+  agency: id.OrgId,
+) -> Result(List(Review), Fail(e)) {
+  use rows <- result.try(store.query(
+    read,
+    "SELECT "
+      <> review_row.columns
+      <> " FROM regulatory_reviews WHERE agency_org_id = ? ORDER BY rowid",
+    [id.org_sql(agency)],
+    review_row.decoder(),
+  ))
+  list.try_map(rows, load(read, _))
 }
 
 /// Open items first, each part oldest first, by cursor: each row with its `[rank, requested_at, rowid]` key.
@@ -538,10 +579,14 @@ pub type Decision {
     reason: String,
     evidence_refs: List(String),
     prior_status: review_status.ReviewStatus,
+    prior_facet_state: Option(facet_state.FacetState),
+    prior_agreement_status: Option(agreement_status.AgreementStatus),
     prior_context_outcome: Option(context_outcome.ContextOutcome),
     prior_representation_status: Option(
       declared_representation_status.DeclaredRepresentationStatus,
     ),
+    result_facet_state: Option(facet_state.FacetState),
+    result_agreement_status: Option(agreement_status.AgreementStatus),
     result_context_outcome: Option(context_outcome.ContextOutcome),
     result_representation_status: Option(
       declared_representation_status.DeclaredRepresentationStatus,
@@ -562,7 +607,7 @@ pub fn resolve(
   let text = sqlight.nullable(sqlight.text, _)
   use rows <- result.try(store.write(
     tx,
-    "UPDATE regulatory_reviews SET status = ?, decided_at = ?, decision_reviewer_id = ?, decision_reviewer_name = ?, decision_reviewer_role = ?, decision_outcome = ?, decision_reason_code = ?, decision_reason = ?, decision_at = ?, prior_status = ?, prior_context_outcome = ?, prior_representation_status = ?, result_context_outcome = ?, result_representation_status = ?, result_note = ?, resolve_key = ?, resolve_fp = ?, rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ? AND status IN ('PENDING','IN_REVIEW') RETURNING 1",
+    "UPDATE regulatory_reviews SET status = ?, decided_at = ?, decision_reviewer_id = ?, decision_reviewer_name = ?, decision_reviewer_role = ?, decision_outcome = ?, decision_reason_code = ?, decision_reason = ?, decision_at = ?, prior_status = ?, prior_facet_state = ?, prior_agreement_status = ?, prior_context_outcome = ?, prior_representation_status = ?, result_facet_state = ?, result_agreement_status = ?, result_context_outcome = ?, result_representation_status = ?, result_note = ?, resolve_key = ?, resolve_fp = ?, rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ? AND status IN ('PENDING','IN_REVIEW') RETURNING 1",
     [
       sqlight.text(
         review_status.to_string(case d.outcome {
@@ -580,11 +625,15 @@ pub fn resolve(
       sqlight.text(d.reason),
       sqlight.int(d.at),
       sqlight.text(review_status.to_string(d.prior_status)),
+      text(option.map(d.prior_facet_state, facet_state.to_string)),
+      text(option.map(d.prior_agreement_status, agreement_status.to_string)),
       text(option.map(d.prior_context_outcome, context_outcome.to_string)),
       text(option.map(
         d.prior_representation_status,
         declared_representation_status.to_string,
       )),
+      text(option.map(d.result_facet_state, facet_state.to_string)),
+      text(option.map(d.result_agreement_status, agreement_status.to_string)),
       text(option.map(d.result_context_outcome, context_outcome.to_string)),
       text(option.map(
         d.result_representation_status,
@@ -642,4 +691,260 @@ pub fn resolve(
       )
     }
   }
+}
+
+// ------------------------------------------------------------------------------------------------- the reviewer's acts
+
+/// A reviewer acting on an item.
+pub type Reviewer {
+  Reviewer(id: String, name: String, role: reviewer_role.ReviewerRole)
+}
+
+fn reviewer_event(
+  tx: Tx,
+  review_id: id.RegulatoryReviewId,
+  by: Reviewer,
+  action: event_row.Action,
+  rev: Option(Int),
+  detail_review_id: Option(id.RegulatoryReviewId),
+  prior_status: Option(review_status.ReviewStatus),
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use ord <- result.try(
+    store.one(
+      store.reading(tx),
+      "SELECT COALESCE(MAX(ord) + 1, 0) FROM regulatory_review_history WHERE review_id = ?",
+      [id.regulatory_review_sql(review_id)],
+      decode.at([0], decode.int),
+    )
+    |> result.map(result.unwrap(_, 0)),
+  )
+  use event_id <- result.try(id.next_review_event(tx))
+  event_row.insert(
+    tx,
+    event_row.Row(
+      ..event_row.new(
+        id: event_id,
+        review_id:,
+        ord:,
+        at:,
+        by_kind: compliance_actor_kind.TsReviewer,
+        action:,
+      ),
+      by_id: Some(by.id),
+      by_name: Some(by.name),
+      by_role: Some(reviewer_role.to_string(by.role)),
+      detail_rev: rev,
+      detail_review_id:,
+      detail_prior_status: prior_status,
+    ),
+  )
+}
+
+/// `UPDATE … WHERE <guard>` with the reviewer's rev bump; another reviewer moving it first is a lost race.
+fn moved(
+  tx: Tx,
+  review_id: id.RegulatoryReviewId,
+  set: String,
+  args: List(sqlight.Value),
+  guard: String,
+  by: Reviewer,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use rows <- result.try(store.write(
+    tx,
+    "UPDATE regulatory_reviews SET "
+      <> set
+      <> ", rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ? AND "
+      <> guard
+      <> " RETURNING 1",
+    list.append(args, [
+      sqlight.int(at),
+      sqlight.text(by.id),
+      sqlight.text(by.name),
+      id.regulatory_review_sql(review_id),
+    ]),
+    decode.at([0], decode.int),
+  ))
+  case rows {
+    [] -> store.stale("the review moved")
+    _ -> Ok(Nil)
+  }
+}
+
+/// A pending item is taken by a named reviewer.
+pub fn start(tx: Tx, r: Review, by: Reviewer, at: Int) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(moved(
+    tx,
+    r.row.id,
+    "status = 'IN_REVIEW', started_at = ?, started_by_id = ?, started_by_name = ?, started_by_role = ?",
+    [
+      sqlight.int(at),
+      sqlight.text(by.id),
+      sqlight.text(by.name),
+      sqlight.text(reviewer_role.to_string(by.role)),
+    ],
+    "status = 'PENDING'",
+    by,
+    at,
+  ))
+  use _ <- result.map(reviewer_event(
+    tx,
+    r.row.id,
+    by,
+    event_row.RegulatoryReviewStarted,
+    Some(r.row.rev),
+    None,
+    None,
+    at,
+  ))
+  store.emit(
+    tx,
+    effect.Live(live_event.RegulatoryReviewStarted(
+      org_id: id.org_to_string(r.row.agency_org_id),
+      review_id: id.regulatory_review_to_string(r.row.id),
+    )),
+  )
+}
+
+/// A reviewer cancels an open item, with a written reason: a CANCELLED decision.
+pub fn cancel_decided(
+  tx: Tx,
+  r: Review,
+  by: Reviewer,
+  reason: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(moved(
+    tx,
+    r.row.id,
+    "status = 'CANCELLED', decided_at = ?, decision_reviewer_id = ?, decision_reviewer_name = ?, decision_reviewer_role = ?, decision_outcome = 'CANCELLED', decision_reason_code = 'cancelled', decision_reason = ?, decision_at = ?",
+    [
+      sqlight.int(at),
+      sqlight.text(by.id),
+      sqlight.text(by.name),
+      sqlight.text(reviewer_role.to_string(by.role)),
+      sqlight.text(reason),
+      sqlight.int(at),
+    ],
+    "status IN ('PENDING','IN_REVIEW')",
+    by,
+    at,
+  ))
+  reviewer_event(
+    tx,
+    r.row.id,
+    by,
+    event_row.RegulatoryReviewCancelled,
+    Some(r.row.rev),
+    None,
+    None,
+    at,
+  )
+}
+
+/// A decided item is reconsidered by a new one naming it; its own decision stays as it was. Returns the new id.
+pub fn supersede(
+  tx: Tx,
+  r: Review,
+  by: Reviewer,
+  policy_versions: List(id.PolicyId),
+  at: Int,
+) -> Result(id.RegulatoryReviewId, Fail(e)) {
+  use new_id <- result.try(id.next_regulatory_review(tx))
+  let old = r.row
+  let requested_by =
+    RequestedBy(
+      kind: compliance_actor_kind.TsReviewer,
+      id: Some(by.id),
+      name: Some(by.name),
+    )
+  use _ <- result.try(review_row.insert(
+    tx,
+    review_row.Row(
+      ..blank(new_id, old.kind, old.agency_org_id, requested_by, at),
+      agent_user_id: old.agent_user_id,
+      subject_profile_id: old.subject_profile_id,
+      subject_user_id: old.subject_user_id,
+      subject_facet: old.subject_facet,
+      subject_member_association: old.subject_member_association,
+      subject_agreement_id: old.subject_agreement_id,
+      subject_context_id: old.subject_context_id,
+      subject_transaction_id: old.subject_transaction_id,
+      subject_representation_id: old.subject_representation_id,
+      subject_party_role: old.subject_party_role,
+      subject_is_approach: old.subject_is_approach,
+      subject_player_id: old.subject_player_id,
+      subject_jurisdiction: old.subject_jurisdiction,
+      snapshot_outcome: old.snapshot_outcome,
+      snapshot_evaluation_id: old.snapshot_evaluation_id,
+      snapshot_evaluated_at: old.snapshot_evaluated_at,
+      requested_by_role: Some(reviewer_role.to_string(by.role)),
+      supersedes_id: Some(old.id),
+    ),
+  ))
+  use _ <- result.try(
+    list.try_each(r.reasons, fn(x) {
+      reason_row.insert(tx, reason_row.Row(..x, review_id: new_id))
+    }),
+  )
+  use _ <- result.try(
+    list.index_map(r.reason_items, fn(item, i) { #(i, item) })
+    |> list.try_each(fn(p) {
+      let #(_, #(reason_ord, which, value)) = p
+      store.run(
+        tx,
+        "INSERT INTO regulatory_review_reason_items (review_id, reason_ord, list, ord, value) VALUES (?, ?, ?, (SELECT COUNT(*) FROM regulatory_review_reason_items WHERE review_id = ? AND reason_ord = ? AND list = ?), ?)",
+        [
+          id.regulatory_review_sql(new_id),
+          sqlight.int(reason_ord),
+          sqlight.text(which),
+          id.regulatory_review_sql(new_id),
+          sqlight.int(reason_ord),
+          sqlight.text(which),
+          sqlight.text(value),
+        ],
+      )
+    }),
+  )
+  use _ <- result.try(finish(
+    tx,
+    new_id,
+    old.kind,
+    old.agency_org_id,
+    old.agent_user_id,
+    policy_versions,
+    requested_by,
+    at,
+  ))
+  use _ <- result.try(reviewer_event(
+    tx,
+    new_id,
+    by,
+    event_row.RegulatoryReviewRequested,
+    None,
+    Some(old.id),
+    None,
+    at,
+  ))
+  use _ <- result.try(moved(
+    tx,
+    old.id,
+    "status = 'SUPERSEDED'",
+    [],
+    "status IN ('APPROVED','REJECTED')",
+    by,
+    at,
+  ))
+  use _ <- result.map(reviewer_event(
+    tx,
+    old.id,
+    by,
+    event_row.RegulatoryReviewSuperseded,
+    Some(old.rev),
+    Some(new_id),
+    Some(old.status),
+    at,
+  ))
+  new_id
 }

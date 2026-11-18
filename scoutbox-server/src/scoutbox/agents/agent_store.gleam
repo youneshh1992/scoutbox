@@ -298,6 +298,14 @@ pub type ProfileDetail {
     from: facet_state.FacetState,
     to: facet_state.FacetState,
   )
+  /// An attributed reviewer decided the facet.
+  FacetReviewed(
+    facet: AgentFacet,
+    ma: Option(Jurisdiction),
+    from: facet_state.FacetState,
+    to: facet_state.FacetState,
+    review_id: id.RegulatoryReviewId,
+  )
   /// A recheck against the register: the effective states before and after it.
   FacetRechecked(
     facet: AgentFacet,
@@ -333,7 +341,7 @@ pub fn profile_event(
     ProfileCreated -> profile_event_row.AgentProfileCreated
     ProfileUpdated(..) -> profile_event_row.AgentProfileUpdated
     FacetSubmitted(..) -> profile_event_row.AgentVerificationSubmitted
-    FacetStateChanged(..) | FacetRecheckChanged(..) ->
+    FacetStateChanged(..) | FacetRecheckChanged(..) | FacetReviewed(..) ->
       profile_event_row.AgentVerificationStateChanged
     FacetRechecked(..) -> profile_event_row.AgentFacetRechecked
   }
@@ -369,6 +377,16 @@ pub fn profile_event(
         detail_from: Some(from),
         detail_to: Some(to),
         detail_state: Some(to),
+      )
+    FacetReviewed(facet:, ma:, from:, to:, review_id:) ->
+      profile_event_row.Row(
+        ..base,
+        detail_facet: Some(facet),
+        detail_ma: ma,
+        detail_from: Some(from),
+        detail_to: Some(to),
+        detail_state: Some(to),
+        detail_review_id: Some(review_id),
       )
     FacetRechecked(facet:, ma:, from:, to:) ->
       profile_event_row.Row(

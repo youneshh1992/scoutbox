@@ -8,8 +8,10 @@
 //// `declare_representation` is the same evaluation without the exclusivity window. The conflict engine
 //// (`agents/conflict`) reads the same policy set.
 ////
-//// Not ported yet: the other policy actions (`request_consent`, `approach_minor`), the minors gate and the
-//// representation-scope rule, which belong to the consent routes and the minor pathway.
+//// `approach_minor` is the agent's own readiness for a minor pathway, evaluated against no subject.
+////
+//// Not ported yet: `request_consent` and the minors gate, which belong to the consent routes and the minor
+//// pathway.
 
 import gleam/json
 import gleam/list
@@ -554,6 +556,118 @@ pub fn approach_adult(
         }
       })
     }
+  }
+}
+
+/// Approaching a minor (`approach_minor`): the agent's own facets, the national minors accreditation where a rule
+/// asks for it, and the FIFA minors accreditation recorded on the INT scope. Evaluated against no subject, this is
+/// the agent's own readiness.
+pub fn approach_minor(
+  set: PolicySet,
+  mas: List(String),
+  state_of: fn(AgentFacet, Option(Jurisdiction)) -> FacetState,
+  now: Int,
+) -> Decision {
+  let policies = set.policies
+  let d =
+    list.fold(set.missing, Decision(False, False, [], []), fn(d, ma) {
+      Decision(
+        ..d,
+        requires_manual_review: True,
+        reasons: list.append(d.reasons, [unencoded(ma)]),
+      )
+    })
+  let mas =
+    ["INT", ..list.filter(mas, fn(m) { m != "INT" && m != "" })]
+    |> list.unique
+  let d =
+    require_facet(
+      d,
+      rule_at(policies, "FIFA-8.1", now),
+      FifaLicence,
+      None,
+      state_of,
+    )
+  let approach = rule_at(policies, "FIFA-13.1", now)
+  let d = case approach.status {
+    Known(rule_status.Active) -> d
+    Known(rule_status.Unknown) ->
+      Decision(
+        ..d,
+        reasons: list.append(d.reasons, [
+          reason_of("POLICY_NOT_ENCODED", approach),
+        ]),
+      )
+    _ ->
+      Decision(
+        ..d,
+        reasons: list.append(d.reasons, [
+          reason_of("RULE_STATUS_UNCERTAIN", approach),
+        ]),
+      )
+  }
+  let d =
+    list.fold(mas, d, fn(d, ma) {
+      case
+        ma,
+        list.find(policies, fn(p) {
+          jurisdiction.to_string(p.row.jurisdiction) == ma
+        })
+      {
+        "INT", _ | _, Error(Nil) -> d
+        _, Ok(policy) -> {
+          let ma = Some(policy.row.jurisdiction)
+          list.fold(policy.rules, d, fn(d, r) {
+            let e = Entry(r.id, Some(r), Some(policy), Known(status_at(r, now)))
+            let d = case flag(r, "nationalRegistrationRequired") {
+              True -> require_facet(d, e, NationalRegistration, ma, state_of)
+              False -> d
+            }
+            let d = case flag(r, "domesticAuthorisationRequired") {
+              True -> require_facet(d, e, DomesticAuthorisation, ma, state_of)
+              False -> d
+            }
+            case flag(r, "minorsAuthorisationRequired") {
+              True -> require_facet(d, e, MinorsAuthorisation, ma, state_of)
+              False -> d
+            }
+          })
+        }
+      }
+    })
+  // FIFA minors accreditation is recorded as a facet on the INT scope.
+  require_facet(
+    d,
+    rule_at(policies, "FIFA-13.2", now),
+    MinorsAuthorisation,
+    Some(jurisdiction.INT),
+    state_of,
+  )
+}
+
+/// The rule that times a minor approach in `ma`: FIFA-13.1 internationally, else the national rule that names a
+/// formula. None when the national policy has none.
+pub fn minor_timing_rule(
+  policies: List(Policy),
+  ma: String,
+  now: Int,
+) -> Option(#(String, RuleStatus, Option(String))) {
+  let formula = fn(r: Rule) {
+    list.key_find(r.texts, "formula") |> option.from_result
+  }
+  case ma {
+    "INT" ->
+      case find_rule(policies, "FIFA-13.1") {
+        Ok(#(r, _)) -> Some(#("FIFA-13.1", status_at(r, now), formula(r)))
+        Error(Nil) -> Some(#("FIFA-13.1", rule_status.Unknown, None))
+      }
+    _ ->
+      list.find(policies, fn(p) {
+        jurisdiction.to_string(p.row.jurisdiction) == ma
+      })
+      |> result.try(fn(p) { list.find(p.rules, fn(r) { formula(r) != None }) })
+      |> result.map(fn(r) { #(r.id, status_at(r, now), formula(r)) })
+      |> option.from_result
   }
 }
 

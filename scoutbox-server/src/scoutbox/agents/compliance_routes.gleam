@@ -20,6 +20,7 @@ import scoutbox/agents/approach_policy
 import scoutbox/agents/compliance_store.{type By}
 import scoutbox/agents/conflict
 import scoutbox/agents/consent_store.{type Consent}
+import scoutbox/agents/context_view
 import scoutbox/agents/reviews.{type Review}
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
@@ -40,16 +41,24 @@ import scoutbox/platform/paging
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/domain_errors.{Contract}
+import scoutbox/rows/agent_profile_facets as facet_row
+import scoutbox/rows/agreement_history as agreement_event_row
+import scoutbox/rows/compliance_context_history as context_event_row
 import scoutbox/rows/compliance_context_parties as context_party_row
 import scoutbox/rows/compliance_contexts as context_row
 import scoutbox/rows/id
 import scoutbox/rows/regulatory_consents as consent_row
+import scoutbox/rows/regulatory_review_history as review_event_row
+import scoutbox/rows/regulatory_review_reasons as review_reason_row
 import scoutbox/rows/regulatory_reviews as review_row
+import scoutbox/rows/representation_agreements as agreement_row
 import scoutbox/rows/ts_reviewer_history as reviewer_event_row
 import scoutbox/rows/ts_reviewers as reviewer_row
 import scoutbox/verification/claims
 import scoutbox/verification/records
+import scoutbox/vocab/agent_actor_kind
 import scoutbox/vocab/agent_facet
+import scoutbox/vocab/agreement_status
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
@@ -63,6 +72,7 @@ import scoutbox/vocab/review_status
 import scoutbox/vocab/reviewer_role
 import scoutbox/vocab/rule_status
 import scoutbox/vocab/subject_kind
+import scoutbox/vocab/terminator
 import scoutbox/vocab/ver_level
 import sqlight
 import wisp.{type Request, type Response}
@@ -166,15 +176,15 @@ pub fn refusal(
   }
 }
 
-fn bare(code: String, fields: List(#(String, Json))) -> Response {
+pub fn bare(code: String, fields: List(#(String, Json))) -> Response {
   domain_errors.send(contract, code, fields)
 }
 
-fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
+pub fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   store.map_refusal(r, fn(_) { http.error(500, "INTERNAL") })
 }
 
-fn answer_unit(r: Result(Response, store.UnitError(Response))) -> Response {
+pub fn answer_unit(r: Result(Response, store.UnitError(Response))) -> Response {
   case r {
     Ok(response) -> response
     Error(store.Refused(response)) -> response
@@ -183,7 +193,7 @@ fn answer_unit(r: Result(Response, store.UnitError(Response))) -> Response {
   }
 }
 
-fn reading(
+pub fn reading(
   ctx: Ctx,
   f: fn(Read) -> Result(a, Fail(e)),
   next: fn(a) -> Response,
@@ -213,7 +223,7 @@ fn parsed(
   }
 }
 
-fn body(
+pub fn body(
   req: Request,
   shape: input.Shape(a),
   default: String,
@@ -235,7 +245,7 @@ pub fn parsed_body(
   next(v)
 }
 
-fn client_key(
+pub fn client_key(
   raw: Option(String),
   next: fn(Option(String)) -> Response,
 ) -> Response {
@@ -254,7 +264,7 @@ fn rate_limited(action: limits.Action) -> Response {
   )
 }
 
-fn limited(
+pub fn limited(
   ctx: Ctx,
   req: Request,
   action: limits.Action,
@@ -269,11 +279,11 @@ fn limited(
   }
 }
 
-fn fingerprint(fields: List(#(String, canonical.Value))) -> String {
+pub fn fingerprint(fields: List(#(String, canonical.Value))) -> String {
   canonical.Object(fields) |> canonical.to_string
 }
 
-fn guard_rev(
+pub fn guard_rev(
   raw: Dynamic,
   current: rev.Rev,
   code: String,
@@ -423,7 +433,7 @@ pub fn reviewer_session(
   }
 }
 
-fn by_reviewer(r: reviewer_row.Row) -> By {
+pub fn by_reviewer(r: reviewer_row.Row) -> By {
   compliance_store.By(
     kind: compliance_actor_kind.TsReviewer,
     id: Some(id.reviewer_to_string(r.id)),
@@ -803,9 +813,13 @@ fn subject_json(r: review_row.Row) -> Json {
   }
 }
 
+/// A decision's prior or resulting state, by the kind of thing the review was about (reviewRoutes.mjs
+/// `reviewEffectState` and `applyReviewDecision`).
 fn state_json(
   r: review_row.Row,
   status: Option(review_status.ReviewStatus),
+  facet: Option(facet_state.FacetState),
+  agreement: Option(agreement_status.AgreementStatus),
   context: Option(context_outcome.ContextOutcome),
   representation: Option(
     declared_representation_status.DeclaredRepresentationStatus,
@@ -816,12 +830,15 @@ fn state_json(
     Some(s) -> [#("status", review_status.to_json(s))]
     None -> []
   }
-  let state = case r.kind {
-    review_row.VerificationFacet -> [
-      #("facetState", json.nullable(r.prior_facet_state, facet_state.to_json)),
+  let state = case r.kind, note {
+    review_row.VerificationFacet, _ -> [
+      #("facetState", json.nullable(facet, facet_state.to_json)),
     ]
-    review_row.RepresentationDispute -> []
-    _ -> [
+    review_row.RepresentationDispute, _ -> [
+      #("agreementStatus", json.nullable(agreement, agreement_status.to_json)),
+    ]
+    _, Some(review_row.ContextGone) -> [#("contextOutcome", json.null())]
+    _, _ -> [
       #("contextOutcome", json.nullable(context, context_outcome.to_json)),
       #(
         "representationStatus",
@@ -836,8 +853,119 @@ fn state_json(
   json.object(list.flatten([status_field, state, note_field]))
 }
 
-/// A review item for the reviewer lane: the decision's reason, evidence and states are the reviewer's.
+/// A review's reason in full, as the reviewer reads it.
+fn review_reason(
+  rv: Review,
+  x: review_reason_row.Row,
+) -> context_view.ReasonFields {
+  let listed = fn(which) {
+    list.filter_map(rv.reason_items, fn(i) {
+      case i.0 == x.ord && i.1 == which {
+        True -> Ok(i.2)
+        False -> Error(Nil)
+      }
+    })
+  }
+  context_view.ReasonFields(
+    code: x.code,
+    rule_id: x.rule_id,
+    rule_status: x.rule_status,
+    regulator: x.regulator,
+    jurisdiction: x.jurisdiction,
+    policy_version: x.policy_version_id,
+    facet: x.facet,
+    member_association: x.member_association,
+    state: x.state,
+    agent_user_id: option.map(x.agent_user_id, id.org_user_to_string),
+    party_role: x.party_role,
+    party_roles: case x.has_party_roles {
+      True -> Some(listed("partyRoles"))
+      False -> None
+    },
+    consent_kind: x.consent_kind,
+    detail: x.detail_text,
+    reason: x.reason_text,
+    override_rule_id: x.override_rule_id,
+    kind: x.kind_text,
+    via_connected_agent: x.via_connected_agent == Some(1),
+    jurisdictions: case x.has_jurisdictions {
+      True -> Some(listed("jurisdictions"))
+      False -> None
+    },
+  )
+}
+
+/// The reviewer's view of a review: its snapshot is the evaluation it was raised on, read back.
+pub fn reviewer_view(read: Read, rv: Review) -> Result(Json, Fail(e)) {
+  let r = rv.row
+  case r.snapshot_outcome, r.snapshot_evaluation_id {
+    Some(_), Some(eid) -> {
+      use ev <- result.map(context_view.evaluation(read, id.evaluation(eid)))
+      review_object(rv, True, case ev {
+        Some(e) -> snapshot_of_evaluation(e)
+        None -> reviewer_snapshot(rv)
+      })
+    }
+    _, _ -> Ok(review_json(rv, True))
+  }
+}
+
+fn snapshot_of_evaluation(e: context_view.Evaluation) -> Json {
+  let full = context_view.evaluation_json_fields(e)
+  let keys = [
+    "outcome", "alias", "reasons", "consentsOutstanding", "requiredActions",
+    "missingEvidence", "policyVersions", "evaluatedAt", "inputHash",
+  ]
+  json.object(
+    list.flatten([
+      list.filter_map(keys, fn(k) {
+        list.key_find(full, k) |> result.map(fn(v) { #(k, v) })
+      }),
+      [
+        #("proposed", context_view.proposed_json(e)),
+        #("evaluationId", id.evaluation_json(e.row.id)),
+      ],
+    ]),
+  )
+}
+
+/// A snapshot with no evaluation to read back: the outcome, the review's own reasons and versions.
+fn reviewer_snapshot(rv: Review) -> Json {
+  let r = rv.row
+  case r.snapshot_outcome {
+    Some(outcome) ->
+      json.object([
+        #("outcome", context_outcome.to_json(outcome)),
+        #(
+          "reasons",
+          json.array(rv.reasons, fn(x) {
+            context_view.reason_fields_json(review_reason(rv, x))
+          }),
+        ),
+        #("policyVersions", json.array(rv.policy_versions, id.policy_json)),
+        #("evaluatedAt", json.nullable(r.snapshot_evaluated_at, json.int)),
+      ])
+    None -> json.null()
+  }
+}
+
+/// A review item: the agent's projection, or with `for_reviewer` the reviewer's (the decision's reason, evidence and
+/// states, and the full snapshot).
 pub fn review_json(rv: Review, for_reviewer: Bool) -> Json {
+  let r = rv.row
+  review_object(rv, for_reviewer, case for_reviewer, r.snapshot_outcome {
+    True, _ -> reviewer_snapshot(rv)
+    False, Some(outcome) ->
+      json.object([
+        #("outcome", context_outcome.to_json(outcome)),
+        #("evaluatedAt", json.nullable(r.snapshot_evaluated_at, json.int)),
+        #("policyVersions", json.array(rv.policy_versions, id.policy_json)),
+      ])
+    False, None -> json.null()
+  })
+}
+
+fn review_object(rv: Review, for_reviewer: Bool, snapshot: Json) -> Json {
   let r = rv.row
   let pvs = json.array(rv.policy_versions, id.policy_json)
   json.object([
@@ -892,6 +1020,12 @@ pub fn review_json(rv: Review, for_reviewer: Bool) -> Json {
               #("evidenceCount", json.int(list.length(rv.evidence_refs))),
             ],
             case for_reviewer {
+              True if outcome == review_row.Cancelled -> [
+                #("reason", json.nullable(r.decision_reason, json.string)),
+                #("evidenceRefs", json.array(rv.evidence_refs, json.string)),
+                #("priorState", json.null()),
+                #("resultingState", json.null()),
+              ]
               True -> [
                 #("reason", json.nullable(r.decision_reason, json.string)),
                 #("evidenceRefs", json.array(rv.evidence_refs, json.string)),
@@ -900,6 +1034,8 @@ pub fn review_json(rv: Review, for_reviewer: Bool) -> Json {
                   state_json(
                     r,
                     r.prior_status,
+                    r.prior_facet_state,
+                    r.prior_agreement_status,
                     r.prior_context_outcome,
                     r.prior_representation_status,
                     None,
@@ -910,6 +1046,8 @@ pub fn review_json(rv: Review, for_reviewer: Bool) -> Json {
                   state_json(
                     r,
                     None,
+                    r.result_facet_state,
+                    r.result_agreement_status,
                     r.result_context_outcome,
                     r.result_representation_status,
                     r.result_note,
@@ -935,16 +1073,11 @@ pub fn review_json(rv: Review, for_reviewer: Bool) -> Json {
       None -> json.null()
     }),
     #("supersedes", json.nullable(r.supersedes_id, id.regulatory_review_json)),
-    #("supersededBy", json.null()),
-    #("snapshot", case r.snapshot_outcome {
-      Some(outcome) ->
-        json.object([
-          #("outcome", context_outcome.to_json(outcome)),
-          #("evaluatedAt", json.nullable(r.snapshot_evaluated_at, json.int)),
-          #("policyVersions", pvs),
-        ])
-      None -> json.null()
-    }),
+    #(
+      "supersededBy",
+      json.nullable(rv.superseded_by, id.regulatory_review_json),
+    ),
+    #("snapshot", snapshot),
     ..list.append(rev.meta(rev.Rev(r.rev, r.rev_at, r.rev_by_name)), [
       #(
         "honest",
@@ -1034,7 +1167,15 @@ fn queue(
           let #(a, b, c) = x.0
           [paging.IntKey(a), paging.IntKey(b), paging.IntKey(c)]
         })
-      next(json.array(items, fn(x) { review_json(x.1, for_reviewer) }), cursor)
+      use views <- reading(ctx, fn(read) {
+        list.try_map(items, fn(x) {
+          case for_reviewer {
+            True -> reviewer_view(read, x.1)
+            False -> Ok(review_json(x.1, False))
+          }
+        })
+      })
+      next(json.preprocessed_array(views), cursor)
     }
   }
 }
@@ -1133,14 +1274,16 @@ pub fn resolve_review(
       case key, r.resolve_key {
         Some(k), Some(stored) if k == stored ->
           case r.resolve_fp == Some(fp) {
-            True ->
+            True -> {
+              use reviewed <- reading(ctx, reviewer_view(_, rv))
               http.json(
                 200,
                 json.object([
-                  #("review", review_json(rv, True)),
+                  #("review", reviewed),
                   #("idempotent", json.bool(True)),
                 ]),
               )
+            }
             False -> bare("REVIEW_IDEMPOTENCY_CONFLICT", [])
           }
         _, _ ->
@@ -1250,27 +1393,17 @@ pub fn resolve_review(
                       ),
                     ],
                   )
-                  case r.kind {
-                    review_row.RepresentationDeclared ->
-                      decide_binding(
-                        ctx,
-                        reviewer,
-                        rv,
-                        b.outcome,
-                        reason_code,
-                        reason,
-                        refs,
-                        option.map(key, fn(k) { #(k, fp) }),
-                        binding_decided,
-                      )
-                    // Not ported yet: a decision on a facet, a dispute or a conflict evaluation.
-                    _ ->
-                      http.error_message(
-                        501,
-                        "NOT_PORTED",
-                        "This review kind's decision is not ported to this server yet.",
-                      )
-                  }
+                  decide(
+                    ctx,
+                    reviewer,
+                    rv,
+                    b.outcome,
+                    reason_code,
+                    reason,
+                    refs,
+                    option.map(key, fn(k) { #(k, fp) }),
+                    binding_decided,
+                  )
                 }
               }
           }
@@ -1319,7 +1452,543 @@ fn context_state(
   }
 }
 
-fn decide_binding(
+/// The state a decision is taken from, or leaves, by the kind of thing the review is about.
+type Effect {
+  Effect(
+    facet: Option(facet_state.FacetState),
+    agreement: Option(agreement_status.AgreementStatus),
+    context: Option(context_outcome.ContextOutcome),
+    representation: Option(
+      declared_representation_status.DeclaredRepresentationStatus,
+    ),
+    note: Option(review_row.ResultNote),
+  )
+}
+
+const no_effect = Effect(None, None, None, None, None)
+
+fn subject_ma(r: review_row.Row) -> Option(jurisdiction.Jurisdiction) {
+  option.then(r.subject_member_association, fn(m) {
+    jurisdiction.from_string(m) |> option.from_result
+  })
+}
+
+/// `reviewEffectState`.
+fn effect_state(
+  read: Read,
+  r: review_row.Row,
+  now: Int,
+) -> Result(Effect, Fail(e)) {
+  case r.kind {
+    review_row.VerificationFacet ->
+      case r.subject_profile_id, r.subject_facet {
+        Some(pid), Some(facet) -> {
+          use p <- result.map(agent_store.profile_by_id(read, pid))
+          let rec =
+            option.then(p, agent_rules.facet_of(_, facet, subject_ma(r)))
+          Effect(
+            ..no_effect,
+            facet: option.map(rec, fn(f) {
+              agent_rules.effective_facet_state(Some(f), now)
+            }),
+          )
+        }
+        _, _ -> Ok(no_effect)
+      }
+    review_row.RepresentationDispute ->
+      case r.subject_agreement_id {
+        Some(aid) -> {
+          use a <- result.map(agent_store.agreement_by_id(read, aid))
+          Effect(
+            ..no_effect,
+            agreement: option.map(a, fn(a) {
+              agent_rules.effective_status(a.row, now)
+            }),
+          )
+        }
+        None -> Ok(no_effect)
+      }
+    _ -> {
+      use #(context, rep) <- result.map(context_state(read, r))
+      Effect(..no_effect, context:, representation: rep)
+    }
+  }
+}
+
+fn reviewer_actor(reviewer: reviewer_row.Row) -> agent_store.Actor {
+  agent_store.Actor(
+    kind: agent_actor_kind.TsReviewer,
+    id: Some(id.reviewer_to_string(reviewer.id)),
+    name: Some(reviewer.name),
+  )
+}
+
+/// A facet review: VERIFIED under attributed review against the cited evidence, or not verified.
+fn apply_facet(
+  tx: Tx,
+  reviewer: reviewer_row.Row,
+  r: review_row.Row,
+  approved: Bool,
+  now: Int,
+) -> Result(Effect, Fail(Response)) {
+  let read = store.reading(tx)
+  case r.subject_profile_id, r.subject_facet {
+    Some(pid), Some(facet) -> {
+      use p <- result.try(agent_store.profile_by_id(read, pid) |> storage)
+      case p {
+        None -> Ok(Effect(..no_effect, note: Some(review_row.ProfileGone)))
+        Some(p) -> {
+          let ma = subject_ma(r)
+          let cur = agent_rules.facet_of(p, facet, ma)
+          let prev = agent_rules.effective_facet_state(cur, now)
+          let base = case cur {
+            Some(f) -> f
+            None ->
+              facet_row.new(
+                profile_id: p.row.id,
+                facet:,
+                member_association: option.unwrap(ma, jurisdiction.INT),
+                state: facet_state.Unverified,
+              )
+          }
+          let provenance = fn(f: facet_row.Row) {
+            facet_row.Row(
+              ..f,
+              provenance_provider: Some(facet_row.AttributedReview),
+              provenance_kind: Some(facet_row.HumanReview),
+              provenance_at: Some(now),
+              provenance_reviewer_id: Some(id.reviewer_to_string(reviewer.id)),
+              provenance_review_id: Some(r.id),
+              stale_notified_at: None,
+            )
+          }
+          let next = case approved {
+            True ->
+              provenance(
+                facet_row.Row(
+                  ..base,
+                  state: facet_state.Verified,
+                  verified_at: Some(now),
+                  recheck_at: Some(now + agent_rules.recheck_ms),
+                  note: Some(
+                    "Verified by attributed Trust & Safety review against the cited evidence. Re-check due in 30 days.",
+                  ),
+                ),
+              )
+            False ->
+              provenance(
+                facet_row.Row(
+                  ..base,
+                  state: facet_state.Unverified,
+                  verified_at: None,
+                  recheck_at: None,
+                  note: Some(
+                    "Attributed Trust & Safety review could not verify this reference.",
+                  ),
+                ),
+              )
+          }
+          let by = reviewer_actor(reviewer)
+          use _ <- result.try(agent_store.set_facet(tx, next) |> storage)
+          use _ <- result.try(
+            agent_store.bump_profile(
+              tx,
+              p.row.id,
+              agent_store.bump_by(now, by),
+              True,
+            )
+            |> storage,
+          )
+          use _ <- result.try(
+            agent_store.profile_event(
+              tx,
+              p.row.id,
+              now,
+              by,
+              agent_store.FacetReviewed(facet, ma, prev, next.state, r.id),
+            )
+            |> storage,
+          )
+          let org = id.org_to_string(p.row.agency_org_id)
+          let user = id.org_user_to_string(p.row.user_id)
+          let state = facet_state.to_string(next.state)
+          store.emit(
+            tx,
+            effect.Live(live_event.AgentVerificationStateChanged(
+              org,
+              user,
+              agent_facet.to_string(facet),
+              state,
+            )),
+          )
+          store.emit(
+            tx,
+            effect.Live(live_event.AgentAuthorisationStateChanged(
+              org,
+              user,
+              state,
+            )),
+          )
+          Ok(Effect(..no_effect, facet: Some(next.state)))
+        }
+      }
+    }
+    _, _ -> Ok(Effect(..no_effect, note: Some(review_row.ProfileGone)))
+  }
+}
+
+/// A dispute review: reinstating lifts only the dispute suspension (an expired term stays expired); upholding ends
+/// the relationship.
+fn apply_dispute(
+  tx: Tx,
+  reviewer: reviewer_row.Row,
+  r: review_row.Row,
+  approved: Bool,
+  now: Int,
+) -> Result(Effect, Fail(Response)) {
+  let read = store.reading(tx)
+  use found <- result.try(case r.subject_agreement_id {
+    Some(aid) -> agent_store.agreement_by_id(read, aid) |> storage
+    None -> Ok(None)
+  })
+  case found {
+    Some(a) if a.row.status == agreement_row.Disputed -> {
+      let by = reviewer_actor(reviewer)
+      let row = a.row
+      let set = case approved {
+        True ->
+          case row.end_at, row.confirmed_at {
+            None, Some(confirmed) -> [
+              #("status", sqlight.text("active")),
+              #(
+                "end_at",
+                sqlight.int(agent_rules.term_end_at(
+                  option.unwrap(row.start_at, confirmed),
+                  row.term_months,
+                )),
+              ),
+            ]
+            _, _ -> [#("status", sqlight.text("active"))]
+          }
+        False -> [
+          #("status", sqlight.text("terminated_by_client")),
+          #("terminated_at", sqlight.int(now)),
+          #("terminated_by", sqlight.text("trust_safety")),
+          #("termination_reason_code", sqlight.text("dispute_upheld")),
+        ]
+      }
+      let set =
+        list.append(set, [
+          #("dispute_resolved_at", sqlight.int(now)),
+          #("dispute_review_id", id.regulatory_review_sql(r.id)),
+          #(
+            "dispute_outcome",
+            sqlight.text(case approved {
+              True -> "reinstated"
+              False -> "ended"
+            }),
+          ),
+        ])
+      use _ <- result.try(
+        store.run(
+          tx,
+          "UPDATE representation_agreements SET "
+            <> string.join(list.map(set, fn(x) { x.0 <> " = ?" }), ", ")
+            <> " WHERE id = ? AND status = 'disputed'",
+          list.append(list.map(set, fn(x) { x.1 }), [id.agreement_sql(row.id)]),
+        )
+        |> storage,
+      )
+      use _ <- result.try(
+        agent_store.bump_agreement(tx, row.id, agent_store.bump_by(now, by))
+        |> storage,
+      )
+      use _ <- result.try(
+        agent_store.agreement_event(
+          tx,
+          row.id,
+          now,
+          by,
+          fn(e) {
+            agreement_event_row.Row(
+              ..e,
+              detail_by: Some(terminator.TrustSafety),
+              detail_phase: Some(agreement_status.Disputed),
+              detail_review_id: Some(r.id),
+              detail_reason_code: Some(case approved {
+                True -> "dispute_reinstated"
+                False -> "dispute_upheld"
+              }),
+            )
+          },
+          case approved {
+            True -> agreement_event_row.RepresentationConfirmed
+            False -> agreement_event_row.RepresentationTerminated
+          },
+        )
+        |> storage,
+      )
+      store.emit(
+        tx,
+        effect.Live(live_event.Representation(
+          change: case approved {
+            True -> live_event.RepresentationConfirmed
+            False -> live_event.RepresentationTerminated
+          },
+          org_id: id.org_to_string(row.agency_org_id),
+          agreement_id: id.agreement_to_string(row.id),
+          agent_user_id: id.org_user_to_string(row.agent_user_id),
+        )),
+      )
+      use _ <- result.try(
+        notifications.notify(
+          tx,
+          to: audience.Player,
+          id: row.client_id,
+          type_: "representation_disputed",
+          text: case approved {
+            True ->
+              "Attributed Trust & Safety review resolved your dispute: the relationship record is reinstated. You can still end it at any time."
+            False ->
+              "Attributed Trust & Safety review resolved your dispute: the relationship record has been ended."
+          },
+          ref_id: Some(id.agreement_to_string(row.id)),
+          at: now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(
+        notifications.notify(
+          tx,
+          to: audience.OrgUser,
+          id: id.org_user_to_string(row.agent_user_id),
+          type_: "representation_disputed",
+          text: case approved {
+            True ->
+              "A disputed relationship was reinstated by attributed review."
+            False -> "A disputed relationship was ended by attributed review."
+          },
+          ref_id: Some(id.agreement_to_string(row.id)),
+          at: now,
+        )
+        |> storage,
+      )
+      use after <- result.map(
+        agent_store.agreement_by_id(read, row.id) |> storage,
+      )
+      Effect(
+        ..no_effect,
+        agreement: option.map(after, fn(a) {
+          agent_rules.effective_status(a.row, now)
+        }),
+      )
+    }
+    other ->
+      Ok(
+        Effect(
+          ..no_effect,
+          agreement: option.map(other, fn(a) {
+            agent_rules.effective_status(a.row, now)
+          }),
+          note: Some(review_row.NotDisputedAnyMore),
+        ),
+      )
+  }
+}
+
+/// A conflict or declaration review: the context records the decision, is evaluated again when open, and moves.
+fn apply_context(
+  tx: Tx,
+  reviewer: reviewer_row.Row,
+  r: review_row.Row,
+  approved: Bool,
+  binding_decided: BindingDecided,
+  now: Int,
+) -> Result(Effect, Fail(Response)) {
+  let read = store.reading(tx)
+  let by = by_reviewer(reviewer)
+  case r.subject_context_id {
+    None -> Ok(Effect(..no_effect, note: Some(review_row.ContextGone)))
+    Some(cid) -> {
+      let context_id = id.compliance_context(cid)
+      use c <- result.try(compliance_store.by_id(read, context_id) |> storage)
+      case c {
+        None -> Ok(Effect(..no_effect, note: Some(review_row.ContextGone)))
+        Some(_) -> {
+          use _ <- result.try(case r.kind {
+            review_row.RepresentationDeclared -> {
+              // For a transaction, its representation row is the truth and the context only projects it.
+              use _ <- result.try(
+                case r.subject_transaction_id, r.subject_representation_id {
+                  Some(t), Some(rep) ->
+                    binding_decided(tx, t, rep, approved, by, r.id, now)
+                  _, _ -> Ok(Nil)
+                },
+              )
+              use live <- result.try(
+                compliance_store.by_id(read, context_id) |> storage,
+              )
+              let pending =
+                option.then(live, fn(c) {
+                  list.find(c.representations, fn(x) {
+                    Some(id.representation_to_string(x.id))
+                    == r.subject_representation_id
+                    && x.status == declared_representation_status.PendingReview
+                  })
+                  |> option.from_result
+                })
+              case pending {
+                None -> Ok(Nil)
+                Some(rep) -> {
+                  use _ <- result.try(
+                    case approved {
+                      True ->
+                        store.run(
+                          tx,
+                          "UPDATE compliance_context_representations SET status = 'verified', declared_only = 0, verified_by_review_id = ?, verified_at = ? WHERE context_id = ? AND id = ? AND status = 'pending_review'",
+                          [
+                            id.regulatory_review_sql(r.id),
+                            sqlight.int(now),
+                            id.compliance_context_sql(context_id),
+                            id.representation_sql(rep.id),
+                          ],
+                        )
+                      False ->
+                        store.run(
+                          tx,
+                          "UPDATE compliance_context_representations SET status = 'withdrawn', withdrawn_at = ? WHERE context_id = ? AND id = ? AND status = 'pending_review'",
+                          [
+                            sqlight.int(now),
+                            id.compliance_context_sql(context_id),
+                            id.representation_sql(rep.id),
+                          ],
+                        )
+                    }
+                    |> storage,
+                  )
+                  compliance_store.event(
+                    tx,
+                    context_id,
+                    case approved {
+                      True -> context_event_row.ComplianceRepresentationVerified
+                      False ->
+                        context_event_row.ComplianceRepresentationWithdrawn
+                    },
+                    by,
+                    now,
+                    compliance_store.Detail(
+                      ..compliance_store.no_detail,
+                      party_role: Some(rep.party_role),
+                      review_id: Some(r.id),
+                    ),
+                  )
+                  |> storage
+                }
+              }
+            }
+            review_row.ConflictEvaluation -> {
+              use _ <- result.try(case approved {
+                True -> {
+                  let codes =
+                    list.filter(
+                      list.map(r_reasons(read, r) |> result.unwrap([]), fn(x) {
+                        x.code
+                      }),
+                      list.contains(
+                        [
+                          "OTHER_SERVICES_PRESUMPTION", "INTEREST_DECLARED",
+                          "REPRESENTATION_UNVERIFIED",
+                        ],
+                        _,
+                      ),
+                    )
+                  list.try_each(codes, fn(code) {
+                    store.run(
+                      tx,
+                      "INSERT INTO compliance_context_resolved_facts (context_id, ord, code) SELECT ?, (SELECT COALESCE(MAX(ord) + 1, 0) FROM compliance_context_resolved_facts WHERE context_id = ?), ? WHERE NOT EXISTS (SELECT 1 FROM compliance_context_resolved_facts WHERE context_id = ? AND code = ?)",
+                      [
+                        id.compliance_context_sql(context_id),
+                        id.compliance_context_sql(context_id),
+                        sqlight.text(code),
+                        id.compliance_context_sql(context_id),
+                        sqlight.text(code),
+                      ],
+                    )
+                  })
+                  |> storage
+                }
+                False ->
+                  store.run(
+                    tx,
+                    "UPDATE compliance_contexts SET review_rejected_at = ? WHERE id = ?",
+                    [sqlight.int(now), id.compliance_context_sql(context_id)],
+                  )
+                  |> storage
+              })
+              compliance_store.event(
+                tx,
+                context_id,
+                context_event_row.ComplianceContextEvaluated,
+                by,
+                now,
+                compliance_store.Detail(
+                  ..compliance_store.no_detail,
+                  review_id: Some(r.id),
+                  review_outcome: Some(case approved {
+                    True -> context_event_row.ReviewApproved
+                    False -> context_event_row.ReviewRejected
+                  }),
+                ),
+              )
+              |> storage
+            }
+            _ -> Ok(Nil)
+          })
+          use c <- result.try(
+            compliance_store.by_id(read, context_id) |> storage,
+          )
+          let assert Some(c) = c
+          use _ <- result.try(case c.row.status {
+            context_row.Open -> evaluate_context(tx, c, by, now)
+            context_row.Closed -> Ok(Nil)
+          })
+          use _ <- result.try(
+            store.run(
+              tx,
+              "UPDATE compliance_contexts SET rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ?",
+              [
+                sqlight.int(now),
+                sqlight.text(id.reviewer_to_string(reviewer.id)),
+                sqlight.text(reviewer.name),
+                id.compliance_context_sql(context_id),
+              ],
+            )
+            |> storage,
+          )
+          use #(context, rep) <- result.map(context_state(read, r) |> storage)
+          Effect(..no_effect, context:, representation: rep)
+        }
+      }
+    }
+  }
+}
+
+fn r_reasons(
+  read: Read,
+  r: review_row.Row,
+) -> Result(List(review_reason_row.Row), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> review_reason_row.columns
+      <> " FROM regulatory_review_reasons WHERE review_id = ? ORDER BY ord",
+    [id.regulatory_review_sql(r.id)],
+    review_reason_row.decoder(),
+  )
+}
+
+/// `applyReviewDecision` and the decision it records, in one unit.
+fn decide(
   ctx: Ctx,
   reviewer: reviewer_row.Row,
   rv: Review,
@@ -1332,7 +2001,6 @@ fn decide_binding(
 ) -> Response {
   let r = rv.row
   let now = clock.now_ms()
-  let by = by_reviewer(reviewer)
   let approved = outcome == review_row.Approved
   store.unit(ctx.store, fn(tx) {
     let read = store.reading(tx)
@@ -1340,53 +2008,13 @@ fn decide_binding(
     case option.map(current, fn(c) { c.row.rev }) == Some(r.rev) {
       False -> store.stale("the review moved")
       True -> {
-        use prior <- result.try(context_state(read, r) |> storage)
-        use note <- result.try(case r.subject_context_id {
-          None -> Ok(Some(review_row.ContextGone))
-          Some(cid) -> {
-            let context_id = id.compliance_context(cid)
-            use c <- result.try(
-              compliance_store.by_id(read, context_id) |> storage,
-            )
-            case c {
-              None -> Ok(Some(review_row.ContextGone))
-              Some(_) -> {
-                // For a transaction, its representation row is the truth and the context only projects it.
-                use _ <- result.try(
-                  case r.subject_transaction_id, r.subject_representation_id {
-                    Some(t), Some(rep) ->
-                      binding_decided(tx, t, rep, approved, by, r.id, now)
-                    _, _ -> Ok(Nil)
-                  },
-                )
-                use c <- result.try(
-                  compliance_store.by_id(read, context_id) |> storage,
-                )
-                let assert Some(c) = c
-                use _ <- result.map(case c.row.status {
-                  context_row.Open -> evaluate_context(tx, c, by, now)
-                  context_row.Closed -> Ok(Nil)
-                })
-                None
-              }
-            }
-          }
-        })
-        use after <- result.try(context_state(read, r) |> storage)
-        use _ <- result.try(case r.subject_context_id {
-          Some(cid) ->
-            store.run(
-              tx,
-              "UPDATE compliance_contexts SET rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ?",
-              [
-                sqlight.int(now),
-                sqlight.text(id.reviewer_to_string(reviewer.id)),
-                sqlight.text(reviewer.name),
-                sqlight.text(cid),
-              ],
-            )
-            |> storage
-          None -> Ok(Nil)
+        use prior <- result.try(effect_state(read, r, now) |> storage)
+        use after <- result.try(case r.kind {
+          review_row.VerificationFacet ->
+            apply_facet(tx, reviewer, r, approved, now)
+          review_row.RepresentationDispute ->
+            apply_dispute(tx, reviewer, r, approved, now)
+          _ -> apply_context(tx, reviewer, r, approved, binding_decided, now)
         })
         let decision =
           reviews.Decision(
@@ -1398,17 +2026,15 @@ fn decide_binding(
             reason:,
             evidence_refs: refs,
             prior_status: r.status,
-            prior_context_outcome: prior.0,
-            prior_representation_status: prior.1,
-            result_context_outcome: case note {
-              Some(_) -> None
-              None -> after.0
-            },
-            result_representation_status: case note {
-              Some(_) -> None
-              None -> after.1
-            },
-            result_note: note,
+            prior_facet_state: prior.facet,
+            prior_agreement_status: prior.agreement,
+            prior_context_outcome: prior.context,
+            prior_representation_status: prior.representation,
+            result_facet_state: after.facet,
+            result_agreement_status: after.agreement,
+            result_context_outcome: after.context,
+            result_representation_status: after.representation,
+            result_note: after.note,
             at: now,
           )
         use _ <- result.try(reviews.resolve(tx, rv, decision, key) |> storage)
@@ -1441,9 +2067,10 @@ fn decide_binding(
             |> storage
           None -> Ok(Nil)
         })
-        use stored <- result.map(reviews.by_id(read, r.id) |> storage)
+        use stored <- result.try(reviews.by_id(read, r.id) |> storage)
         let assert Some(stored) = stored
-        http.json(200, json.object([#("review", review_json(stored, True))]))
+        use view <- result.map(reviewer_view(read, stored) |> storage)
+        http.json(200, json.object([#("review", view)]))
       }
     }
   })
@@ -1615,7 +2242,7 @@ fn consent_for_party(
   ])
 }
 
-fn public_reason(r: approach_policy.Reason) -> Json {
+pub fn public_reason(r: approach_policy.Reason) -> Json {
   json.object([
     #("code", json.string(r.code)),
     #("ruleId", json.nullable(r.rule_id, json.string)),
@@ -1711,6 +2338,44 @@ pub fn request_consent(
         }
       }
     }
+  }
+}
+
+/// The refusal a facet gate problem answers (shared.mjs `facetGate`).
+pub fn gate_refusal(problem: compliance_store.GateProblem) -> Response {
+  case problem {
+    compliance_store.NoProfile ->
+      err("AGENT_VERIFICATION_REQUIRED", "Create your agent profile first.", [])
+    compliance_store.FacetMissing(g) ->
+      err(
+        g.code,
+        "A regulated action needs a VERIFIED "
+          <> agent_facet.to_string(g.facet)
+          <> case g.member_association {
+          Some(ma) -> " (" <> jurisdiction.to_string(ma) <> ")"
+          None -> ""
+        }
+          <> "; it is "
+          <> facet_state.to_string(g.state)
+          <> ".",
+        [
+          #("facet", agent_facet.to_json(g.facet)),
+          #(
+            "memberAssociation",
+            json.nullable(g.member_association, jurisdiction.to_json),
+          ),
+          #("state", facet_state.to_json(g.state)),
+        ],
+      )
+    compliance_store.Unsupported(reasons:, policy_versions:) ->
+      err(
+        "JURISDICTION_UNSUPPORTED",
+        "No encoded policy covers this jurisdiction. The workflow cannot proceed without attributed review under an encoded policy version.",
+        [
+          #("reasons", json.array(reasons, public_reason)),
+          #("policyVersions", json.array(policy_versions, id.policy_json)),
+        ],
+      )
   }
 }
 
@@ -2387,4 +3052,258 @@ pub fn club_consents(ctx: Ctx, a: OrgAccess) -> Response {
     }
     _ -> bare("COMPLIANCE_ACTION_NOT_PERMITTED", [])
   }
+}
+
+// ------------------------------------------------------------------------------------------------- audit, metrics
+
+/// One decision entry's detail, as the repository decodes it.
+fn decision_detail(
+  rv: Review,
+  h: review_event_row.Row,
+) -> List(#(String, Json)) {
+  let r = rv.row
+  let pvs = json.array(rv.policy_versions, id.policy_json)
+  let rev = #("rev", json.nullable(h.detail_rev, json.int))
+  case h.action {
+    review_event_row.RegulatoryReviewStarted -> [rev]
+    review_event_row.RegulatoryReviewResolved -> [
+      #(
+        "outcome",
+        json.nullable(r.decision_outcome, review_row.decision_outcome_to_json),
+      ),
+      #("reasonCode", json.nullable(r.decision_reason_code, json.string)),
+      #("evidenceRefs", json.array(rv.evidence_refs, json.string)),
+      #("policyVersions", pvs),
+      #(
+        "priorState",
+        state_json(
+          r,
+          r.prior_status,
+          r.prior_facet_state,
+          r.prior_agreement_status,
+          r.prior_context_outcome,
+          r.prior_representation_status,
+          None,
+        ),
+      ),
+      #(
+        "resultingState",
+        state_json(
+          r,
+          None,
+          r.result_facet_state,
+          r.result_agreement_status,
+          r.result_context_outcome,
+          r.result_representation_status,
+          r.result_note,
+        ),
+      ),
+      rev,
+    ]
+    review_event_row.RegulatoryReviewCancelled ->
+      case h.detail_rev {
+        None -> [#("reasonCode", json.string("context_closed"))]
+        Some(_) -> [
+          #("outcome", json.string("CANCELLED")),
+          #("reasonCode", json.string("cancelled")),
+          rev,
+        ]
+      }
+    review_event_row.RegulatoryReviewSuperseded -> [
+      #("reasonCode", json.string("superseded")),
+      #(
+        "priorState",
+        json.object([
+          #(
+            "status",
+            json.nullable(h.detail_prior_status, review_status.to_json),
+          ),
+        ]),
+      ),
+      rev,
+    ]
+    review_event_row.RegulatoryReviewRequested -> []
+  }
+}
+
+/// `GET /ts/compliance/audit`: the newest 200 decision entries with the reviewer who made each (audit.mjs
+/// `reviewerDecisionRows`).
+pub fn audit(ctx: Ctx) -> Response {
+  use rows <- reading(ctx, fn(r) {
+    use entries <- result.try(store.query(
+      r,
+      "SELECT "
+        <> review_event_row.columns
+        <> " FROM regulatory_review_history WHERE action <> 'regulatory_review_requested' ORDER BY at DESC, id DESC LIMIT 200",
+      [],
+      review_event_row.decoder(),
+    ))
+    list.try_map(entries, fn(h) {
+      use rv <- result.map(reviews.by_id(r, h.review_id))
+      let assert Some(rv) = rv
+      #(h, rv)
+    })
+  })
+  let item = fn(pair: #(review_event_row.Row, Review)) {
+    let #(h, rv) = pair
+    let detail = decision_detail(rv, h)
+    let pick = fn(k, default) {
+      list.key_find(detail, k) |> result.unwrap(default)
+    }
+    json.object([
+      #("id", id.review_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", review_event_row.action_to_json(h.action)),
+      #("reviewId", id.regulatory_review_json(rv.row.id)),
+      #("kind", review_row.kind_to_json(rv.row.kind)),
+      #("reviewer", case h.by_kind {
+        compliance_actor_kind.TsReviewer ->
+          json.object([
+            #("reviewerId", json.nullable(h.by_id, json.string)),
+            #("name", json.nullable(h.by_name, json.string)),
+            #("role", json.nullable(h.by_role, json.string)),
+            #("attribution", json.string("authenticated_reviewer")),
+          ])
+        kind ->
+          json.object([
+            #("reviewerId", json.null()),
+            #("name", json.nullable(h.by_name, json.string)),
+            #("role", json.null()),
+            #(
+              "attribution",
+              json.string(case kind {
+                compliance_actor_kind.System -> "system"
+                _ -> "legacy_unattributed"
+              }),
+            ),
+          ])
+      }),
+      #("subject", subject_json(rv.row)),
+      #("agencyOrgId", id.org_json(rv.row.agency_org_id)),
+      #("outcome", pick("outcome", json.null())),
+      #("reasonCode", pick("reasonCode", json.null())),
+      #("evidenceRefs", pick("evidenceRefs", json.preprocessed_array([]))),
+      #(
+        "policyVersions",
+        pick("policyVersions", json.array(rv.policy_versions, id.policy_json)),
+      ),
+      #("priorState", pick("priorState", json.null())),
+      #("resultingState", pick("resultingState", json.null())),
+      #("rev", pick("rev", json.null())),
+    ])
+  }
+  http.json(
+    200,
+    json.object([
+      #("items", json.array(rows, item)),
+      #("legacyNote", json.string(legacy_note)),
+    ]),
+  )
+}
+
+fn counts_by(read: Read, sql: String) -> Result(List(#(String, Int)), Fail(e)) {
+  store.query(read, sql, [], {
+    use k <- decode.field(0, decode.string)
+    use n <- decode.field(1, decode.int)
+    decode.success(#(k, n))
+  })
+}
+
+/// `GET /ts/compliance/metrics`: counts and durations only; no person, no ranking.
+pub fn metrics(ctx: Ctx) -> Response {
+  let now = clock.now_ms()
+  use m <- reading(ctx, fn(r) {
+    use statuses <- result.try(counts_by(
+      r,
+      "SELECT status, COUNT(*) FROM regulatory_reviews GROUP BY status",
+    ))
+    use kinds <- result.try(counts_by(
+      r,
+      "SELECT kind, COUNT(*) FROM regulatory_reviews GROUP BY kind",
+    ))
+    use decided <- result.try(store.query(
+      r,
+      "SELECT decided_at - requested_at FROM regulatory_reviews WHERE decided_at IS NOT NULL ORDER BY 1",
+      [],
+      decode.at([0], decode.int),
+    ))
+    use outcomes <- result.try(counts_by(
+      r,
+      "SELECT outcome, COUNT(*) FROM compliance_evaluations GROUP BY outcome ORDER BY outcome",
+    ))
+    use consents <- result.try(
+      store.query(
+        r,
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.status = 'granted' AND v.id IS NULL THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN c.status = 'declined' THEN 1 ELSE 0 END), 0), COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END), 0) FROM regulatory_consents c LEFT JOIN regulatory_consent_revocations v ON v.consent_id = c.id WHERE c.kind = 'dual_representation'",
+        [],
+        {
+          use a <- decode.field(0, decode.int)
+          use b <- decode.field(1, decode.int)
+          use c <- decode.field(2, decode.int)
+          use d <- decode.field(3, decode.int)
+          decode.success(#(a, b, c, d))
+        },
+      ),
+    )
+    use stale <- result.map(store.query(
+      r,
+      "SELECT COUNT(*) FROM agent_profile_facets WHERE state = 'VERIFIED' AND recheck_at IS NOT NULL AND recheck_at <= ?",
+      [sqlight.int(now)],
+      decode.at([0], decode.int),
+    ))
+    #(statuses, kinds, decided, outcomes, consents, stale)
+  })
+  let #(statuses, kinds, decided, outcomes, consents, stale) = m
+  let counted = fn(pairs: List(#(String, a)), found: List(#(String, Int))) {
+    json.object(
+      list.map(pairs, fn(p) {
+        #(p.0, json.int(list.key_find(found, p.0) |> result.unwrap(0)))
+      }),
+    )
+  }
+  let median = case decided {
+    [] -> json.null()
+    _ ->
+      list.drop(decided, list.length(decided) / 2)
+      |> list.first
+      |> result.map(json.int)
+      |> result.unwrap(json.null())
+  }
+  let consents = case consents {
+    [#(a, b, c, d), ..] -> #(a, b, c, d)
+    [] -> #(0, 0, 0, 0)
+  }
+  http.json(
+    200,
+    json.object([
+      #(
+        "reviews",
+        json.object([
+          #("byStatus", counted(review_status.pairs, statuses)),
+          #("byKind", counted(review_row.kind_pairs, kinds)),
+          #("medianDurationMs", median),
+        ]),
+      ),
+      #(
+        "conflictOutcomes",
+        json.object(list.map(outcomes, fn(p) { #(p.0, json.int(p.1)) })),
+      ),
+      #(
+        "consents",
+        json.object([
+          #("requested", json.int(consents.0)),
+          #("granted", json.int(consents.1)),
+          #("declined", json.int(consents.2)),
+          #("revoked", json.int(consents.3)),
+        ]),
+      ),
+      #("staleFacets", json.int(list.first(stale) |> result.unwrap(0))),
+      #(
+        "note",
+        json.string(
+          "Process metrics only. No agent is ranked and no subscription or payment status enters any compliance outcome.",
+        ),
+      ),
+    ]),
+  )
 }

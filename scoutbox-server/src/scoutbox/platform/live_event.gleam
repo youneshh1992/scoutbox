@@ -142,8 +142,12 @@ pub type Event {
   AgentTransactionHeld(org_id: String, tx_id: String, status: String)
   AgentTransactionCancelled(org_id: String, tx_id: String, status: String)
   AgentTransactionClosed(org_id: String, tx_id: String, status: String)
+  /// A named reviewer took a review item. Private to the agency.
+  RegulatoryReviewStarted(org_id: String, review_id: String)
   /// A named reviewer decided a review item. Private to the agency.
   RegulatoryReviewResolved(org_id: String, review_id: String, outcome: String)
+  /// An agent's authorisation changed by attributed review. Private to the agency.
+  AgentAuthorisationStateChanged(org_id: String, user_id: String, state: String)
   /// A party was asked for, or answered, a regulatory consent. Private to the agency.
   RegulatoryConsentChanged(
     change: ConsentChange,
@@ -300,7 +304,9 @@ pub fn name(event: Event) -> String {
     AgentTransactionHeld(..) -> "agent_transaction_held"
     AgentTransactionCancelled(..) -> "agent_transaction_cancelled"
     AgentTransactionClosed(..) -> "agent_transaction_closed"
+    RegulatoryReviewStarted(..) -> "regulatory_review_started"
     RegulatoryReviewResolved(..) -> "regulatory_review_resolved"
+    AgentAuthorisationStateChanged(..) -> "agent_authorisation_state_changed"
     RegulatoryConsentChanged(change:, ..) ->
       case change {
         ConsentRequested -> "regulatory_consent_requested"
@@ -347,7 +353,9 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | AgentTransactionHeld(org_id:, ..)
     | AgentTransactionCancelled(org_id:, ..)
     | AgentTransactionClosed(org_id:, ..)
+    | RegulatoryReviewStarted(org_id:, ..)
     | RegulatoryReviewResolved(org_id:, ..)
+    | AgentAuthorisationStateChanged(org_id:, ..)
     | RegulatoryConsentChanged(org_id:, ..) -> Ok(org_id)
     Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
   }
@@ -521,6 +529,15 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
     AgentTransactionMessageLinked(org_id:, tx_id:) -> [
       #("orgId", json.string(org_id)),
       #("txId", json.string(tx_id)),
+    ]
+    RegulatoryReviewStarted(org_id:, review_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+    ]
+    AgentAuthorisationStateChanged(org_id:, user_id:, state:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+      #("state", json.string(state)),
     ]
     RegulatoryReviewResolved(org_id:, review_id:, outcome:) -> [
       #("orgId", json.string(org_id)),

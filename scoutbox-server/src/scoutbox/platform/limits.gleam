@@ -72,6 +72,7 @@ pub const policy = [
   #("transaction_note_write", transaction_note_write_policy),
   #("transaction_status_write", transaction_write_policy),
   #("transaction_document_write", transaction_note_write_policy),
+  #("compliance_context_write", context_write_policy),
   #("compliance_consent_request", consent_request_policy),
   #("compliance_consent_response", consent_request_policy),
   #("ts_review_decision", review_decision_policy),
@@ -166,6 +167,8 @@ pub type Action {
   TransactionStatusWrite
   /// Transaction document metadata, per writer.
   TransactionDocumentWrite
+  /// Context creation, party additions and representation declarations by an agent.
+  ComplianceContextWrite
   /// Consent requests by an agent.
   ComplianceConsentRequest
   /// Consent answers by a party.
@@ -251,6 +254,8 @@ const transaction_write_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const transaction_note_write_policy = Policy(max: 120, window_ms: 3_600_000)
 
+const context_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
 const consent_request_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const review_decision_policy = Policy(max: 120, window_ms: 3_600_000)
@@ -297,6 +302,7 @@ fn action_name(action: Action) -> String {
     TransactionNoteWrite -> "transaction_note_write"
     TransactionStatusWrite -> "transaction_status_write"
     TransactionDocumentWrite -> "transaction_document_write"
+    ComplianceContextWrite -> "compliance_context_write"
     ComplianceConsentRequest -> "compliance_consent_request"
     ComplianceConsentResponse -> "compliance_consent_response"
     TsReviewDecision -> "ts_review_decision"
@@ -345,6 +351,7 @@ fn action_policy(action: Action) -> Policy {
     TransactionNoteWrite -> transaction_note_write_policy
     TransactionStatusWrite -> transaction_write_policy
     TransactionDocumentWrite -> transaction_note_write_policy
+    ComplianceContextWrite -> context_write_policy
     ComplianceConsentRequest -> consent_request_policy
     ComplianceConsentResponse -> consent_request_policy
     TsReviewDecision -> review_decision_policy

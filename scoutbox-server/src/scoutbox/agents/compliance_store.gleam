@@ -134,6 +134,115 @@ fn history(
   |> result.replace(Nil)
 }
 
+/// What a history entry records beyond its action.
+pub type Detail {
+  Detail(
+    party_role: Option(party_role.PartyRole),
+    subject_kind: Option(subject_kind.SubjectKind),
+    status: Option(declared_representation_status.DeclaredRepresentationStatus),
+    evaluation_id: Option(id.EvaluationId),
+    review_id: Option(id.RegulatoryReviewId),
+    review_outcome: Option(event_row.DetailReviewOutcome),
+  )
+}
+
+pub const no_detail = Detail(None, None, None, None, None, None)
+
+/// One history entry of an agent's act on a context.
+pub fn event(
+  tx: Tx,
+  context_id: id.ComplianceContextId,
+  action: event_row.Action,
+  by: By,
+  at: Int,
+  detail: Detail,
+) -> Result(Nil, Fail(e)) {
+  use event_id <- result.try(id.next_context_event(tx))
+  use ord <- result.try(next_ord(
+    tx,
+    event_row.table,
+    "context_id",
+    id.compliance_context_sql(context_id),
+  ))
+  event_row.insert(
+    tx,
+    event_row.Row(
+      ..event_row.new(
+        id: event_id,
+        context_id:,
+        ord:,
+        at:,
+        by_kind: by.kind,
+        action:,
+      ),
+      by_id: by.id,
+      by_name: by.name,
+      by_role: by.role,
+      by_org_id: by.org_id,
+      detail_party_role: detail.party_role,
+      detail_subject_kind: detail.subject_kind,
+      detail_status: detail.status,
+      detail_evaluation_id: detail.evaluation_id,
+      detail_review_id: detail.review_id,
+      detail_review_outcome: detail.review_outcome,
+    ),
+  )
+}
+
+/// The agent moved the context: its revision and who moved it.
+pub fn bump(
+  tx: Tx,
+  context_id: id.ComplianceContextId,
+  user_id: id.OrgUserId,
+  name: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE compliance_contexts SET rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ?",
+    [
+      sqlight.int(at),
+      id.org_user_sql(user_id),
+      sqlight.text(name),
+      id.compliance_context_sql(context_id),
+    ],
+  )
+}
+
+/// The agent's own open contexts and closed ones, oldest first.
+pub fn for_agent(
+  read: Read,
+  agency: id.OrgId,
+  agent: id.OrgUserId,
+) -> Result(List(Context), Fail(e)) {
+  use ids <- result.try(store.query(
+    read,
+    "SELECT id FROM compliance_contexts WHERE agency_org_id = ? AND agent_user_id = ? ORDER BY rowid",
+    [id.org_sql(agency), id.org_user_sql(agent)],
+    decode.at([0], id.compliance_context_decoder()),
+  ))
+  list.try_map(ids, by_id(read, _)) |> result.map(option.values)
+}
+
+/// The agent's context created under `key`.
+pub fn by_create_key(
+  read: Read,
+  agency: id.OrgId,
+  agent: id.OrgUserId,
+  key: String,
+) -> Result(Option(Context), Fail(e)) {
+  use ids <- result.try(store.query(
+    read,
+    "SELECT id FROM compliance_contexts WHERE agency_org_id = ? AND agent_user_id = ? AND create_key = ?",
+    [id.org_sql(agency), id.org_user_sql(agent), sqlight.text(key)],
+    decode.at([0], id.compliance_context_decoder()),
+  ))
+  case ids {
+    [] -> Ok(None)
+    [cid, ..] -> by_id(read, cid)
+  }
+}
+
 /// A transaction's context, opened with it. Its history names the policy versions that applied.
 pub fn open(
   tx: Tx,
@@ -142,6 +251,33 @@ pub fn open(
   type_: ContextType,
   jurisdictions: List(String),
   transaction_id: id.TransactionId,
+  policy_versions: List(id.PolicyId),
+  by: By,
+  at: Int,
+) -> Result(id.ComplianceContextId, Fail(e)) {
+  open_context(
+    tx,
+    agency_org_id,
+    agent_user_id,
+    type_,
+    jurisdictions,
+    Some(transaction_id),
+    None,
+    policy_versions,
+    by,
+    at,
+  )
+}
+
+/// A context: a transaction's (`transaction_id`), or the agent's own, with the client key it was created under.
+pub fn open_context(
+  tx: Tx,
+  agency_org_id: id.OrgId,
+  agent_user_id: id.OrgUserId,
+  type_: ContextType,
+  jurisdictions: List(String),
+  transaction_id: Option(id.TransactionId),
+  create_key: Option(#(String, String)),
   policy_versions: List(id.PolicyId),
   by: By,
   at: Int,
@@ -160,8 +296,10 @@ pub fn open(
         opened_at: at,
         rev: 1,
       ),
-      origin: Some("transaction"),
-      transaction_id: Some(transaction_id),
+      origin: option.map(transaction_id, fn(_) { "transaction" }),
+      transaction_id:,
+      create_key: option.map(create_key, fn(k) { k.0 }),
+      create_fp: option.map(create_key, fn(k) { k.1 }),
       rev_at: Some(at),
     ),
   ))

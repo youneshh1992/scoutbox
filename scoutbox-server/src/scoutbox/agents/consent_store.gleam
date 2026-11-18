@@ -106,6 +106,18 @@ pub fn for_context(
   ])
 }
 
+/// The agent's consents in the agency, oldest first.
+pub fn for_agent(
+  read: Read,
+  agency: id.OrgId,
+  agent: id.OrgUserId,
+) -> Result(List(Consent), Fail(e)) {
+  where(read, "agency_org_id = ? AND agent_user_id = ? ORDER BY rowid", [
+    id.org_sql(agency),
+    id.org_user_sql(agent),
+  ])
+}
+
 /// The consents asked of a party, oldest first.
 pub fn for_subject(
   read: Read,

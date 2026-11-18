@@ -7,9 +7,12 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import scoutbox/agents/compliance_overview
 import scoutbox/agents/compliance_routes as compliance
+import scoutbox/agents/context_routes
 import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
+import scoutbox/agents/review_routes
 import scoutbox/agents/transaction_party_routes as party_lanes
 import scoutbox/agents/transaction_routes
 import scoutbox/agents/transaction_ts_routes
@@ -1324,6 +1327,27 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             transaction_ts_routes.get_one(ctx, reviewer, tid)
           })
+        ["compliance", "audit"] ->
+          only(req, Get, fn() { compliance.audit(ctx) })
+        ["compliance", "metrics"] ->
+          only(req, Get, fn() { compliance.metrics(ctx) })
+        ["compliance", "reviews", rid] ->
+          only(req, Get, fn() { review_routes.detail(ctx, rid) })
+        ["compliance", "reviews", rid, "start"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            review_routes.start(ctx, req, reviewer, rid)
+          })
+        ["compliance", "reviews", rid, "cancel"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            review_routes.cancel(ctx, req, reviewer, rid)
+          })
+        ["compliance", "reviews", rid, "supersede"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            review_routes.supersede(ctx, req, reviewer, rid)
+          })
         ["compliance", "reviews", rid, "resolve"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
@@ -1670,6 +1694,46 @@ fn agent_org(
         Post -> agent.save_profile(ctx, req, org)
         _ -> not_found()
       }
+    ["compliance", "overview"] ->
+      only(req, Get, fn() { compliance_overview.overview(ctx, org) })
+    ["compliance", "contexts"] ->
+      case req.method {
+        Get -> context_routes.list_contexts(ctx, org)
+        Post -> context_routes.create_context(ctx, req, org)
+        _ -> not_found()
+      }
+    ["compliance", "contexts", cid] ->
+      only(req, Get, fn() { context_routes.get_context(ctx, org, cid) })
+    ["compliance", "contexts", cid, "evaluate"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.evaluate(ctx, req, org, cid)
+      })
+    ["compliance", "contexts", cid, "parties"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.add_party(ctx, req, org, cid)
+      })
+    ["compliance", "contexts", cid, "representations"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.declare(ctx, req, org, cid)
+      })
+    ["compliance", "contexts", cid, "representations", rid, "withdraw"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.withdraw(ctx, req, org, cid, rid)
+      })
+    ["compliance", "contexts", cid, "close"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.close(ctx, req, org, cid)
+      })
+    ["compliance", "contexts", cid, "consents", "request"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        context_routes.request_consent(ctx, req, org, cid)
+      })
     ["compliance", "facets", facet, "recheck"] ->
       only(req, Post, fn() { agent.recheck_facet(ctx, req, org, facet) })
     ["profile", "facets", facet, "submit"] ->
