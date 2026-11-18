@@ -99,7 +99,9 @@ import scoutbox/scouting/board_routes
 import scoutbox/scouting/coaches
 import scoutbox/scouting/opportunities
 import scoutbox/scouting/passport_routes
+import scoutbox/scouting/shadow
 import scoutbox/scouting/squad_invites
+import scoutbox/scouting/tactical
 import scoutbox/scouting/vacancies
 import scoutbox/scouting/video
 import scoutbox/verification/applications
@@ -352,7 +354,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             _ -> not_found()
           }
         ["vacancies"] ->
-          only(req, Get, fn() { vacancies.list_for(ctx, req, org) })
+          case req.method {
+            Get -> vacancies.list_for(ctx, req, org)
+            Post -> vacancies.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["vacancies", vid, "close"] ->
+          only(req, Post, fn() { vacancies.close(ctx, org, vid) })
+        ["vacancies", vid, "candidates"] ->
+          only(req, Get, fn() { vacancies.candidates(ctx, req, org, vid) })
+        ["squad", "shadow"] ->
+          only(req, Post, fn() { shadow.add(ctx, req, org) })
+        ["squad-planner"] -> only(req, Get, fn() { shadow.planner(ctx, org) })
         ["cases", cid] ->
           only(req, Get, fn() { case_workspace.get(ctx, org, cid) })
         ["cases", cid, "assign"] ->
@@ -441,7 +454,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["audit", "export"] ->
           only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
-        ["tactical"] -> only(req, Post, fn() { tactical(org) })
+        ["tactical"] ->
+          case req.method {
+            Get -> tactical.get(ctx, org)
+            Post -> tactical.save_route(ctx, req, org)
+            _ -> not_found()
+          }
         ["staff", user_id, "remove"] ->
           only(req, Post, fn() {
             staff_routes.remove(ctx, org, id.org_user(user_id))
@@ -756,7 +774,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["webhooks"] -> only(req, Post, fn() { webhooks.create(ctx, req, org) })
         ["support"] -> only(req, Post, fn() { support.create(ctx, req, org) })
         ["squad"] ->
-          only(req, Post, fn() { grassroots_club.add_to_squad(ctx, req, org) })
+          case req.method {
+            Get -> grassroots_club.squad(ctx, org)
+            Post -> grassroots_club.add_to_squad(ctx, req, org)
+            _ -> not_found()
+          }
+        ["matchday"] ->
+          only(req, Post, fn() { grassroots_club.log_matchday(ctx, req, org) })
         ["open-trials"] ->
           only(req, Post, fn() {
             grassroots_club.post_open_trial(ctx, req, org)
@@ -2126,11 +2150,6 @@ fn sso(ctx: Ctx) -> Response {
 
 /// `POST /org/tactical`: a lead's tactical setup. Not ported yet: the setup itself (club setup, scouting), and
 /// `GET /org/tactical`. Only the lead gate is here.
-fn tactical(org: access.OrgAccess) -> Response {
-  use <- access.require_lead(org)
-  not_ported("Tactical setups are")
-}
-
 fn not_ported(subject: String) -> Response {
   contract.error_message(
     501,

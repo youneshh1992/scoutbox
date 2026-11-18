@@ -547,7 +547,7 @@ pub fn list_of(item: Check(a), max: Int) -> Check(List(a)) {
               Issue(
                 ..issue(
                   TooLong,
-                  "must have at most " <> int.to_string(max) <> " items",
+                  "must be at most " <> int.to_string(max) <> " items long",
                 ),
                 max: Some(max),
               ),
@@ -802,6 +802,11 @@ pub fn done(value: a) -> Shape(a) {
   })
 }
 
+/// The end of a shape that lets fields it did not name through (valibot's `looseObject`).
+pub fn loose(value: a) -> Shape(a) {
+  Shape(fn(_, _) { Ok(value) })
+}
+
 /// A nested object read with its own shape. Its refusals name the field inside it (`declarations.extra`).
 pub fn object(shape: Shape(a)) -> Check(a) {
   fn(v) {
@@ -845,7 +850,7 @@ pub fn items(item: Check(a), max: Int) -> Check(List(a)) {
               Issue(
                 ..issue(
                   TooLong,
-                  "must have at most " <> int.to_string(max) <> " items",
+                  "must be at most " <> int.to_string(max) <> " items long",
                 ),
                 max: Some(max),
               ),

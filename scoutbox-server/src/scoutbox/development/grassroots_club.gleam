@@ -1,7 +1,7 @@
 //// A grassroots club's own operations (domains/development/grassrootsClub.mjs): its squad, its open trial days
 //// and the friendlies board. Only a club on ScoutBox Grassroots has them.
 ////
-//// Not ported yet: everything but posting. The squad's release and its match days; listing, editing and deleting
+//// Not ported yet: the squad's release; the match days' list; listing, editing and deleting
 //// open days, their registrations and outcomes; the friendlies board's list and responses; the `openTrials` and
 //// `friendlies` live events.
 
@@ -13,8 +13,11 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/development/activity
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/orgs
 import scoutbox/identity/players
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -22,6 +25,8 @@ import scoutbox/platform/store.{type Read}
 import scoutbox/rows/friendlies as friendly_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/matchday_players as matchday_player_row
+import scoutbox/rows/matchdays as matchday_row
 import scoutbox/rows/open_trial_positions as position_row
 import scoutbox/rows/open_trials as trial_row
 import scoutbox/rows/org_squad_members as squad_row
@@ -29,6 +34,7 @@ import scoutbox/rows/orgs as org_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
+import scoutbox/vocab/audience
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -528,4 +534,169 @@ fn own_friendly_view(f: friendly_row.Row, org_name: String) -> Json {
     #("distanceKm", json.int(0)),
     #("responses", json.preprocessed_array([])),
   ])
+}
+
+/// `GET /org/squad`: the squad, its coverage by position group, its gaps and the positions to look for.
+pub fn squad(ctx: Ctx, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  case store.read(ctx.store, squad_view(_, a.org.id)) {
+    Ok(view) -> http.json(200, view)
+    Error(e) -> http.internal(e)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------- match days
+
+const fixture_max = 160
+
+const result_max = 20
+
+const matchday_players_max = 100
+
+type Matchday {
+  Matchday(
+    fixture: Option(String),
+    venue: Option(String),
+    date: Option(String),
+    result: Option(String),
+    player_ids: List(String),
+  )
+}
+
+/// `POST /org/matchday`: a fixture the club played. Each named player on its squad whom it may see is credited
+/// with a verified, coach-signed attendance; anyone else named is skipped, a shadowed player included.
+///
+/// Not ported yet: the live 'players' event.
+pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  let shape = {
+    use fixture <- input.field(
+      "fixture",
+      input.nullish(input.text(fixture_max)),
+    )
+    use venue <- input.field("venue", input.nullish(input.text(venue_max)))
+    use date <- input.field("date", input.nullish(input.day_or_blank()))
+    use result <- input.field("result", input.nullish(input.text(result_max)))
+    use player_ids <- input.field(
+      "playerIds",
+      input.nullish(input.items(input.id(), matchday_players_max)),
+    )
+    input.done(Matchday(
+      fixture:,
+      venue:,
+      date: option.flatten(date),
+      result:,
+      player_ids: option.unwrap(player_ids, []),
+    ))
+  }
+  use body <- http.body(req, shape, [])
+  case input.filled(body.fixture), body.date {
+    Some(fixture), Some(date) -> {
+      let now = clock.now_ms()
+      let venue = option.map(body.venue, string.trim)
+      let logged =
+        store.unit(ctx.store, fn(tx) {
+          let read = store.reading(tx)
+          use credited <- result.try(
+            list.unique(body.player_ids)
+            |> list.try_fold([], fn(credited, pid) {
+              let pid = id.player(pid)
+              use on <- result.try(on_squad(read, a.org.id, pid))
+              use seen <- result.try(case on {
+                True -> players.for_org(read, pid, a.org, now)
+                False -> Ok(None)
+              })
+              case seen {
+                Some(#(p, access)) if access.visible -> {
+                  use _ <- result.try(players.add_club_attendance(
+                    tx,
+                    p.row.id,
+                    fixture,
+                    case venue {
+                      Some("") | None -> option.unwrap(a.org.city, "")
+                      Some(v) -> v
+                    },
+                    date,
+                    option.map(orgs.location(a.org), fn(l) { #(l.lat, l.lng) }),
+                    a.org.name,
+                  ))
+                  use _ <- result.try(activity.record(tx, p.row.id, now))
+                  use _ <- result.map(notifications.notify(
+                    tx,
+                    to: audience.Player,
+                    id: id.player_to_string(p.row.id),
+                    type_: "matchday",
+                    text: "📍 "
+                      <> a.org.name
+                      <> " logged your appearance in \""
+                      <> fixture
+                      <> "\" — verified, coach-signed attendance on your profile.",
+                    ref_id: Some(id.player_to_string(p.row.id)),
+                    at: now,
+                  ))
+                  [p.row.id, ..credited]
+                }
+                _ -> Ok(credited)
+              }
+            })
+            |> result.map(list.reverse),
+          )
+          use matchday_id <- result.try(id.next_matchday(tx))
+          use _ <- result.try(matchday_row.insert(
+            tx,
+            matchday_row.Row(
+              id: matchday_id,
+              org_id: a.org.id,
+              fixture:,
+              venue: option.unwrap(venue, ""),
+              match_date: date,
+              result: case option.map(body.result, string.trim) {
+                Some("") -> None
+                r -> r
+              },
+              logged_by_user_id: a.user.id,
+              created_at: now,
+            ),
+          ))
+          use _ <- result.try(
+            list.index_map(credited, fn(pid, i) {
+              matchday_player_row.Row(matchday_id:, ord: i, player_id: pid)
+            })
+            |> list.try_each(matchday_player_row.insert(tx, _)),
+          )
+          use _ <- result.try(ledger.append(
+            tx,
+            ledger.Entry(
+              entry_type: ledger_row.MatchdayLogged,
+              player_id: None,
+              org_id: Some(a.org.id),
+              org_name: Some(a.org.name),
+              user_id: Some(a.user.id),
+              actor_name: Some(a.user.name),
+            ),
+            now,
+          ))
+          use count <- result.map(store.query(
+            store.reading(tx),
+            "SELECT COUNT(*) FROM matchdays WHERE org_id = ?",
+            [id.org_sql(a.org.id)],
+            decode.at([0], decode.int),
+          ))
+          #(list.length(credited), count)
+        })
+      case logged {
+        Ok(#(credited, [count])) ->
+          http.json(
+            201,
+            json.object([
+              #("credited", json.int(credited)),
+              #("matchdays", json.int(count)),
+            ]),
+          )
+        Ok(_) -> panic as "COUNT(*) gives one row"
+        Error(e) -> http.internal(e)
+      }
+    }
+    _, _ -> http.error(400, "FIXTURE_AND_DATE_REQUIRED")
+  }
 }

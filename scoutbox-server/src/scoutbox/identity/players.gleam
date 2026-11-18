@@ -1318,6 +1318,42 @@ pub fn add_trial_attendance(
   refreshed(tx, player_id)
 }
 
+/// A match day the club logged feeds the player's attendance record: verified, counter-signed by the club, at its
+/// ground when it has one.
+pub fn add_club_attendance(
+  tx: Tx,
+  player_id: id.PlayerId,
+  fixture: String,
+  venue: String,
+  date: String,
+  at_ground: Option(#(Float, Float)),
+  corroborated_by: String,
+) -> Result(Player, Fail(e)) {
+  use attendance_id <- result.try(id.next_attendance(tx))
+  let #(lat, lng) = case at_ground {
+    Some(#(lat, lng)) -> #(sqlight.float(lat), sqlight.float(lng))
+    None -> #(sqlight.null(), sqlight.null())
+  }
+  use _ <- result.try(
+    store.run(
+      tx,
+      "INSERT INTO player_attendance (id, player_id, position, fixture, venue, match_date, lat, lng, device_confirmed, verified, corroborated_by, trial_id) SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, ?, ?, NULL, 1, ?, NULL FROM player_attendance WHERE player_id = ?",
+      [
+        id.attendance_sql(attendance_id),
+        id.player_sql(player_id),
+        sqlight.text(fixture),
+        sqlight.text(venue),
+        sqlight.text(date),
+        lat,
+        lng,
+        sqlight.text(corroborated_by),
+        id.player_sql(player_id),
+      ],
+    ),
+  )
+  refreshed(tx, player_id)
+}
+
 /// Keeps the stored profile signal in step after a write the record's own acts did not make (a filed trial
 /// report).
 pub fn refresh_signal(

@@ -267,3 +267,39 @@ pub fn an_object_is_written_back_as_javascript_orders_it_test() {
   assert json.to_string(key_order.object_json(entries, order))
     == "{\"1\":\"x\",\"3\":true,\"b\":1.5,\"a\":[1,{\"z\":2,\"y\":null}]}"
 }
+
+pub fn a_loose_shape_lets_fields_it_does_not_name_through_test() {
+  let loose = {
+    use email <- input.field("email", input.nullish(input.boolean()))
+    input.loose(email)
+  }
+  assert input.parse(
+      loose,
+      body([#("email", dynamic.bool(True)), #("other", dynamic.int(1))]),
+      "body",
+      [],
+    )
+    == Ok(Some(True))
+  // The fields it names are still judged.
+  let assert Error(r) =
+    input.parse(loose, body([#("email", dynamic.int(1))]), "body", [])
+  assert r.field == "email"
+}
+
+pub fn a_list_over_its_limit_is_refused_as_valibot_words_it_test() {
+  let ids = {
+    use ids <- input.field("ids", input.nullish(input.items(input.id(), 1)))
+    input.done(ids)
+  }
+  assert refusal_text(
+      input.parse(
+        ids,
+        body([
+          #("ids", dynamic.list([dynamic.string("a"), dynamic.string("b")])),
+        ]),
+        "body",
+        [],
+      ),
+    )
+    == "{\"error\":\"FIELD_INVALID\",\"field\":\"ids\",\"problem\":\"too_long\",\"message\":\"ids must be at most 1 items long.\",\"max\":1}"
+}

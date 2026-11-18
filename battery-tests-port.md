@@ -193,7 +193,10 @@ are for surprising facts or points that later work depends on, not implementatio
    queries, template versions, published feedback, video segments and playlists are in. The `feedback` live event
    reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
    as a drawing (docs/known-issues.md). The case workspace is whole (reading one, assigning, completing tasks,
-   approvals' answers, links), so the battery now passes through its recruitment section and stops at tactical fit.
+   approvals' answers, links), and so is tactical fit: the setup, vacancies and their candidates, the shadow
+   squad, the squad planner, the grassroots squad and match days. The battery now stops at its opportunities section
+   (applying). A save refused after the TypeScript server minted a new role's id still burns that id there, so id
+   numbers drift between the servers; no battery reads them.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.

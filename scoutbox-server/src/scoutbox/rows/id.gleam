@@ -1803,6 +1803,38 @@ pub fn next_mail(tx: Tx) -> Result(MailId, Fail(e)) {
   ids.next(tx, "mail") |> result.map(MailId)
 }
 
+/// An id of `matchdays`.
+pub opaque type MatchdayId {
+  MatchdayId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn matchday(text: String) -> MatchdayId {
+  MatchdayId(text)
+}
+
+pub fn matchday_to_string(id: MatchdayId) -> String {
+  let MatchdayId(text) = id
+  text
+}
+
+pub fn matchday_sql(id: MatchdayId) -> sqlight.Value {
+  sqlight.text(matchday_to_string(id))
+}
+
+pub fn matchday_json(id: MatchdayId) -> Json {
+  json.string(matchday_to_string(id))
+}
+
+pub fn matchday_decoder() -> decode.Decoder(MatchdayId) {
+  decode.map(decode.string, MatchdayId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_matchday(tx: Tx) -> Result(MatchdayId, Fail(e)) {
+  ids.next(tx, "md") |> result.map(MatchdayId)
+}
+
 /// An id of `player_media`.
 pub opaque type MediaId {
   MediaId(String)
@@ -2976,6 +3008,38 @@ pub fn next_reviewer_event(tx: Tx) -> Result(ReviewerEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(ReviewerEventId)
 }
 
+/// An id of `org_tactical_roles`.
+pub opaque type RoleId {
+  RoleId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn role(text: String) -> RoleId {
+  RoleId(text)
+}
+
+pub fn role_to_string(id: RoleId) -> String {
+  let RoleId(text) = id
+  text
+}
+
+pub fn role_sql(id: RoleId) -> sqlight.Value {
+  sqlight.text(role_to_string(id))
+}
+
+pub fn role_json(id: RoleId) -> Json {
+  json.string(role_to_string(id))
+}
+
+pub fn role_decoder() -> decode.Decoder(RoleId) {
+  decode.map(decode.string, RoleId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_role(tx: Tx) -> Result(RoleId, Fail(e)) {
+  ids.next(tx, "role") |> result.map(RoleId)
+}
+
 /// An id of `room_comments`.
 pub opaque type RoomCommentId {
   RoomCommentId(String)
@@ -3296,6 +3360,38 @@ pub fn segment_decoder() -> decode.Decoder(SegmentId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_segment(tx: Tx) -> Result(SegmentId, Fail(e)) {
   ids.next(tx, "seg") |> result.map(SegmentId)
+}
+
+/// An id of `org_shadow_players`.
+pub opaque type ShadowEntryId {
+  ShadowEntryId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn shadow_entry(text: String) -> ShadowEntryId {
+  ShadowEntryId(text)
+}
+
+pub fn shadow_entry_to_string(id: ShadowEntryId) -> String {
+  let ShadowEntryId(text) = id
+  text
+}
+
+pub fn shadow_entry_sql(id: ShadowEntryId) -> sqlight.Value {
+  sqlight.text(shadow_entry_to_string(id))
+}
+
+pub fn shadow_entry_json(id: ShadowEntryId) -> Json {
+  json.string(shadow_entry_to_string(id))
+}
+
+pub fn shadow_entry_decoder() -> decode.Decoder(ShadowEntryId) {
+  decode.map(decode.string, ShadowEntryId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_shadow_entry(tx: Tx) -> Result(ShadowEntryId, Fail(e)) {
+  ids.next(tx, "shd") |> result.map(ShadowEntryId)
 }
 
 /// An id of `signings`.

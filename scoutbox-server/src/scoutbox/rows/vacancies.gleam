@@ -67,7 +67,7 @@ pub type Row {
   Row(
     id: id.VacancyId,
     org_id: id.OrgId,
-    role_id: Option(String),
+    role_id: Option(id.RoleId),
     role_name: String,
     window_name: Option(String),
     notes: Option(String),
@@ -105,7 +105,7 @@ pub fn new(
 pub fn decoder() -> decode.Decoder(Row) {
   use id <- decode.field(0, id.vacancy_decoder())
   use org_id <- decode.field(1, id.org_decoder())
-  use role_id <- decode.field(2, decode.optional(decode.string))
+  use role_id <- decode.field(2, decode.optional(id.role_decoder()))
   use role_name <- decode.field(3, decode.string)
   use window_name <- decode.field(4, decode.optional(decode.string))
   use notes <- decode.field(5, decode.optional(decode.string))
@@ -135,7 +135,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
   [
     id.vacancy_sql(row.id),
     id.org_sql(row.org_id),
-    sqlight.nullable(sqlight.text, row.role_id),
+    sqlight.nullable(id.role_sql, row.role_id),
     sqlight.text(row.role_name),
     sqlight.nullable(sqlight.text, row.window_name),
     sqlight.nullable(sqlight.text, row.notes),
