@@ -3,7 +3,8 @@
 // invent no review or reviewer and change no agent row, (3) a real boot over
 // typed agent rows, (4) a full round trip across a restart, (5) corruption on
 // disk is contained and named. No migration bootstraps review items: a review is
-// requested by the route that needs one, which section 3 exercises.
+// requested by the route that needs one, which section 3 exercises. The pure engine's
+// view of the corrupt records is the rules suite's (scripts/rules/agents/compliancePersistence.mjs).
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -12,16 +13,14 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_POLICIES_TABLES } from '../../repositories/compliancePolicies.mjs';
-import { COMPLIANCE_RECORDS_MIGRATION, COMPLIANCE_RECORDS_TABLES } from '../../repositories/complianceRecords.mjs';
-import { SEEDED_POLICY_VERSIONS } from '../../domains/agents/compliance/policyVersions.mjs';
-import { consentSufficiency, PERMITTED_WITH_CONSENT } from '../../domains/agents/compliance/conflict.mjs';
-import { applicablePolicySet } from '../../domains/agents/compliance/policy.mjs';
-import { newFacets } from '../../domains/agents/core/shared.mjs';
+import { openFixture, writeFixture, SCHEMA_VERSION, TABLE_MIGRATIONS } from '../support/sqlFixture.mjs';
+import { readRows, rows } from '../support/sqlRows.mjs';
+import conflictSpec from '../support/spec/agents/compliance/conflict.json' with { type: 'json' };
+import policySpec from '../support/spec/agents/compliance/policyVersions.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
+
+const { PERMITTED_WITH_CONSENT } = conflictSpec;
+const { SEEDED_POLICY_VERSIONS, RULE_PARAMS } = policySpec;
 
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
@@ -112,7 +111,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -122,131 +121,169 @@ const T0 = 1_700_000_000_000;
 // Reviewers and policy versions come from migration 0027 (which inserts the seeded versions); contexts, reviews
 // and consents from 0028.
 const TABLE_STORES = [
-  'tsReviewers',
-  'jurisdictionPolicies',
-  'regulatoryReviews',
-  'regulatoryConsents',
-  'complianceContexts',
+  'ts_reviewers',
+  'jurisdiction_policies',
+  'regulatory_reviews',
+  'regulatory_consents',
+  'compliance_contexts',
 ];
-const STEPS = [COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_RECORDS_MIGRATION];
-const SCHEMA_VERSION = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-);
+const STEPS = ['0027_compliance_policies', '0028_compliance_records'];
+/** The compliance tables: every table of the reviewer, policy, context, review and consent families. */
+const complianceTables = (tables) =>
+  Object.keys(tables).filter((t) => /^(ts_reviewer|jurisdiction_polic|compliance_|regulatory_)/.test(t));
 /** The table migrations recorded in a data directory's file, with when each ran. */
-const appliedMigrations = (dir) => {
-  const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+const appliedMigrations = (dir) => rows(dir, 'data_migrations').map((r) => ({ id: r.id, at: r.applied_at }));
+/** Every table's rows as stored: what a stopped server left on disk. */
+function stored(dir) {
+  const R = readRows(dir);
   try {
-    return st
-      .prepare('SELECT id, applied_at FROM data_migrations ORDER BY id')
-      .all()
-      .map((r) => ({ id: r.id, at: r.applied_at }));
+    return R.all();
   } finally {
-    st.close();
+    R.close();
   }
-};
+}
+/** The stored rows of `table` in `tables` whose columns match `where`, in `ord` order when they have one. */
+const of = (tables, table, where) =>
+  tables[table]
+    .filter((r) => Object.entries(where).every(([c, v]) => r[c] === v))
+    .sort((a, b) => (a.set_no ?? 0) - (b.set_no ?? 0) || (a.ord ?? 0) - (b.ord ?? 0));
+/**
+ * A policy version's rules rebuilt from its stored rule rows, in the shape the policy snapshot encodes them. Each
+ * parameter is read by its type in the snapshot's RULE_PARAMS: a flag, a count, role sets, an age map, a text list,
+ * or else text (an enum, a date, a month-day).
+ */
+const storedRules = (tables, policyId) =>
+  Object.fromEntries(
+    of(tables, 'jurisdiction_policy_rules', { policy_id: policyId }).map((r) => {
+      const at = { policy_id: policyId, rule_id: r.rule_id };
+      const params = Object.fromEntries(
+        of(tables, 'jurisdiction_policy_rule_params', at).map((p) => {
+          const items = of(tables, 'jurisdiction_policy_rule_param_items', { ...at, name: p.name });
+          const type = RULE_PARAMS[p.name];
+          const value =
+            type === 'flag'
+              ? p.flag_value === 1
+              : type === 'count'
+                ? p.count_value
+                : type === 'roleSets'
+                  ? Object.values(Object.groupBy(items, (i) => i.set_no)).map((set) => set.map((i) => i.text_value))
+                  : type === 'ageMap'
+                    ? Object.fromEntries(items.map((i) => [i.member, i.count_value]))
+                    : type === 'textList'
+                      ? items.map((i) => i.text_value)
+                      : p.text_value;
+          return [p.name, value];
+        }),
+      );
+      const overrides = of(tables, 'jurisdiction_policy_rule_overrides', at).map((o) => ({
+        jurisdiction: o.jurisdiction,
+        scope: o.scope,
+        overrideRuleId: o.override_rule_id,
+      }));
+      return [
+        r.rule_id,
+        {
+          ruleStatus: r.rule_status,
+          textStatus: r.text_status,
+          sourceRef: of(tables, 'jurisdiction_policy_rule_sources', at).map((s) => ({
+            source: s.source,
+            version: s.version,
+            effectiveDate: s.effective_date,
+            retrievedDate: s.retrieved_date,
+          })),
+          params,
+          note: r.note,
+          ...(overrides.length ? { overrides } : {}),
+          ...(r.effective_from_date ? { effectiveFrom: r.effective_from_date } : {}),
+        },
+      ];
+    }),
+  );
+/** JSON with every object's keys sorted: rows have no key order, so neither does a record rebuilt from them. */
+const canonical = (v) =>
+  JSON.stringify(v, (_, x) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, x[k]]),
+        )
+      : x,
+  );
 
 // ------------------------------------------------------------- fixtures
+// Rows in the stored shape, as the repositories wrote them in a probe run of the original fixture.
 
-/** The writers' whole literals for the agent core rows (the repository refuses a partial record). */
-const affiliation = (id, userId, tiers) => ({
+const player = (id, name, birthDate) => ({
   id,
-  agencyOrgId: 'org-ag',
-  userId,
-  tiers,
-  startedAt: T0,
-  endedAt: null,
-  endedReason: null,
-  createdAt: T0,
-  rev: 1,
-  revAt: T0,
-  revBy: null,
-  keys: {},
-  history: [],
+  name,
+  birth_date: birthDate,
+  country: 'GB',
+  city: 'London',
+  availability: 'not_seeking',
+  contract_status: 'unknown',
+  level: 'amateur',
+  lat: 51.5,
+  lng: -0.1,
+  medical_shared: 0,
+  medical_condition_status: 'unknown',
+  profile_signal: 30,
 });
-const profile = (id, userId, displayName, jurisdictions, facets) => ({
+const user = (id, name, role, createdAt) => ({
   id,
-  userId,
-  agencyOrgId: 'org-ag',
-  displayName,
-  declared: { fifaLicenceNumber: null, jurisdictions },
-  facets: { ...newFacets(), ...facets },
-  createdAt: T0,
-  updatedAt: T0,
-  rev: 1,
-  revAt: T0,
-  revBy: null,
-  history: [],
+  org_id: 'org-ag',
+  name,
+  name_key: name.toLowerCase(),
+  role,
+  created_at: createdAt,
 });
 const agreement = (id, clientId) => ({
   id,
-  agentUserId: 'usr-agent',
-  agencyOrgId: 'org-ag',
-  clientKind: 'player',
-  clientId,
+  agent_user_id: 'usr-agent',
+  agency_org_id: 'org-ag',
+  client_kind: 'player',
+  client_id: clientId,
   jurisdiction: 'ENG',
-  exclusive: false,
-  termMonths: 12,
-  startAt: T0 + 10,
-  endAt: Date.now() + 1e10,
+  exclusive: 0,
+  term_months: 12,
+  start_at: T0 + 10,
+  end_at: Date.now() + 1e10,
   status: 'active',
-  proposedAt: T0,
-  confirmedAt: T0 + 10,
-  confirmedBy: { kind: 'player', id: clientId },
-  declinedAt: null,
-  terminatedAt: null,
-  terminatedBy: null,
-  terminationReasonCode: null,
-  disputedAt: null,
-  disputeReason: null,
-  shareWithAgencyStaff: false,
-  scope: ['employment'],
-  policyVersions: [],
-  keys: {},
-  createdAt: T0,
+  proposed_at: T0,
+  confirmed_at: T0 + 10,
+  confirmed_by_player_id: clientId,
+  share_with_agency_staff: 0,
+  disclosure_club_presence: 0,
+  disclosure_contact_routing: 0,
+  disclosure_trial_visibility: 0,
+  created_at: T0,
   rev: 2,
-  revAt: T0 + 10,
-  revBy: null,
-  history: [],
+  rev_at: T0 + 10,
+});
+const profile = (id, userId, displayName) => ({
+  id,
+  user_id: userId,
+  agency_org_id: 'org-ag',
+  display_name: displayName,
+  created_at: T0,
+  updated_at: T0,
+  rev: 1,
+  rev_at: T0,
+});
+const affiliation = (id, userId) => ({
+  id,
+  agency_org_id: 'org-ag',
+  user_id: userId,
+  started_at: T0,
+  created_at: T0,
+  rev: 1,
+  rev_at: T0,
 });
 
 /** One agency with a licensed agent (licence VERIFIED) and a licensed administrator, two active agreements. */
 function agencySnapshot() {
   return {
-    players: [
-      {
-        id: 'pl-a',
-        name: 'Adult A',
-        dob: '1999-01-01',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-      {
-        id: 'pl-b',
-        name: 'Adult B',
-        dob: '1998-01-01',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
+    players: [player('pl-a', 'Adult A', '1999-01-01'), player('pl-b', 'Adult B', '1998-01-01')],
     orgs: [
       {
         id: 'org-club',
@@ -254,57 +291,61 @@ function agencySnapshot() {
         type: 'club',
         level: 'pro',
         plan: 'Pro',
-        verified: true,
-        safeguardingContractSigned: true,
-        location: { lat: 51.5, lng: -0.1 },
+        verified: 1,
+        safeguarding_contract_signed: 1,
+        lat: 51.5,
+        lng: -0.1,
+        created_at: T0,
       },
-      {
-        id: 'org-ag',
-        name: 'Agency',
-        type: 'agency',
-        level: 'agency',
-        plan: 'Agency',
-        verified: false,
-        location: null,
-      },
+      { id: 'org-ag', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: 0, created_at: T0 },
     ],
-    guardians: [],
-    sessions: [],
-    ledger: [],
-    notifications: [],
-    blocks: [],
-    users: [
-      { id: 'usr-lead', orgId: 'org-ag', name: 'Lead Person', role: 'Managing Director', createdAt: T0 },
-      { id: 'usr-agent', orgId: 'org-ag', name: 'Agent Person', role: 'Agent', createdAt: T0 + 1 },
+    org_users: [
+      user('usr-lead', 'Lead Person', 'Managing Director', T0),
+      user('usr-agent', 'Agent Person', 'Agent', T0 + 1),
     ],
     // The Agent core rows, as typed tables write them.
-    agencyAffiliations: [
-      affiliation('aff-lead', 'usr-lead', ['agency_admin', 'licensed_agent']),
-      affiliation('aff-agent', 'usr-agent', ['licensed_agent']),
+    agency_affiliations: [affiliation('aff-lead', 'usr-lead'), affiliation('aff-agent', 'usr-agent')],
+    agency_affiliation_tiers: [
+      { affiliation_id: 'aff-lead', ord: 0, tier: 'agency_admin' },
+      { affiliation_id: 'aff-lead', ord: 1, tier: 'licensed_agent' },
+      { affiliation_id: 'aff-agent', ord: 0, tier: 'licensed_agent' },
     ],
-    agentProfiles: [
-      profile('agp-1', 'usr-agent', 'Agent Person', ['ENG', 'INT'], {
-        fifa_licence: {
-          ...newFacets().fifa_licence,
-          state: 'VERIFIED',
-          reference: 'TEST-VERIFIED-1',
-          provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: T0 },
-          submittedAt: T0,
-          verifiedAt: T0,
-          recheckAt: Date.now() + 20 * 86_400_000,
-          note: 'x',
-        },
-      }),
-      profile('agp-2', 'usr-lead', 'Lead Person', ['INT'], {}),
+    agent_profiles: [profile('agp-1', 'usr-agent', 'Agent Person'), profile('agp-2', 'usr-lead', 'Lead Person')],
+    agent_profile_jurisdictions: [
+      { profile_id: 'agp-1', ord: 0, jurisdiction: 'ENG' },
+      { profile_id: 'agp-1', ord: 1, jurisdiction: 'INT' },
+      { profile_id: 'agp-2', ord: 0, jurisdiction: 'INT' },
     ],
-    representationAgreements: [agreement('rep-disputed', 'pl-a'), agreement('rep-active', 'pl-b')],
+    agent_profile_facets: [
+      {
+        profile_id: 'agp-1',
+        facet: 'fifa_licence',
+        member_association: 'INT',
+        state: 'VERIFIED',
+        reference: 'TEST-VERIFIED-1',
+        provenance_provider: 'local-synthetic-test-provider',
+        provenance_kind: 'synthetic',
+        provenance_at: T0,
+        submitted_at: T0,
+        verified_at: T0,
+        recheck_at: Date.now() + 20 * 86_400_000,
+        note: 'x',
+      },
+      { profile_id: 'agp-2', facet: 'fifa_licence', member_association: 'INT', state: 'UNVERIFIED' },
+    ],
+    representation_agreements: [agreement('rep-disputed', 'pl-a'), agreement('rep-active', 'pl-b')],
+    agreement_scopes: [
+      { agreement_id: 'rep-disputed', ord: 0, scope: 'employment' },
+      { agreement_id: 'rep-active', ord: 0, scope: 'employment' },
+    ],
   };
 }
+const fixture = (dir, tables) => writeFixture(dir, { rows: tables });
 
 // ======================================================= 1 — the tables
 section('1 — the compliance tables: 0027 and 0028, each recorded once; the seeded policies are rows of 0027');
 {
-  const ids = DATA_MIGRATIONS.map((m) => m.id);
+  const ids = TABLE_MIGRATIONS;
   ok(
     STEPS.every((id) => ids.filter((x) => x === id).length === 1) && SCHEMA_VERSION >= 28,
     `${STEPS.join(' and ')} are registered once each; the current schema is ${SCHEMA_VERSION}`,
@@ -313,12 +354,13 @@ section('1 — the compliance tables: 0027 and 0028, each recorded once; the see
     new Set(ids.map((id) => id.slice(0, 4))).size === ids.length,
     'every schema version is reached by exactly one migration — no number is used twice',
   );
-  for (const s of TABLE_STORES) ok(TABLE_BACKED.includes(s), `${s} is a table, not a collection`);
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p1-'));
-  const tables = readRecords(freshDir);
+  const tables = stored(freshDir);
+  for (const t of TABLE_STORES) ok(t in tables, `${t} is a table, not a collection`);
+  const policies = tables.jurisdiction_policies;
   ok(
-    tables.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length &&
-      tables.jurisdictionPolicies
+    policies.length === SEEDED_POLICY_VERSIONS.length &&
+      policies
         .map((p) => p.id)
         .sort()
         .join() ===
@@ -328,37 +370,39 @@ section('1 — the compliance tables: 0027 and 0028, each recorded once; the see
     `the ${SEEDED_POLICY_VERSIONS.length} policy versions are seeded (FIFA baseline, England 2026/27, USA)`,
   );
   ok(
-    tables.jurisdictionPolicies.every(
-      (p) =>
+    policies.every((p) => {
+      const first = of(tables, 'jurisdiction_policy_history', { policy_id: p.id })[0];
+      return (
         p.status === 'published' &&
-        p.proposedBy === null &&
-        p.approvedBy === null &&
-        p.history[0].by.name === 'migration 0027_compliance_policies' &&
-        p.history[0].detail.seeded === true,
-    ),
+        p.proposed_by_id === null &&
+        p.approved_by_id === null &&
+        first?.by_name === 'migration 0027_compliance_policies' &&
+        first.detail_seeded === 1
+      );
+    }),
     'each seeded version is published, attributed to the migration, with no reviewer invented',
   );
   ok(
-    tables.jurisdictionPolicies.every(
-      (p) => stableJson(p.rules) === stableJson(SEEDED_POLICY_VERSIONS.find((v) => v.id === p.id).rules),
-    ),
+    policies.every((p) => {
+      const rules = storedRules(tables, p.id);
+      const encoded = SEEDED_POLICY_VERSIONS.find((v) => v.id === p.id).rules;
+      return canonical(rules) === canonical(encoded) && Object.keys(rules).join() === Object.keys(encoded).join();
+    }),
     "each seeded version's rules (statuses, sources, parameters, overrides) read back exactly as encoded",
   );
   neg(
-    tables.tsReviewers.length === 0 &&
-      tables.regulatoryReviews.length === 0 &&
-      tables.regulatoryConsents.length === 0 &&
-      tables.complianceContexts.length === 0,
+    tables.ts_reviewers.length === 0 &&
+      tables.regulatory_reviews.length === 0 &&
+      tables.regulatory_consents.length === 0 &&
+      tables.compliance_contexts.length === 0,
     'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default',
   );
   neg(
-    ![...COMPLIANCE_POLICIES_TABLES, ...COMPLIANCE_RECORDS_TABLES].some((t) =>
-      /offer|negotiation|transaction/i.test(t),
-    ),
+    !complianceTables(tables).some((t) => /offer|negotiation|transaction/i.test(t)),
     'the compliance migrations create no offer, negotiation or transaction table (out of scope for compliance)',
   );
   const recordsBefore = appliedMigrations(freshDir);
-  const again = readRecords(freshDir);
+  const again = stored(freshDir);
   ok(
     stableJson(again) === stableJson(tables) &&
       stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore) &&
@@ -372,36 +416,34 @@ section('2 — a database with agent rows: the compliance migrations invent noth
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p2-'));
   const db = agencySnapshot();
-  // What a migration could change: the facts of each agent row (the table reads its own key order back).
+  // What a migration could change: the facts of each agent row.
+  const sorted = (xs, key) => xs.map(key).sort().join('|');
   const agentFacts = (d) =>
     stableJson([
-      d.agentProfiles.map((p) => [
-        p.id,
-        p.userId,
-        p.rev,
-        Object.entries(p.facets).map(([k, f]) => [k, f.state ?? null, f.reference ?? null]),
-      ]),
-      d.agencyAffiliations.map((a) => [a.id, a.userId, a.tiers, a.rev, a.endedAt]),
-      d.representationAgreements.map((r) => [r.id, r.clientId, r.status, r.rev, r.disputedAt]),
+      sorted(d.agent_profiles, (p) => [p.id, p.user_id, p.rev].join()),
+      sorted(d.agent_profile_facets, (f) => [f.profile_id, f.facet, f.state, f.reference ?? null].join()),
+      sorted(d.agency_affiliations, (a) => [a.id, a.user_id, a.rev, a.ended_at ?? null].join()),
+      sorted(d.agency_affiliation_tiers, (t) => [t.affiliation_id, t.ord, t.tier].join()),
+      sorted(d.representation_agreements, (r) => [r.id, r.client_id, r.status, r.rev, r.disputed_at ?? null].join()),
     ]);
   const agentBefore = agentFacts(db);
-  writeFixture(dir, db);
-  const back = readRecords(dir);
+  fixture(dir, db);
+  const back = stored(dir);
   neg(agentFacts(back) === agentBefore, 'every agent row reads back with its facets, tiers, status and rev unchanged');
   neg(
-    back.users.map((u) => `${u.id}:${u.name}:${u.role}`).join() ===
-      db.users.map((u) => `${u.id}:${u.name}:${u.role}`).join(),
+    sorted(back.org_users, (u) => `${u.id}:${u.name}:${u.role}`) ===
+      sorted(db.org_users, (u) => `${u.id}:${u.name}:${u.role}`),
     'no user row was touched',
   );
   neg(
-    back.regulatoryReviews.length === 0,
+    back.regulatory_reviews.length === 0,
     'no review item is requested: a review is requested by the route that needs one',
   );
   neg(
-    back.tsReviewers.length === 0,
+    back.ts_reviewers.length === 0,
     'NO reviewer identity was invented by a migration (G-C0: production reviewers come from the operator bootstrap)',
   );
-  ok(back.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'the seeded policy versions are there, once');
+  ok(back.jurisdiction_policies.length === SEEDED_POLICY_VERSIONS.length, 'the seeded policy versions are there, once');
 }
 
 // ======================================================= 3 — boot over it
@@ -409,7 +451,7 @@ section('3 — a real boot over that database');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p3-'));
   const db = agencySnapshot();
-  writeFixture(dir, db);
+  fixture(dir, db);
   const s = await bootOn(dir, PORT);
   ok(s.up, 'the server boots over a database carrying agent rows');
   if (s.up) {
@@ -541,8 +583,9 @@ section('3 — a real boot over that database');
     );
     const after = await s.stop();
     ok(
-      after.representationAgreements.find((x) => x.id === 'rep-disputed').terminationReasonCode === 'dispute_upheld' &&
-        after.regulatoryReviews.find((r) => r.id === disp?.id)?.decision.reviewerId === 'tsr-dev-admin',
+      after.representation_agreements.find((x) => x.id === 'rep-disputed').termination_reason_code ===
+        'dispute_upheld' &&
+        after.regulatory_reviews.find((r) => r.id === disp?.id)?.decision_reviewer_id === 'tsr-dev-admin',
       'the decision is on disk, attributed',
     );
   }
@@ -703,80 +746,77 @@ section('4 — clean boot → context → review → consent → revocation → 
   ok(
     snap &&
       Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION &&
-      snap.complianceContexts.length === 1 &&
-      snap.regulatoryReviews.length === 1 &&
-      snap.tsReviewers.length === 3,
+      snap.compliance_contexts.length === 1 &&
+      snap.regulatory_reviews.length === 1 &&
+      snap.ts_reviewers.length === 3,
     `the file holds one context, one review, the three dev reviewers, at schema ${SCHEMA_VERSION}`,
   );
-  const ctxRow = snap.complianceContexts[0];
-  if (
-    !(
-      ctxRow.keys?.create?.key === 'rt-ctx' &&
-      ctxRow.representations.length === 2 &&
-      ctxRow.evaluations?.length >= 4 &&
-      ctxRow.rev >= 4
-    )
-  )
+  const ctxRow = snap.compliance_contexts[0];
+  const reps = of(snap, 'compliance_context_representations', { context_id: ctxRow.id });
+  const evaluations = of(snap, 'compliance_evaluations', { context_id: ctxRow.id });
+  if (!(ctxRow.create_key === 'rt-ctx' && reps.length === 2 && evaluations.length >= 4 && ctxRow.rev >= 4))
     console.error(
       '   ctx row',
       JSON.stringify({
-        keys: ctxRow.keys,
-        reps: ctxRow.representations.map((r) => [r.partyRole, r.status, r.keys]),
-        evaluations: ctxRow.evaluations?.length,
+        key: ctxRow.create_key,
+        reps: reps.map((r) => [r.party_role, r.status, r.declare_key]),
+        evaluations: evaluations.length,
         rev: ctxRow.rev,
       }),
     );
   ok(
-    ctxRow.keys.create.key === 'rt-ctx' &&
-      ctxRow.representations.length === 2 &&
-      ctxRow.representations[0].keys.declare.key === 'rt-rep-1' &&
-      ctxRow.representations[1].keys.declare.key === 'rt-rep-2' &&
-      ctxRow.evaluations.length >= 4 &&
+    ctxRow.create_key === 'rt-ctx' &&
+      reps.length === 2 &&
+      reps[0].declare_key === 'rt-rep-1' &&
+      reps[1].declare_key === 'rt-rep-2' &&
+      evaluations.length >= 4 &&
       ctxRow.rev >= 4,
     'keys, both representations, the evaluation history and the rev are on disk',
   );
   neg(
-    ctxRow.evaluations.every(
-      (e) => typeof e.inputHash === 'string' && Array.isArray(e.policyVersions) && e.policyVersions.length === 2,
+    evaluations.every(
+      (e) =>
+        typeof e.input_hash === 'string' &&
+        of(snap, 'compliance_evaluation_policy_versions', { evaluation_id: e.id }).length === 2,
     ),
     'every stored evaluation names its input hash and its two policy versions',
   );
-  const ledger = snap.regulatoryConsents;
-  const granted = ledger.find((k) => k.id === CONSENT);
-  const revocation = ledger.find((k) => k.kind === 'revocation' && k.of === CONSENT);
+  const granted = snap.regulatory_consents.find((k) => k.id === CONSENT);
+  const revocation = snap.regulatory_consent_revocations.find((k) => k.consent_id === CONSENT);
   neg(
-    ledger.length === 2 &&
+    snap.regulatory_consents.length === 1 &&
+      snap.regulatory_consent_revocations.length === 1 &&
       granted.status === 'granted' &&
-      granted.revokedAt === undefined &&
+      !Object.keys(granted).some((c) => c.startsWith('revoked')) &&
       revocation &&
-      revocation.at >= granted.grantedAt &&
-      granted.keys.request.key === 'rt-cons' &&
-      granted.keys.grant.key === 'rt-grant' &&
-      granted.keys.revoke.key === 'rt-revoke' &&
-      revocation.by?.kind === 'player',
+      revocation.revoked_at >= granted.granted_at &&
+      granted.request_key === 'rt-cons' &&
+      granted.grant_key === 'rt-grant' &&
+      granted.revoke_key === 'rt-revoke' &&
+      revocation.by_kind === 'player',
     'the ledger is append-only on disk: the granted row is untouched (its status word stays "granted"; the revocation is derived), the revocation is its own attributed row, every key is stored',
   );
-  const review = snap.regulatoryReviews[0];
+  const review = snap.regulatory_reviews[0];
   ok(
     review.status === 'APPROVED' &&
-      review.decision.reviewerId === 'tsr-dev-reviewer' &&
-      review.decision.evidenceRefs.length === 1 &&
-      review.keys.resolve.key === 'rt-resolve' &&
-      review.startedBy.id === 'tsr-dev-reviewer',
+      review.decision_reviewer_id === 'tsr-dev-reviewer' &&
+      of(snap, 'regulatory_review_evidence_refs', { review_id: review.id }).length === 1 &&
+      review.resolve_key === 'rt-resolve' &&
+      review.started_by_id === 'tsr-dev-reviewer',
     'the review decision, its evidence, its key and its attribution are on disk',
   );
   neg(
-    snap.tsReviewers.every(
-      (r) => typeof r.secretHash === 'string' && r.secret === undefined && r.password === undefined,
+    snap.ts_reviewers.every(
+      (r) => typeof r.secret_hash === 'string' && !('secret' in r) && !Object.keys(r).some((c) => /password/.test(c)),
     ),
     'reviewer rows hold a hash and never a plaintext secret',
   );
   ok(
-    snap.sessions.some((x) => x.kind === 'ts_reviewer' && x.refId === 'tsr-dev-reviewer'),
+    snap.sessions.some((x) => x.kind === 'ts_reviewer' && x.ref_id === 'tsr-dev-reviewer'),
     'the reviewer session is on disk',
   );
   neg(
-    !('transactionRoomId' in ctxRow) && !('offer' in ctxRow) && !('fee' in ctxRow),
+    !Object.keys(ctxRow).some((c) => /room|offer|fee/.test(c)),
     'the context row carries no room, offer or fee field',
   );
   s = await bootOn(dir, await freePort());
@@ -891,7 +931,7 @@ section('4 — clean boot → context → review → consent → revocation → 
   const snap2 = await s.stop();
   ok(
     STEPS.every((id) => appliedMigrations(dir).filter((r) => r.id === id).length === 1) &&
-      snap2.tsReviewers.length === 3,
+      snap2.ts_reviewers.length === 3,
     'one record per compliance migration, still; the dev reviewers were not seeded twice',
   );
 }
@@ -905,36 +945,40 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   // is not there is not a row the typed table can hold (its key refuses it); the same snapshot on an
   // Approach item (no context) is, and stays planted.
   const prohibited = (subject) => ({
-    id: 'rrv-prohibited',
-    kind: 'conflict_evaluation',
-    status: 'PENDING',
-    agencyOrgId: 'org-ag',
-    agentUserId: 'usr-agent',
-    subject,
-    reasons: [
-      { code: 'PROHIBITED_COMBINATION', ruleId: 'ENG-6.4', ruleStatus: 'ACTIVE', policyVersion: 'jp-eng-2026-27-1' },
+    regulatory_reviews: [
+      {
+        id: 'rrv-prohibited',
+        kind: 'conflict_evaluation',
+        status: 'PENDING',
+        agency_org_id: 'org-ag',
+        agent_user_id: 'usr-agent',
+        subject_is_approach: 0,
+        ...subject,
+        snapshot_outcome: 'PROHIBITED_CONFLICT',
+        requested_at: T0,
+        requested_by_kind: 'system',
+        requested_by_name: 'fixture',
+        rev: 1,
+        rev_at: T0,
+      },
     ],
-    policyVersions: ['jp-eng-2026-27-1'],
-    snapshot: { outcome: 'PROHIBITED_CONFLICT' },
-    requestedAt: T0,
-    requestedBy: { kind: 'system', userId: null, name: 'fixture' },
-    startedAt: null,
-    startedBy: null,
-    decidedAt: null,
-    decision: null,
-    supersedes: null,
-    supersededBy: null,
-    keys: {},
-    rev: 1,
-    revAt: T0,
-    revBy: null,
-    history: [],
+    regulatory_review_reasons: [
+      {
+        review_id: 'rrv-prohibited',
+        ord: 0,
+        code: 'PROHIBITED_COMBINATION',
+        rule_id: 'ENG-6.4',
+        rule_status: 'ACTIVE',
+        policy_version_id: 'jp-eng-2026-27-1',
+      },
+    ],
+    regulatory_review_policy_versions: [{ review_id: 'rrv-prohibited', ord: 0, policy_version_id: 'jp-eng-2026-27-1' }],
   });
   let refusedCtx = null;
   try {
-    writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m25p5a-')), {
+    fixture(mkdtempSync(path.join(tmpdir(), 'sbx-m25p5a-')), {
       ...db,
-      regulatoryReviews: [prohibited({ contextId: 'ctx-gone', representationId: null, partyRole: 'releasing_entity' })],
+      ...prohibited({ subject_context_id: 'ctx-gone', subject_party_role: 'releasing_entity' }),
     });
   } catch (e) {
     refusedCtx = e;
@@ -943,75 +987,39 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     /FOREIGN KEY constraint failed/.test(refusedCtx?.message),
     `a review naming a context that is not there is refused by its key (${refusedCtx?.message})`,
   );
-  db.regulatoryReviews = [prohibited({ approach: true, playerId: 'pl-b', jurisdiction: 'ENG' })];
+  Object.assign(db, prohibited({ subject_is_approach: 1, subject_player_id: 'pl-b', subject_jurisdiction: 'ENG' }));
   // (b) a reviewer row with an unknown status word — injected after the first boot below.
-  // (c) a consent naming a policy version that does not exist (pure).
-  const stale = consentSufficiency(
-    {
-      kind: 'dual_representation',
-      status: 'granted',
-      grantedAt: T0,
-      contextId: 'c',
-      agentUserId: 'a',
-      partyRole: 'individual',
-      policyVersions: ['jp-eng-1999-1'],
-      grantedBy: { kind: 'player', id: 'p' },
-      particulars: { fullParticularsProvided: true, legalAdviceOffered: true },
-    },
-    {
-      partyRole: 'individual',
-      agentUserId: 'a',
-      contextId: 'c',
-      activePolicyIds: ['jp-eng-2026-27-1'],
-      requireParticulars: true,
-    },
-  );
-  neg(
-    stale.ok === false && stale.reasonCode === 'CONSENT_POLICY_VERSION_STALE',
-    'a consent naming an unknown policy version is insufficient (pure engine)',
-  );
-  // (d) an emptied policy store: no jurisdiction is encoded any more.
-  const missing = applicablePolicySet([], ['ENG'], Date.now());
-  neg(
-    missing.policies.length === 0 && missing.missing.includes('ENG') && missing.missing.includes('INT'),
-    'with no policy rows the policy set is empty and both INT and ENG are reported missing (pure)',
-  );
-  writeFixture(dir, db);
+  fixture(dir, db);
   // First boot: the dev reviewers are seeded only into an EMPTY reviewer store — so the odd row is injected after that.
   const s0 = await bootOn(dir, await freePort());
   ok(s0.up, 'a first boot seeds the dev reviewers (empty store)');
   const seeded = await s0.stop();
-  ok(seeded.tsReviewers.length === 3, 'three dev reviewers on disk');
-  // A reviewer row with an unknown status word is not a row the typed table can hold: the repository refuses
-  // it, naming it, and nothing is written.
+  ok(seeded.ts_reviewers.length === 3, 'three dev reviewers on disk');
+  // A reviewer row with an unknown status word is not a row the typed table can hold: the schema refuses it, and
+  // nothing is written. (The repository's own refusal, naming the row and the field, is testCompliancePolicies'.)
   const odd = {
     id: 'tsr-odd',
     name: 'Odd Reviewer',
     role: 'trust_safety_admin',
     status: 'enabled',
-    secretHash: 'not-a-hash',
-    createdAt: T0,
-    createdBy: { kind: 'system', userId: null, name: 'fixture' },
-    revokedAt: null,
-    revokedBy: null,
+    secret_hash: 'not-a-hash',
+    created_at: T0,
+    created_by_kind: 'system',
+    created_by_name: 'fixture',
     rev: 1,
-    revAt: T0,
-    revBy: null,
-    history: [],
+    rev_at: T0,
   };
   let refused = null;
   try {
-    writeFixture(dir, { tsReviewers: [odd] });
+    fixture(dir, { ts_reviewers: [odd] });
   } catch (e) {
     refused = e;
   }
   neg(
-    refused?.code === 'COMPLIANCE_POLICIES_INPUT_INVALID' &&
-      /tsr-odd/.test(refused.message) &&
-      /status/.test(refused.message),
-    `a reviewer row with status "enabled" (unknown) is refused by the repository, naming the row and the field (${refused?.message})`,
+    /CHECK constraint failed/.test(refused?.message) && /status/.test(refused.message),
+    `a reviewer row with status "enabled" (unknown) is refused by the schema, naming the field (${refused?.message})`,
   );
-  neg(readRecords(dir).tsReviewers.length === 3, 'and nothing was written: the three seeds are still the reviewers');
+  neg(rows(dir, 'ts_reviewers').length === 3, 'and nothing was written: the three seeds are still the reviewers');
   const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the corrupt rows');
   if (s.up) {
@@ -1057,25 +1065,25 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     );
     const after = await s.stop();
     neg(
-      !after.tsReviewers.some((r) => r.id === 'tsr-odd') && after.tsReviewers.every((r) => r.status === 'active'),
+      !after.ts_reviewers.some((r) => r.id === 'tsr-odd') && after.ts_reviewers.every((r) => r.status === 'active'),
       'the failed login wrote no reviewer row and changed no status',
     );
     // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy. (The review that
     // names a version goes with it — a typed row cannot name a version that is not there.) No route deletes a policy
     // version, so the wipe is plain SQL on the file (the rules and history rows cascade).
-    neg(after.regulatoryReviews.length === 1, '(the one review is the planted one)');
-    const L = openLayer(dir);
+    neg(after.regulatory_reviews.length === 1, '(the one review is the planted one)');
+    const F = openFixture(dir);
     try {
-      L.sqlite.exec('DELETE FROM regulatory_reviews; DELETE FROM jurisdiction_policies;');
+      F.sql.exec('DELETE FROM regulatory_reviews; DELETE FROM jurisdiction_policies;');
     } finally {
-      L.close();
+      F.close();
     }
     const s2 = await bootOn(dir, await freePort());
     ok(s2.up, 'the server boots over an EMPTY policy store');
     if (s2.up) {
-      const snap = readRecords(dir);
+      const snap = stored(dir);
       neg(
-        snap.jurisdictionPolicies.length === 0,
+        snap.jurisdiction_policies.length === 0,
         'boot did not re-seed the policies (the migration record says the step already ran)',
       );
       const agent = (
