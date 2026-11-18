@@ -27,7 +27,7 @@ export const SPEC = {
   'domains/agents/compliance/conflict.mjs': ['PERMITTED_WITH_CONSENT', 'CONFLICT_OUTCOMES'],
   'domains/agents/compliance/errors.mjs': ['COMPLIANCE_ERROR_HTTP'],
   'domains/agents/compliance/policy.mjs': ['POLICY_ACTIONS', 'MINOR_PATHWAY_PRODUCTION_ENABLED'],
-  'domains/agents/compliance/policyVersions.mjs': ['SEEDED_POLICY_VERSIONS'],
+  'domains/agents/compliance/policyVersions.mjs': ['SEEDED_POLICY_VERSIONS', 'RULE_PARAMS', 'TEXT_STATUSES'],
   'domains/agents/integration/integration.mjs': ['HANDOFF_TTL_MS'],
   'domains/agents/transactions/errors.mjs': ['TRANSACTION_ERROR_HTTP'],
   'domains/agents/transactions/transaction.mjs': [
