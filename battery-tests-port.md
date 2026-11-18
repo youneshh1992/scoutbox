@@ -107,7 +107,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 48 of 53 neutral]
+### Untangling [in progress: 50 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -219,6 +219,9 @@ are for surprising facts or points that later work depends on, not implementatio
 5. **Box Cam** (see "Box Cam: everything but the video"). Untangle `development/boxCam` and `development/combine`
    first, then port sessions, training and the Combine with the `production_cv` stub, then `development/hub`.
    `passport/trustScore` reads Combine results, so this goes before the Passport.
+   1. Untangle `development/boxCam` and `development/combine` [**done**: their pure sections are rules suites (40 and
+      20 checks, 62 rule cases pending)]. The CV eligibility checks moved whole with the rest, so no `cv/` table was
+      snapshotted. Combine's check 27 reads the protocol from `GET /org/combine/protocols`.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared
@@ -298,7 +301,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 6 batteries is about **1–2 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 3 batteries is about **1–2 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 

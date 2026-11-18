@@ -891,6 +891,163 @@
     ]
   },
   {
+    "battery": "development/boxCam",
+    "functions": [
+      {
+        "function": "domains/development/boxcam/drills.mjs#drillByIdVersion",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/drills.mjs#providerFor",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#boxStreakWeeks",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#challengeProgress",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#dedupeReps",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#deriveVerification",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#detectionQuality",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#intersectIntervals",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#mergeIntervals",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#subtractIntervals",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#targetCompleted",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/shared.mjs#verifiedActiveMs",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "development/combine",
+    "functions": [
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#combineProtocol",
+        "calls": 8,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#combineResultHash",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#comparisonMatrix",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#formatCombineValue",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#latestCombineProtocol",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#measureAttempt",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#measurementCapability",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#measurementSupported",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#personalBest",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "discovery/matchingAndWatchlists",
     "functions": [
       {

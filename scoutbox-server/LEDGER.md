@@ -18,7 +18,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
 | agents | 9 | 9 | 9 | 231 / 433 | 51 / 83 | 7 to go |
-| development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
+| development | 3 | 2 | 0 | 0 / 62 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
@@ -43,10 +43,10 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
-| `development/boxCam` | not yet neutral | 3 → 3 | 150 | 150 |  |  |  |  |  | not untangled; not answered |
+| `development/boxCam` | neutral | 3 → 0 | 150 | 110 | 40 |  |  | 0 / 40 |  | not answered; 40 cases pending |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
-| `development/combine` | not yet neutral | 2 → 2 | 92 | 92 |  |  |  |  |  | not untangled; not answered |
+| `development/combine` | neutral | 2 → 0 | 92 | 72 | 20 |  |  | 0 / 22 |  | not answered; 22 cases pending |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
@@ -325,6 +325,27 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
+| `development/boxCam` | `domains/development/boxcam/drills.mjs#drillByIdVersion` | 1 |
+| `development/boxCam` | `domains/development/boxcam/drills.mjs#providerFor` | 2 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#boxStreakWeeks` | 3 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#challengeProgress` | 1 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#dedupeReps` | 6 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#deriveVerification` | 6 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#detectionQuality` | 3 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#intersectIntervals` | 1 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#mergeIntervals` | 1 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#subtractIntervals` | 1 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#targetCompleted` | 6 |
+| `development/boxCam` | `domains/development/boxcam/shared.mjs#verifiedActiveMs` | 9 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#combineProtocol` | 4 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#combineResultHash` | 1 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#comparisonMatrix` | 1 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#formatCombineValue` | 1 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#latestCombineProtocol` | 1 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#measureAttempt` | 7 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#measurementCapability` | 4 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#measurementSupported` | 1 |
+| `development/combine` | `domains/development/boxcam/combineShared.mjs#personalBest` | 2 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |
