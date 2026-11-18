@@ -448,11 +448,12 @@ pub fn login_key(identifier: String) -> String {
   }
 }
 
-/// True when the identifier's wrong-guess budget is spent.
+/// True when the identifier's wrong-guess budget is spent: as the TypeScript limiter's `peek`, once more than `max`
+/// wrong guesses are in the window, so the guess that spends the last of it is still answered.
 pub fn login_locked(limits: Limits, identifier: String, now: Int) -> Bool {
   table.update(limits.login, login_key(identifier), fn(entry) {
     let w = current(entry, now, login_policy.window_ms)
-    #(entry, w.count >= login_policy.max)
+    #(entry, w.count > login_policy.max)
   })
 }
 

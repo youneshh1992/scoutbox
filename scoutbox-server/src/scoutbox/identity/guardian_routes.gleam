@@ -187,7 +187,14 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
           let aliased = limits.login_key(canonical) != limits.login_key(tried)
           case aliased && limits.login_locked(ctx.limits, canonical, now) {
             True -> sign_in.locked_out()
-            False -> signing_in(ctx, g, now)
+            False ->
+              signing_in(ctx, g, option.unwrap(body.password, ""), now, fn() {
+                limits.login_failed(ctx.limits, tried, now)
+                case aliased {
+                  True -> limits.login_failed(ctx.limits, canonical, now)
+                  False -> Nil
+                }
+              })
           }
         }
       }
@@ -195,23 +202,34 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
   }
 }
 
-fn signing_in(ctx: Ctx, g: Guardian, now: Int) -> Response {
-  case g.row.password_hash, ctx.config.dev_logins {
-    // Not ported yet: signing a guardian in with a password (`identity/passwords` checks one). No guardian this
-    // server can hold has a password.
-    Some(_), _ ->
+/// The password is checked before the unit: scrypt is slow, and a unit holds the only writer.
+fn signing_in(
+  ctx: Ctx,
+  g: Guardian,
+  password: String,
+  now: Int,
+  failed: fn() -> Nil,
+) -> Response {
+  let checked = case g.row.password_hash {
+    Some(stored) -> Some(passwords.verify(password, stored))
+    None -> None
+  }
+  case checked, ctx.config.dev_logins {
+    Some(False), _ -> {
+      failed()
       http.error_message(
-        501,
-        "NOT_PORTED",
-        "Password-protected guardian accounts are not supported by this server yet.",
+        401,
+        "BAD_PASSWORD",
+        "This account is password-protected.",
       )
+    }
     None, False ->
       http.error_message(
         403,
         "DEV_LOGIN_DISABLED",
         "Passwordless demo logins are disabled outside development. Use a credentialed account.",
       )
-    None, True -> {
+    Some(True), _ | None, True -> {
       let minted =
         store.unit(ctx.store, fn(tx) {
           sessions.create(

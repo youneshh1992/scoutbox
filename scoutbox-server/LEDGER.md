@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 6 | 6 | 193 / 250 | 35 / 38 | 7 to go |
+| agents | 9 | 9 | 7 | 231 / 433 | 51 / 83 | 7 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -34,13 +34,13 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
+| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 31 / 85 | 13 / 34 | 85 cases pending; 21 hand-port calls |
 | `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
-| `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
-| `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
+| `agents/crossApp` | neutral | 13 → 0 | 380 | 239 | 141 |  |  | 7 / 96 | 3 / 11 | not answered; 96 cases pending; 8 hand-port calls |
+| `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  |  | 0 / 2 |  | not answered; 2 cases pending |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
 | `development/boxCam` | not yet neutral | 3 → 3 | 150 | 150 |  |  |  |  |  | not untangled; not answered |
@@ -128,6 +128,14 @@ ported by hand to a gleeunit test.
 
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
+| `agents/adversarial` | `domain.ts#ageOn` | 4 | args[] is a  | to do |
+| `agents/adversarial` | `domain.ts#isAdult` | 13 | args[] is a  | to do |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 | its result depends on the clock | to do |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 1 | args[] is undefined | to do |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 11 | args[] is undefined; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is Infinity; args[].startAt is NaN; Gleam's types can't hold its arguments: cannot print "1789776000000" as an Int; Gleam's types can't hold its arguments: cannot print "2024-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "2026-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "expired" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 2 | args[].endAt is NaN; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#normaliseDisclosure` | 1 | args[].clubPresence is NaN | to do |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#termMonthsOf` | 1 | args[] is NaN | to do |
 | `agents/compliance` | `domains/agents/compliance/provider.mjs#createVerificationProvider` | 2 | result.verifyFifaLicence is a function | to do |
 | `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 2 | Gleam's types can't hold its arguments: an affiliation without a start {"endedAt":null}; Gleam's types can't hold its arguments: an affiliation without a start null | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 4 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -144,6 +152,10 @@ ported by hand to a gleeunit test.
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#effectiveFacetState` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#verificationGap` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/crossApp` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 2 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/crossApp` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#duplicateTransactionOf` | 7 | args[].partiesOf is a function | to do |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
@@ -241,6 +253,17 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
+| `agents/adversarial` | `domain.ts#parseDob` | 8 |
+| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#canonicalJson` | 2 |
+| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 4 |
+| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#mostSevere` | 25 |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 8 |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 12 |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 1 |
+| `agents/adversarial` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 3 |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#agreementTermCoversNow` | 3 |
+| `agents/adversarial` | `domains/agents/core/shared.mjs#normaliseDisclosure` | 18 |
+| `agents/adversarial` | `domains/agents/integration/integration.mjs#agentClientBasis` | 1 |
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#conflictSummaryForParty` | 1 |
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#evaluateConflict` | 36 |
@@ -259,6 +282,23 @@ mapped, then `npm run cases`.
 | `agents/compliance` | `domains/agents/compliance/provider.mjs#facetFromProviderAnswer` | 3 |
 | `agents/compliancePersistence` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
 | `agents/compliancePersistence` | `domains/agents/compliance/policy.mjs#applicablePolicySet` | 1 |
+| `agents/crossApp` | `domains/agents/core/shared.mjs#agreementInForce` | 7 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#agentClientBasis` | 9 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#agentSurfaceDecision` | 29 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#clubAgentPresence` | 2 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#contactRouting` | 7 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#contactTargetSnapshot` | 3 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 3 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#handoffBlockers` | 11 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 6 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#surfaceIsRegulated` | 12 |
+| `agents/crossApp` | `domains/agents/integration/integration.mjs#surfaceScopes` | 1 |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 3 |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
+| `agents/crossApp` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 1 |
+| `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 |
+| `agents/crossAppAdversarial` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
@@ -498,6 +538,7 @@ their role, so their recorded calls get no test.
 
 | Battery | Function | Cases | Why |
 |---|---|---|---|
+| `agents/adversarial` | `domains/agents/core/shared.mjs#termMonthsOf` | 7 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
 | `agents/core` | `domains/agents/core/shared.mjs#newFacets` | 1 | A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP. |
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 | A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used. |

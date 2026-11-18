@@ -114,5 +114,10 @@
     "terminated_by_agent",
     "disputed"
   ],
-  "MAX_TERM_MONTHS": 24
+  "MAX_TERM_MONTHS": 24,
+  "DISCLOSURE_KEYS": [
+    "clubPresence",
+    "contactRouting",
+    "trialVisibility"
+  ]
 }

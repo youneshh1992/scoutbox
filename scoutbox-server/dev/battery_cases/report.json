@@ -1,5 +1,155 @@
 [
   {
+    "battery": "agents/adversarial",
+    "functions": [
+      {
+        "function": "domain.ts#ageOn",
+        "calls": 4,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 4
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 13,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 13
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#parseDob",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#canonicalJson",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#inputHashOf",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#mostSevere",
+        "calls": 33,
+        "cases": 25,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
+        "calls": 10,
+        "cases": 8,
+        "handPort": {
+          "its result depends on the clock": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
+        "calls": 13,
+        "cases": 12,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#ruleStatusAt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
+        "calls": 28,
+        "cases": 17,
+        "handPort": {
+          "args[] is undefined": 1,
+          "args[].endAt is Infinity": 1,
+          "args[].endAt is NaN": 1,
+          "args[].startAt is Infinity": 1,
+          "args[].startAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1789776000000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2024-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"expired\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 2
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementTermCoversNow",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#can",
+        "calls": 13,
+        "cases": 13,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
+        "calls": 3,
+        "cases": 1,
+        "handPort": {
+          "args[].endAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#normaliseDisclosure",
+        "calls": 20,
+        "cases": 18,
+        "handPort": {
+          "args[].clubPresence is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#termMonthsOf",
+        "calls": 8,
+        "cases": 7,
+        "handPort": {
+          "args[] is NaN": 1
+        },
+        "status": "closed"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#agentClientBasis",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "agents/compliance",
     "functions": [
       {
@@ -406,6 +556,171 @@
           "Gleam's types can't hold its arguments: cannot print \"approved\" as a value of scoutbox/vocab/facet_state.pairs": 1
         },
         "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "agents/crossApp",
+    "functions": [
+      {
+        "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 2
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementInForce",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#can",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#agentClientBasis",
+        "calls": 12,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#agentSurfaceDecision",
+        "calls": 30,
+        "cases": 29,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#clubAgentPresence",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#contactRouting",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#contactTargetSnapshot",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#duplicateTransactionOf",
+        "calls": 7,
+        "cases": 0,
+        "handPort": {
+          "args[].partiesOf is a function": 7
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#effectiveHandoffStatus",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#handoffBlockers",
+        "calls": 12,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#normaliseDisclosure",
+        "calls": 8,
+        "cases": 6,
+        "handPort": {
+          "args[] is a Object": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#surfaceIsRegulated",
+        "calls": 12,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#surfaceScopes",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactMilestone",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#contactView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/errors.mjs#httpStatusFor",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "agents/crossAppAdversarial",
+    "functions": [
+      {
+        "function": "domains/agents/core/shared.mjs#agreementInForce",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
       }
     ]
   },

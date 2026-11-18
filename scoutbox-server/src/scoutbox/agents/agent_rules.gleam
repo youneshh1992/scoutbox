@@ -417,9 +417,11 @@ pub fn term_covers_now(a: agreement_row.Row, now: Int) -> Bool {
   start_reached(a.start_at, now) && !end_passed(a.end_at, now)
 }
 
-/// Names an agent, client-confirmed, active and within its term.
+/// Names an agent, client-confirmed, active and within its term. An empty agent id names nobody, as in the
+/// TypeScript rule, so it can never match a caller.
 pub fn in_force(a: agreement_row.Row, now: Int) -> Bool {
-  option.is_some(a.confirmed_at)
+  id.org_user_to_string(a.agent_user_id) != ""
+  && option.is_some(a.confirmed_at)
   && effective_status(a, now) == Active
   && start_reached(a.start_at, now)
 }

@@ -18,3 +18,27 @@ pub fn five_challenge_requests_an_hour_per_club_test() {
   // A fresh window starts once the hour is over.
   assert !spend("org-a", hour)
 }
+
+/// As the TypeScript limiter: 20 wrong guesses are all answered, and only past them is the identifier locked, by
+/// any spelling of its case.
+pub fn twenty_wrong_guesses_then_locked_test() {
+  let assert Ok(l) = limits.start()
+  repeat(20, fn() {
+    assert !limits.login_locked(l, "guardian:gd-1", 0)
+    limits.login_failed(l, "guardian:gd-1", 0)
+  })
+  assert !limits.login_locked(l, "guardian:gd-1", 0)
+  limits.login_failed(l, "guardian:gd-1", 0)
+  assert limits.login_locked(l, " GUARDIAN:GD-1", 0)
+  assert !limits.login_locked(l, "guardian:gd-2", 0)
+}
+
+fn repeat(n: Int, f: fn() -> Nil) -> Nil {
+  case n {
+    0 -> Nil
+    _ -> {
+      f()
+      repeat(n - 1, f)
+    }
+  }
+}

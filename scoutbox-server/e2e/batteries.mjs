@@ -40,4 +40,5 @@ export const BATTERIES = [
   'agents/transactions',
   'agents/compliance',
   'agents/compliancePersistence',
+  'agents/adversarial',
 ];
