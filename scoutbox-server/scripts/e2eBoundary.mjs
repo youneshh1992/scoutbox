@@ -23,7 +23,6 @@ export const TYPESCRIPT_ONLY = [
 /** Batteries that still import the server or start it themselves. */
 export const NOT_YET_NEUTRAL = [
   'agents/adversarial',
-  'agents/crossApp',
   'development/boxCam',
   'development/combine',
   'development/hub',
