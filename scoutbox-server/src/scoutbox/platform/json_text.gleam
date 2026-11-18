@@ -80,6 +80,16 @@ fn object(
   }
 }
 
+/// A JSON string's text after its opening quote: the decoded string and what follows the closing quote.
+pub fn read_string(s: String) -> Result(#(String, String), Nil) {
+  string_body(s, "")
+}
+
+/// `s` without its leading JSON whitespace.
+pub fn skip_space(s: String) -> String {
+  skip(s)
+}
+
 fn string_body(s: String, acc: String) -> Result(#(String, String), Nil) {
   case string.pop_grapheme(s) {
     Error(Nil) -> Error(Nil)

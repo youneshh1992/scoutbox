@@ -978,5 +978,79 @@
         }
       }
     }
+  ],
+  "RULE_PARAMS": {
+    "licenceRequired": "flag",
+    "licenceHolder": "text",
+    "onlyLicensedAgentPerforms": "flag",
+    "agencyStaffMayNotApproach": "flag",
+    "onlyLicensedAgentApproaches": "flag",
+    "maxTermMonthsIndividual": "count",
+    "oneAgreementPerPair": "flag",
+    "legalAdviceNotice": "flag",
+    "permittedSets": "roleSets",
+    "consentKind": [
+      "dual_representation",
+      "agency_performance",
+      "guardian_approach",
+      "guardian_agreement",
+      "legal_advice_ack"
+    ],
+    "consentInAdvance": "flag",
+    "prohibitedWith": [
+      "individual",
+      "engaging_entity",
+      "releasing_entity"
+    ],
+    "connectedAgentsAreOne": "flag",
+    "sameAgencyConnected": "flag",
+    "formula": [
+      "academic_year_16",
+      "six_months_before_first_contract_age"
+    ],
+    "firstContractAge": "ageMap",
+    "guardianConsentBeforeApproach": "flag",
+    "minorsAccreditationRequired": "flag",
+    "validityYears": "count",
+    "informational": "flag",
+    "noFeeForMinorWithoutProContract": "flag",
+    "otherServicesPresumptionMonths": "count",
+    "exclusivityWindowMonths": "count",
+    "discloseConflicts": "flag",
+    "effectiveFrom": "date",
+    "nationalRegistrationRequired": "flag",
+    "requiresFifaLicence": "flag",
+    "cascadeFromFifaLicence": "flag",
+    "onlyRegisteredAgentPerforms": "flag",
+    "agencyPartyColleaguePerformance": "flag",
+    "productionEnabled": "flag",
+    "pendingLegalReview": "text",
+    "pfaLmaNotice": "flag",
+    "academicYearStart": "monthDay",
+    "coversIndirectApproach": "flag",
+    "minorsAuthorisationRequired": "flag",
+    "enhancedDbsWithinMonths": "count",
+    "permittedMultiple": "flag",
+    "excludedRole": [
+      "individual",
+      "engaging_entity",
+      "releasing_entity"
+    ],
+    "fullParticularsRequired": "flag",
+    "legalAdviceOfferRequired": "flag",
+    "prescribedForm": "text",
+    "activeLimbs": "textList",
+    "lodgeWithinDays": "count",
+    "domesticAuthorisationRequired": "flag",
+    "kind": "text"
+  },
+  "TEXT_STATUSES": [
+    "CURRENT",
+    "CURRENT_BUT_SUSPENDED",
+    "CURRENT_WITH_PARTIAL_SUSPENSION",
+    "UNCERTAIN_OPERATIVE_STATUS",
+    "HISTORICAL",
+    "SUPERSEDED",
+    "ANNOUNCED"
   ]
 }

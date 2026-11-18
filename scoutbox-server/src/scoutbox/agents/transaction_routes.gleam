@@ -224,8 +224,8 @@ fn body_coded(
   codes: List(#(String, String)),
   next: fn(a, Dynamic) -> Response,
 ) -> Response {
-  use raw <- http.json_body(req)
-  case input.parse_coded(shape, raw, root: "body", codes:, default:) {
+  use raw, order <- http.json_body_in_order(req)
+  case input.parse_in_order(shape, raw, order, root: "body", codes:, default:) {
     Ok(v) -> next(v, raw)
     Error(r) -> domain_errors.send(contract, r.error, input.refusal_fields(r))
   }

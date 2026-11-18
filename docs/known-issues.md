@@ -72,6 +72,24 @@ sends the same text for `compliance_store.NoProfile`, with a comment.
 **Fix.** In `agentRoutes.mjs`, keep the gate's own message when it names no facet ("Create your agent profile
 first."), then send that text from `gate_refusal` too. No battery checks this message.
 
+## A policy version's rules are ordered by the keys of a JSON object
+
+Found 2026-11-18 while porting the policy routes. Ported as the TypeScript server behaves.
+
+**What it is.** `POST /ts/compliance/policies` takes a version's rules as an object keyed by rule id
+(`{ "FIFA-8.1": {…}, "FIFA-11.1": {…} }`). The TypeScript server stores each rule's position in the order the keys
+were sent (`Object.entries` in `writeRules`, `repositories/compliancePolicies.mjs`), and the policy view returns
+`rules` in that order. The admin app renders its rules table straight from it (`Object.entries(p.rules)` in
+`scoutbox-admin/src/m25tabs.tsx`). But JSON object members have no order: the standard says so, and a proxy or a
+client library may reorder them. The order a Trust & Safety administrator entered is kept only by luck.
+
+**Where it is in the port.** An Erlang map has no order either, so this server reads the order keys were sent in
+from the request's raw text (`scoutbox-server/src/scoutbox/platform/key_order.gleam`) and `input` keeps it.
+
+**Fix.** Send and return rules as an array, each carrying its id (`rules: [{ "ruleId": "FIFA-8.1", … }]`), so the
+order is part of the data. That changes the TypeScript server, the admin app, the batteries and this server
+together, so it waits until the port is done.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package

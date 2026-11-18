@@ -35,6 +35,7 @@ import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
+import scoutbox/platform/key_order
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
 import scoutbox/platform/paging
@@ -217,7 +218,20 @@ fn parsed(
   default: String,
   next: fn(a) -> Response,
 ) -> Response {
-  case input.parse_coded(shape, raw, root:, codes: field_codes, default:) {
+  parsed_in_order(shape, raw, key_order.Unknown, root, default, next)
+}
+
+fn parsed_in_order(
+  shape: input.Shape(a),
+  raw: Dynamic,
+  order: key_order.KeyOrder,
+  root: String,
+  default: String,
+  next: fn(a) -> Response,
+) -> Response {
+  case
+    input.parse_in_order(shape, raw, order, root:, codes: field_codes, default:)
+  {
     Ok(v) -> next(v)
     Error(r) -> domain_errors.send(contract, r.error, input.refusal_fields(r))
   }
@@ -229,8 +243,8 @@ pub fn body(
   default: String,
   next: fn(a, Dynamic) -> Response,
 ) -> Response {
-  use raw <- http.json_body(req)
-  use v <- parsed(shape, raw, "body", default)
+  use raw, order <- http.json_body_in_order(req)
+  use v <- parsed_in_order(shape, raw, order, "body", default)
   next(v, raw)
 }
 

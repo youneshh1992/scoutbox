@@ -14,6 +14,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/platform/input.{type Refusal, type Shape}
+import scoutbox/platform/key_order.{type KeyOrder}
 import wisp.{type Request, type Response}
 import wisp/internal
 
@@ -213,6 +214,17 @@ pub fn json_body(req: Request, next: fn(Dynamic) -> Response) -> Response {
   }
 }
 
+/// `json_body` with the order the body's objects named their keys in (`key_order`), for a route that reads it.
+pub fn json_body_in_order(
+  req: Request,
+  next: fn(Dynamic, KeyOrder) -> Response,
+) -> Response {
+  case read_json_text(req) {
+    Ok(#(text, value)) -> next(value, key_order.of(text))
+    Error(response) -> response
+  }
+}
+
 /// The JSON body as sent, or the MALFORMED_JSON answer.
 fn read_json(req: Request) -> Result(Dynamic, Response) {
   read_json_text(req) |> result.map(fn(pair) { pair.1 })
@@ -334,8 +346,17 @@ pub fn body(
   codes: List(#(String, String)),
   next: fn(a) -> Response,
 ) -> Response {
-  use raw <- json_body(req)
-  case input.parse(shape, raw, root: "body", codes:) {
+  use raw, order <- json_body_in_order(req)
+  case
+    input.parse_in_order(
+      shape,
+      raw,
+      order,
+      root: "body",
+      codes:,
+      default: "FIELD_INVALID",
+    )
+  {
     Ok(value) -> next(value)
     Error(refusal) -> refused(refusal)
   }
@@ -348,8 +369,16 @@ pub fn parse_body(
   shape: Shape(a),
   codes: List(#(String, String)),
 ) -> Result(a, Response) {
-  use raw <- result.try(read_json(req))
-  input.parse(shape, raw, root: "body", codes:) |> result.map_error(refused)
+  use #(text, raw) <- result.try(read_json_text(req))
+  input.parse_in_order(
+    shape,
+    raw,
+    key_order.of(text),
+    root: "body",
+    codes:,
+    default: "FIELD_INVALID",
+  )
+  |> result.map_error(refused)
 }
 
 /// The query string read with `shape`. A parameter sent twice arrives as a list, so a text field refuses it.

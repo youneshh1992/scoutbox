@@ -1,9 +1,11 @@
 import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import scoutbox/platform/input
+import scoutbox/platform/key_order
 
 type Prefs {
   Prefs(start: option.Option(String), email: option.Option(Bool))
@@ -141,4 +143,80 @@ pub fn a_day_refusal_says_why_as_temporal_ts_does_test() {
   )
   assert string.contains(why(dynamic.string("1 May")), "(wrong shape)")
   assert string.contains(why(dynamic.int(20_260_501)), "(not text)")
+}
+
+// ------------------------------------------------------------------------------------------------- key order
+
+fn parsed_text(text: String, s: input.Shape(a)) -> Result(a, input.Refusal) {
+  let assert Ok(raw) = json.parse(text, decode.dynamic)
+  input.parse_in_order(
+    s,
+    raw,
+    key_order.of(text),
+    root: "body",
+    codes: [],
+    default: "FIELD_INVALID",
+  )
+}
+
+pub fn the_first_unknown_field_sent_is_named_test() {
+  let assert Error(r) =
+    parsed_text("{\"outcome\": \"CLEAR\", \"clearance\": \"CLEAR\"}", input.nothing())
+  assert r.field == "outcome"
+  // Without an order, the first in key order.
+  let assert Error(r) =
+    input.parse(
+      input.nothing(),
+      body([
+        #("outcome", dynamic.string("CLEAR")),
+        #("clearance", dynamic.string("CLEAR")),
+      ]),
+      "body",
+      [],
+    )
+  assert r.field == "clearance"
+}
+
+pub fn a_nested_unknown_field_is_named_in_the_order_sent_test() {
+  let party = {
+    use id <- input.field("subjectId", input.required(input.id()))
+    input.done(id)
+  }
+  let s = {
+    use parties <- input.field(
+      "parties",
+      input.required(input.items(input.object(party), 6)),
+    )
+    input.done(parties)
+  }
+  let assert Error(r) =
+    parsed_text(
+      "{\"parties\": [{\"subjectId\": \"pl-1\", \"guardianConsent\": true, \"dob\": \"2000-01-01\"}]}",
+      s,
+    )
+  assert r.field == "parties[0].guardianConsent"
+  assert r.problem == input.UnknownField
+}
+
+pub fn entries_keep_the_order_sent_test() {
+  let text = "{\"rules\": {\"FIFA-8.1\": 1, \"FIFA-11.1\": 2, \"ENG-6.3\": 3}}"
+  let s = {
+    use rules <- input.field(
+      "rules",
+      input.required(input.entries(input.text(40), input.whole_number(0, 9))),
+    )
+    input.done(rules)
+  }
+  let assert Ok(rules) = parsed_text(text, s)
+  assert list.map(rules, fn(x) { x.0 }) == ["ENG-6.3", "FIFA-11.1", "FIFA-8.1"]
+  let sent = key_order.keys(key_order.of(text), [key_order.Key("rules")])
+  assert key_order.sort(rules, sent)
+    == [#("FIFA-8.1", 1), #("FIFA-11.1", 2), #("ENG-6.3", 3)]
+}
+
+pub fn key_order_reads_nested_lists_and_escapes_test() {
+  let order = key_order.of("{\"a\\u00e9\": [{\"y\": 1, \"x\": [2, 3]}], \"b\": null}")
+  assert key_order.keys(order, []) == Some(["aé", "b"])
+  assert key_order.keys(order, key_order.steps("aé[0]")) == Some(["y", "x"])
+  assert key_order.of("not json") == key_order.Unknown
 }

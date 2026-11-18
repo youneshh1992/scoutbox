@@ -2454,6 +2454,38 @@ pub fn policy_decoder() -> decode.Decoder(PolicyId) {
   decode.map(decode.string, PolicyId)
 }
 
+/// An id of `jurisdiction_policy_history`.
+pub opaque type PolicyEventId {
+  PolicyEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn policy_event(text: String) -> PolicyEventId {
+  PolicyEventId(text)
+}
+
+pub fn policy_event_to_string(id: PolicyEventId) -> String {
+  let PolicyEventId(text) = id
+  text
+}
+
+pub fn policy_event_sql(id: PolicyEventId) -> sqlight.Value {
+  sqlight.text(policy_event_to_string(id))
+}
+
+pub fn policy_event_json(id: PolicyEventId) -> Json {
+  json.string(policy_event_to_string(id))
+}
+
+pub fn policy_event_decoder() -> decode.Decoder(PolicyEventId) {
+  decode.map(decode.string, PolicyEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_policy_event(tx: Tx) -> Result(PolicyEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(PolicyEventId)
+}
+
 /// An id of `agent_profile_history`.
 pub opaque type ProfileEventId {
   ProfileEventId(String)

@@ -28,6 +28,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/string
+import scoutbox/platform/key_order.{type KeyOrder}
 import scoutbox/platform/temporal
 
 pub type Problem {
@@ -87,6 +88,9 @@ pub opaque type Issue {
     code: Option(String),
     /// Inside a nested object: the field within it (`declarations.authorised`).
     within: Option(String),
+    /// For an unknown field: every unknown field of its object, so a caller that knows the order they were sent in
+    /// can name the first (`parse_in_order`).
+    unknown: List(String),
   )
 }
 
@@ -100,6 +104,7 @@ fn issue(problem: Problem, phrase: String) -> Issue {
     allowed: None,
     code: None,
     within: None,
+    unknown: [],
   )
 }
 
@@ -778,18 +783,21 @@ pub fn field(name: String, rule: Rule(b), next: fn(b) -> Shape(a)) -> Shape(a) {
 pub fn done(value: a) -> Shape(a) {
   Shape(fn(fields, named) {
     // The TypeScript server reports the first unknown field in the order it was sent; an Erlang map has no
-    // order, so here it is the first in key order. Either way, one is named.
+    // order, so here it is the first in key order, and every one is kept for `parse_in_order` to choose from.
     case
       dict.keys(fields)
       |> list.sort(string.compare)
-      |> list.find(fn(k) { !list.contains(named, k) })
+      |> list.filter(fn(k) { !list.contains(named, k) })
     {
-      Ok(unknown) ->
+      [first, ..] as unknown ->
         Error(#(
-          unknown,
-          issue(UnknownField, "is not a field this request takes"),
+          first,
+          Issue(
+            ..issue(UnknownField, "is not a field this request takes"),
+            unknown:,
+          ),
         ))
-      Error(Nil) -> Ok(value)
+      [] -> Ok(value)
     }
   })
 }
@@ -974,6 +982,19 @@ pub fn parse_coded(
   codes codes: List(#(String, String)),
   default default: String,
 ) -> Result(a, Refusal) {
+  parse_in_order(shape, input, key_order.Unknown, root:, codes:, default:)
+}
+
+/// `parse_coded` for input whose key order is known (`key_order.of` the body's text): of several unknown fields,
+/// the first sent is named, as the TypeScript server names it.
+pub fn parse_in_order(
+  shape: Shape(a),
+  input: Dynamic,
+  order: KeyOrder,
+  root root: String,
+  codes codes: List(#(String, String)),
+  default default: String,
+) -> Result(a, Refusal) {
   case decode.run(input, decode.dict(decode.string, decode.dynamic)) {
     Error(_) ->
       Error(Refusal(
@@ -996,6 +1017,7 @@ pub fn parse_coded(
             Some(inner) -> path(field, inner)
             None -> field
           }
+          let field = first_sent(field, i, order)
           let coded = code_for(codes, field)
           let error = case coded, i.code {
             Ok(code), _ -> code
@@ -1014,6 +1036,71 @@ pub fn parse_coded(
           ))
         }
       }
+  }
+}
+
+/// An unknown field's path, naming the first of its object's unknown fields the order says was sent.
+fn first_sent(field: String, i: Issue, order: KeyOrder) -> String {
+  case i.problem, i.unknown {
+    UnknownField, [_, _, ..] -> {
+      let steps = key_order.steps(field)
+      let parent = list.take(steps, list.length(steps) - 1)
+      let parent_path =
+        string.drop_end(field, string.length(last_name(i, field)))
+      case key_order.keys(order, parent) {
+        Some(sent) ->
+          case list.find(sent, list.contains(i.unknown, _)) {
+            Ok(k) -> parent_path <> k
+            Error(Nil) -> field
+          }
+        None -> field
+      }
+    }
+    _, _ -> field
+  }
+}
+
+/// The unknown field `done` named, at the end of the path: the first of them in key order.
+fn last_name(i: Issue, _field: String) -> String {
+  case i.unknown {
+    [first, ..] -> first
+    [] -> ""
+  }
+}
+
+/// An object whose keys are names it chooses (valibot's `record`): each key passes `key` and each value `value`.
+/// Entries come back in key order; `key_order.sort` puts them in the order sent.
+pub fn entries(
+  key: Check(String),
+  value: Check(a),
+) -> Check(List(#(String, a))) {
+  fn(v) {
+    case decode.run(v, decode.dict(decode.string, decode.dynamic)) {
+      Error(_) -> Error(issue(NotObject, "must be an object"))
+      Ok(fields) ->
+        dict.to_list(fields)
+        |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+        |> list.try_map(fn(pair) {
+          let #(k, raw) = pair
+          let inside = fn(e: Issue) {
+            Issue(
+              ..e,
+              within: Some(case e.within {
+                Some(inner) -> path(k, inner)
+                None -> k
+              }),
+            )
+          }
+          case key(dynamic.string(k)) {
+            Error(e) -> Error(inside(e))
+            Ok(_) ->
+              case value(raw) {
+                Ok(a) -> Ok(#(k, a))
+                Error(e) -> Error(inside(e))
+              }
+          }
+        })
+    }
   }
 }
 
