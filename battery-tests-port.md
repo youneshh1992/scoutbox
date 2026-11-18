@@ -201,6 +201,11 @@ Patterns established on the way. New domains should reuse them, and `CLAUDE.md` 
   funnel never counts a case's current status as "history only".
 - **Query strings are read as Express's `qs` reads them:** `source[x]=…` is an object under `source`, so a shape
   refuses it as not text (`http.query_input`).
+- **Field order a client doesn't rely on may be relaxed in the test.** A decoded JSON object here has no order, so
+  where the TypeScript server names the first of several unknown fields as sent, this one names the first
+  alphabetically. Where that order means nothing to a client (a refusal naming one of several forged fields, say),
+  relax the check in the TypeScript battery to accept any of them, and sync. Where a client may reasonably rely on
+  the order for a UI feature, stop and ask before changing the test. Done so far: `agents/compliance` K14 and T7.
 - **Port only as far as the battery reaches.** Mark the rest `Not ported yet:`. There are 120 such markers, and the
   next battery in a domain usually starts by clearing some.
 
