@@ -32,7 +32,9 @@ export const SPEC = {
   'domains/agents/transactions/errors.mjs': ['TRANSACTION_ERROR_HTTP'],
   'domains/agents/transactions/transaction.mjs': [
     'TRANSACTION_STATUSES',
+    'LIVE_STATUSES',
     'TERMINAL_STATUSES',
+    'ROOM_ROLES',
     'DOCUMENT_TYPES',
     'DOCUMENT_VISIBILITY',
     'TIMELINE_AUDIENCES',
