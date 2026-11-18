@@ -126,8 +126,6 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
   the day's cancel and postpone skip what the trial's own cancel checks: the Room's permission (any club staff member
   can use them, not only a Room lead or recruitment lead), the revision gate, the rate limit and moderation of the
   reason.
-- **The public passport-share limiter is its own unpruned Map** (`domains/passport/sharing.mjs`) rather
-  than the shared `rateLimit`.
 
 ## Code clean-up
 

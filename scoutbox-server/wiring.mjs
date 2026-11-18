@@ -863,6 +863,7 @@ const passportDomain = createPassport({
   nextId,
   notify,
   ledgerAppend,
+  rateLimit,
 });
 
 // Recruitment Rooms: the club's private decision layer over one player, composed from every layer beneath it, and the

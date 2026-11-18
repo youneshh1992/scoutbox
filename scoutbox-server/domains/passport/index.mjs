@@ -36,6 +36,7 @@ export function createPassport(deps) {
     'nextId',
     'notify',
     'ledgerAppend',
+    'rateLimit',
   ]);
   const { testProviderEnabled, ...passportDeps } = deps;
   const passport = registerFootballPassport(strictContext('createPassport', passportDeps));

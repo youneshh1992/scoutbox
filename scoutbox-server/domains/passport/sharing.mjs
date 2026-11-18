@@ -5,6 +5,7 @@ import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../domain.ts';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
+import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { PASSPORT_LIMITS } from '../../repositories/passport.ts';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import { CURSOR_PAGE, inputOrRefuse, oneOf, wholeNumber } from '../platform/schemas.mjs';
@@ -28,6 +29,7 @@ export function registerPassportSharing(ctx) {
     nextId,
     notify,
     ledgerAppend,
+    rateLimit,
     findPlayer,
     isBlocked,
     vmetric,
@@ -161,20 +163,6 @@ export function registerPassportSharing(ctx) {
   });
 
   // --------------------------------------------------- public resolution
-  // Enumeration hits 429 long before the keyspace (24 random bytes) matters.
-  const attempts = new Map();
-  const RATE = { windowMs: 60_000, max: 30 };
-  function rateLimited(ip) {
-    const now = Date.now();
-    const row = attempts.get(ip);
-    if (!row || row.resetAt < now) {
-      attempts.set(ip, { count: 1, resetAt: now + RATE.windowMs });
-      return false;
-    }
-    row.count += 1;
-    return row.count > RATE.max;
-  }
-
   function resolveShare(secret) {
     const share = shares.byHash(sha256(String(secret ?? '')));
     const player = share ? findPlayer(share.playerId) : null;
@@ -184,7 +172,9 @@ export function registerPassportSharing(ctx) {
 
   app.get('/passport/shared/:token', (req, res) => {
     res.set('X-Robots-Tag', 'noindex, nofollow');
-    if (rateLimited(req.ip ?? 'unknown')) return res.status(429).json({ error: 'RATE_LIMITED' });
+    // Enumeration hits 429 long before the keyspace (24 random bytes) matters.
+    if (rateLimit.limited('passport_share_read', req.ip ?? req.socket?.remoteAddress ?? '?'))
+      return res.status(429).json(rateLimitedBody('passport_share_read'));
     const { share, player, problem } = resolveShare(req.params.token);
     // Unknown, revoked, expired, removed-subject and wrong-mode all look identical from outside.
     if (problem || share.mode !== 'public') return res.status(404).json({ error: 'PASSPORT_NOT_FOUND' });

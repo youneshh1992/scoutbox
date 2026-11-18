@@ -269,7 +269,7 @@ export const RATE_LIMIT_POLICY = {
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
   org_invite: { max: 25, windowMs: 86_400_000, scope: 'org', note: 'Staff invitations.' },
-  passport_share_read: { max: 60, windowMs: 60_000, scope: 'ip', note: 'Public Passport share link reads.' },
+  passport_share_read: { max: 30, windowMs: 60_000, scope: 'ip', note: 'Public Passport share link reads.' },
 };
 
 /** Correct for a single process only. */
