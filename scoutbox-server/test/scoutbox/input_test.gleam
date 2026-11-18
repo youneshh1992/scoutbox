@@ -161,7 +161,10 @@ fn parsed_text(text: String, s: input.Shape(a)) -> Result(a, input.Refusal) {
 
 pub fn the_first_unknown_field_sent_is_named_test() {
   let assert Error(r) =
-    parsed_text("{\"outcome\": \"CLEAR\", \"clearance\": \"CLEAR\"}", input.nothing())
+    parsed_text(
+      "{\"outcome\": \"CLEAR\", \"clearance\": \"CLEAR\"}",
+      input.nothing(),
+    )
   assert r.field == "outcome"
   // Without an order, the first in key order.
   let assert Error(r) =
@@ -215,7 +218,8 @@ pub fn entries_keep_the_order_sent_test() {
 }
 
 pub fn key_order_reads_nested_lists_and_escapes_test() {
-  let order = key_order.of("{\"a\\u00e9\": [{\"y\": 1, \"x\": [2, 3]}], \"b\": null}")
+  let order =
+    key_order.of("{\"a\\u00e9\": [{\"y\": 1, \"x\": [2, 3]}], \"b\": null}")
   assert key_order.keys(order, []) == Some(["aé", "b"])
   assert key_order.keys(order, key_order.steps("aé[0]")) == Some(["y", "x"])
   assert key_order.of("not json") == key_order.Unknown

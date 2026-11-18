@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 5 | 4 | 193 / 248 | 35 / 38 | 7 to go |
+| agents | 9 | 5 | 5 | 193 / 248 | 35 / 38 | 7 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -35,7 +35,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
-| `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  |  | 6 / 115 | 0 / 2 | not answered; 115 cases pending; 2 hand-port calls |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |

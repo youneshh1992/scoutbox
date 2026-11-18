@@ -233,8 +233,18 @@ fn parsed_in_order(
     input.parse_in_order(shape, raw, order, root:, codes: field_codes, default:)
   {
     Ok(v) -> next(v)
-    Error(r) -> domain_errors.send(contract, r.error, input.refusal_fields(r))
+    Error(r) -> input_refusal(r, default)
   }
+}
+
+/// A refusal of the input under this domain's codes: a date's own DATE_INVALID is the schema's code here
+/// (schemas.mjs `complianceParseOptions`).
+pub fn input_refusal(r: input.Refusal, default: String) -> Response {
+  let code = case r.error {
+    "DATE_INVALID" -> default
+    other -> other
+  }
+  domain_errors.send(contract, code, input.refusal_fields(r))
 }
 
 pub fn body(
@@ -578,7 +588,10 @@ pub fn create_reviewer(
   let shape = {
     use new_id <- input.field(
       "id",
-      input.required(input.matching("[a-zA-Z0-9][a-zA-Z0-9-]{2,39}")),
+      input.required(input.matching_said(
+        "[a-zA-Z0-9][a-zA-Z0-9-]{2,39}",
+        "must be 3 to 40 letters, digits or dashes",
+      )),
     )
     use name <- input.field("name", input.required(input.required_text(80)))
     use role <- input.field(

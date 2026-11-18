@@ -76,6 +76,7 @@ pub const policy = [
   #("compliance_consent_request", consent_request_policy),
   #("compliance_consent_response", consent_request_policy),
   #("ts_review_decision", review_decision_policy),
+  #("ts_policy_publish", policy_publish_policy),
   #("analytics_read", analytics_read_policy),
   #("brief_write", brief_write_policy),
   #("matching_query", matching_query_policy),
@@ -175,6 +176,8 @@ pub type Action {
   ComplianceConsentResponse
   /// Review decisions by a named reviewer.
   TsReviewDecision
+  /// Policy version proposals by a Trust & Safety administrator.
+  TsPolicyPublish
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
@@ -260,6 +263,8 @@ const consent_request_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const review_decision_policy = Policy(max: 120, window_ms: 3_600_000)
 
+const policy_publish_policy = Policy(max: 10, window_ms: 86_400_000)
+
 fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
@@ -306,6 +311,7 @@ fn action_name(action: Action) -> String {
     ComplianceConsentRequest -> "compliance_consent_request"
     ComplianceConsentResponse -> "compliance_consent_response"
     TsReviewDecision -> "ts_review_decision"
+    TsPolicyPublish -> "ts_policy_publish"
   }
 }
 
@@ -355,6 +361,7 @@ fn action_policy(action: Action) -> Policy {
     ComplianceConsentRequest -> consent_request_policy
     ComplianceConsentResponse -> consent_request_policy
     TsReviewDecision -> review_decision_policy
+    TsPolicyPublish -> policy_publish_policy
   }
 }
 

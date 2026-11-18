@@ -1787,7 +1787,10 @@ pub fn recheck_facet(
           let shape = {
             use ma <- input.field(
               "memberAssociation",
-              input.nullish(input.matching("[A-Za-z]{3}")),
+              input.nullish(input.matching_said(
+                "[A-Za-z]{3}",
+                "must be a three-letter code",
+              )),
             )
             input.done(ma)
           }

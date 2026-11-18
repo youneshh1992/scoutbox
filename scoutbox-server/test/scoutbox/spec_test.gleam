@@ -7,7 +7,9 @@ import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import scoutbox/agents/core_routes
+import scoutbox/agents/policy_routes
 import scoutbox/agents/transaction_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
@@ -204,4 +206,46 @@ pub fn recruitment_analytics_registry_test() {
       decode.at(["FUNNEL_STAGES"], decode.list(decode.string)),
     )
     == funnels.funnel_stages()
+}
+
+/// RULE_PARAMS, whole and in order, with each parameter's type; and TEXT_STATUSES.
+pub fn policy_rule_params_test() {
+  let kind = {
+    use k <- decode.then(decode.dynamic)
+    case
+      decode.run(k, decode.string),
+      decode.run(k, decode.list(decode.string))
+    {
+      Ok(name), _ -> decode.success(name)
+      _, Ok(values) -> decode.success("[" <> string.join(values, "|") <> "]")
+      _, _ -> decode.failure("", "kind")
+    }
+  }
+  let params =
+    snapshot(
+      "agents/compliance/policyVersions.json",
+      decode.at(["RULE_PARAMS"], decode.dict(decode.string, kind)),
+    )
+  let name = fn(k: policy_routes.Kind) {
+    case k {
+      policy_routes.Flag -> "flag"
+      policy_routes.Count -> "count"
+      policy_routes.Text -> "text"
+      policy_routes.Day -> "date"
+      policy_routes.MonthDay -> "monthDay"
+      policy_routes.TextList -> "textList"
+      policy_routes.RoleSets -> "roleSets"
+      policy_routes.AgeMap -> "ageMap"
+      policy_routes.OneOf(values) -> "[" <> string.join(values, "|") <> "]"
+    }
+  }
+  let ported = list.map(policy_routes.rule_params, fn(p) { #(p.0, name(p.1)) })
+  assert dict.from_list(ported) == params
+  assert list.length(ported) == dict.size(params)
+  let statuses =
+    snapshot(
+      "agents/compliance/policyVersions.json",
+      decode.at(["TEXT_STATUSES"], decode.list(decode.string)),
+    )
+  assert list.map(policy_routes.text_statuses, fn(p) { p.0 }) == statuses
 }

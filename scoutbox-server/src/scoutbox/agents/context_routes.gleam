@@ -349,7 +349,7 @@ pub fn create_context(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
     use jurisdictions <- input.field(
       "jurisdictions",
       input.required(input.items_between(
-        input.matching("[A-Za-z]{3}"),
+        input.matching_said("[A-Za-z]{3}", "must be a three-letter code"),
         1,
         jurisdictions_max,
       )),
@@ -888,7 +888,7 @@ fn declare_checked(
       }
       // Safeguarding before scope, so it cannot be told apart from "no such party" by a later refusal.
       case seen {
-        Some(#(pl, access)) if access.visible ->
+        Some(#(pl, access)) if access.visible && !access.blocked ->
           case players.is_adult(pl, now) {
             False -> Error(compliance.bare("PARTY_NOT_FOUND", []))
             True ->
@@ -999,7 +999,7 @@ fn declare_in_unit(
             list.filter(e.reasons, fn(r) { list.contains(codes, r.row.code) })
           }
           let reasons = fn(rs) {
-            #("reasons", json.array(rs, context_view.reason_json))
+            #("reasons", json.array(rs, context_view.public_reason_json))
           }
           let policy_versions = #(
             "policyVersions",
@@ -1046,10 +1046,6 @@ fn declare_in_unit(
                     json.array(e.outstanding, fn(o) {
                       json.object([
                         #("partyRole", json.string(o.party_role)),
-                        #(
-                          "agentUserId",
-                          json.nullable(o.agent_user_id, json.string),
-                        ),
                         #("consentKind", json.string(o.consent_kind)),
                         #("reasonCode", json.string(o.reason_code)),
                       ])

@@ -12,6 +12,7 @@ import scoutbox/agents/compliance_routes as compliance
 import scoutbox/agents/context_routes
 import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
+import scoutbox/agents/policy_routes
 import scoutbox/agents/review_routes
 import scoutbox/agents/transaction_party_routes as party_lanes
 import scoutbox/agents/transaction_routes
@@ -1329,6 +1330,17 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["compliance", "audit"] ->
           only(req, Get, fn() { compliance.audit(ctx) })
+        ["compliance", "policies"] ->
+          case req.method {
+            Get -> policy_routes.ts_list(ctx)
+            Post -> policy_routes.propose(ctx, req, reviewer)
+            _ -> not_found()
+          }
+        ["compliance", "policies", pid, "approve"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            policy_routes.approve(ctx, req, reviewer, pid)
+          })
         ["compliance", "metrics"] ->
           only(req, Get, fn() { compliance.metrics(ctx) })
         ["compliance", "reviews", rid] ->
@@ -1368,6 +1380,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["verification", ..path] -> verification_admin(ctx, req, path)
         ["compliance", "reviews"] ->
           only(req, Get, fn() { compliance.admin_review_queue(ctx, req) })
+        ["compliance", "policies"] ->
+          only(req, Get, fn() { policy_routes.admin_list(ctx) })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.admin_relationships(ctx, req) })
         ["agent", "profiles"] ->
@@ -1694,6 +1708,8 @@ fn agent_org(
         Post -> agent.save_profile(ctx, req, org)
         _ -> not_found()
       }
+    ["compliance", "policies"] ->
+      only(req, Get, fn() { policy_routes.agent_policies(ctx, org) })
     ["compliance", "overview"] ->
       only(req, Get, fn() { compliance_overview.overview(ctx, org) })
     ["compliance", "contexts"] ->

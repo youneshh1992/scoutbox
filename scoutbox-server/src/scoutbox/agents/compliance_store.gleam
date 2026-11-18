@@ -143,10 +143,11 @@ pub type Detail {
     evaluation_id: Option(id.EvaluationId),
     review_id: Option(id.RegulatoryReviewId),
     review_outcome: Option(event_row.DetailReviewOutcome),
+    policy_version: Option(id.PolicyId),
   )
 }
 
-pub const no_detail = Detail(None, None, None, None, None, None)
+pub const no_detail = Detail(None, None, None, None, None, None, None)
 
 /// One history entry of an agent's act on a context.
 pub fn event(
@@ -185,6 +186,7 @@ pub fn event(
       detail_evaluation_id: detail.evaluation_id,
       detail_review_id: detail.review_id,
       detail_review_outcome: detail.review_outcome,
+      detail_policy_version_id: detail.policy_version,
     ),
   )
 }
@@ -619,7 +621,7 @@ pub fn engine_input(
           })
           let #(gone, minor) = case found {
             Some(#(player, access)) -> #(
-              !access.visible,
+              !access.visible || access.blocked,
               !players.is_adult(player, now),
             )
             None -> #(True, False)

@@ -2,8 +2,6 @@
 //// never what was said. A player is named only while the organisation may see them; a reviewer appears as a role.
 ////
 //// The transaction workspace's rows come from its own module (`transaction_ts_routes.agency_rows`).
-////
-//// Not ported yet: compliance contexts' and consents' rows.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -15,6 +13,8 @@ import gleam/result
 import gleam/string
 import scoutbox/agents/agent_rules.{type Agreement}
 import scoutbox/agents/agent_store
+import scoutbox/agents/compliance_store
+import scoutbox/agents/context_view
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/players
 import scoutbox/platform/store.{type Fail, type Read}
@@ -22,7 +22,10 @@ import scoutbox/rows/agency_affiliation_history as affiliation_event_row
 import scoutbox/rows/agent_profile_history as profile_event_row
 import scoutbox/rows/agreement_history as event_row
 import scoutbox/rows/agreement_scopes as scope_row
+import scoutbox/rows/compliance_context_history as context_event_row
 import scoutbox/rows/id
+import scoutbox/rows/regulatory_consent_history as consent_event_row
+import scoutbox/rows/regulatory_consents as consent_row
 import scoutbox/rows/regulatory_review_history as review_event_row
 import scoutbox/rows/regulatory_reviews as review_row
 import scoutbox/vocab/agency_tier
@@ -32,6 +35,7 @@ import scoutbox/vocab/agreement_status
 import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
+import scoutbox/vocab/party_role
 import scoutbox/vocab/terminator
 
 /// One row of the feed: its id and instant (the sort key) and its fields.
@@ -165,7 +169,9 @@ pub fn rows(read: Read, org: Org, now: Int) -> Result(List(Row), Fail(e)) {
       })
     }),
   )
-  use review_rows <- result.map(review_rows(read, org))
+  use review_rows <- result.try(review_rows(read, org))
+  use context_rows <- result.try(context_rows(read, org))
+  use consent_rows <- result.map(consent_rows(read, org))
   let profile_rows =
     list.flat_map(profiles, fn(p) {
       list.map(p.history, fn(h) {
@@ -188,7 +194,9 @@ pub fn rows(read: Read, org: Org, now: Int) -> Result(List(Row), Fail(e)) {
     profile_rows,
     list.flatten(affiliation_rows),
     list.flatten(agreement_rows),
+    context_rows,
     review_rows,
+    consent_rows,
   ])
   |> newest_first
 }
@@ -317,12 +325,21 @@ fn review_rows(read: Read, org: Org) -> Result(List(Row), Fail(e)) {
         [rid],
         decode.at([0], decode.string),
       ))
-      use versions <- result.map(store.query(
+      use versions <- result.try(store.query(
         read,
         "SELECT policy_version_id FROM regulatory_review_policy_versions WHERE review_id = ? ORDER BY ord",
         [rid],
         decode.at([0], decode.string),
       ))
+      use evidence <- result.map(
+        store.one(
+          read,
+          "SELECT COUNT(*) FROM regulatory_review_evidence_refs WHERE review_id = ?",
+          [rid],
+          decode.at([0], decode.int),
+        )
+        |> result.map(result.unwrap(_, 0)),
+      )
       list.map(history, fn(h) {
         row(
           id.review_event_to_string(h.id),
@@ -345,8 +362,29 @@ fn review_rows(read: Read, org: Org) -> Result(List(Row), Fail(e)) {
                   #("reasonCodes", json.array(list.unique(codes), json.string)),
                 ]
               }
-            // Not ported yet: the reviewer's acts (started, resolved, cancelled, superseded).
-            _ -> []
+            review_event_row.RegulatoryReviewResolved ->
+              safe([
+                #(
+                  "outcome",
+                  json.nullable(
+                    r.decision_outcome,
+                    review_row.decision_outcome_to_json,
+                  ),
+                ),
+                #("policyVersions", json.array(versions, json.string)),
+                #("evidenceCount", json.int(evidence)),
+              ])
+            review_event_row.RegulatoryReviewCancelled ->
+              case h.detail_rev {
+                Some(_) -> [#("outcome", json.string("CANCELLED"))]
+                None -> []
+              }
+            review_event_row.RegulatoryReviewSuperseded ->
+              case h.detail_review_id {
+                Some(other) -> [#("reviewId", id.regulatory_review_json(other))]
+                None -> []
+              }
+            review_event_row.RegulatoryReviewStarted -> []
           },
         )
       })
@@ -356,23 +394,164 @@ fn review_rows(read: Read, org: Org) -> Result(List(Row), Fail(e)) {
 }
 
 fn compliance_actor(h: review_event_row.Row) -> Json {
+  compliance_actor_of(h.by_kind, h.by_id, h.by_name)
+}
+
+fn compliance_actor_of(
+  kind: compliance_actor_kind.ComplianceActorKind,
+  by_id: Option(String),
+  by_name: Option(String),
+) -> Json {
+  let h = #(by_id, by_name)
   let anon = fn(name) {
     json.object([#("userId", json.null()), #("name", json.string(name))])
   }
-  case h.by_kind {
+  case kind {
     compliance_actor_kind.Org ->
       json.object([
-        #("userId", json.nullable(h.by_id, json.string)),
-        #("name", json.nullable(h.by_name, json.string)),
+        #("userId", json.nullable(h.0, json.string)),
+        #("name", json.nullable(h.1, json.string)),
       ])
     compliance_actor_kind.TsReviewer ->
       json.object([
         #("userId", json.null()),
         #("name", json.string("Trust & Safety (attributed)")),
-        #("reviewerId", json.nullable(h.by_id, json.string)),
+        #("reviewerId", json.nullable(h.0, json.string)),
       ])
     compliance_actor_kind.Player -> anon("Player")
     compliance_actor_kind.ClubUser -> anon("Club signatory")
-    compliance_actor_kind.System -> anon(option.unwrap(h.by_name, "system"))
+    compliance_actor_kind.System -> anon(option.unwrap(h.1, "system"))
   }
+}
+
+/// The detail keys the agency feed may carry, in this order (compliance/audit.mjs `safeDetail`): never a reason
+/// text, a note or another party's agent.
+const safe_keys = [
+  "outcome", "partyRole", "kind", "status", "from", "to", "facet",
+  "memberAssociation", "state", "policyVersions", "reasonCodes", "reviewId",
+  "consentId", "contextId", "hadReason", "evidenceCount", "type",
+]
+
+fn safe(fields: List(#(String, Json))) -> List(#(String, Json)) {
+  list.filter_map(safe_keys, fn(k) {
+    list.key_find(fields, k) |> result.map(fn(v) { #(k, v) })
+  })
+}
+
+/// The actions of a context or consent the feed shows (`COMPLIANCE_AUDIT_ACTIONS`).
+fn shown(action: String) -> Bool {
+  !list.contains(
+    ["compliance_context_party_removed", "compliance_context_policy_changed"],
+    action,
+  )
+}
+
+/// The agency's compliance contexts' entries.
+fn context_rows(read: Read, org: Org) -> Result(List(Row), Fail(e)) {
+  use ids <- result.try(store.query(
+    read,
+    "SELECT id FROM compliance_contexts WHERE agency_org_id = ? ORDER BY rowid",
+    [id.org_sql(org.id)],
+    decode.at([0], id.compliance_context_decoder()),
+  ))
+  use per <- result.map(
+    list.try_map(ids, fn(cid) {
+      use found <- result.try(compliance_store.by_id(read, cid))
+      case found {
+        None -> Ok([])
+        Some(c) -> {
+          use history <- result.try(store.query(
+            read,
+            "SELECT "
+              <> context_event_row.columns
+              <> " FROM compliance_context_history WHERE context_id = ? ORDER BY ord",
+            [id.compliance_context_sql(cid)],
+            context_event_row.decoder(),
+          ))
+          list.filter(history, fn(h) {
+            shown(context_event_row.action_to_string(h.action))
+          })
+          |> list.try_map(fn(h) {
+            use fields <- result.map(context_view.event_fields(read, c, h))
+            row(
+              id.context_event_to_string(h.id),
+              h.at,
+              context_event_row.action_to_json(h.action),
+              "compliance",
+              compliance_actor_of(h.by_kind, h.by_id, h.by_name),
+              json.object([
+                #("type", json.string("compliance_context")),
+                #("id", id.compliance_context_json(c.row.id)),
+                #("agentUserId", id.org_user_json(c.row.agent_user_id)),
+              ]),
+              safe(fields),
+            )
+          })
+        }
+      }
+    }),
+  )
+  list.flatten(per)
+}
+
+/// The agency's consents' entries. A revocation is recorded once, on its consent.
+fn consent_rows(read: Read, org: Org) -> Result(List(Row), Fail(e)) {
+  use consents <- result.try(store.query(
+    read,
+    "SELECT "
+      <> consent_row.columns
+      <> " FROM regulatory_consents WHERE agency_org_id = ? ORDER BY rowid",
+    [id.org_sql(org.id)],
+    consent_row.decoder(),
+  ))
+  use per <- result.map(
+    list.try_map(consents, fn(k) {
+      let kid = id.consent_sql(k.id)
+      use history <- result.try(store.query(
+        read,
+        "SELECT "
+          <> consent_event_row.columns
+          <> " FROM regulatory_consent_history WHERE consent_id = ? ORDER BY ord",
+        [kid],
+        consent_event_row.decoder(),
+      ))
+      use versions <- result.map(store.query(
+        read,
+        "SELECT policy_version_id FROM regulatory_consent_policy_versions WHERE consent_id = ? ORDER BY ord",
+        [kid],
+        decode.at([0], decode.string),
+      ))
+      let role = #("partyRole", party_role.to_json(k.party_role))
+      let pvs = #("policyVersions", json.array(versions, json.string))
+      list.map(history, fn(h) {
+        row(
+          id.consent_event_to_string(h.id),
+          h.at,
+          consent_event_row.action_to_json(h.action),
+          "compliance",
+          compliance_actor_of(h.by_kind, h.by_id, h.by_name),
+          json.object([
+            #("type", json.string("regulatory_consent")),
+            #("id", id.consent_json(k.id)),
+            #("contextId", id.compliance_context_json(k.context_id)),
+            #("partyRole", party_role.to_json(k.party_role)),
+          ]),
+          safe(case h.action {
+            consent_event_row.RegulatoryConsentRequested -> [
+              role,
+              #("kind", consent_row.kind_to_json(k.kind)),
+              pvs,
+            ]
+            consent_event_row.RegulatoryConsentGranted -> [role, pvs]
+            consent_event_row.RegulatoryConsentDeclined -> [role]
+            consent_event_row.RegulatoryConsentRevoked -> [
+              #("consentId", id.consent_json(k.id)),
+              role,
+            ]
+          }),
+        )
+      })
+    }),
+  )
+  list.flatten(per)
 }

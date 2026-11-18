@@ -311,6 +311,31 @@ pub fn reason_fields_json(x: ReasonFields) -> Json {
   )
 }
 
+/// A reason as a refusal shows it (errors.mjs `publicReason`): the rule, and the party roles it concerns.
+pub fn public_reason_json(r: Reason) -> Json {
+  let x = evaluation_reason(r)
+  json.object(
+    list.flatten([
+      [
+        #("code", json.string(x.code)),
+        #("ruleId", opt(x.rule_id)),
+        #("ruleStatus", json.nullable(x.rule_status, rule_status.to_json)),
+        #("regulator", opt(x.regulator)),
+        #("jurisdiction", opt(x.jurisdiction)),
+        #("policyVersion", json.nullable(x.policy_version, id.policy_json)),
+      ],
+      case x.party_roles {
+        Some(roles) -> [#("partyRoles", json.array(roles, json.string))]
+        None -> []
+      },
+      case x.party_role {
+        Some(role) -> [#("partyRole", json.string(role))]
+        None -> []
+      },
+    ]),
+  )
+}
+
 pub fn reason_json(r: Reason) -> Json {
   reason_fields_json(evaluation_reason(r))
 }
@@ -482,12 +507,12 @@ fn scope_name(jurisdictions: List(String)) -> String {
   }
 }
 
-/// A history entry's detail, as the repository decodes it.
-fn event_detail(
+/// A history entry's detail fields, as the repository decodes them; none is a null detail.
+pub fn event_fields(
   read: Read,
   c: Context,
   h: event_row.Row,
-) -> Result(Json, Fail(e)) {
+) -> Result(List(#(String, Json)), Fail(e)) {
   let role = fn() { json.nullable(h.detail_party_role, party_role.to_json) }
   let linked = fn() {
     case h.detail_evaluation_id {
@@ -503,32 +528,27 @@ fn event_detail(
         [id.context_event_sql(h.id)],
         decode.at([0], id.policy_decoder()),
       ))
-      json.object([
+      [
         #("type", context_type.to_json(c.row.type_)),
         #("policyVersions", json.array(versions, id.policy_json)),
-      ])
+      ]
     }
     event_row.ComplianceContextPartyAdded ->
-      Ok(
-        json.object([
-          #("partyRole", role()),
-          #("kind", json.nullable(h.detail_subject_kind, subject_kind.to_json)),
-        ]),
-      )
-    event_row.ComplianceContextPartyRemoved ->
-      Ok(json.object([#("partyRole", role())]))
+      Ok([
+        #("partyRole", role()),
+        #("kind", json.nullable(h.detail_subject_kind, subject_kind.to_json)),
+      ])
+    event_row.ComplianceContextPartyRemoved -> Ok([#("partyRole", role())])
     event_row.ComplianceRepresentationDeclared ->
       case h.detail_status {
         Some(declared_representation_status.PendingReview) ->
-          Ok(
-            json.object([
-              #("partyRole", role()),
-              #("status", json.string("pending_review")),
-            ]),
-          )
+          Ok([
+            #("partyRole", role()),
+            #("status", json.string("pending_review")),
+          ])
         _ -> {
           use ev <- result.map(linked())
-          json.object([
+          [
             #("partyRole", role()),
             #("status", json.string("verified")),
             #(
@@ -541,82 +561,70 @@ fn event_detail(
                 json.array(e.policy_versions, id.policy_json)
               }),
             ),
-          ])
+          ]
         }
       }
     event_row.ComplianceRepresentationVerified ->
-      Ok(
-        json.object([
-          #("partyRole", role()),
-          #(
-            "reviewId",
-            json.nullable(h.detail_review_id, id.regulatory_review_json),
-          ),
-        ]),
-      )
+      Ok([
+        #("partyRole", role()),
+        #(
+          "reviewId",
+          json.nullable(h.detail_review_id, id.regulatory_review_json),
+        ),
+      ])
     event_row.ComplianceRepresentationWithdrawn ->
-      Ok(
-        json.object([
-          #("partyRole", role()),
-          ..case h.detail_review_id {
-            Some(r) -> [#("reviewId", id.regulatory_review_json(r))]
-            None -> []
-          }
-        ]),
-      )
+      Ok([
+        #("partyRole", role()),
+        ..case h.detail_review_id {
+          Some(r) -> [#("reviewId", id.regulatory_review_json(r))]
+          None -> []
+        }
+      ])
     event_row.ComplianceContextEvaluated ->
       case h.detail_review_id {
         Some(r) ->
-          Ok(
-            json.object([
-              #("reviewId", id.regulatory_review_json(r)),
-              #(
-                "outcome",
-                json.nullable(
-                  h.detail_review_outcome,
-                  event_row.detail_review_outcome_to_json,
-                ),
+          Ok([
+            #("reviewId", id.regulatory_review_json(r)),
+            #(
+              "outcome",
+              json.nullable(
+                h.detail_review_outcome,
+                event_row.detail_review_outcome_to_json,
               ),
-            ]),
-          )
+            ),
+          ])
         None -> {
           use ev <- result.map(linked())
           case ev {
-            None -> json.null()
-            Some(e) ->
-              json.object([
-                #("outcome", context_outcome.to_json(e.row.outcome)),
-                #(
-                  "reasonCodes",
-                  json.array(
-                    codes_among(
-                      e.reasons,
-                      list.map(e.reasons, fn(x) { x.row.code }),
-                    ),
-                    json.string,
+            None -> []
+            Some(e) -> [
+              #("outcome", context_outcome.to_json(e.row.outcome)),
+              #(
+                "reasonCodes",
+                json.array(
+                  codes_among(
+                    e.reasons,
+                    list.map(e.reasons, fn(x) { x.row.code }),
                   ),
+                  json.string,
                 ),
-                #(
-                  "policyVersions",
-                  json.array(e.policy_versions, id.policy_json),
-                ),
-              ])
+              ),
+              #("policyVersions", json.array(e.policy_versions, id.policy_json)),
+            ]
           }
         }
       }
     event_row.ComplianceContextPolicyChanged ->
-      Ok(
-        json.object([
-          #(
-            "policyVersions",
-            json.array(
-              option.values([h.detail_policy_version_id]),
-              id.policy_json,
-            ),
+      Ok([
+        #(
+          "policyVersions",
+          json.array(
+            option.values([h.detail_policy_version_id]),
+            id.policy_json,
           ),
-        ]),
-      )
-    event_row.ComplianceContextClosed -> Ok(json.null())
+        ),
+      ])
+    event_row.ComplianceContextClosed -> Ok([])
   }
 }
 
@@ -630,13 +638,16 @@ fn history(read: Read, c: Context) -> Result(List(Json), Fail(e)) {
     event_row.decoder(),
   ))
   list.try_map(rows, fn(h) {
-    use detail <- result.map(event_detail(read, c, h))
+    use detail <- result.map(event_fields(read, c, h))
     json.object([
       #("id", id.context_event_json(h.id)),
       #("at", json.int(h.at)),
       #("action", event_row.action_to_json(h.action)),
       #("byKind", compliance_actor_kind.to_json(h.by_kind)),
-      #("detail", detail),
+      #("detail", case detail {
+        [] -> json.null()
+        _ -> json.object(detail)
+      }),
     ])
   })
 }
@@ -662,7 +673,8 @@ fn party_name(
         now,
       ))
       case found {
-        Some(#(p, access)) if access.visible -> Some(p.row.name)
+        Some(#(p, access)) if access.visible && !access.blocked ->
+          Some(p.row.name)
         _ -> None
       }
     }

@@ -912,6 +912,17 @@ pub fn items_between(item: Check(a), min: Int, max: Int) -> Check(List(a)) {
   }
 }
 
+/// `matching`, refused with the schema's own words (valibot's `regex(pattern, message)`).
+pub fn matching_said(pattern: String, phrase: String) -> Check(String) {
+  let check = matching(pattern)
+  fn(v) {
+    case check(v) {
+      Error(e) if e.problem == Invalid -> Error(Issue(..e, phrase:))
+      other -> other
+    }
+  }
+}
+
 /// Text that matches `pattern` in full; anything else is not valid (valibot's `regex`).
 pub fn matching(pattern: String) -> Check(String) {
   let assert Ok(re) = regexp.from_string("^(?:" <> pattern <> ")$")
