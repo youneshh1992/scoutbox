@@ -9,8 +9,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { agreementInForce } from '../../domains/agents/core/shared.mjs';
-import { EVENT_REGISTRY, isRegistered } from '../../domains/platform/eventRegistry.mjs';
+import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = Number(process.env.PORT || 4141);
@@ -251,11 +250,6 @@ section('RA — no non-active relationship is active Trust evidence, in either l
       `RA6 ${label}: contributes nothing to Trust (${base?.detail?.distinct} → ${after?.detail?.distinct})`,
     );
   }
-
-  ok(
-    !agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2),
-    'RA9 and a NAMED individual: a row naming nobody counts for nothing',
-  );
 }
 
 // ================================================ RB — Passport / evidence
@@ -915,6 +909,8 @@ section('RL — a count, a total and a cursor reveal nothing a projection withhe
 // ============================================ RM — the event registry, whole
 section('RM — the cross-app events, as the registry declares them');
 {
+  const EVENT_REGISTRY = eventRegistrySpec.EVENT_REGISTRY;
+  const isRegistered = (n) => Object.prototype.hasOwnProperty.call(EVENT_REGISTRY, n);
   // Every broadcast refuses, outside production, an event the registry does not declare or a key it does not allow
   // (liveSync.mjs), so what the server emits is checked where it is emitted. Here: the five cross-app declarations.
   const p56e = [
@@ -943,13 +939,6 @@ section('RM — the cross-app events, as the registry declares them');
       `RM9 ${n}: it declares an audience (${def.audience})`,
     );
   }
-  // And the contract itself still holds, run exactly as boot runs it.
-  const { assertEventRegistry } = await import('../../domains/platform/eventRegistry.mjs');
-  const problems = assertEventRegistry({ mode: 'production' });
-  neg(
-    problems.length === 0,
-    `RM10 and the production registry contract reports no problems at all (${problems.join(' | ') || 'none'})`,
-  );
 }
 
 // ================================================= RN — demo / dev boundaries

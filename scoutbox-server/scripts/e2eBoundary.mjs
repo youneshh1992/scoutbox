@@ -24,7 +24,6 @@ export const TYPESCRIPT_ONLY = [
 export const NOT_YET_NEUTRAL = [
   'agents/adversarial',
   'agents/crossApp',
-  'agents/crossAppAdversarial',
   'development/boxCam',
   'development/combine',
   'development/hub',
