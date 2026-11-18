@@ -117,3 +117,6 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 `scoutbox-server/e2e/` holds copies made by `e2e/sync.mjs`. Never edit a copy: edit the source battery in the
 TypeScript tree and re-sync. To port a battery, port its routes, add it to `e2e/batteries.mjs`, run
 `npm run e2e:sync`, then `npm run e2e`. `npm run e2e:check` fails when a copy has drifted from its source.
+
+While developing, run only the batteries the change touches: `npm run e2e -- platform/staff`, or a whole domain
+with `npm run e2e -- recruitment`. Run every battery (`npm run e2e`) once, just before committing.
