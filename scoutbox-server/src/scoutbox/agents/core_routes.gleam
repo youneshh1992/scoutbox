@@ -6,8 +6,11 @@
 //// not a verified licence; the client's confirmation, and only that, is the root of a relationship. The shared
 //// Trust & Safety key adjudicates nothing: no `/admin` route here writes.
 ////
-//// Not ported yet: the attributed reviewer lane (`/ts/…`) that decides a facet or a dispute, the integration layer
-//// (opportunity shares, contact routing, handoffs) and the transaction workspace's rows in the agency audit.
+//// The integration layer's routes (contacts, trials and opportunity shares across the seam) are in
+//// `agents/integration_routes`, and the handoffs in `agents/handoffs`.
+////
+//// Not ported yet: the attributed reviewer lane (`/ts/…`) that decides a facet or a dispute, and the transaction
+//// workspace's rows in the agency audit.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -149,7 +152,7 @@ fn read(ctx: Ctx, f: fn(Read) -> Result(a, Fail(e))) -> Result(a, Response) {
 }
 
 /// Reads, then continues with the value or answers the storage failure.
-fn reading(
+pub fn reading(
   ctx: Ctx,
   f: fn(Read) -> Result(a, Fail(e)),
   next: fn(a) -> Response,
@@ -161,7 +164,7 @@ fn reading(
 }
 
 /// A unit whose refusals are responses.
-fn act(
+pub fn act(
   ctx: Ctx,
   work: fn(Tx) -> Result(a, Fail(Response)),
   next: fn(a) -> Response,
@@ -169,11 +172,12 @@ fn act(
   case store.unit(ctx.store, work) {
     Ok(v) -> next(v)
     Error(store.Refused(response)) -> response
+    Error(store.Lost(what)) -> http.stale(what)
     Error(failure) -> http.internal(failure)
   }
 }
 
-fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
+pub fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   case r {
     Ok(v) -> Ok(v)
     Error(store.Storage(e)) -> Error(store.Storage(e))
@@ -191,7 +195,7 @@ fn rate_limited(action: limits.Action) -> Response {
   )
 }
 
-fn limited(
+pub fn limited(
   ctx: Ctx,
   action: limits.Action,
   owner: String,
@@ -234,11 +238,44 @@ fn parsed_in_order(
   default: String,
   next: fn(a) -> Response,
 ) -> Response {
+  case read_input(shape, raw, order, root, default) {
+    Ok(v) -> next(v)
+    Error(r) -> refuse(r.error, input.refusal_fields(r))
+  }
+}
+
+/// The input read with the agent contract's field codes. A field's own code is for a field the request declares
+/// (`declaredCodes`), so a top-level field it does not take is refused under the default, whatever its name.
+fn read_input(
+  shape: input.Shape(a),
+  raw: Dynamic,
+  order: key_order.KeyOrder,
+  root: String,
+  default: String,
+) -> Result(a, input.Refusal) {
   case
     input.parse_in_order(shape, raw, order, root:, codes: field_codes, default:)
   {
+    Error(input.Refusal(problem: input.UnknownField, field:, ..) as r) ->
+      case string.contains(field, ".") || string.contains(field, "[") {
+        True -> Error(r)
+        False -> Error(input.Refusal(..r, error: default))
+      }
+    other -> other
+  }
+}
+
+/// The body read with `shape` and the agent contract's codes, refused as a plain input refusal (`inputOrRefuse`):
+/// what the integration routes answer, without the contract's `ok`.
+pub fn plain_body(
+  req: Request,
+  shape: input.Shape(a),
+  next: fn(a) -> Response,
+) -> Response {
+  use raw, order <- http.json_body_in_order(req)
+  case read_input(shape, raw, order, "body", "AGENT_INPUT_INVALID") {
     Ok(v) -> next(v)
-    Error(r) -> refuse(r.error, input.refusal_fields(r))
+    Error(r) -> http.json(400, json.object(input.refusal_fields(r)))
   }
 }
 
@@ -283,14 +320,14 @@ const id_max = 80
 const name_max = 200
 
 /// A client key: absent, null or blank is none; anything else is at most 64 characters once trimmed.
-fn client_key_field(
+pub fn client_key_field(
   next: fn(Option(String)) -> input.Shape(a),
 ) -> input.Shape(a) {
   use raw <- input.field("clientKey", input.nullish(input.text(1_000_000)))
   next(raw)
 }
 
-fn client_key(
+pub fn client_key(
   raw: Option(String),
   next: fn(Option(String)) -> Response,
 ) -> Response {
@@ -329,13 +366,13 @@ fn tiers_check() -> input.Check(List(AgencyTier)) {
   input.distinct_list(input.one_of(agency_tier.pairs), 1)
 }
 
-fn fingerprint(fields: List(#(String, canonical.Value))) -> String {
+pub fn fingerprint(fields: List(#(String, canonical.Value))) -> String {
   canonical.to_string(canonical.Object(fields))
 }
 
 // -------------------------------------------------------------------------------------------------- actors
 
-fn by_org(a: OrgAccess) -> Actor {
+pub fn by_org(a: OrgAccess) -> Actor {
   Actor(
     agent_actor_kind.Org,
     Some(id.org_user_to_string(a.user.id)),
@@ -4130,6 +4167,15 @@ pub fn sharing(
             option.map(v, fn(b) { #(name, sqlight.bool(b)) })
           }
           use updated <- act(ctx, fn(tx) {
+            // The rev was checked before the unit; another request may have moved it since.
+            use current <- result.try(
+              agent_store.agreement_by_id(store.reading(tx), x.row.id)
+              |> storage,
+            )
+            use _ <- result.try(case current {
+              Some(c) if c.row.rev == x.row.rev -> Ok(Nil)
+              _ -> store.stale("the relationship's sharing changed")
+            })
             use _ <- result.try(
               agent_store.set_agreement(
                 tx,

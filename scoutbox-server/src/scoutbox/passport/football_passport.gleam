@@ -8,7 +8,10 @@
 //// Not ported yet: every other source of the Passport (verification claims, references, footage evidence,
 //// squads, signings and career entries, achievements, development objectives, applications, transitions, agents,
 //// Box Cam's sessions, challenges and Combine results, position history and the Passport preferences), its
-//// revision fingerprint, completeness, status and conflicts, and every viewer but the player.
+//// revision fingerprint, completeness, status and conflicts, and every viewer but the player and a club. A club's
+//// view (`/org/players/:id/football-passport`) has the player, the viewer and the representation in force; its
+//// timeline, club history, evidence, references, achievements, the club's own assessments and trials, and the
+//// rest of `status` are not ported yet.
 
 import gleam/dict
 import gleam/int
@@ -18,9 +21,13 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
 import gleam/string
+import scoutbox/agents/agent_rules
+import scoutbox/agents/agent_store
 import scoutbox/app.{type Ctx}
-import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/orgs as org_store
+import scoutbox/identity/players
+import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store.{type Fail, type Read}
@@ -28,10 +35,14 @@ import scoutbox/platform/temporal
 import scoutbox/recruitment/room_view
 import scoutbox/recruitment/trial_rules.{type Trial}
 import scoutbox/recruitment/trials
+import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/trial_attendance as attendance_row
 import scoutbox/rules/age
+import scoutbox/safety/ledger
+import scoutbox/vocab/org_type
 import scoutbox/vocab/playing_level
 import scoutbox/vocab/position
 import wisp.{type Response}
@@ -302,5 +313,151 @@ pub fn player_view(ctx: Ctx, a: PlayerAccess) -> Response {
           ),
         ]),
       )
+  }
+}
+
+/// The representation a club may read on the Passport: the first agreement in force (the access predicate's own
+/// rule, so a mandate that has not started is not the headline), named by its agency and agent.
+fn representation(
+  read: Read,
+  player_id: id.PlayerId,
+  now: Int,
+) -> Result(Json, Fail(e)) {
+  use agreements <- result.try(agent_store.agreements_for_client(
+    read,
+    id.player_to_string(player_id),
+  ))
+  case list.find(agreements, fn(a) { agent_rules.in_force(a.row, now) }) {
+    Error(Nil) -> Ok(json.null())
+    Ok(a) -> {
+      use profile <- result.try(agent_store.profile_for_user(
+        read,
+        a.row.agent_user_id,
+      ))
+      use agent_name <- result.try(case profile {
+        Some(p) -> Ok(Some(p.row.display_name))
+        None ->
+          staff.by_id(read, a.row.agent_user_id)
+          |> result.map(option.map(_, fn(u) { u.name }))
+      })
+      use agency <- result.map(org_store.by_id(read, a.row.agency_org_id))
+      json.object([
+        #(
+          "agencyName",
+          json.nullable(option.map(agency, fn(o) { o.name }), json.string),
+        ),
+        #("agentDisplayName", json.nullable(agent_name, json.string)),
+        #("scope", json.array(a.scope, scope_row.scope_to_json)),
+        #(
+          "since",
+          json.nullable(
+            option.or(a.row.confirmed_at, a.row.start_at)
+              |> option.map(clock.iso_day),
+            json.string,
+          ),
+        ),
+        #("source", json.string("canonical")),
+      ])
+    }
+  }
+}
+
+/// `GET /org/players/:id/football-passport`: recorded on the Discovery Ledger as a recruitment view.
+pub fn org_view(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
+  let now = clock.now_ms()
+  case store.read(ctx.store, players.for_org(_, player_id, a.org, now)) {
+    Error(e) -> http.internal(e)
+    Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
+    Ok(Some(#(p, seen))) ->
+      case seen.visible && !seen.blocked {
+        False ->
+          http.error(403, case a.org.type_, players.is_adult(p, now) {
+            org_type.Agency, False -> "UNDER_18_WALL"
+            _, _ -> "NOT_VISIBLE"
+          })
+        True -> {
+          let viewed =
+            store.unit(ctx.store, fn(tx) {
+              ledger.append(
+                tx,
+                ledger.Entry(
+                  entry_type: ledger_row.PassportRecruitmentView,
+                  player_id: Some(p.row.id),
+                  org_id: Some(a.org.id),
+                  org_name: Some(a.org.name),
+                  user_id: Some(a.user.id),
+                  actor_name: Some(a.user.name),
+                ),
+                now,
+              )
+            })
+          case viewed {
+            Error(e) -> http.internal(e)
+            Ok(_) -> org_passport(ctx, a, p, now)
+          }
+        }
+      }
+  }
+}
+
+fn org_passport(
+  ctx: Ctx,
+  a: OrgAccess,
+  p: players.Player,
+  now: Int,
+) -> Response {
+  case store.read(ctx.store, representation(_, p.row.id, now)) {
+    Error(e) -> http.internal(e)
+    Ok(rep) -> {
+      let adult = players.is_adult(p, now)
+      let viewer = case a.org.type_ {
+        org_type.Agency -> "agency"
+        _ -> "pro_club"
+      }
+      // A minor's representation is shown only to an agency, as on the TypeScript server.
+      let rep = case viewer == "agency" || adult {
+        True -> rep
+        False -> json.null()
+      }
+      http.json(
+        200,
+        json.object([
+          #("passportVersion", json.int(1)),
+          #(
+            "player",
+            json.object([
+              #("id", id.player_json(p.row.id)),
+              #("name", json.string(p.row.name)),
+              #(
+                "age",
+                json.nullable(age.age_on(p.row.birth_date, now), json.int),
+              ),
+              #(
+                "position",
+                json.nullable(
+                  option.map(p.row.position, position.to_string),
+                  json.string,
+                ),
+              ),
+              // A minor's location is stripped from every organisation's view.
+              #("location", case adult {
+                True -> json.nullable(p.row.city, json.string)
+                False -> json.null()
+              }),
+              #("level", playing_level.to_json(p.row.level)),
+            ]),
+          ),
+          #(
+            "note",
+            json.string(
+              "A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.",
+            ),
+          ),
+          #("viewer", json.string(viewer)),
+          #("status", json.object([#("representation", rep)])),
+          #("representation", rep),
+        ]),
+      )
+    }
   }
 }

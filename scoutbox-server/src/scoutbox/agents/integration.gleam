@@ -2,15 +2,20 @@
 //// `decide` seam in index.mjs): facts read from canonical records, a decision with a reason code out. Every surface
 //// fails closed: a missing fact or an unrecognised scope denies.
 ////
-//// Not ported yet: the compliance answer for a regulated surface (`compliance.clearFor`), so a regulated surface
-//// reads it as "not evaluated", which is not clear; and the explicit Passport and evidence shares, which nothing
-//// writes, so a surface that needs one refuses with SHARE_REQUIRED, as on the TypeScript server.
+//// A regulated surface asks the compliance engine whether the agent is clear for its policy action in the
+//// agreement's jurisdiction (`compliance.clearFor`). Every surface's action (`approach_adult`, or
+//// `declare_representation` for a transaction) is evaluated there without an exclusivity window, so both are
+//// `compliance_store.clear_to_declare`.
+////
+//// The explicit Passport and evidence shares are written by nothing, so a surface that needs one refuses with
+//// SHARE_REQUIRED, as on the TypeScript server.
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/agents/agent_rules
 import scoutbox/agents/agent_store
+import scoutbox/agents/compliance_store
 import scoutbox/identity/players
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/agreement_scopes as scope_row
@@ -192,16 +197,22 @@ pub fn decide(
           case s.regulated {
             False -> Ok(Allowed(a))
             True -> {
-              use current <- result.map(licence_current(
+              use current <- result.try(licence_current(
                 read,
                 agent,
                 a.row.jurisdiction,
                 now,
               ))
-              case current {
-                False -> Denied("LICENCE_NOT_CURRENT", "LICENCE")
-                // Not ported yet: the compliance layer's answer; "not evaluated" is not clear.
-                True -> Denied("COMPLIANCE_NOT_CLEAR", "COMPLIANCE")
+              use <- guard(current, Denied("LICENCE_NOT_CURRENT", "LICENCE"))
+              use clear <- result.map(compliance_store.clear_to_declare(
+                read,
+                agent,
+                jurisdiction.to_string(a.row.jurisdiction),
+                now,
+              ))
+              case clear {
+                True -> Allowed(a)
+                False -> Denied("COMPLIANCE_NOT_CLEAR", "COMPLIANCE")
               }
             }
           }

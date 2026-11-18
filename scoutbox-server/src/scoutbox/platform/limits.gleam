@@ -68,6 +68,7 @@ pub const policy = [
   #("agent_affiliation_write", agent_affiliation_write_policy),
   #("agent_client_response", agent_client_response_policy),
   #("transaction_handoff", transaction_handoff_policy),
+  #("opportunity_share", opportunity_share_policy),
   #("transaction_write", transaction_write_policy),
   #("transaction_note_write", transaction_note_write_policy),
   #("transaction_status_write", transaction_write_policy),
@@ -160,6 +161,8 @@ pub type Action {
   AgentClientResponse
   /// Transaction-workspace invitations a club issues from a case, and their withdrawals, per organisation.
   TransactionHandoff
+  /// Opportunities an agent shares with clients, and shares withdrawn, per agent.
+  OpportunityShare
   /// Transactions opened and changed by a licensed agent, per agent.
   TransactionWrite
   /// Transaction notes, per writer.
@@ -253,6 +256,8 @@ const agent_client_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const transaction_handoff_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const opportunity_share_policy = Policy(max: 60, window_ms: 3_600_000)
+
 const transaction_write_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const transaction_note_write_policy = Policy(max: 120, window_ms: 3_600_000)
@@ -303,6 +308,7 @@ fn action_name(action: Action) -> String {
     AgentAffiliationWrite -> "agent_affiliation_write"
     AgentClientResponse -> "agent_client_response"
     TransactionHandoff -> "transaction_handoff"
+    OpportunityShare -> "opportunity_share"
     TransactionWrite -> "transaction_write"
     TransactionNoteWrite -> "transaction_note_write"
     TransactionStatusWrite -> "transaction_status_write"
@@ -353,6 +359,7 @@ fn action_policy(action: Action) -> Policy {
     AgentAffiliationWrite -> agent_affiliation_write_policy
     AgentClientResponse -> agent_client_response_policy
     TransactionHandoff -> transaction_handoff_policy
+    OpportunityShare -> opportunity_share_policy
     TransactionWrite -> transaction_write_policy
     TransactionNoteWrite -> transaction_note_write_policy
     TransactionStatusWrite -> transaction_write_policy

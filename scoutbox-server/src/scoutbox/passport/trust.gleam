@@ -5,8 +5,7 @@
 //// of its own, and how its results reach this server is not designed yet. No provider here can produce simulated
 //// evidence, so a profile never includes any (`simulatedEvidenceIncluded` is false).
 ////
-//// Not ported yet: `/player/trust-profile/explain`, the guardian's and Trust & Safety's views, the trust
-//// summaries, the policy route and the band metrics.
+//// Not ported yet: `/player/trust-profile/explain`, the guardian's view, the policy route and the band metrics.
 
 import gleam/dynamic/decode
 import gleam/json
@@ -20,6 +19,7 @@ import scoutbox/passport/history
 import scoutbox/passport/trust_rules.{type Profile}
 import scoutbox/platform/clock
 import scoutbox/platform/http
+import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/box_sessions as session_row
@@ -34,7 +34,7 @@ import scoutbox/rows/ver_references as reference_row
 import scoutbox/verification/claims
 import scoutbox/vocab/claim_type
 import sqlight
-import wisp.{type Response}
+import wisp.{type Request, type Response}
 
 fn rows_for(
   read: Read,
@@ -460,6 +460,161 @@ pub fn org_view(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
       )
     Ok(Error(403)) -> http.error(403, "NOT_VISIBLE")
     Ok(Error(_)) -> http.error(404, "PLAYER_NOT_FOUND")
+    Error(e) -> http.internal(e)
+  }
+}
+
+/// `trustSummary`: the score and band, with the top three strengths by code.
+fn summary_fields(p: Profile) -> List(#(String, json.Json)) {
+  [
+    #("score", json.int(p.score)),
+    #("band", json.string(p.band.id)),
+    #("bandLabel", json.string(p.band.label)),
+    #("policyVersion", json.int(trust_rules.policy_version)),
+    #(
+      "topEvidenceSignals",
+      json.array(list.take(trust_rules.strengths(p), 3), fn(s) {
+        json.string(s.code)
+      }),
+    ),
+  ]
+}
+
+/// `GET /org/trust-summaries?playerIds=a,b`: in the order requested, never ranked. A player this club cannot see
+/// is omitted silently, so absence leaks nothing.
+pub fn org_summaries(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  let shape = {
+    use ids <- input.field("playerIds", input.optional(input.ids_text(100)))
+    input.done(option.unwrap(ids, []))
+  }
+  use ids <- http.query(req, shape, [])
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      // From the query.
+      list.try_map(ids, fn(pid) {
+        use found <- result.try(players.for_org(
+          read,
+          id.player(pid),
+          a.org,
+          now,
+        ))
+        case found {
+          Some(#(p, access)) if access.visible && !access.blocked ->
+            profile(read, p, now) |> result.map(fn(t) { [#(p, t)] })
+          _ -> Ok([])
+        }
+      })
+      |> result.map(list.flatten)
+    })
+  case found {
+    Ok(items) ->
+      http.json(
+        200,
+        json.object([
+          #(
+            "items",
+            json.array(items, fn(item) {
+              json.object([
+                #("playerId", id.player_json({ item.0 }.row.id)),
+                ..summary_fields(item.1)
+              ])
+            }),
+          ),
+          #(
+            "note",
+            json.string(
+              "Evidence confidence — not football ability. Results are returned in the order requested and are never ranked by Trust Score.",
+            ),
+          ),
+        ]),
+      )
+    Error(e) -> http.internal(e)
+  }
+}
+
+fn policy_json() -> json.Json {
+  json.object([
+    #("version", json.int(trust_rules.policy_version)),
+    #(
+      "weights",
+      json.object(
+        list.map(trust_rules.weights, fn(w) { #(w.0, json.int(w.1)) }),
+      ),
+    ),
+    #(
+      "bands",
+      json.array(trust_rules.bands, fn(b) {
+        json.object([
+          #("id", json.string(b.id)),
+          #("label", json.string(b.label)),
+          #("min", json.int(b.min)),
+          #("max", json.int(b.max)),
+        ])
+      }),
+    ),
+  ])
+}
+
+/// `trustSnapshot`, with each component's weight, coverage in whole percent (rounded half up, as `Math.round`) and
+/// level.
+fn snapshot_json(p: Profile, at: Int) -> json.Json {
+  let s = trust_rules.snapshot(p)
+  json.object([
+    #("at", json.int(at)),
+    #("score", json.int(s.score)),
+    #("band", json.string(s.band)),
+    #("policyVersion", json.int(s.policy_version)),
+    #(
+      "components",
+      json.object(
+        list.map(p.components, fn(c) {
+          let #(key, comp) = c
+          #(
+            key,
+            json.object([
+              #("weight", json.int(comp.weight)),
+              #("coverage", json.int({ comp.coverage_bp + 50 } / 100)),
+              #("level", json.string(comp.level.0)),
+            ]),
+          )
+        }),
+      ),
+    ),
+    #("hash", json.string(s.hash)),
+  ])
+}
+
+/// `GET /admin/trust/:playerId`. There is no write route: a wrong score is fixed by correcting the evidence or the
+/// policy.
+pub fn admin_view(ctx: Ctx, player_id: id.PlayerId) -> Response {
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      use found <- result.try(players.by_id(read, player_id))
+      case found {
+        Some(p) -> profile(read, p, now) |> result.map(fn(t) { Some(#(p, t)) })
+        None -> Ok(None)
+      }
+    })
+  case found {
+    Ok(Some(#(p, t))) ->
+      http.json(
+        200,
+        json.object([
+          #("playerId", id.player_json(p.row.id)),
+          #("trust", trust_rules.projection(t, trust_rules.TrustSafetyViewer)),
+          #("policy", policy_json()),
+          #("snapshot", snapshot_json(t, now)),
+          #(
+            "note",
+            json.string(
+              "Trust Score is derived at read time from canonical evidence. It cannot be set manually — correct the underlying evidence or the policy, then recalculate.",
+            ),
+          ),
+        ]),
+      )
+    Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
     Error(e) -> http.internal(e)
   }
 }

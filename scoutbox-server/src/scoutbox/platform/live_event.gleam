@@ -116,6 +116,18 @@ pub type Event {
   )
   /// A club invited a transaction workspace on a Room. Private to the club.
   TransactionHandoffInvited(org_id: String, room_id: String, handoff_id: String)
+  /// A club withdrew its transaction handoff. Private to the club.
+  TransactionHandoffWithdrawn(
+    org_id: String,
+    room_id: String,
+    handoff_id: String,
+  )
+  /// An agent shared an opportunity with a client. Private to the agency.
+  AgentOpportunityShared(
+    org_id: String,
+    agreement_id: String,
+    agent_user_id: String,
+  )
   /// A compliance context was evaluated. Private to the agency.
   ConflictEvaluated(org_id: String, ctx_id: String, outcome: String)
   /// A transaction workspace was opened. Private to the agency.
@@ -293,6 +305,8 @@ pub fn name(event: Event) -> String {
         TrialEvidenceLinked -> "trial_evidence_linked"
       }
     TransactionHandoffInvited(..) -> "transaction_handoff_invited"
+    TransactionHandoffWithdrawn(..) -> "transaction_handoff_withdrawn"
+    AgentOpportunityShared(..) -> "agent_opportunity_shared"
     ConflictEvaluated(..) -> "conflict_evaluated"
     AgentTransactionCreated(..) -> "agent_transaction_created"
     AgentTransactionComplianceUpdated(..) ->
@@ -343,6 +357,8 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | TrialChanged(org_id:, ..)
     | TrialSessionChanged(org_id:, ..)
     | TransactionHandoffInvited(org_id:, ..)
+    | TransactionHandoffWithdrawn(org_id:, ..)
+    | AgentOpportunityShared(org_id:, ..)
     | ConflictEvaluated(org_id:, ..)
     | AgentTransactionCreated(org_id:, ..)
     | AgentTransactionComplianceUpdated(org_id:, ..)
@@ -489,10 +505,16 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("trialId", json.string(trial_id)),
       #("sessionId", json.string(session_id)),
     ]
-    TransactionHandoffInvited(org_id:, room_id:, handoff_id:) -> [
+    TransactionHandoffInvited(org_id:, room_id:, handoff_id:)
+    | TransactionHandoffWithdrawn(org_id:, room_id:, handoff_id:) -> [
       #("orgId", json.string(org_id)),
       #("roomId", json.string(room_id)),
       #("handoffId", json.string(handoff_id)),
+    ]
+    AgentOpportunityShared(org_id:, agreement_id:, agent_user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("agreementId", json.string(agreement_id)),
+      #("agentUserId", json.string(agent_user_id)),
     ]
     ConflictEvaluated(org_id:, ctx_id:, outcome:) -> [
       #("orgId", json.string(org_id)),

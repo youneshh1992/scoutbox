@@ -12,6 +12,7 @@ import scoutbox/agents/compliance_routes as compliance
 import scoutbox/agents/context_routes
 import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
+import scoutbox/agents/integration_routes
 import scoutbox/agents/policy_routes
 import scoutbox/agents/review_routes
 import scoutbox/agents/transaction_party_routes as party_lanes
@@ -467,6 +468,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["players", id, "trust-profile"] ->
           only(req, Get, fn() { trust.org_view(ctx, org, id.player(id)) })
+        ["players", id, "football-passport"] ->
+          only(req, Get, fn() {
+            football_passport.org_view(ctx, org, id.player(id))
+          })
+        ["trust-summaries"] ->
+          only(req, Get, fn() { trust.org_summaries(ctx, req, org) })
         ["players", pid, "assessment-compare"] ->
           only(req, Get, fn() { assessments.compare(ctx, org, id.player(pid)) })
         ["assessments"] ->
@@ -825,6 +832,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
+        ["agent", "shared-opportunities"] ->
+          only(req, Get, fn() { integration_routes.player_shared(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
           only(req, Post, fn() {
             agent.answer(ctx, req, player, id.agreement(rid), agent.Confirm)
@@ -843,6 +852,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["agent", "relationships", rid, "sharing"] ->
           only(req, Patch, fn() {
+            use req <- contract.rerun_on_stale(req)
             agent.sharing(ctx, req, player, id.agreement(rid))
           })
         ["account"] ->
@@ -1402,6 +1412,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["delivery", "inject-failure"] ->
           only(req, Post, fn() { delivery.inject_failure(ctx, req) })
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
+        ["trust", pid] ->
+          only(req, Get, fn() { trust.admin_view(ctx, id.player(pid)) })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
         ["rooms", "overview"] ->
           only(req, Get, fn() { room_routes.admin_overview(ctx) })
@@ -1799,6 +1811,34 @@ fn agent_org(
       only(req, Get, fn() {
         agent.client_opportunities(ctx, org, id.agreement(rid))
       })
+    ["clients", rid, "contacts"] ->
+      only(req, Get, fn() {
+        integration_routes.client_contacts(ctx, org, id.agreement(rid))
+      })
+    ["clients", rid, "trials"] ->
+      only(req, Get, fn() {
+        integration_routes.client_trials(ctx, org, id.agreement(rid))
+      })
+    ["clients", rid, "opportunities", "shares"] ->
+      only(req, Get, fn() {
+        integration_routes.client_shares(ctx, org, id.agreement(rid))
+      })
+    ["clients", rid, "opportunities", "shares", sid, "withdraw"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        integration_routes.withdraw_share(
+          ctx,
+          req,
+          org,
+          id.agreement(rid),
+          id.opportunity_share(sid),
+        )
+      })
+    ["clients", rid, "opportunities", oid, "share"] ->
+      only(req, Post, fn() {
+        integration_routes.share(ctx, req, org, id.agreement(rid), oid)
+      })
+    ["handoffs"] -> only(req, Get, fn() { handoffs.agent_list(ctx, org) })
     ["opportunities"] -> only(req, Get, fn() { agent.opportunities(ctx, org) })
     ["inbox"] -> only(req, Get, fn() { agent.inbox(ctx, org) })
     _ -> not_found()
@@ -2096,6 +2136,11 @@ fn rooms(
     [rid, "transaction-handoff"], Post -> {
       use req <- contract.rerun_on_stale(req)
       handoffs.invite(ctx, req, org, room(rid))
+    }
+    [rid, "transaction-handoff"], Get -> handoffs.show(ctx, org, room(rid))
+    [rid, "transaction-handoff", "withdraw"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      handoffs.withdraw(ctx, req, org, room(rid))
     }
     [rid, "journey"], Get -> case_routes.journey(ctx, req, org, room(rid))
     [rid, "lifecycle"], Post -> {

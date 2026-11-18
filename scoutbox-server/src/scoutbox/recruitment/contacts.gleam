@@ -100,6 +100,14 @@ pub fn for_cases(
   }
 }
 
+/// The contacts a club routed to this agent as well as to the player (recruitmentReads.contacts.forAgent).
+pub fn for_routed_agent(
+  read: Read,
+  agent: id.OrgUserId,
+) -> Result(List(Contact), Fail(e)) {
+  select(read, "routing_agent_user_id = ?", [id.org_user_sql(agent)])
+}
+
 pub fn for_org_player(
   read: Read,
   org_id: id.OrgId,

@@ -3,16 +3,20 @@
 //// workspace. It is not an offer, carries no terms and commits nobody. The workspace that cites the case accepts
 //// it (`bind`), so one invitation opens one workspace.
 ////
-//// Not ported yet: reading the handoff (`GET`) and withdrawing it, and the minor pathway (closed in every
-//// jurisdiction, so a minor always meets HANDOFF_MINOR_PATHWAY_DISABLED).
+//// Not ported yet: the minor pathway (closed in every jurisdiction, so a minor always meets
+//// HANDOFF_MINOR_PATHWAY_DISABLED).
 
 import gleam/dynamic
+import gleam/dynamic/decode
+import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/agents/agent_store
 import scoutbox/agents/compliance_store
 import scoutbox/agents/core_routes
+import scoutbox/agents/integration
 import scoutbox/agents/representation
 import scoutbox/agents/transaction_store
 import scoutbox/app.{type Ctx}
@@ -223,48 +227,167 @@ fn rate_limited(action: limits.Action) -> Response {
   )
 }
 
-/// `POST /org/rooms/:id/transaction-handoff`. Writing one needs the rank a formal decision needs: it is a decision
-/// about the club's external conduct.
+type Need {
+  View
+  Write
+}
+
+/// A handoff is a decision about the club's external conduct, so writing it needs the rank a formal decision
+/// needs. Continues with the room and whether this caller may write.
+fn room_for_handoff(
+  ctx: Ctx,
+  a: OrgAccess,
+  room_id: id.RecruitmentCaseId,
+  need: Need,
+  next: fn(Room, Bool) -> Response,
+) -> Response {
+  use room <- room_routes.with_room(ctx, a, room_id)
+  let role = room_view.role(a, room)
+  let can_write = room_rules.room_can(role, room_rules.DecisionFinalize)
+  case room_rules.room_can(role, room_rules.DecisionView), need, can_write {
+    False, _, _ ->
+      http.error_message(
+        403,
+        "HANDOFF_NOT_PERMITTED",
+        "Your role cannot read this case's handoff.",
+      )
+    True, Write, False ->
+      http.error_message(
+        403,
+        "HANDOFF_NOT_PERMITTED",
+        "Only a recruitment lead can invite a transaction workspace.",
+      )
+    True, _, _ -> next(room, can_write)
+  }
+}
+
+/// `GET /org/rooms/:id/transaction-handoff`. The invite route asks the same `blockers`, so forcing the request
+/// gets the answer the screen showed.
+pub fn show(ctx: Ctx, a: OrgAccess, room_id: id.RecruitmentCaseId) -> Response {
+  use room, can_write <- room_for_handoff(ctx, a, room_id, View)
+  let now = clock.now_ms()
+  case store.read(ctx.store, gather(_, a, room, can_write, now)) {
+    Error(e) -> http.internal(e)
+    Ok(#(existing, facts, _)) -> {
+      let all = blockers(facts)
+      http.json(
+        200,
+        json.object([
+          #("handoff", json.nullable(existing, view(_, now))),
+          #("available", json.bool(all == [])),
+          // A viewer does not get a checklist of what a lead could do.
+          #(
+            "blockers",
+            json.array(
+              case can_write {
+                True -> all
+                False -> ["HANDOFF_NOT_PERMITTED"]
+              },
+              json.string,
+            ),
+          ),
+          #("blockerVocabulary", json.array(blocker_codes, json.string)),
+          #("action", json.string("inviteToTransaction")),
+          #(
+            "note",
+            json.string(
+              "Inviting a transaction is a separate, explicit decision. ScoutBox never creates one from a recruitment decision by itself, and this invitation is not an offer.",
+            ),
+          ),
+        ]),
+      )
+    }
+  }
+}
+
+/// `HANDOFF_BLOCKERS`, in the order `blockers` reports them.
+const blocker_codes = [
+  "HANDOFF_NOT_PERMITTED", "HANDOFF_DECISION_REQUIRED", "HANDOFF_CASE_STATE",
+  "HANDOFF_SUBJECT_UNAVAILABLE", "HANDOFF_MINOR_PATHWAY_DISABLED",
+  "HANDOFF_BLOCKED", "HANDOFF_EXISTS", "HANDOFF_TRANSACTION_EXISTS",
+  "HANDOFF_COMPLIANCE_UNAVAILABLE",
+]
+
+/// `POST /org/rooms/:id/transaction-handoff`.
 pub fn invite(
   ctx: Ctx,
   req: Request,
   a: OrgAccess,
   room_id: id.RecruitmentCaseId,
 ) -> Response {
-  use room <- room_routes.with_room(ctx, a, room_id)
-  let role = room_view.role(a, room)
-  case
-    room_rules.room_can(role, room_rules.DecisionView),
-    room_rules.room_can(role, room_rules.DecisionFinalize)
-  {
-    False, _ ->
-      http.error_message(
-        403,
-        "HANDOFF_NOT_PERMITTED",
-        "Your role cannot read this case's handoff.",
-      )
-    True, False ->
-      http.error_message(
-        403,
-        "HANDOFF_NOT_PERMITTED",
-        "Only a recruitment lead can invite a transaction workspace.",
-      )
-    True, True -> {
-      let shape = {
-        use raw <- input.field(
-          "clientKey",
-          input.nullish(input.text(1_000_000)),
-        )
-        input.done(InviteBody(raw))
-      }
-      use b, _ <- core_routes.body(req, shape)
-      case idempotency.client_key(option.map(b.client_key, dynamic.string)) {
-        Error(message) ->
-          http.error_message(400, "AGENT_CLIENT_KEY_INVALID", message)
-        Ok(key) -> invite_checked(ctx, a, room, key)
-      }
-    }
+  use room, _ <- room_for_handoff(ctx, a, room_id, Write)
+  let shape = {
+    use raw <- input.field("clientKey", input.nullish(input.text(1_000_000)))
+    input.done(InviteBody(raw))
   }
+  use b <- core_routes.plain_body(req, shape)
+  case idempotency.client_key(option.map(b.client_key, dynamic.string)) {
+    Error(message) ->
+      http.error_message(400, "AGENT_CLIENT_KEY_INVALID", message)
+    Ok(key) -> invite_checked(ctx, a, room, key)
+  }
+}
+
+/// The case's handoff, the facts `blockers` decides on, and the client's sole active agreement.
+fn gather(
+  read: Read,
+  a: OrgAccess,
+  room: Room,
+  can_write: Bool,
+  now: Int,
+) -> Result(
+  #(Option(handoff_row.Row), Facts, Option(representation.Agreement)),
+  Fail(e),
+) {
+  let r = room.row
+  use existing <- result.try(of_case(read, r.id))
+  use decided <- result.try(has_final_progress_decision(read, room))
+  use found <- result.try(players.for_org(read, r.player_id, a.org, now))
+  use live <- result.try(transaction_store.duplicate_of(
+    read,
+    id.player_to_string(r.player_id),
+    context_type.EmploymentContract,
+    Some(id.org_to_string(r.org_id)),
+    None,
+  ))
+  use #(agreement, _) <- result.try(representation.sole_active(
+    read,
+    id.player_to_string(r.player_id),
+    now,
+  ))
+  // An unrepresented player has no agent to evaluate; the workspace's own gate asks whoever opens one.
+  use evaluable <- result.map(case agreement {
+    Some(ag) ->
+      compliance_store.clear_to_declare(
+        read,
+        ag.row.agent_user_id,
+        jurisdiction.to_string(ag.row.jurisdiction),
+        now,
+      )
+    None -> Ok(True)
+  })
+  let facts =
+    Facts(
+      can_write:,
+      has_final_progress_decision: decided,
+      case_status: room.status,
+      subject_present: case found {
+        Some(#(_, access)) -> access.visible
+        None -> False
+      },
+      is_adult: case found {
+        Some(#(p, _)) -> players.is_adult(p, now)
+        None -> False
+      },
+      blocked: case found {
+        Some(#(_, access)) -> access.blocked
+        None -> False
+      },
+      existing_status: option.map(existing, effective_status(_, now)),
+      live_transaction: live != None,
+      compliance_evaluable: evaluable,
+    )
+  #(existing, facts, agreement)
 }
 
 fn invite_checked(
@@ -275,39 +398,9 @@ fn invite_checked(
 ) -> Response {
   let now = clock.now_ms()
   let r = room.row
-  let gathered =
-    store.read(ctx.store, fn(read) {
-      use existing <- result.try(of_case(read, r.id))
-      use decided <- result.try(has_final_progress_decision(read, room))
-      use found <- result.try(players.for_org(read, r.player_id, a.org, now))
-      use live <- result.try(transaction_store.duplicate_of(
-        read,
-        id.player_to_string(r.player_id),
-        context_type.EmploymentContract,
-        Some(id.org_to_string(r.org_id)),
-        None,
-      ))
-      use #(agreement, _) <- result.try(representation.sole_active(
-        read,
-        id.player_to_string(r.player_id),
-        now,
-      ))
-      // An unrepresented player has no agent to evaluate; the workspace's own gate asks whoever opens one.
-      use evaluable <- result.map(case agreement {
-        Some(ag) ->
-          compliance_store.clear_to_declare(
-            read,
-            ag.row.agent_user_id,
-            jurisdiction.to_string(ag.row.jurisdiction),
-            now,
-          )
-        None -> Ok(True)
-      })
-      #(existing, decided, found, live, agreement, evaluable)
-    })
-  case gathered {
+  case store.read(ctx.store, gather(_, a, room, True, now)) {
     Error(e) -> http.internal(e)
-    Ok(#(existing, decided, found, live, agreement, evaluable)) -> {
+    Ok(#(existing, facts, agreement)) ->
       case existing, key {
         Some(h), Some(k) if h.invite_key == Some(k) ->
           http.json(
@@ -317,28 +410,7 @@ fn invite_checked(
               #("idempotent", json.bool(True)),
             ]),
           )
-        _, _ -> {
-          let facts =
-            Facts(
-              can_write: True,
-              has_final_progress_decision: decided,
-              case_status: room.status,
-              subject_present: case found {
-                Some(#(_, access)) -> access.visible
-                None -> False
-              },
-              is_adult: case found {
-                Some(#(p, _)) -> players.is_adult(p, now)
-                None -> False
-              },
-              blocked: case found {
-                Some(#(_, access)) -> access.blocked
-                None -> False
-              },
-              existing_status: option.map(existing, effective_status(_, now)),
-              live_transaction: live != None,
-              compliance_evaluable: evaluable,
-            )
+        _, _ ->
           case blockers(facts) {
             [first, ..] as all ->
               http.json(
@@ -375,9 +447,7 @@ fn invite_checked(
                 False -> write(ctx, a, room, existing, agreement, key, now)
               }
           }
-        }
       }
-    }
   }
 }
 
@@ -508,5 +578,231 @@ fn stale_unless(
   case holds {
     True -> next()
     False -> store.stale("the case's handoff changed")
+  }
+}
+
+/// `POST /org/rooms/:id/transaction-handoff/withdraw`. The record stays, marked withdrawn; a taken-up invitation
+/// is refused, because withdrawing it would not close the workspace it opened.
+pub fn withdraw(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  room_id: id.RecruitmentCaseId,
+) -> Response {
+  use room, _ <- room_for_handoff(ctx, a, room_id, Write)
+  let r = room.row
+  let now = clock.now_ms()
+  case store.read(ctx.store, of_case(_, r.id)) {
+    Error(e) -> http.internal(e)
+    Ok(None) -> http.error(404, "HANDOFF_NOT_FOUND")
+    Ok(Some(h)) -> {
+      use _ <- core_routes.plain_body(req, input.done(Nil))
+      case h.status {
+        handoff_row.Withdrawn ->
+          http.json(
+            200,
+            json.object([
+              #("handoff", view(h, now)),
+              #("idempotent", json.bool(True)),
+            ]),
+          )
+        handoff_row.Accepted ->
+          http.json(
+            409,
+            json.object([
+              #("error", json.string("HANDOFF_ALREADY_ACCEPTED")),
+              #(
+                "transactionId",
+                json.nullable(h.transaction_id, id.transaction_json),
+              ),
+              #(
+                "message",
+                json.string(
+                  "A workspace has already been opened from this invitation. Withdrawing the invitation would not close it — act in the workspace instead.",
+                ),
+              ),
+            ]),
+          )
+        // The other half of the invite/withdraw loop, on the same club budget.
+        handoff_row.Invited ->
+          case
+            limits.limited(
+              ctx.limits,
+              limits.TransactionHandoff,
+              id.org_to_string(r.org_id),
+              now,
+            )
+          {
+            True -> rate_limited(limits.TransactionHandoff)
+            False -> withdrawing(ctx, a, room, h, now)
+          }
+      }
+    }
+  }
+}
+
+fn withdrawing(
+  ctx: Ctx,
+  a: OrgAccess,
+  room: Room,
+  h: handoff_row.Row,
+  now: Int,
+) -> Response {
+  let r = room.row
+  store.unit(ctx.store, fn(tx) {
+    use rows <- result.try(
+      store.write(
+        tx,
+        "UPDATE case_transaction_handoffs SET status = 'withdrawn', withdrawn_at = ?, rev = rev + 1, rev_at = ? WHERE case_id = ? AND status = 'invited' RETURNING "
+          <> handoff_row.columns,
+        [sqlight.int(now), sqlight.int(now), id.recruitment_case_sql(r.id)],
+        handoff_row.decoder(),
+      )
+      |> room_routes.storage,
+    )
+    case rows {
+      [] -> store.stale("the case's handoff changed")
+      [fresh, ..] -> {
+        use _ <- result.try(
+          cases.record(
+            tx,
+            r.id,
+            cases.by_staff(a.user.id, a.user.name),
+            [
+              cases.entry("transaction_handoff_withdrawn", [
+                #("handoffId", id.handoff_json(h.id)),
+              ]),
+            ],
+            now,
+          )
+          |> room_routes.storage,
+        )
+        store.emit(
+          tx,
+          effect.Live(live_event.TransactionHandoffWithdrawn(
+            org_id: id.org_to_string(r.org_id),
+            room_id: id.recruitment_case_to_string(r.id),
+            handoff_id: id.handoff_to_string(h.id),
+          )),
+        )
+        use _ <- result.map(
+          case h.invited_agent_user_id {
+            Some(agent) ->
+              notifications.notify(
+                tx,
+                to: audience.OrgUser,
+                id: id.org_user_to_string(agent),
+                type_: "representation_transaction",
+                text: "A club has withdrawn its invitation to open a transaction workspace. Nothing was opened and nothing was agreed.",
+                ref_id: Some(id.handoff_to_string(h.id)),
+                at: now,
+              )
+            None -> Ok(Nil)
+          }
+          |> room_routes.storage,
+        )
+        http.json(200, json.object([#("handoff", view(fresh, now))]))
+      }
+    }
+  })
+  |> room_routes.answer
+}
+
+/// The open invitations addressed to an agent, each only while the agent still represents the player: enough to
+/// open a workspace from, and nothing of the club's recruitment thinking.
+pub fn for_agent(
+  read: Read,
+  agent: id.OrgUserId,
+  now: Int,
+) -> Result(List(#(handoff_row.Row, id.AgreementId, Option(String))), Fail(e)) {
+  use rows <- result.try(
+    store.query(
+      read,
+      "SELECT "
+        <> handoff_row.qualified("h")
+        <> ", o.name FROM case_transaction_handoffs h JOIN recruitment_cases c ON c.id = h.case_id LEFT JOIN orgs o ON o.id = h.org_id WHERE h.invited_agent_user_id = ? ORDER BY c.rowid",
+      [id.org_user_sql(agent)],
+      {
+        use h <- decode.then(handoff_row.decoder())
+        use name <- decode.field(
+          handoff_row.width,
+          decode.optional(decode.string),
+        )
+        decode.success(#(h, name))
+      },
+    ),
+  )
+  list.try_fold(rows, [], fn(out, row) {
+    let #(h, club_name) = row
+    case effective_status(h, now) {
+      "invited" -> {
+        // An invitation sent while the relationship was active is not an entitlement after it ends.
+        use agreements <- result.map(agent_store.agreements_for_client(
+          read,
+          id.player_to_string(h.player_id),
+        ))
+        case
+          integration.basis(
+            agreements,
+            agent,
+            id.player_to_string(h.player_id),
+            now,
+          )
+        {
+          integration.Basis(Some(ag), _) -> [#(h, ag.row.id, club_name), ..out]
+          _ -> out
+        }
+      }
+      _ -> Ok(out)
+    }
+  })
+  |> result.map(list.reverse)
+}
+
+/// `GET /org/agent/handoffs`.
+pub fn agent_list(ctx: Ctx, a: OrgAccess) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  let now = clock.now_ms()
+  case store.read(ctx.store, for_agent(_, a.user.id, now)) {
+    Error(e) -> http.internal(e)
+    Ok(found) -> {
+      let items =
+        list.sort(found, fn(x, y) {
+          int.compare({ y.0 }.invited_at, { x.0 }.invited_at)
+        })
+      http.json(
+        200,
+        json.object([
+          #(
+            "items",
+            json.array(items, fn(item) {
+              let #(h, agreement_id, club_name) = item
+              json.object([
+                #("handoffId", id.handoff_json(h.id)),
+                #("recruitmentCaseId", id.recruitment_case_json(h.case_id)),
+                #("clientId", id.player_json(h.player_id)),
+                #("agreementId", id.agreement_json(agreement_id)),
+                #(
+                  "club",
+                  json.object([
+                    #("id", id.org_json(h.org_id)),
+                    #("name", json.nullable(club_name, json.string)),
+                  ]),
+                ),
+                #("invitedAt", json.int(h.invited_at)),
+                #("expiresAt", json.int(h.invited_at + ttl_ms)),
+              ])
+            }),
+          ),
+          #(
+            "note",
+            json.string(
+              "Clubs that have invited a transaction workspace for one of your clients. Their recruitment case, their assessment and their reasons are not here. Opening a workspace is your action and commits nobody to anything.",
+            ),
+          ),
+        ]),
+      )
+    }
   }
 }

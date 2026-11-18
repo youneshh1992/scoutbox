@@ -41,4 +41,6 @@ export const BATTERIES = [
   'agents/compliance',
   'agents/compliancePersistence',
   'agents/adversarial',
+  'agents/crossApp',
+  'agents/crossAppAdversarial',
 ];

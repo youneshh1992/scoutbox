@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 44 of 53 neutral]
+### Untangling [in progress: 47 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 39 batteries pass unchanged]
+### Porting, domain by domain [in progress: 42 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -116,7 +116,7 @@ of the product, so they aren't one slice.
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
-| Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence | 6 | the workspace and the compliance engine are in |
+| Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -177,7 +177,16 @@ are for surprising facts or points that later work depends on, not implementatio
       fixture database has them too (`agents/dev_reviewers`). `/ts/compliance/policies` leaves out a rule's
       `overrides` and its own `effectiveFrom`, on both servers: the battery compares whole seeded rules from the
       stored rows instead, decoding each parameter by its type in the snapshot's `RULE_PARAMS`.
-   6. `agents/adversarial`, `crossApp`, `crossAppAdversarial`: not untangled.
+   6. `agents/adversarial`, `crossApp`, `crossAppAdversarial` [**done**; their rule cases are pending (adversarial 85,
+      crossApp 96, crossAppAdversarial 2)]. A fixture can now plant a password: `support/password.mjs` writes the stored
+      form, `testE2ESupport` proves the TypeScript server verifies it, and `CONTRACT.md` names the stored forms. The
+      failed-login budget locks once more than 20 wrong guesses are in the window, as TypeScript's `peek` does (this
+      server locked at 20). A regulated integration surface asks the compliance engine (`clear_to_declare`; until
+      now it always read "not clear"), which changes routed contacts too. The club's Passport read
+      (`/org/players/:id/football-passport`) has only the player, the viewer and the representation in force: the
+      rest waits for the Passport port. `/player/applications` isn't ported, so crossApp's G8 passes vacuously here.
+      The agent contract gives a field's own code only to a field the request declares (`declaredCodes`): an unknown
+      `clientKey` is `AGENT_INPUT_INVALID`.
 4. `scouting/clubWorkflows`. It needs the uploads check first. Opportunity creation, the club's list and the
    board's club rows are in, and match the TypeScript server response for response. Applications, closing and the
    structured requirements are not.
@@ -251,7 +260,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 14 batteries is about **2–4 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 6 batteries is about **1–2 sessions** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 
