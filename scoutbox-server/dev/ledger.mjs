@@ -90,7 +90,10 @@ function gleamSide(r) {
     hand,
     handDone: sum(hand.filter((f) => HAND_PORTED[f.function]), handPortCalls),
     handAll: sum(hand, handPortCalls),
-    moved: r.checks.moved.map((m) => ({ ...m, accepted: ACCEPTED[`${r.battery} → ${m.to}`] ?? null })),
+    // A move to another battery (e2e/…) is that battery's to answer, so only moves to a unit suite need a verdict.
+    moved: r.checks.moved
+      .filter((m) => !m.to.startsWith('e2e/'))
+      .map((m) => ({ ...m, accepted: ACCEPTED[`${r.battery} → ${m.to}`] ?? null })),
     recorded: report.has(r.battery),
   };
 }

@@ -22,7 +22,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 9 | 52 / 2261 | 67 / 239 | 5 to go |
+| platform | 14 | 14 | 9 | 52 / 2261 | 67 / 239 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -68,6 +68,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
+| `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
 | `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 3 / 232 | 0 / 46 | 232 cases pending; 46 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
@@ -87,7 +88,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 1 / 105 | 0 / 6 | 105 cases pending; 6 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
-| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 264 |  |  |  |  |  | not answered |
+| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 238 |  | 26 moved |  |  |  | not answered |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
 
@@ -117,6 +118,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |
+| `platform/uploads` | 26 | Moved whole from scouting/clubWorkflows's access section (resumable uploads, media links, captions) |
 | `recruitment/analytics` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all sixty) |
 | `recruitment/analytics` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
