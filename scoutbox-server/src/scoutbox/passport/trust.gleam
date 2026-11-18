@@ -33,6 +33,7 @@ import scoutbox/rows/representation_agreements as agreement_row
 import scoutbox/rows/ver_claims
 import scoutbox/rows/ver_references as reference_row
 import scoutbox/verification/claims
+import scoutbox/vocab/box_provider
 import scoutbox/vocab/claim_type
 import sqlight
 import wisp.{type Request, type Response}
@@ -274,8 +275,8 @@ pub fn current_evidence(
   )
 }
 
-fn simulated(provider: session_row.ProviderId) -> Bool {
-  provider == session_row.LocalTest
+fn simulated(provider: box_provider.BoxProvider) -> Bool {
+  provider == box_provider.LocalTest
 }
 
 fn box_cam(
@@ -340,7 +341,7 @@ fn combine(
         True -> "invalidated"
         False -> attempt_row.combine_state_to_string(a.combine_state)
       },
-      simulated: a.provider_id == attempt_row.LocalTest,
+      simulated: a.provider_id == box_provider.LocalTest,
     )
   })
 }

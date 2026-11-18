@@ -73,6 +73,7 @@ import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/vocab/audience
+import scoutbox/vocab/box_provider
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/trial_workflow_state
@@ -2449,7 +2450,7 @@ fn box_session(
 }
 
 fn test_only(s: box_row.Row) -> Bool {
-  s.provider_id == box_row.LocalTest
+  s.provider_id == box_provider.LocalTest
 }
 
 fn withdrawn(s: box_row.Row) -> Bool {

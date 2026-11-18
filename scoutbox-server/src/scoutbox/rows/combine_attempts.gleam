@@ -7,6 +7,8 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/box_provider
+import scoutbox/vocab/capture_context
 import sqlight
 
 pub const table = "combine_attempts"
@@ -60,52 +62,6 @@ pub fn mode_decoder() -> decode.Decoder(Mode) {
   case mode_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(Verified, "Mode")
-  }
-}
-
-pub type CaptureContext {
-  AtHome
-  Club
-  Event
-}
-
-/// Each value with the text the column stores.
-pub const capture_context_pairs = [
-  #("at_home", AtHome),
-  #("club", Club),
-  #("event", Event),
-]
-
-pub fn capture_context_to_string(value: CaptureContext) -> String {
-  case value {
-    AtHome -> "at_home"
-    Club -> "club"
-    Event -> "event"
-  }
-}
-
-pub fn capture_context_from_string(
-  value: String,
-) -> Result(CaptureContext, Nil) {
-  case value {
-    "at_home" -> Ok(AtHome)
-    "club" -> Ok(Club)
-    "event" -> Ok(Event)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn capture_context_to_json(value: CaptureContext) -> Json {
-  json.string(capture_context_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn capture_context_decoder() -> decode.Decoder(CaptureContext) {
-  use value <- decode.then(decode.string)
-  case capture_context_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(AtHome, "CaptureContext")
   }
 }
 
@@ -199,50 +155,6 @@ pub fn direction_decoder() -> decode.Decoder(Direction) {
   case direction_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(Higher, "Direction")
-  }
-}
-
-pub type ProviderId {
-  ProductionCv
-  WebClient
-  LocalTest
-}
-
-/// Each value with the text the column stores.
-pub const provider_id_pairs = [
-  #("production_cv", ProductionCv),
-  #("web_client", WebClient),
-  #("local_test", LocalTest),
-]
-
-pub fn provider_id_to_string(value: ProviderId) -> String {
-  case value {
-    ProductionCv -> "production_cv"
-    WebClient -> "web_client"
-    LocalTest -> "local_test"
-  }
-}
-
-pub fn provider_id_from_string(value: String) -> Result(ProviderId, Nil) {
-  case value {
-    "production_cv" -> Ok(ProductionCv)
-    "web_client" -> Ok(WebClient)
-    "local_test" -> Ok(LocalTest)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn provider_id_to_json(value: ProviderId) -> Json {
-  json.string(provider_id_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn provider_id_decoder() -> decode.Decoder(ProviderId) {
-  use value <- decode.then(decode.string)
-  case provider_id_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(ProductionCv, "ProviderId")
   }
 }
 
@@ -377,13 +289,13 @@ pub type Row {
     box_session_id: id.BoxSessionId,
     attempt_number: Int,
     mode: Mode,
-    capture_context: CaptureContext,
+    capture_context: capture_context.CaptureContext,
     request_id: Option(id.CombineRequestId),
     metric_type: MetricType,
     metric_unit: String,
     direction: Direction,
     measurement_algorithm_version: Int,
-    provider_id: ProviderId,
+    provider_id: box_provider.BoxProvider,
     provider_version: Int,
     measured_value: Option(Float),
     measurement_state: Option(MeasurementState),
@@ -406,12 +318,12 @@ pub fn new(
   box_session_id box_session_id: id.BoxSessionId,
   attempt_number attempt_number: Int,
   mode mode: Mode,
-  capture_context capture_context: CaptureContext,
+  capture_context capture_context: capture_context.CaptureContext,
   metric_type metric_type: MetricType,
   metric_unit metric_unit: String,
   direction direction: Direction,
   measurement_algorithm_version measurement_algorithm_version: Int,
-  provider_id provider_id: ProviderId,
+  provider_id provider_id: box_provider.BoxProvider,
   provider_version provider_version: Int,
   combine_state combine_state: CombineState,
   created_at created_at: Int,
@@ -453,7 +365,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use box_session_id <- decode.field(4, id.box_session_decoder())
   use attempt_number <- decode.field(5, decode.int)
   use mode <- decode.field(6, mode_decoder())
-  use capture_context <- decode.field(7, capture_context_decoder())
+  use capture_context <- decode.field(7, capture_context.decoder())
   use request_id <- decode.field(
     8,
     decode.optional(id.combine_request_decoder()),
@@ -462,7 +374,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use metric_unit <- decode.field(10, decode.string)
   use direction <- decode.field(11, direction_decoder())
   use measurement_algorithm_version <- decode.field(12, decode.int)
-  use provider_id <- decode.field(13, provider_id_decoder())
+  use provider_id <- decode.field(13, box_provider.decoder())
   use provider_version <- decode.field(14, decode.int)
   use measured_value <- decode.field(15, decode.optional(decode.float))
   use measurement_state <- decode.field(
@@ -520,13 +432,13 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.box_session_sql(row.box_session_id),
     sqlight.int(row.attempt_number),
     sqlight.text(mode_to_string(row.mode)),
-    sqlight.text(capture_context_to_string(row.capture_context)),
+    sqlight.text(capture_context.to_string(row.capture_context)),
     sqlight.nullable(id.combine_request_sql, row.request_id),
     sqlight.text(metric_type_to_string(row.metric_type)),
     sqlight.text(row.metric_unit),
     sqlight.text(direction_to_string(row.direction)),
     sqlight.int(row.measurement_algorithm_version),
-    sqlight.text(provider_id_to_string(row.provider_id)),
+    sqlight.text(box_provider.to_string(row.provider_id)),
     sqlight.int(row.provider_version),
     sqlight.nullable(sqlight.float, row.measured_value),
     sqlight.nullable(

@@ -27,6 +27,7 @@ import scoutbox/rows/case_decision_drafts as draft_row
 import scoutbox/rows/id
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/room_snapshot_source_refs as ref_row
+import scoutbox/vocab/box_provider
 import scoutbox/vocab/case_outcome
 import scoutbox/vocab/decision_evidence_kind.{type DecisionEvidenceKind}
 import scoutbox/vocab/decision_outcome.{
@@ -361,7 +362,7 @@ pub fn resolve_refs(
                 case found {
                   [b]
                     if b.player_id == player_id
-                    && b.provider_id != box_row.LocalTest
+                    && b.provider_id != box_provider.LocalTest
                   ->
                     Ok(
                       Ok([

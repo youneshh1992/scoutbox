@@ -1970,7 +1970,175 @@ const PASSPORT_MAP = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------------- Box Cam
+
+const BOX = 'domains/development/boxcam';
+const BCR = 'scoutbox/development/box_cam_rules';
+const boxQuality = vocab('scoutbox/vocab/box_quality');
+const boxState = vocab('scoutbox/rows/box_sessions', 'verification_state_pairs');
+const boxReason = code(BCR, 'reason_to_string');
+const capability = code(BCR, 'capability_to_string');
+const boxTargetType = vocab('scoutbox/vocab/box_target_type');
+const challengeMetric = vocab('scoutbox/rows/box_challenges', 'metric_pairs');
+const boxProvider = vocab('scoutbox/vocab/box_provider');
+const span = record({ module: BCR, constructor: 'Span', fields: { fromMs: ['from_ms', float], toMs: ['to_ms', float] } });
+/** An active interval; one reported without a quality is good, as the engine reads it. */
+const interval = record({
+  module: BCR,
+  constructor: 'Interval',
+  fields: { fromMs: ['from_ms', float], toMs: ['to_ms', float], quality: ['quality', boxQuality] },
+  defaults: { quality: (ctx) => `${ctx.use('scoutbox/vocab/box_quality')}.Good` },
+});
+const boxTarget = record({
+  module: BCR,
+  constructor: 'Target',
+  fields: { type: ['type_', boxTargetType], value: ['value', float] },
+});
+/** A finished session as the streak and challenge progress read it: `at` is when it ended. */
+const finished = record({
+  module: BCR,
+  constructor: 'Finished',
+  fields: {
+    id: ['id', string],
+    drillId: ['drill_id', string],
+    drillVersion: ['drill_version', int],
+    verificationState: ['state', option(boxState)],
+    verifiedActiveMs: ['verified_active_ms', float],
+    verifiedReps: ['verified_reps', option(int)],
+    endedAt: ['at', int],
+  },
+  defaults: { id: '""', drill_id: '""', drill_version: '1', state: 'None', verified_active_ms: '0.0', verified_reps: 'None' },
+});
+const boxRules = plainIn(BCR);
+
+const BOX_CAM_MAP = {
+  [`${BOX}/shared.mjs#verifiedActiveMs`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const { activeIntervals = [], pauses = [], interruptions = [], sessionDurationMs = 0, requiredIntervals = null, ...rest } =
+        c.args[0];
+      if (Object.keys(rest).length) throw new Error(`verifiedActiveMs has no argument ${Object.keys(rest)[0]}`);
+      return eq(
+        `${ctx.use(BCR)}.verified_active_ms(active: ${list(interval)(activeIntervals, ctx)}, pauses: ${list(span)(pauses, ctx)}, interruptions: ${list(span)(interruptions, ctx)}, session_duration_ms: ${float(sessionDurationMs)}, required: ${option(list(span))(requiredIntervals, ctx)})`,
+        float(c.result),
+      );
+    },
+  },
+  [`${BOX}/shared.mjs#targetCompleted`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const [target, { activeMs = 0, reps = null, setsCompleted = 0 }, caps = []] = c.args;
+      return eq(
+        `${ctx.use(BCR)}.target_completed(${boxTarget(target, ctx)}, active_ms: ${float(activeMs)}, reps: ${option(int)(reps, ctx)}, sets_completed: ${int(setsCompleted)}, capabilities: ${list(capability)(caps, ctx)})`,
+        option(bool)(c.result, ctx),
+      );
+    },
+  },
+  [`${BOX}/shared.mjs#mergeIntervals`]: boxRules('merge_intervals', [list(span)], list(span)),
+  [`${BOX}/shared.mjs#intersectIntervals`]: boxRules('intersect_intervals', [list(span), list(span)], list(span)),
+  [`${BOX}/shared.mjs#subtractIntervals`]: boxRules('subtract_intervals', [list(span), list(span)], list(span)),
+  [`${BOX}/shared.mjs#detectionQuality`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const { observedMs = 0, sessionDurationMs = 0 } = c.args[0];
+      return eq(
+        `${ctx.use(BCR)}.detection_quality(observed_ms: ${float(observedMs)}, session_duration_ms: ${float(sessionDurationMs)})`,
+        boxQuality(c.result, ctx),
+      );
+    },
+  },
+  [`${BOX}/shared.mjs#dedupeReps`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const [reps, { sessionDurationMs = null, minGapMs = 250, minConfidence = 0.5 } = {}] = c.args;
+      const rep = record({
+        module: BCR,
+        constructor: 'Rep',
+        fields: { atMs: ['at_ms', float], confidence: ['confidence', option(float)] },
+        defaults: { confidence: 'None' },
+      });
+      const counted = record({
+        module: BCR,
+        constructor: 'CountedRep',
+        fields: { atMs: ['at_ms', float], confidence: ['confidence', float] },
+      });
+      return eq(
+        `${ctx.use(BCR)}.dedupe_reps(${list(rep)(reps, ctx)}, session_duration_ms: ${option(float)(sessionDurationMs, ctx)}, min_gap_ms: ${float(minGapMs)}, min_confidence: ${float(minConfidence)})`,
+        list(counted)(c.result, ctx),
+      );
+    },
+  },
+  [`${BOX}/shared.mjs#deriveVerification`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const {
+        cancelled = false,
+        livenessPassed = false,
+        providerAvailable = true,
+        activeMs = 0,
+        completed = null,
+        quality = null,
+        interruptionsCount = 0,
+        unsupportedTargetMetric = false,
+        sessionDurationMs: _unread,
+        ...rest
+      } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`deriveVerification has no argument ${Object.keys(rest)[0]}`);
+      return eq(
+        `${ctx.use(BCR)}.derive_verification(${ctx.use(BCR)}.Observed(cancelled: ${bool(cancelled)}, liveness_passed: ${bool(livenessPassed)}, provider_available: ${bool(providerAvailable)}, active_ms: ${float(activeMs)}, completed: ${option(bool)(completed, ctx)}, quality: ${option(boxQuality)(quality, ctx)}, interruptions_count: ${int(interruptionsCount)}, unsupported_target_metric: ${bool(unsupportedTargetMetric)}))`,
+        `#(${boxState(c.result.state, ctx)}, ${list(boxReason)(c.result.reasons, ctx)})`,
+      );
+    },
+  },
+  [`${BOX}/shared.mjs#boxStreakWeeks`]: boxRules('box_streak_weeks', [list(finished), int], int),
+  [`${BOX}/shared.mjs#challengeProgress`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const window = record({
+        module: BCR,
+        constructor: 'ChallengeWindow',
+        fields: {
+          drillId: ['drill_id', string],
+          metric: ['metric', challengeMetric],
+          targetTotal: ['target_total', int],
+          startsAt: ['starts_at', int],
+          endsAt: ['ends_at', int],
+        },
+        defaults: { starts_at: '0', ends_at: '0' },
+      });
+      const { total, completed, sessionIds } = c.result;
+      return eq(
+        `${ctx.use(BCR)}.challenge_progress(${window(c.args[0], ctx)}, ${list(finished)(c.args[1], ctx)})`,
+        `${ctx.use(BCR)}.Progress(total: ${int(total)}, completed: ${bool(completed)}, session_ids: ${list(string)(sessionIds, ctx)})`,
+      );
+    },
+  },
+  // The registry itself is compared with the snapshot (spec_test); these check the lookups.
+  [`${BOX}/drills.mjs#providerFor`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const [id, { testProviderEnabled = false } = {}] = c.args;
+      return eq(
+        `${ctx.use(BCR)}.provider_for(${string(id)}, ${bool(testProviderEnabled)})`,
+        c.result === null ? 'None' : `Some(${ctx.use(BCR)}.provider(${boxProvider(c.result.id, ctx)}))`,
+      );
+    },
+  },
+  [`${BOX}/drills.mjs#drillByIdVersion`]: {
+    module: BCR,
+    test: (c, ctx) => {
+      const [id, version] = c.args;
+      const found = c.result === null ? 'None' : `Some(#(${string(c.result.id)}, ${int(c.result.version)}))`;
+      return eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(BCR)}.drill_by_id_version(${string(id)}, ${int(version)}), fn(d) { #(d.id, d.version) })`,
+        found,
+      );
+    },
+  },
+};
+
 export const MAP = {
+  ...BOX_CAM_MAP,
   ...ROOM_MAP,
   ...PASSPORT_MAP,
   ...AGENT_MAP,

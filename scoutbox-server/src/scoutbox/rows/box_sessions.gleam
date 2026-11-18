@@ -7,6 +7,11 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/box_provider
+import scoutbox/vocab/box_quality
+import scoutbox/vocab/box_restorable_state
+import scoutbox/vocab/box_target_type
+import scoutbox/vocab/capture_context
 import sqlight
 
 pub const table = "box_sessions"
@@ -24,50 +29,6 @@ pub fn qualified(alias: String) -> String {
   |> string.split(", ")
   |> list.map(fn(c) { alias <> "." <> c })
   |> string.join(", ")
-}
-
-pub type TargetType {
-  Repetitions
-  Duration
-  Sets
-}
-
-/// Each value with the text the column stores.
-pub const target_type_pairs = [
-  #("repetitions", Repetitions),
-  #("duration", Duration),
-  #("sets", Sets),
-]
-
-pub fn target_type_to_string(value: TargetType) -> String {
-  case value {
-    Repetitions -> "repetitions"
-    Duration -> "duration"
-    Sets -> "sets"
-  }
-}
-
-pub fn target_type_from_string(value: String) -> Result(TargetType, Nil) {
-  case value {
-    "repetitions" -> Ok(Repetitions)
-    "duration" -> Ok(Duration)
-    "sets" -> Ok(Sets)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn target_type_to_json(value: TargetType) -> Json {
-  json.string(target_type_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn target_type_decoder() -> decode.Decoder(TargetType) {
-  use value <- decode.then(decode.string)
-  case target_type_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Repetitions, "TargetType")
-  }
 }
 
 pub type LivenessChallenge {
@@ -117,50 +78,6 @@ pub fn liveness_challenge_decoder() -> decode.Decoder(LivenessChallenge) {
   case liveness_challenge_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(RaiseRightHand, "LivenessChallenge")
-  }
-}
-
-pub type ProviderId {
-  ProductionCv
-  WebClient
-  LocalTest
-}
-
-/// Each value with the text the column stores.
-pub const provider_id_pairs = [
-  #("production_cv", ProductionCv),
-  #("web_client", WebClient),
-  #("local_test", LocalTest),
-]
-
-pub fn provider_id_to_string(value: ProviderId) -> String {
-  case value {
-    ProductionCv -> "production_cv"
-    WebClient -> "web_client"
-    LocalTest -> "local_test"
-  }
-}
-
-pub fn provider_id_from_string(value: String) -> Result(ProviderId, Nil) {
-  case value {
-    "production_cv" -> Ok(ProductionCv)
-    "web_client" -> Ok(WebClient)
-    "local_test" -> Ok(LocalTest)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn provider_id_to_json(value: ProviderId) -> Json {
-  json.string(provider_id_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn provider_id_decoder() -> decode.Decoder(ProviderId) {
-  use value <- decode.then(decode.string)
-  case provider_id_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(ProductionCv, "ProviderId")
   }
 }
 
@@ -232,96 +149,6 @@ pub fn status_decoder() -> decode.Decoder(Status) {
   }
 }
 
-pub type CaptureContext {
-  AtHome
-  Club
-  Event
-}
-
-/// Each value with the text the column stores.
-pub const capture_context_pairs = [
-  #("at_home", AtHome),
-  #("club", Club),
-  #("event", Event),
-]
-
-pub fn capture_context_to_string(value: CaptureContext) -> String {
-  case value {
-    AtHome -> "at_home"
-    Club -> "club"
-    Event -> "event"
-  }
-}
-
-pub fn capture_context_from_string(
-  value: String,
-) -> Result(CaptureContext, Nil) {
-  case value {
-    "at_home" -> Ok(AtHome)
-    "club" -> Ok(Club)
-    "event" -> Ok(Event)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn capture_context_to_json(value: CaptureContext) -> Json {
-  json.string(capture_context_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn capture_context_decoder() -> decode.Decoder(CaptureContext) {
-  use value <- decode.then(decode.string)
-  case capture_context_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(AtHome, "CaptureContext")
-  }
-}
-
-pub type Quality {
-  Good
-  Degraded
-  Insufficient
-}
-
-/// Each value with the text the column stores.
-pub const quality_pairs = [
-  #("good", Good),
-  #("degraded", Degraded),
-  #("insufficient", Insufficient),
-]
-
-pub fn quality_to_string(value: Quality) -> String {
-  case value {
-    Good -> "good"
-    Degraded -> "degraded"
-    Insufficient -> "insufficient"
-  }
-}
-
-pub fn quality_from_string(value: String) -> Result(Quality, Nil) {
-  case value {
-    "good" -> Ok(Good)
-    "degraded" -> Ok(Degraded)
-    "insufficient" -> Ok(Insufficient)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn quality_to_json(value: Quality) -> Json {
-  json.string(quality_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn quality_decoder() -> decode.Decoder(Quality) {
-  use value <- decode.then(decode.string)
-  case quality_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Good, "Quality")
-  }
-}
-
 pub type VerificationState {
   VerificationStateVerified
   VerificationStatePartiallyVerified
@@ -380,83 +207,19 @@ pub fn verification_state_decoder() -> decode.Decoder(VerificationState) {
   }
 }
 
-pub type PreviousVerificationState {
-  PreviousVerificationStateVerified
-  PreviousVerificationStatePartiallyVerified
-  PreviousVerificationStateUnableToVerify
-  PreviousVerificationStateCompletedUnverified
-  PreviousVerificationStateCancelled
-}
-
-/// Each value with the text the column stores.
-pub const previous_verification_state_pairs = [
-  #("verified", PreviousVerificationStateVerified),
-  #("partially_verified", PreviousVerificationStatePartiallyVerified),
-  #("unable_to_verify", PreviousVerificationStateUnableToVerify),
-  #("completed_unverified", PreviousVerificationStateCompletedUnverified),
-  #("cancelled", PreviousVerificationStateCancelled),
-]
-
-pub fn previous_verification_state_to_string(
-  value: PreviousVerificationState,
-) -> String {
-  case value {
-    PreviousVerificationStateVerified -> "verified"
-    PreviousVerificationStatePartiallyVerified -> "partially_verified"
-    PreviousVerificationStateUnableToVerify -> "unable_to_verify"
-    PreviousVerificationStateCompletedUnverified -> "completed_unverified"
-    PreviousVerificationStateCancelled -> "cancelled"
-  }
-}
-
-pub fn previous_verification_state_from_string(
-  value: String,
-) -> Result(PreviousVerificationState, Nil) {
-  case value {
-    "verified" -> Ok(PreviousVerificationStateVerified)
-    "partially_verified" -> Ok(PreviousVerificationStatePartiallyVerified)
-    "unable_to_verify" -> Ok(PreviousVerificationStateUnableToVerify)
-    "completed_unverified" -> Ok(PreviousVerificationStateCompletedUnverified)
-    "cancelled" -> Ok(PreviousVerificationStateCancelled)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn previous_verification_state_to_json(
-  value: PreviousVerificationState,
-) -> Json {
-  json.string(previous_verification_state_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn previous_verification_state_decoder() -> decode.Decoder(
-  PreviousVerificationState,
-) {
-  use value <- decode.then(decode.string)
-  case previous_verification_state_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(
-        PreviousVerificationStateVerified,
-        "PreviousVerificationState",
-      )
-  }
-}
-
 pub type Row {
   Row(
     id: id.BoxSessionId,
     player_id: id.PlayerId,
     drill_id: String,
     drill_version: Int,
-    assignment_id: Option(String),
-    challenge_entry_id: Option(String),
-    target_type: TargetType,
+    assignment_id: Option(id.BoxAssignmentId),
+    challenge_entry_id: Option(id.BoxChallengeEntryId),
+    target_type: box_target_type.BoxTargetType,
     target_value: Float,
     nonce_hash: String,
     liveness_challenge: LivenessChallenge,
-    provider_id: ProviderId,
+    provider_id: box_provider.BoxProvider,
     provider_version: Int,
     status: Status,
     created_at: Int,
@@ -466,20 +229,20 @@ pub type Row {
     liveness_passed_at: Option(Int),
     last_seq: Int,
     batches: Int,
-    capture_context: Option(CaptureContext),
+    capture_context: Option(capture_context.CaptureContext),
     session_duration_ms: Option(Float),
     verified_active_ms: Option(Float),
     verified_reps: Option(Int),
     sets_completed: Option(Int),
     target_completed: Option(Bool),
-    quality: Option(Quality),
+    quality: Option(box_quality.BoxQuality),
     interruptions_count: Option(Int),
     verification_state: Option(VerificationState),
     result_hash: Option(String),
     finalized_at: Option(Int),
     note: Option(String),
     clip_media_id: Option(String),
-    previous_verification_state: Option(PreviousVerificationState),
+    previous_verification_state: Option(box_restorable_state.BoxRestorableState),
     invalidated_at: Option(Int),
     cv_provider_session_id: Option(String),
   )
@@ -491,11 +254,11 @@ pub fn new(
   player_id player_id: id.PlayerId,
   drill_id drill_id: String,
   drill_version drill_version: Int,
-  target_type target_type: TargetType,
+  target_type target_type: box_target_type.BoxTargetType,
   target_value target_value: Float,
   nonce_hash nonce_hash: String,
   liveness_challenge liveness_challenge: LivenessChallenge,
-  provider_id provider_id: ProviderId,
+  provider_id provider_id: box_provider.BoxProvider,
   provider_version provider_version: Int,
   status status: Status,
   created_at created_at: Int,
@@ -549,13 +312,19 @@ pub fn decoder() -> decode.Decoder(Row) {
   use player_id <- decode.field(1, id.player_decoder())
   use drill_id <- decode.field(2, decode.string)
   use drill_version <- decode.field(3, decode.int)
-  use assignment_id <- decode.field(4, decode.optional(decode.string))
-  use challenge_entry_id <- decode.field(5, decode.optional(decode.string))
-  use target_type <- decode.field(6, target_type_decoder())
+  use assignment_id <- decode.field(
+    4,
+    decode.optional(id.box_assignment_decoder()),
+  )
+  use challenge_entry_id <- decode.field(
+    5,
+    decode.optional(id.box_challenge_entry_decoder()),
+  )
+  use target_type <- decode.field(6, box_target_type.decoder())
   use target_value <- decode.field(7, decode.float)
   use nonce_hash <- decode.field(8, decode.string)
   use liveness_challenge <- decode.field(9, liveness_challenge_decoder())
-  use provider_id <- decode.field(10, provider_id_decoder())
+  use provider_id <- decode.field(10, box_provider.decoder())
   use provider_version <- decode.field(11, decode.int)
   use status <- decode.field(12, status_decoder())
   use created_at <- decode.field(13, decode.int)
@@ -567,7 +336,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use batches <- decode.field(19, decode.int)
   use capture_context <- decode.field(
     20,
-    decode.optional(capture_context_decoder()),
+    decode.optional(capture_context.decoder()),
   )
   use session_duration_ms <- decode.field(21, decode.optional(decode.float))
   use verified_active_ms <- decode.field(22, decode.optional(decode.float))
@@ -577,7 +346,7 @@ pub fn decoder() -> decode.Decoder(Row) {
     25,
     decode.optional(sqlight.decode_bool()),
   )
-  use quality <- decode.field(26, decode.optional(quality_decoder()))
+  use quality <- decode.field(26, decode.optional(box_quality.decoder()))
   use interruptions_count <- decode.field(27, decode.optional(decode.int))
   use verification_state <- decode.field(
     28,
@@ -589,7 +358,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use clip_media_id <- decode.field(32, decode.optional(decode.string))
   use previous_verification_state <- decode.field(
     33,
-    decode.optional(previous_verification_state_decoder()),
+    decode.optional(box_restorable_state.decoder()),
   )
   use invalidated_at <- decode.field(34, decode.optional(decode.int))
   use cv_provider_session_id <- decode.field(35, decode.optional(decode.string))
@@ -643,13 +412,13 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.player_sql(row.player_id),
     sqlight.text(row.drill_id),
     sqlight.int(row.drill_version),
-    sqlight.nullable(sqlight.text, row.assignment_id),
-    sqlight.nullable(sqlight.text, row.challenge_entry_id),
-    sqlight.text(target_type_to_string(row.target_type)),
+    sqlight.nullable(id.box_assignment_sql, row.assignment_id),
+    sqlight.nullable(id.box_challenge_entry_sql, row.challenge_entry_id),
+    sqlight.text(box_target_type.to_string(row.target_type)),
     sqlight.float(row.target_value),
     sqlight.text(row.nonce_hash),
     sqlight.text(liveness_challenge_to_string(row.liveness_challenge)),
-    sqlight.text(provider_id_to_string(row.provider_id)),
+    sqlight.text(box_provider.to_string(row.provider_id)),
     sqlight.int(row.provider_version),
     sqlight.text(status_to_string(row.status)),
     sqlight.int(row.created_at),
@@ -660,7 +429,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.int(row.last_seq),
     sqlight.int(row.batches),
     sqlight.nullable(
-      fn(v) { sqlight.text(capture_context_to_string(v)) },
+      fn(v) { sqlight.text(capture_context.to_string(v)) },
       row.capture_context,
     ),
     sqlight.nullable(sqlight.float, row.session_duration_ms),
@@ -668,7 +437,10 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.int, row.verified_reps),
     sqlight.nullable(sqlight.int, row.sets_completed),
     sqlight.nullable(sqlight.bool, row.target_completed),
-    sqlight.nullable(fn(v) { sqlight.text(quality_to_string(v)) }, row.quality),
+    sqlight.nullable(
+      fn(v) { sqlight.text(box_quality.to_string(v)) },
+      row.quality,
+    ),
     sqlight.nullable(sqlight.int, row.interruptions_count),
     sqlight.nullable(
       fn(v) { sqlight.text(verification_state_to_string(v)) },
@@ -679,7 +451,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.note),
     sqlight.nullable(sqlight.text, row.clip_media_id),
     sqlight.nullable(
-      fn(v) { sqlight.text(previous_verification_state_to_string(v)) },
+      fn(v) { sqlight.text(box_restorable_state.to_string(v)) },
       row.previous_verification_state,
     ),
     sqlight.nullable(sqlight.int, row.invalidated_at),

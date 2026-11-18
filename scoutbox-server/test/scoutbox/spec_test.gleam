@@ -12,15 +12,20 @@ import scoutbox/agents/core_routes
 import scoutbox/agents/policy_routes
 import scoutbox/agents/transaction_routes
 import scoutbox/development/benchmarks.{Drill}
+import scoutbox/development/box_cam_rules
 import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
+import scoutbox/platform/json_text
 import scoutbox/platform/limits.{Policy}
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/analytics/cohorts
 import scoutbox/recruitment/analytics/funnels
 import scoutbox/recruitment/analytics/metrics
 import scoutbox/recruitment/domain_errors
+import scoutbox/rows/box_sessions as session_row
+import scoutbox/vocab/box_provider
+import scoutbox/vocab/box_target_type
 import scoutbox/vocab/notification_category
 import scoutbox/vocab/position
 import simplifile
@@ -364,4 +369,120 @@ pub fn passport_provenance_test() {
     assert dict.get(copy, p.0) == Ok(passport_rules.provenance_copy(p.1))
   })
   assert dict.size(copy) == list.length(order)
+}
+
+/// Box Cam's drills and observation providers, whole: each written as the TypeScript registry holds it.
+pub fn box_cam_registry_test() {
+  let num = json_text.number
+  let caps = fn(cs) {
+    json.array(cs, fn(c) { json.string(box_cam_rules.capability_to_string(c)) })
+  }
+  let drill = fn(d: box_cam_rules.Drill) {
+    json.object(
+      list.flatten([
+        [
+          #("safetyNotes", json.string(d.safety_notes)),
+          #("restGuidance", json.nullable(d.rest_guidance, json.string)),
+          #("ageAppropriateness", json.string(d.age_appropriateness)),
+          #(
+            "thresholds",
+            json.object([
+              #("repMinGapMs", num(d.rep_min_gap_ms)),
+              #("repMinConfidence", num(d.rep_min_confidence)),
+            ]),
+          ),
+          #("id", json.string(d.id)),
+          #("version", json.int(d.version)),
+          #("title", json.string(d.title)),
+          #("category", json.string(d.category)),
+          #("summary", json.string(d.summary)),
+          #("targetTypes", json.array(d.target_types, box_target_type.to_json)),
+          #("verificationCapabilities", caps(d.verification_capabilities)),
+          #(
+            "setup",
+            json.object([
+              #("orientation", json.string(d.setup.orientation)),
+              #("distanceM", num(d.setup.distance_m)),
+              #("space", json.string(d.setup.space)),
+              #("equipment", json.array(d.setup.equipment, json.string)),
+              #("framing", json.string(d.setup.framing)),
+              #("demo", json.string(d.setup.demo)),
+            ]),
+          ),
+        ],
+        case d.rep_support {
+          True -> []
+          False -> [#("repSupport", json.string("not_configured"))]
+        },
+        case d.rep_support_note {
+          Some(note) -> [#("repSupportNote", json.string(note))]
+          None -> []
+        },
+      ]),
+    )
+  }
+  let provider = fn(p: box_cam_rules.Provider) {
+    #(
+      box_provider.to_string(p.id),
+      json.object(
+        list.flatten([
+          [
+            #("id", box_provider.to_json(p.id)),
+            #("version", json.int(p.version)),
+            #("status", json.string(p.status)),
+          ],
+          case p.label {
+            Some(l) -> [#("label", json.string(l))]
+            None -> []
+          },
+          [
+            #("testOnly", json.bool(p.test_only)),
+            #("capabilities", caps(p.capabilities)),
+          ],
+          case p.id {
+            box_provider.ProductionCv -> [
+              #("combineVerifiedProtocols", json.preprocessed_array([])),
+            ]
+            _ -> []
+          },
+          [#("note", json.string(p.note))],
+        ]),
+      ),
+    )
+  }
+  let ported =
+    json.object([
+      #("$source", json.string("domains/development/boxcam/drills.mjs")),
+      #("CAPABILITIES", caps(box_cam_rules.capabilities)),
+      #("DRILLS", json.array(box_cam_rules.drills, drill)),
+      #("PROVIDERS", json.object(list.map(box_cam_rules.providers, provider))),
+      #(
+        "LIVENESS_CHALLENGES",
+        json.array(session_row.liveness_challenge_pairs, fn(p) {
+          json.string(p.0)
+        }),
+      ),
+    ])
+  let assert Ok(ported) = json.parse(json.to_string(ported), decode.dynamic)
+  assert snapshot("development/boxcam/drills.json", decode.dynamic) == ported
+}
+
+/// The verification states' player copy, state by state.
+pub fn box_cam_state_copy_test() {
+  let copy =
+    snapshot(
+      "development/boxcam/shared.json",
+      decode.at(["STATE_COPY"], decode.dict(decode.string, decode.string)),
+    )
+  let ported =
+    list.map(session_row.verification_state_pairs, fn(p) {
+      #(p.0, box_cam_rules.state_copy(p.1))
+    })
+  assert dict.from_list(ported) == copy
+  let note =
+    snapshot(
+      "development/boxcam/shared.json",
+      decode.at(["DEV_ACTIVITY_NOTE"], decode.string),
+    )
+  assert note == box_cam_rules.dev_activity_note
 }

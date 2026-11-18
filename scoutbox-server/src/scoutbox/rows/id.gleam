@@ -458,6 +458,136 @@ pub fn next_block(tx: Tx) -> Result(BlockId, Fail(e)) {
   ids.next(tx, "blk") |> result.map(BlockId)
 }
 
+/// An id of `box_assignments`.
+pub opaque type BoxAssignmentId {
+  BoxAssignmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn box_assignment(text: String) -> BoxAssignmentId {
+  BoxAssignmentId(text)
+}
+
+pub fn box_assignment_to_string(id: BoxAssignmentId) -> String {
+  let BoxAssignmentId(text) = id
+  text
+}
+
+pub fn box_assignment_sql(id: BoxAssignmentId) -> sqlight.Value {
+  sqlight.text(box_assignment_to_string(id))
+}
+
+pub fn box_assignment_json(id: BoxAssignmentId) -> Json {
+  json.string(box_assignment_to_string(id))
+}
+
+pub fn box_assignment_decoder() -> decode.Decoder(BoxAssignmentId) {
+  decode.map(decode.string, BoxAssignmentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_box_assignment(tx: Tx) -> Result(BoxAssignmentId, Fail(e)) {
+  ids.next(tx, "boxa") |> result.map(BoxAssignmentId)
+}
+
+/// An id of `box_challenges`.
+pub opaque type BoxChallengeId {
+  BoxChallengeId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn box_challenge(text: String) -> BoxChallengeId {
+  BoxChallengeId(text)
+}
+
+pub fn box_challenge_to_string(id: BoxChallengeId) -> String {
+  let BoxChallengeId(text) = id
+  text
+}
+
+pub fn box_challenge_sql(id: BoxChallengeId) -> sqlight.Value {
+  sqlight.text(box_challenge_to_string(id))
+}
+
+pub fn box_challenge_json(id: BoxChallengeId) -> Json {
+  json.string(box_challenge_to_string(id))
+}
+
+pub fn box_challenge_decoder() -> decode.Decoder(BoxChallengeId) {
+  decode.map(decode.string, BoxChallengeId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_box_challenge(tx: Tx) -> Result(BoxChallengeId, Fail(e)) {
+  ids.next(tx, "boxc") |> result.map(BoxChallengeId)
+}
+
+/// An id of `box_challenge_entries`.
+pub opaque type BoxChallengeEntryId {
+  BoxChallengeEntryId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn box_challenge_entry(text: String) -> BoxChallengeEntryId {
+  BoxChallengeEntryId(text)
+}
+
+pub fn box_challenge_entry_to_string(id: BoxChallengeEntryId) -> String {
+  let BoxChallengeEntryId(text) = id
+  text
+}
+
+pub fn box_challenge_entry_sql(id: BoxChallengeEntryId) -> sqlight.Value {
+  sqlight.text(box_challenge_entry_to_string(id))
+}
+
+pub fn box_challenge_entry_json(id: BoxChallengeEntryId) -> Json {
+  json.string(box_challenge_entry_to_string(id))
+}
+
+pub fn box_challenge_entry_decoder() -> decode.Decoder(BoxChallengeEntryId) {
+  decode.map(decode.string, BoxChallengeEntryId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_box_challenge_entry(
+  tx: Tx,
+) -> Result(BoxChallengeEntryId, Fail(e)) {
+  ids.next(tx, "boxe") |> result.map(BoxChallengeEntryId)
+}
+
+/// An id of `box_cam_disputes`.
+pub opaque type BoxDisputeId {
+  BoxDisputeId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn box_dispute(text: String) -> BoxDisputeId {
+  BoxDisputeId(text)
+}
+
+pub fn box_dispute_to_string(id: BoxDisputeId) -> String {
+  let BoxDisputeId(text) = id
+  text
+}
+
+pub fn box_dispute_sql(id: BoxDisputeId) -> sqlight.Value {
+  sqlight.text(box_dispute_to_string(id))
+}
+
+pub fn box_dispute_json(id: BoxDisputeId) -> Json {
+  json.string(box_dispute_to_string(id))
+}
+
+pub fn box_dispute_decoder() -> decode.Decoder(BoxDisputeId) {
+  decode.map(decode.string, BoxDisputeId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_box_dispute(tx: Tx) -> Result(BoxDisputeId, Fail(e)) {
+  ids.next(tx, "boxd") |> result.map(BoxDisputeId)
+}
+
 /// An id of `box_sessions`.
 pub opaque type BoxSessionId {
   BoxSessionId(String)
@@ -483,6 +613,11 @@ pub fn box_session_json(id: BoxSessionId) -> Json {
 
 pub fn box_session_decoder() -> decode.Decoder(BoxSessionId) {
   decode.map(decode.string, BoxSessionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_box_session(tx: Tx) -> Result(BoxSessionId, Fail(e)) {
+  ids.next(tx, "boxs") |> result.map(BoxSessionId)
 }
 
 /// An id of `recruitment_briefs`.
@@ -987,6 +1122,11 @@ pub fn combine_attempt_json(id: CombineAttemptId) -> Json {
 
 pub fn combine_attempt_decoder() -> decode.Decoder(CombineAttemptId) {
   decode.map(decode.string, CombineAttemptId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_combine_attempt(tx: Tx) -> Result(CombineAttemptId, Fail(e)) {
+  ids.next(tx, "catt") |> result.map(CombineAttemptId)
 }
 
 /// An id of `combine_requests`.
