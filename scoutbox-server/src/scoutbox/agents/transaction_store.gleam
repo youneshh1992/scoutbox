@@ -1335,3 +1335,83 @@ pub fn agent_counts(
   )
   |> result.map(result.unwrap(_, Counts(0, 0, 0, 0, 0)))
 }
+
+// ------------------------------------------------------------------------------------------------- the audit
+
+/// Every document version's history entries (removed versions included), with the version they belong to.
+pub fn document_events(
+  read: Read,
+  transaction_id: id.TransactionId,
+) -> Result(List(#(doc_row.Row, doc_event_row.Row)), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> doc_row.qualified("d")
+      <> ", "
+      <> doc_event_row.qualified("h")
+      <> " FROM transaction_document_history h JOIN transaction_documents d ON d.id = h.document_id WHERE d.transaction_id = ? ORDER BY d.rowid, h.ord",
+    [id.transaction_sql(transaction_id)],
+    {
+      use d <- decode.then(doc_row.decoder())
+      use h <- decode.then(event_at(doc_row.width))
+      decode.success(#(d, h))
+    },
+  )
+}
+
+fn event_at(offset: Int) -> decode.Decoder(doc_event_row.Row) {
+  use id_ <- decode.field(offset, id.transaction_document_event_decoder())
+  use document_id <- decode.field(offset + 1, id.transaction_document_decoder())
+  use ord <- decode.field(offset + 2, decode.int)
+  use at <- decode.field(offset + 3, decode.int)
+  use by_kind <- decode.field(offset + 4, compliance_actor_kind.decoder())
+  use by_id <- decode.field(offset + 5, decode.optional(decode.string))
+  use by_name <- decode.field(offset + 6, decode.optional(decode.string))
+  use by_role <- decode.field(offset + 7, decode.optional(decode.string))
+  use by_org_id <- decode.field(offset + 8, decode.optional(id.org_decoder()))
+  use action <- decode.field(offset + 9, doc_event_row.action_decoder())
+  decode.success(doc_event_row.Row(
+    id: id_,
+    document_id:,
+    ord:,
+    at:,
+    by_kind:,
+    by_id:,
+    by_name:,
+    by_role:,
+    by_org_id:,
+    action:,
+  ))
+}
+
+/// Every binding's history entries, with the binding and the policy versions each entry rested on.
+pub fn representation_events(
+  read: Read,
+  transaction_id: id.TransactionId,
+) -> Result(List(#(rep_row.Row, rep_event_row.Row, List(id.PolicyId))), Fail(e)) {
+  use reps <- result.try(representations(read, transaction_id))
+  list.try_map(reps, fn(r) {
+    use events <- result.try(store.query(
+      read,
+      "SELECT "
+        <> rep_event_row.columns
+        <> " FROM transaction_representation_history WHERE representation_id = ? ORDER BY ord",
+      [id.representation_sql(r.row.id)],
+      rep_event_row.decoder(),
+    ))
+    list.try_map(events, fn(h) {
+      use pvs <- result.map(case h.has_policy_versions {
+        True ->
+          store.query(
+            read,
+            "SELECT policy_version_id FROM transaction_representation_history_policy_versions WHERE history_id = ? ORDER BY ord",
+            [id.representation_event_sql(h.id)],
+            decode.at([0], id.policy_decoder()),
+          )
+        False -> Ok([])
+      })
+      #(r.row, h, pvs)
+    })
+  })
+  |> result.map(list.flatten)
+}

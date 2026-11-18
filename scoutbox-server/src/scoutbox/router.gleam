@@ -12,6 +12,7 @@ import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
 import scoutbox/agents/transaction_party_routes as party_lanes
 import scoutbox/agents/transaction_routes
+import scoutbox/agents/transaction_ts_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/box_prefs
 import scoutbox/development/combine
@@ -1294,6 +1295,16 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["compliance", "reviews"] ->
           only(req, Get, fn() { compliance.review_queue(ctx, req, reviewer) })
+        ["transactions"] ->
+          only(req, Get, fn() {
+            transaction_ts_routes.list_all(ctx, req, reviewer)
+          })
+        ["transactions", "metrics"] ->
+          only(req, Get, fn() { transaction_ts_routes.metrics(ctx, reviewer) })
+        ["transactions", tid] ->
+          only(req, Get, fn() {
+            transaction_ts_routes.get_one(ctx, reviewer, tid)
+          })
         ["compliance", "reviews", rid, "resolve"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
