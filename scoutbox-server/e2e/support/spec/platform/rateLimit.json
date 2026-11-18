@@ -380,7 +380,7 @@
       "note": "Staff invitations."
     },
     "passport_share_read": {
-      "max": 60,
+      "max": 30,
       "windowMs": 60000,
       "scope": "ip",
       "note": "Public Passport share link reads."

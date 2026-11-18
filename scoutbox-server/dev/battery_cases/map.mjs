@@ -1445,8 +1445,533 @@ const AGENT_MAP = {
   },
 };
 
+// -------------------------------------------------------------------------------------------------- passport
+
+const PASSPORT = 'domains/passport/shared.mjs';
+const PR = 'scoutbox/passport/passport_rules';
+const passport = plainIn(PR);
+const provenance = vocab(PR, 'provenance_pairs');
+const visibility = vocab(PR, 'visibility_pairs');
+const viewer = vocab(PR, 'viewer_pairs');
+const partyV = vocab('scoutbox/vocab/party');
+const positionV = vocab('scoutbox/vocab/position');
+const levelV = vocab('scoutbox/vocab/playing_level');
+const availabilityV = vocab('scoutbox/rows/passport_prefs', 'availability_pairs');
+const EVIDENCE_ROWS = 'scoutbox/rows/evidence';
+const ACHIEVEMENT_ROWS = 'scoutbox/rows/passport_achievements';
+const anyPlayer = (ctx) => `${ctx.use('scoutbox/rows/id')}.player("p")`;
+const unsupported = (what) => (v) => {
+  throw new Error(`cannot print ${JSON.stringify(v)} as ${what}`);
+};
+
+/** A normalised date; its year, month and day are read from its instant. */
+const when_ = record({
+  module: PR,
+  constructor: 'When',
+  fields: { t: ['t', int], precision: ['precision', vocab(PR, 'precision_pairs')] },
+  ignore: ['y', 'm', 'd'],
+});
+const source = record({ module: PR, constructor: 'Source', fields: { type: ['type_', string], id: ['id', string] } });
+const career = record({
+  module: 'scoutbox/rows/passport_career_entries',
+  constructor: 'Row',
+  fields: {
+    id: ['id', ident('career_entry')],
+    orgName: ['org_name', string],
+    role: ['role', option(string)],
+    from: ['from_date', string],
+    to: ['to_date', option(string)],
+    submittedBy: ['submitted_by', partyV],
+    withdrawnAt: ['withdrawn_at', option(int)],
+  },
+  defaults: { player_id: anyPlayer, role: 'None', to_date: 'None', note: 'None', created_at: '0', withdrawn_at: 'None' },
+});
+const squad = record({
+  module: PR,
+  constructor: 'SquadSource',
+  fields: {
+    orgId: ['org_id', ident('org')],
+    orgName: ['org_name', string],
+    rowId: ['row_id', string],
+    addedAt: ['added_at', int],
+    orgVerified: ['org_verified', bool],
+  },
+});
+/** A trial as the timeline reads it. Only a legacy one (no workflow state) can be printed from its JavaScript. */
+const trial = (t, ctx) => {
+  if (t.workflowState !== undefined && t.workflowState !== 'legacy_accepted')
+    throw new Error(`cannot print the attendance of ${JSON.stringify(t)}`);
+  const { id: tid, orgId, orgName = null, proposedDate = null, acceptedAt, report = null, ...rest } = t;
+  const unknown = Object.keys(rest).filter((k) => k !== 'workflowState');
+  if (unknown.length) throw new Error(`TrialSource has no field for the JavaScript key ${unknown[0]}`);
+  const reportAt = report && (report.filedAt ?? report.at);
+  if (report && !Number.isInteger(reportAt)) throw new Error(`cannot print the report ${JSON.stringify(report)}`);
+  return `${ctx.use(PR)}.TrialSource(id: ${ident('trial')(tid, ctx)}, org_id: ${ident('org')(orgId, ctx)}, org_name: ${option(string)(orgName, ctx)}, proposed_date: ${option(string)(proposedDate, ctx)}, accepted_at: ${int(acceptedAt)}, attendance: ${ctx.use(PR)}.Legacy, report_at: ${option(int)(reportAt, ctx)})`;
+};
+const assessment = record({
+  module: PR,
+  constructor: 'AssessmentSource',
+  fields: {
+    id: ['id', ident('assessment')],
+    orgId: ['org_id', ident('org')],
+    orgName: ['org_name', option(string)],
+    submittedAt: ['submitted_at', option(int)],
+    createdAt: ['created_at', int],
+    state: ['state', vocab('scoutbox/rows/assessments', 'state_pairs')],
+  },
+  defaults: { org_name: 'None', submitted_at: 'None', created_at: '0', state: (ctx) => `${ctx.use('scoutbox/rows/assessments')}.Submitted` },
+});
+const reference = record({
+  module: PR,
+  constructor: 'ReferenceSource',
+  fields: {
+    id: ['id', ident('reference')],
+    coachName: ['coach_name', option(string)],
+    orgId: ['org_id', ident('org')],
+    orgName: ['org_name', option(string)],
+    createdAt: ['created_at', int],
+  },
+  defaults: {
+    coach_name: 'None',
+    role_at_time: 'None',
+    org_name: 'None',
+    relationship: '""',
+    from_year: 'None',
+    to_year: 'None',
+    strengths: '""',
+    development: '""',
+    summary: '""',
+    status: (ctx) => `${ctx.use('scoutbox/rows/ver_references')}.Active`,
+    provenance_still_current: 'False',
+  },
+});
+const evidence = record({
+  module: PR,
+  constructor: 'EvidenceSource',
+  fields: {
+    id: ['id', ident('scouting_evidence')],
+    claimType: ['claim_type', vocab(EVIDENCE_ROWS, 'claim_type_pairs')],
+    label: ['label', string],
+    recordedAt: ['recorded_at', int],
+    tier: ['tier', vocab(EVIDENCE_ROWS, 'verification_status_pairs')],
+    sourceKind: ['source_kind', vocab(EVIDENCE_ROWS, 'source_kind_pairs')],
+    superseded: ['superseded', bool],
+    expired: ['expired', bool],
+  },
+  // With neither, the TypeScript engine reads a player's own unconfirmed item, as these defaults do.
+  defaults: {
+    tier: (ctx) => `${ctx.use(EVIDENCE_ROWS)}.SelfReported`,
+    source_kind: (ctx) => `${ctx.use(EVIDENCE_ROWS)}.Player`,
+    superseded: 'False',
+    expired: 'False',
+  },
+});
+const signing = record({
+  module: PR,
+  constructor: 'SigningSource',
+  fields: { id: ['id', ident('signing')], orgId: ['org_id', ident('org')], orgName: ['org_name', option(string)], ts: ['ts', int] },
+  defaults: { org_name: 'None' },
+});
+const achievement = record({
+  module: ACHIEVEMENT_ROWS,
+  constructor: 'Row',
+  fields: {
+    id: ['id', ident('achievement')],
+    title: ['title', string],
+    orgName: ['org_name', option(string)],
+    when: ['when_date', option(string)],
+    submittedBy: ['submitted_by', partyV],
+    confirmation: (c, ctx) =>
+      c === null
+        ? []
+        : [
+            ['confirmation_provenance', `Some(${vocab(ACHIEVEMENT_ROWS, 'confirmation_provenance_pairs')(c.provenance, ctx)})`],
+            ['confirmation_org_name', option(string)(c.orgName, ctx)],
+          ],
+    withdrawnAt: ['withdrawn_at', option(int)],
+  },
+  defaults: {
+    player_id: anyPlayer,
+    org_name: 'None',
+    when_date: 'None',
+    confirmation_provenance: 'None',
+    confirmation_org_id: 'None',
+    confirmation_org_name: 'None',
+    confirmation_by_name: 'None',
+    confirmation_at: 'None',
+    created_at: '0',
+    withdrawn_at: 'None',
+  },
+});
+const positionEntry = record({
+  module: PR,
+  constructor: 'PositionSource',
+  fields: {
+    id: ['id', ident('position_entry')],
+    from: ['from', string],
+    primary: ['primary', positionV],
+    secondary: ['secondary', list(positionV)],
+  },
+  ignore: ['submittedBy', 'recordedAt'],
+  defaults: { secondary: '[]' },
+});
+const sources = record({
+  module: PR,
+  constructor: 'Sources',
+  base: ref(PR, 'no_sources'),
+  fields: {
+    careerEntries: ['career_entries', list(career)],
+    squads: ['squads', list(squad)],
+    trials: ['trials', list(trial)],
+    assessments: ['assessments', list(assessment)],
+    references: ['references', list(reference)],
+    evidence: ['evidence', list(evidence)],
+    signings: ['signings', list(signing)],
+    achievements: ['achievements', list(achievement)],
+    positionHistory: ['position_history', list(positionEntry)],
+  },
+});
+/** An event's title: each field as the value it holds. */
+const titleField = (v, ctx) => {
+  const pr = ctx.use(PR);
+  if (v === null) return `${pr}.Null`;
+  if (typeof v === 'string') return `${pr}.Text(${string(v)})`;
+  if (typeof v === 'boolean') return `${pr}.Flag(${bool(v)})`;
+  if (Number.isInteger(v)) return `${pr}.Count(${v})`;
+  if (Array.isArray(v)) return `${pr}.Texts(${list(string)(v, ctx)})`;
+  throw new Error(`cannot print ${JSON.stringify(v)} as a title field`);
+};
+const title = (v, ctx) => `[${Object.entries(v).map(([k, x]) => `#(${string(k)}, ${titleField(x, ctx)})`).join(', ')}]`;
+const eventOrg = record({
+  module: PR,
+  constructor: 'EventOrg',
+  fields: { id: ['id', option(ident('org'))], name: ['name', option(string)] },
+});
+const trialMark = record({
+  module: PR,
+  constructor: 'TrialMark',
+  fields: { legacy: ['legacy', bool], attendedSessions: ['attended_sessions', option(int)] },
+  defaults: { attended_sessions: 'None' },
+});
+const eventRecord = record({
+  module: PR,
+  constructor: 'Event',
+  fields: {
+    id: ['id', string],
+    type: ['type_', string],
+    when: ['when', when_],
+    title: ['title', title],
+    org: ['org', option(eventOrg)],
+    provenance: ['provenance', provenance],
+    visibility: ['visibility', visibility],
+    publicEligible: ['public_eligible', bool],
+    current: ['current', option(bool)],
+    source: ['source', source],
+    trial: ['trial', option(trialMark)],
+  },
+  // A bare event (temporalConflicts reads only its id and date) takes any value for the rest.
+  defaults: {
+    type_: '""',
+    title: '[]',
+    org: 'None',
+    provenance: (ctx) => `${ctx.use(PR)}.PlayerSubmitted`,
+    visibility: (ctx) => `${ctx.use(PR)}.Private`,
+    public_eligible: 'False',
+    current: 'None',
+    source: (ctx) => `${ctx.use(PR)}.Source("", "")`,
+    trial: 'None',
+  },
+});
+/** A timeline event: its trial marks are one field here. */
+const event_ = (e, ctx) => {
+  const { legacy, attendedSessions, ...rest } = e;
+  return eventRecord(legacy === undefined ? rest : { ...rest, trial: { legacy, attendedSessions } }, ctx);
+};
+const historyRow = record({
+  module: PR,
+  constructor: 'HistoryRow',
+  fields: {
+    key: ['key', string],
+    orgId: ['org_id', option(ident('org'))],
+    orgName: ['org_name', option(string)],
+    role: ['role', option(string)],
+    from: ['from', option(when_)],
+    to: ['to', option(when_)],
+    current: ['current', bool],
+    provenance: ['provenance', provenance],
+    source: ['source', source],
+  },
+  ignore: ['assurance'],
+  defaults: { org_id: 'None', org_name: 'None', role: 'None', to: 'None', source: (ctx) => `${ctx.use(PR)}.Source("", "")` },
+});
+const history = record({
+  module: PR,
+  constructor: 'History',
+  fields: {
+    rows: ['rows', list(historyRow)],
+    foldedConflicts: [
+      'folded',
+      list(record({ module: PR, constructor: 'Folded', fields: { entryId: ['entry_id', ident('career_entry')], into: ['into', string] } })),
+    ],
+  },
+});
+const signingRow = record({
+  module: PR,
+  constructor: 'SigningRow',
+  fields: {
+    id: ['id', ident('signing')],
+    orgId: ['org_id', ident('org')],
+    orgName: ['org_name', option(string)],
+    ts: ['ts', int],
+    endedAt: ['ended_at', option(int)],
+    orgSuspended: ['org_suspended', bool],
+  },
+  defaults: { org_name: 'None', ended_at: 'None', org_suspended: 'False' },
+});
+const positions = record({
+  module: PR,
+  constructor: 'Positions',
+  fields: { primary: ['primary', option(positionV)], secondary: ['secondary', list(positionV)] },
+});
+const prefs = record({
+  module: PR,
+  constructor: 'Prefs',
+  fields: {
+    bio: ['bio', option(string)],
+    positions: ['positions', option(positions)],
+    availability: ['availability', option(availabilityV)],
+    availableFrom: ['available_from', option(string)],
+    publicSelections: ['public_selections', list(string)],
+    positionHistory: ['position_history', list(positionEntry)],
+  },
+});
+/** ScoutBox's identity confirmation: a fixed record, or null. */
+const identity = (v) => {
+  if (v === null || v === undefined) return 'False';
+  if (v.confirmed === true && v.assurance === 'scoutbox_document_review') return 'True';
+  throw new Error(`cannot print ${JSON.stringify(v)} as an identity`);
+};
+const pFacts = record({
+  module: PR,
+  constructor: 'Facts',
+  fields: {
+    hasRecentFullMatch: ['has_recent_full_match', bool],
+    fullMatchCount: ['full_match_count', int],
+    clipCount: ['clip_count', int],
+    referenceCount: ['reference_count', int],
+    hasConfirmedCurrentClub: ['has_confirmed_current_club', bool],
+    hasRecentAssessment: ['has_recent_assessment', bool],
+    hasPosition: ['has_position', bool],
+    hasAvailability: ['has_availability', bool],
+    identityConfirmed: ['identity_confirmed', bool],
+    historyRows: ['history_rows', int],
+    hasRecentTrainingEvidence: ['has_recent_training_evidence', bool],
+  },
+  // An absent fact reads as false, as `!f.x` does.
+  defaults: { has_recent_training_evidence: 'False' },
+});
+const pGap = record({
+  module: PR,
+  constructor: 'Gap',
+  fields: { id: ['id', string], version: ['version', int], category: ['category', string] },
+});
+const completenessV = (c, ctx) =>
+  `${ctx.use(PR)}.Completeness(coverage: ${string(c.evidenceCoverage)}, gaps: ${list(pGap)(c.gaps, ctx)}, satisfied: ${int(c.eligibility.satisfied)}, total: ${int(c.eligibility.total)})`;
+const currentClub = record({
+  module: PR,
+  constructor: 'CurrentClub',
+  fields: {
+    orgId: ['org_id', option(ident('org'))],
+    orgName: ['org_name', option(string)],
+    role: ['role', option(string)],
+    since: ['since', option(string)],
+    provenance: ['provenance', provenance],
+  },
+  ignore: ['assurance'],
+});
+const pStatus = record({
+  module: PR,
+  constructor: 'Status',
+  fields: {
+    currentClub: ['current_club', option(currentClub)],
+    positions: ['positions', option(positions)],
+    availability: ['availability', option(availabilityV)],
+    availableFrom: ['available_from', option(string)],
+    // Its `since` is shown as a day; the Gleam record holds the instant it was read from.
+    representation: ['representation', option(unsupported('a representation'))],
+    identity: ['identity', identity],
+    conflicts: ['conflicts', list(unsupported('a club conflict'))],
+  },
+});
+const pair = (a, b) => (v, ctx) => `#(${int(v[a])}, ${int(v[b])})`;
+const full = record({
+  module: PR,
+  constructor: 'Full',
+  fields: {
+    player: [
+      'player',
+      record({
+        module: PR,
+        constructor: 'PlayerFacts',
+        fields: {
+          id: ['id', ident('player')],
+          name: ['name', string],
+          age: ['age', option(int)],
+          minor: ['minor', bool],
+          position: ['position', option(positionV)],
+          city: ['city', option(string)],
+          level: ['level', option(levelV)],
+        },
+      }),
+    ],
+    identity: ['identity', identity],
+    prefs: ['prefs', option(prefs)],
+    history: ['history', history],
+    status: ['status', pStatus],
+    timeline: ['timeline', list(event_)],
+    temporalConflicts: ['temporal_conflicts', list(unsupported('a temporal conflict'))],
+    evidenceSummary: [
+      'evidence_summary',
+      record({
+        module: PR,
+        constructor: 'EvidenceSummary',
+        fields: {
+          fullMatches: ['full_matches', int],
+          clips: ['clips', int],
+          assessments: ['assessments', int],
+          references: ['references', int],
+          lastEvidenceDays: ['last_evidence_days', option(int)],
+          note: ['note', string],
+        },
+      }),
+    ],
+    references: ['references', list(reference)],
+    achievements: ['achievements', list(achievement)],
+    developmentSummary: ['development_summary', pair('active', 'completed')],
+    trialsSummary: ['trials_summary', pair('total', 'withReport')],
+    completeness: ['completeness', completenessV],
+    sharingSummary: ['sharing_active', (v) => int(v.active)],
+    // What buildFor filters to the viewing organisation; the Gleam projection filters them itself.
+    assessmentsForOrg: ['assessments', list(assessment)],
+    trialsForOrg: ['trials', list(trial)],
+  },
+  defaults: {
+    development_activity: 'None',
+    combine: 'None',
+    box_share_recruitment: 'False',
+    sharing_active: '0',
+    assessments: '[]',
+    trials: '[]',
+    timeline: '[]',
+    temporal_conflicts: '[]',
+    revision_evidence: '[]',
+    revision_careers: '[]',
+  },
+});
+
+const PASSPORT_MAP = {
+  [`${PASSPORT}#evId`]: passport('ev_id', [string, string, string], string),
+  [`${PASSPORT}#provRank`]: passport('provenance_rank', [provenance], int),
+  [`${PASSPORT}#provenanceFromMethod`]: passport('provenance_from_method', [string], provenance),
+  [`${PASSPORT}#viewerSees`]: passport('viewer_sees', [viewer, visibility], bool),
+  [`${PASSPORT}#whenDisplay`]: passport('when_display', [when_], string),
+  [`${PASSPORT}#sha256`]: passport('sha256', [string], string),
+  [`${PASSPORT}#normWhen`]: {
+    module: PR,
+    test: (c, ctx) => {
+      const [input] = c.args;
+      const pr = ctx.use(PR);
+      if (typeof input === 'string') return eq(`${pr}.when_of(${string(input)})`, option(when_)(c.result, ctx));
+      if (Number.isInteger(input)) return eq(`${pr}.when_at(${int(input)})`, when_(c.result, ctx));
+      if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const { year, month = null, ...rest } = input;
+        if (Object.keys(rest).length) throw new Error(`cannot print ${JSON.stringify(input)} as a year and month`);
+        return eq(`${pr}.when_of_year(${int(year)}, ${option(int)(month, ctx)})`, option(when_)(c.result, ctx));
+      }
+      throw new Error(`cannot print ${JSON.stringify(input)} as a date`);
+    },
+  },
+  [`${PASSPORT}#buildTimeline`]: passport('build_timeline', [sources], list(event_)),
+  [`${PASSPORT}#clubHistory`]: {
+    module: PR,
+    test: (c, ctx) => {
+      const { signingRows = [], squads = [], careerEntries = [], affiliations = [], ...rest } = c.args[0];
+      if (affiliations.length || Object.keys(rest).length)
+        throw new Error(`cannot print ${JSON.stringify(c.args[0])} as club history sources`);
+      return eq(
+        `${ctx.use(PR)}.club_history(${list(signingRow)(signingRows, ctx)}, ${list(squad)(squads, ctx)}, ${list(career)(careerEntries, ctx)})`,
+        history(c.result, ctx),
+      );
+    },
+  },
+  [`${PASSPORT}#currentStatus`]: {
+    module: PR,
+    test: (c, ctx) => {
+      const { history: h, prefs: p = null, agreements = [], identity: i = null, ...rest } = c.args[0];
+      if (agreements.length || Object.keys(rest).length)
+        throw new Error(`cannot print ${JSON.stringify(c.args[0])} as current-status inputs`);
+      return eqJson(
+        `${ctx.use(PR)}.status_json(${ctx.use(PR)}.current_status(${history(h, ctx)}, ${option(prefs)(p, ctx)}, None, ${identity(i)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${PASSPORT}#temporalConflicts`]: {
+    module: PR,
+    now: true,
+    test: (c, ctx) => {
+      const { events = [], history: h = [], dob = null } = c.args[0];
+      return eqJson(
+        `${ctx.use('gleam/json')}.array(${ctx.use(PR)}.temporal_conflicts(${list(event_)(events, ctx)}, ${list(historyRow)(h, ctx)}, ${option(string)(dob, ctx)}, ${ctx.now}), ${ctx.use(PR)}.temporal_conflict_json)`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${PASSPORT}#evaluateGaps`]: {
+    module: PR,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use('gleam/json')}.array(${ctx.use(PR)}.evaluate_gaps(${pFacts(c.args[0], ctx)}), ${ctx.use(PR)}.gap_json)`,
+        c.result,
+        ctx,
+      ),
+  },
+  [`${PASSPORT}#completeness`]: {
+    module: PR,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(PR)}.completeness_json(${ctx.use(PR)}.completeness(${pFacts(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${PASSPORT}#shareProblem`]: {
+    module: PR,
+    now: true,
+    test: (c, ctx) => {
+      const [share, { now = ctx.now, playerRemoved = false } = {}] = c.args;
+      const s =
+        share === null ? 'None' : `Some(#(${option(int)(share.revokedAt ?? null, ctx)}, ${option(int)(share.expiresAt ?? null, ctx)}))`;
+      return eq(
+        `${ctx.use(PR)}.share_problem(${s}, ${int(now)}, ${bool(playerRemoved)})`,
+        option(code(PR, 'share_problem_code'))(c.result, ctx),
+      );
+    },
+  },
+  [`${PASSPORT}#projectPassport`]: {
+    module: PR,
+    test: (c, ctx) => {
+      const [f, v, { orgId = null, shareMode = null } = {}] = c.args;
+      return eqJson(
+        `${ctx.use(PR)}.project(${full(f, ctx)}, ${viewer(v, ctx)}, ${ctx.use(PR)}.Opts(org_id: ${option(ident('org'))(orgId, ctx)}, share_mode: ${option(string)(shareMode, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+};
+
 export const MAP = {
   ...ROOM_MAP,
+  ...PASSPORT_MAP,
   ...AGENT_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
@@ -1526,7 +2051,16 @@ export const NO_COUNTERPART = {
     "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
 };
 
+/**
+ * Rules whose result is random. The recorder seeds randomness so recordings repeat, but a Gleam rule draws its own
+ * bytes, so these calls are ported by hand (HAND_PORTED) rather than compared with the recorded value.
+ */
+export const RANDOM = [`${PASSPORT}#mintShareSecret`];
+
 export const HAND_PORTED = {
+  ...Object.fromEntries(
+    ['mintShareSecret', 'normWhen'].map((f) => [`${PASSPORT}#${f}`, 'test/scoutbox/passport/passport_rules_test.gleam']),
+  ),
   ...Object.fromEntries(
     [
       'affiliationActive',

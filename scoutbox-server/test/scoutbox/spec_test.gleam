@@ -14,6 +14,7 @@ import scoutbox/agents/transaction_routes
 import scoutbox/development/benchmarks.{Drill}
 import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
+import scoutbox/passport/passport_rules
 import scoutbox/platform/limits.{Policy}
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/analytics/cohorts
@@ -315,4 +316,52 @@ pub fn programme_tracks_test() {
       #(t.0, list.map(t.1, position.to_string))
     })
   assert dict.from_list(declared) == tracks
+}
+
+/// GAP_RULE_TABLE (GAP_RULES without their tests) and GAP_RULES_VERSION.
+pub fn passport_gap_rules_test() {
+  let table =
+    snapshot(
+      "passport/shared.json",
+      decode.at(
+        ["GAP_RULE_TABLE"],
+        decode.list({
+          use id <- decode.field("id", decode.string)
+          use version <- decode.field("version", decode.int)
+          use category <- decode.field("category", decode.string)
+          decode.success(passport_rules.Gap(id:, version:, category:))
+        }),
+      ),
+    )
+  let ported =
+    list.map(passport_rules.gap_rules(), fn(r) {
+      passport_rules.Gap(r.id, r.version, r.category)
+    })
+  assert ported == table
+  assert snapshot(
+      "passport/shared.json",
+      decode.at(["GAP_RULES_VERSION"], decode.int),
+    )
+    == passport_rules.gap_rules_version
+}
+
+/// PROVENANCE, in its rank order, and PROVENANCE_COPY for each.
+pub fn passport_provenance_test() {
+  let order =
+    snapshot(
+      "passport/shared.json",
+      decode.at(["PROVENANCE"], decode.list(decode.string)),
+    )
+  let copy =
+    snapshot(
+      "passport/shared.json",
+      decode.at(["PROVENANCE_COPY"], decode.dict(decode.string, decode.string)),
+    )
+  assert list.map(passport_rules.provenance_pairs, fn(p) { p.0 }) == order
+  list.index_map(passport_rules.provenance_pairs, fn(p, i) {
+    assert passport_rules.provenance_to_string(p.1) == p.0
+    assert passport_rules.provenance_rank(p.1) == i
+    assert dict.get(copy, p.0) == Ok(passport_rules.provenance_copy(p.1))
+  })
+  assert dict.size(copy) == list.length(order)
 }

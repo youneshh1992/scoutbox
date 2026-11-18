@@ -1201,6 +1201,127 @@
     ]
   },
   {
+    "battery": "passport/passport",
+    "functions": [
+      {
+        "function": "domains/passport/shared.mjs#buildTimeline",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#clubHistory",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#completeness",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#currentStatus",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#evaluateGaps",
+        "calls": 3,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#evId",
+        "calls": 34,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#mintShareSecret",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "its result is random": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/passport/shared.mjs#normWhen",
+        "calls": 13,
+        "cases": 11,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a date": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#projectPassport",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#provenanceFromMethod",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#provRank",
+        "calls": 14,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#sha256",
+        "calls": 4,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#shareProblem",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#temporalConflicts",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#viewerSees",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/shared.mjs#whenDisplay",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "platform/contracts",
     "functions": [
       {
@@ -1574,7 +1695,7 @@
         "calls": 8,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/analytics/metrics.mjs#previousWindow",

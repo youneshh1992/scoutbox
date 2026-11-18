@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existing, generate, unprintable } from './battery_cases/generate.mjs';
-import { MAP, NO_COUNTERPART } from './battery_cases/map.mjs';
+import { MAP, NO_COUNTERPART, RANDOM } from './battery_cases/map.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -82,7 +82,7 @@ function report(battery) {
     if (!fns.has(id)) fns.set(id, { function: id, calls: 0, cases: new Set(), handPort: {} });
     const f = fns.get(id);
     f.calls += 1;
-    let why = c.why ? reason(c.why) : null;
+    let why = c.why ? reason(c.why) : RANDOM.includes(id) ? 'its result is random' : null;
     let clockDependent = false;
     if (!why) {
       // The same call with the clock moved: by position when both runs made the same calls, else by its arguments.

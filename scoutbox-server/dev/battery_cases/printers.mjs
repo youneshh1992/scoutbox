@@ -94,7 +94,8 @@ export const dict = (k, x) => (v, ctx) =>
  * A record: `Constructor(..base, field: value, …)`, or the full constructor when there is no base. `fields` maps
  * each JavaScript key to `[gleamField, printer]`, or to a function `(value, ctx) => [[gleamField, expression], …]`
  * for a key that spreads over several fields; `ignore` lists keys the Gleam type deliberately has no field for. A key
- * that is in neither is refused. Without a `base`, `defaults` gives the Gleam expression for a field the value leaves
+ * that is in neither is refused. Without a `base`, `defaults` gives the Gleam expression (or `ctx => expression`, to
+ * name an imported value) for a field the value leaves
  * out.
  */
 export const record =
@@ -110,7 +111,8 @@ export const record =
       parts.push(...pairs.map(([name, expr]) => `${name}: ${expr}`));
     }
     for (const [name, expr] of Object.entries(defaults))
-      if (!parts.some((p) => p.startsWith(`${name}: `))) parts.push(`${name}: ${expr}`);
+      if (!parts.some((p) => p.startsWith(`${name}: `)))
+        parts.push(`${name}: ${typeof expr === 'function' ? expr(ctx) : expr}`);
     const ctor = `${ctx.use(module)}.${constructor}`;
     if (!base) return `${ctor}(${parts.join(', ')})`;
     if (!parts.length) return base(ctx);

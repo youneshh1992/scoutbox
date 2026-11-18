@@ -21,8 +21,8 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
-| passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 14 | 14 | 9 | 52 / 2261 | 67 / 239 | 6 to go |
+| passport | 2 | 1 | 0 | 68 / 0 | 3 / 3 | 2 to go |
+| platform | 14 | 14 | 9 | 59 / 2254 | 67 / 239 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -53,12 +53,12 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
-| `passport/passport` | not yet neutral | 1 → 1 | 215 | 215 |  |  |  |  |  | not untangled; not answered |
+| `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  |  | 68 / 0 | 3 / 3 | not answered |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 13 / 37 | 0 / 25 | not answered; 37 cases pending; 25 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 17 / 2189 | 67 / 183 | not answered; 2189 cases pending; 116 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 24 / 2182 | 67 / 183 | not answered; 2182 cases pending; 116 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -162,6 +162,8 @@ ported by hand to a gleeunit test.
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
+| `passport/passport` | `domains/passport/shared.mjs#mintShareSecret` | 2 | its result is random | `test/scoutbox/passport/passport_rules_test.gleam` |
+| `passport/passport` | `domains/passport/shared.mjs#normWhen` | 1 | Gleam's types can't hold its arguments: cannot print null as a date | `test/scoutbox/passport/passport_rules_test.gleam` |
 | `platform/contracts` | `domain.ts#ageOn` | 8 | args[] is a ; result is NaN | to do |
 | `platform/contracts` | `domain.ts#isAdult` | 3 | args[] is a  | to do |
 | `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 | Gleam's types can't hold its arguments: cannot print "established" as a value of scoutbox/vocab/trust_band.pairs | to do |
@@ -349,7 +351,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 |
 | `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
-| `platform/dates` | `domains/passport/shared.mjs#normWhen` | 7 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 4 |

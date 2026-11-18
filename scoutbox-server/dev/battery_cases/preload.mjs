@@ -5,8 +5,12 @@
 //
 // BATTERY_CASES_SERVER  the TypeScript server's directory
 // BATTERY_CASES_CLOCK   the instant Date.now() and `new Date()` stand still at
+//
+// Randomness is seeded too: `crypto.randomBytes` gives the same bytes on every run, so a rule called with a
+// random value (a share secret, say) is recorded with the same value each time.
 import fs from 'node:fs';
-import { registerHooks } from 'node:module';
+import crypto from 'node:crypto';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -99,3 +103,21 @@ if (Number.isFinite(frozen)) {
     }
   };
 }
+
+// A fixed stream for `crypto.randomBytes`: each call takes the next bytes of SHA-256 over a counter. Distinct calls
+// still differ, as random ones would.
+let draws = 0;
+const fixedBytes = (size, callback) => {
+  const out = Buffer.alloc(size);
+  for (let at = 0; at < size; at += 32) {
+    const block = crypto.createHash('sha256').update(`battery-cases:${draws++}`).digest();
+    block.copy(out, at, 0, Math.min(32, size - at));
+  }
+  if (callback) {
+    callback(null, out);
+    return undefined;
+  }
+  return out;
+};
+crypto.randomBytes = fixedBytes;
+syncBuiltinESMExports();

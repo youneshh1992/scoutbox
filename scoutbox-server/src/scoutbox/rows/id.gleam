@@ -10,6 +10,38 @@ import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Tx}
 import sqlight
 
+/// An id of `passport_achievements`.
+pub opaque type AchievementId {
+  AchievementId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn achievement(text: String) -> AchievementId {
+  AchievementId(text)
+}
+
+pub fn achievement_to_string(id: AchievementId) -> String {
+  let AchievementId(text) = id
+  text
+}
+
+pub fn achievement_sql(id: AchievementId) -> sqlight.Value {
+  sqlight.text(achievement_to_string(id))
+}
+
+pub fn achievement_json(id: AchievementId) -> Json {
+  json.string(achievement_to_string(id))
+}
+
+pub fn achievement_decoder() -> decode.Decoder(AchievementId) {
+  decode.map(decode.string, AchievementId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_achievement(tx: Tx) -> Result(AchievementId, Fail(e)) {
+  ids.next(tx, "pach") |> result.map(AchievementId)
+}
+
 /// An id of `agency_affiliations`.
 pub opaque type AffiliationId {
   AffiliationId(String)
@@ -755,6 +787,11 @@ pub fn career_entry_json(id: CareerEntryId) -> Json {
 
 pub fn career_entry_decoder() -> decode.Decoder(CareerEntryId) {
   decode.map(decode.string, CareerEntryId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_career_entry(tx: Tx) -> Result(CareerEntryId, Fail(e)) {
+  ids.next(tx, "pcar") |> result.map(CareerEntryId)
 }
 
 /// An id of `case_history`.
@@ -2735,6 +2772,72 @@ pub fn next_outcome_report(tx: Tx) -> Result(OutcomeReportId, Fail(e)) {
   ids.next(tx, "out") |> result.map(OutcomeReportId)
 }
 
+/// An id of `passport_corrections`.
+pub opaque type PassportCorrectionId {
+  PassportCorrectionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn passport_correction(text: String) -> PassportCorrectionId {
+  PassportCorrectionId(text)
+}
+
+pub fn passport_correction_to_string(id: PassportCorrectionId) -> String {
+  let PassportCorrectionId(text) = id
+  text
+}
+
+pub fn passport_correction_sql(id: PassportCorrectionId) -> sqlight.Value {
+  sqlight.text(passport_correction_to_string(id))
+}
+
+pub fn passport_correction_json(id: PassportCorrectionId) -> Json {
+  json.string(passport_correction_to_string(id))
+}
+
+pub fn passport_correction_decoder() -> decode.Decoder(PassportCorrectionId) {
+  decode.map(decode.string, PassportCorrectionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_passport_correction(
+  tx: Tx,
+) -> Result(PassportCorrectionId, Fail(e)) {
+  ids.next(tx, "pcor") |> result.map(PassportCorrectionId)
+}
+
+/// An id of `passport_shares`.
+pub opaque type PassportShareId {
+  PassportShareId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn passport_share(text: String) -> PassportShareId {
+  PassportShareId(text)
+}
+
+pub fn passport_share_to_string(id: PassportShareId) -> String {
+  let PassportShareId(text) = id
+  text
+}
+
+pub fn passport_share_sql(id: PassportShareId) -> sqlight.Value {
+  sqlight.text(passport_share_to_string(id))
+}
+
+pub fn passport_share_json(id: PassportShareId) -> Json {
+  json.string(passport_share_to_string(id))
+}
+
+pub fn passport_share_decoder() -> decode.Decoder(PassportShareId) {
+  decode.map(decode.string, PassportShareId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_passport_share(tx: Tx) -> Result(PassportShareId, Fail(e)) {
+  ids.next(tx, "pshr") |> result.map(PassportShareId)
+}
+
 /// An id of `players`.
 pub opaque type PlayerId {
   PlayerId(String)
@@ -2888,6 +2991,38 @@ pub fn policy_event_decoder() -> decode.Decoder(PolicyEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_policy_event(tx: Tx) -> Result(PolicyEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(PolicyEventId)
+}
+
+/// An id of `passport_position_history`.
+pub opaque type PositionEntryId {
+  PositionEntryId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn position_entry(text: String) -> PositionEntryId {
+  PositionEntryId(text)
+}
+
+pub fn position_entry_to_string(id: PositionEntryId) -> String {
+  let PositionEntryId(text) = id
+  text
+}
+
+pub fn position_entry_sql(id: PositionEntryId) -> sqlight.Value {
+  sqlight.text(position_entry_to_string(id))
+}
+
+pub fn position_entry_json(id: PositionEntryId) -> Json {
+  json.string(position_entry_to_string(id))
+}
+
+pub fn position_entry_decoder() -> decode.Decoder(PositionEntryId) {
+  decode.map(decode.string, PositionEntryId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_position_entry(tx: Tx) -> Result(PositionEntryId, Fail(e)) {
+  ids.next(tx, "ppos") |> result.map(PositionEntryId)
 }
 
 /// An id of `agent_profile_history`.
