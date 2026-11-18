@@ -22,7 +22,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
-| platform | 14 | 14 | 9 | 59 / 2254 | 67 / 239 | 6 to go |
+| platform | 14 | 14 | 9 | 59 / 2246 | 67 / 249 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -63,7 +63,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
-| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 4 / 35 | 0 / 12 | not answered; 35 cases pending; 12 hand-port calls |
+| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 4 / 27 | 0 / 22 | not answered; 27 cases pending; 22 hand-port calls |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
@@ -189,6 +189,7 @@ ported by hand to a gleeunit test.
 | `platform/dates` | `temporal.ts#parseInstant` | 9 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
 | `platform/dates` | `temporal.ts#parseStrictDateOnly` | 3 | args[] is NaN | to do |
 | `platform/dates` | `temporal.ts#readInstant` | 3 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
+| `platform/productionHardening` | `domains/passport/shared.mjs#passportRevision` | 10 | Gleam's types can't hold its arguments: cannot print {"confirmed":false,"assurance":"player_submitted"} as an identity; Gleam's types can't hold its arguments: cannot print {"confirmed":true,"assurance":"authoritative_registry"} as an identity; Gleam's types can't hold its arguments: cannot print {"confirmed":true,"assurance":"scoutbox_reviewed"} as an identity; Gleam's types can't hold its arguments: PlayerFacts has no field for the JavaScript key ageToday | to do |
 | `platform/productionHardening` | `domains/platform/capabilities.mjs#buildCapabilityReport` | 5 | args[].rateLimit.provider.consume is a function; its result depends on the clock | to do |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 3 | result is NaN | to do |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | to do |
@@ -376,7 +377,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `temporal.ts#utcDayOf` | 1 |
 | `platform/dates` | `temporal.ts#validateIanaZone` | 21 |
 | `platform/dates` | `temporal.ts#zoneOffsetMinutes` | 4 |
-| `platform/productionHardening` | `domains/passport/shared.mjs#passportRevision` | 8 |
 | `platform/productionHardening` | `domains/platform/capabilities.mjs#productionConfigProblems` | 11 |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 4 |

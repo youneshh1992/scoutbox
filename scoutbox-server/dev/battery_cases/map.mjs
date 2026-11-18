@@ -1956,6 +1956,7 @@ const PASSPORT_MAP = {
       );
     },
   },
+  [`${PASSPORT}#passportRevision`]: passport('passport_revision', [full], string),
   [`${PASSPORT}#projectPassport`]: {
     module: PR,
     test: (c, ctx) => {

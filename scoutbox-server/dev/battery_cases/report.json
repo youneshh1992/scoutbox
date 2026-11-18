@@ -1968,9 +1968,14 @@
       {
         "function": "domains/passport/shared.mjs#passportRevision",
         "calls": 10,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":false,\"assurance\":\"player_submitted\"} as an identity": 6,
+          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":true,\"assurance\":\"authoritative_registry\"} as an identity": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":true,\"assurance\":\"scoutbox_reviewed\"} as an identity": 2,
+          "Gleam's types can't hold its arguments: PlayerFacts has no field for the JavaScript key ageToday": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/platform/capabilities.mjs#buildCapabilityReport",
