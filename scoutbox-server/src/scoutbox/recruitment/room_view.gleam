@@ -3,8 +3,8 @@
 //// when the club may no longer see the player (a block, a suspension, a visibility change), the Room keeps the
 //// club's own record and shows nothing of the player, with no cached name, stale Passport or last-known score.
 ////
-//// Not ported yet, inside a Room: the Combine results (from verified attempts) and Box Cam's development activity,
-//// which the Room's Passport and development section show as a player's with none.
+//// Not ported yet, inside a Room: the Combine results (from verified attempts), which the Room's Passport shows as
+//// a player's with none.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -557,6 +557,12 @@ pub fn build(
         read,
         p.row.id,
       ))
+      use development <- result.try(sources.room_activity(
+        read,
+        p.row.id,
+        now,
+        room_rules.dev_note,
+      ))
       use full <- result.try(passport_full(read, s, now))
       let passport = passport_json(org, full)
       let readiness =
@@ -704,7 +710,7 @@ pub fn build(
                 ])
             }),
             #("development", case shares_development {
-              True -> sources.development_activity(room_rules.dev_note)
+              True -> development
               False ->
                 json.object([
                   #("shared", json.bool(False)),

@@ -21,6 +21,8 @@ import scoutbox/agents/transaction_ts_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/benchmarks
 import scoutbox/development/box_prefs
+import scoutbox/development/box_session_routes
+import scoutbox/development/box_training
 import scoutbox/development/combine
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
@@ -568,6 +570,27 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { squad_invites.invite(ctx, req, org) })
         ["players", id, "evidence-gaps"] ->
           only(req, Get, fn() { evidence_gaps.gaps(ctx, org, id.player(id)) })
+        ["box-cam", "assignments"] ->
+          case req.method {
+            Get -> box_training.org_assignments(ctx, req, org)
+            Post -> box_training.create_assignment(ctx, req, org)
+            _ -> not_found()
+          }
+        ["box-cam", "assignments", aid, "cancel"] ->
+          only(req, Post, fn() {
+            box_training.cancel_assignment(
+              ctx,
+              req,
+              org,
+              id.box_assignment(aid),
+            )
+          })
+        ["box-cam", "challenges"] ->
+          case req.method {
+            Get -> box_training.org_challenges(ctx, req, org)
+            Post -> box_training.create_challenge(ctx, req, org)
+            _ -> not_found()
+          }
         ["combine", "protocols"] ->
           only(req, Get, fn() { combine.protocols(ctx) })
         ["combine", "players", id] ->
@@ -1049,6 +1072,46 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Patch -> box_prefs.update(ctx, req, player)
             _ -> not_found()
           }
+        ["box-cam", "drills"] ->
+          only(req, Get, fn() { box_session_routes.drills(ctx) })
+        ["box-cam", "dashboard"] ->
+          only(req, Get, fn() { box_session_routes.dashboard(ctx, player) })
+        ["box-cam", "sessions"] ->
+          case req.method {
+            Get -> box_session_routes.list(ctx, player)
+            Post -> box_session_routes.create(ctx, req, player)
+            _ -> not_found()
+          }
+        ["box-cam", "sessions", sid] ->
+          only(req, Get, fn() {
+            box_session_routes.show(ctx, player, id.box_session(sid))
+          })
+        ["box-cam", "sessions", sid, action] -> {
+          let sid = id.box_session(sid)
+          only(req, Post, fn() {
+            case action {
+              "start" -> box_session_routes.start(ctx, req, player, sid)
+              "events" -> box_session_routes.events(ctx, req, player, sid)
+              "complete" -> box_session_routes.complete(ctx, req, player, sid)
+              "cancel" -> box_session_routes.cancel(ctx, req, player, sid)
+              "note" -> box_session_routes.note(ctx, req, player, sid)
+              "dispute" -> box_training.player_dispute(ctx, req, player, sid)
+              _ -> not_found()
+            }
+          })
+        }
+        ["box-cam", "assignments"] ->
+          only(req, Get, fn() { box_training.player_assignments(ctx, player) })
+        ["box-cam", "assignments", aid, "accept"] ->
+          only(req, Post, fn() {
+            box_training.player_accept(ctx, req, player, id.box_assignment(aid))
+          })
+        ["box-cam", "challenges"] ->
+          only(req, Get, fn() { box_training.player_challenges(ctx, player) })
+        ["box-cam", "challenges", cid, "join"] ->
+          only(req, Post, fn() {
+            box_training.player_join(ctx, req, player, cid)
+          })
         ["agent", "consents"] ->
           only(req, Get, fn() { compliance.player_consents(ctx, player) })
         ["agent", "consents", cid, action] -> {
@@ -1406,6 +1469,46 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["applications", aid, "withdraw"] ->
           only(req, Post, fn() {
             applies.guardian_withdraw(ctx, req, guardian, id.application(aid))
+          })
+        ["children", cid, "box-cam", "sessions"] ->
+          only(req, Get, fn() {
+            box_session_routes.child_list(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "box-cam", "dashboard"] ->
+          only(req, Get, fn() {
+            box_session_routes.child_dashboard(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "box-cam", "sessions", sid, "dispute"] ->
+          only(req, Post, fn() {
+            box_training.child_dispute(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+              id.box_session(sid),
+            )
+          })
+        ["children", cid, "box-cam", "assignments"] ->
+          only(req, Get, fn() {
+            box_training.child_assignments(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "box-cam", "assignments", aid, "accept"] ->
+          only(req, Post, fn() {
+            box_training.child_accept(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+              id.box_assignment(aid),
+            )
+          })
+        ["children", cid, "box-cam", "challenges", chid, "join"] ->
+          only(req, Post, fn() {
+            box_training.child_join(ctx, req, guardian, id.player(cid), chid)
+          })
+        ["children", cid, "box-cam", "prefs"] ->
+          only(req, Patch, fn() {
+            box_prefs.update_child(ctx, req, guardian, id.player(cid))
           })
         ["children", cid, "football-passport"] ->
           only(req, Get, fn() {
@@ -1831,6 +1934,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["evidence", "disputes"] ->
           only(req, Get, fn() { passport_routes.admin_disputes(ctx, req) })
+        ["box-cam", "disputes"] ->
+          only(req, Get, fn() { box_training.dispute_queue(ctx, req) })
+        ["box-cam", "disputes", did, "resolve"] ->
+          only(req, Post, fn() {
+            box_training.resolve_dispute(ctx, req, id.box_dispute(did))
+          })
+        ["box-cam", "sessions", sid] ->
+          only(req, Get, fn() {
+            box_session_routes.admin_show(ctx, id.box_session(sid))
+          })
+        ["box-cam", "sessions", sid, "restore"] ->
+          only(req, Post, fn() {
+            box_training.restore(ctx, req, id.box_session(sid))
+          })
         ["passport", "corrections"] ->
           only(req, Get, fn() { football_passport.admin_corrections(ctx, req) })
         ["passport", "corrections", cid, "resolve"] ->

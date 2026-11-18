@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 44 batteries pass unchanged]
+### Porting, domain by domain [in progress: 45 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -134,7 +134,7 @@ of the product, so they aren't one slice.
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
-| Development: Box Cam, the Combine, the hub | 0 | next |
+| Development: Box Cam, the Combine, the hub | 1 | `development/boxCam` passes; the Combine next |
 | Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -222,6 +222,13 @@ are for surprising facts or points that later work depends on, not implementatio
    1. Untangle `development/boxCam` and `development/combine` [**done**: their pure sections are rules suites (40 and
       20 checks, 62 rule cases pending)]. The CV eligibility checks moved whole with the rest, so no `cv/` table was
       snapshotted. Combine's check 27 reads the protocol from `GET /org/combine/protocols`.
+   2. Box Cam's engine, sessions and training [**done**: `development/boxCam` passes, with its 40 rule cases, and
+      the 39 responses of one probe flow match TypeScript's exactly]. The drill and provider registry is declared in
+      Gleam and checked against the new `spec/development/boxcam` snapshot. The Passport's development activity, its
+      Box Cam milestones and completed challenges, and a Room's development section are real now. A dispute's budget
+      is five a day per player, from training.mjs's own window, not the `box_dispute` entry of `RATE_LIMIT_POLICY`
+      (five an hour), which nothing uses. Cancelling a session reads the nonce but never compares it, on both
+      servers. The clip, the development plan and the club's drill list are `Not ported yet:`.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared

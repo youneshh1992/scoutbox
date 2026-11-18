@@ -11,6 +11,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/agents/agent_rules
 import scoutbox/agents/agent_store
+import scoutbox/development/box_cam_rules as box_rules
+import scoutbox/development/box_sessions
 import scoutbox/development/combine
 import scoutbox/identity/players.{type Player}
 import scoutbox/identity/staff
@@ -22,6 +24,8 @@ import scoutbox/recruitment/trial_rules
 import scoutbox/recruitment/trials
 import scoutbox/rows/applications as application_row
 import scoutbox/rows/assessments as assessment_row
+import scoutbox/rows/box_assignments as assignment_row
+import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/dev_objectives as objective_row
 import scoutbox/rows/evidence as evidence_row
 import scoutbox/rows/id
@@ -399,23 +403,103 @@ fn representation(
   }
 }
 
-/// What the self view shows of Box Cam for a player with none of it. Not ported yet: Box Cam's sessions,
-/// assignments and Combine results, which fill these in.
-/// Box Cam's development activity over the last 30 days, under `note`: the Passport's own note, or the Room's.
-pub fn development_activity(note: String) -> Json {
-  json.object([
-    #("days", json.int(30)),
-    #("boxSessions", json.int(0)),
-    #("verifiedActiveMs", json.int(0)),
-    #("assigned", json.int(0)),
-    #("assignedCompleted", json.int(0)),
-    #("focus", json.preprocessed_array([])),
-    #("note", json.string(note)),
-  ])
+/// What the Passport reads of Box Cam: the player's finished sessions that still stand (finalized, neither cancelled
+/// nor invalidated), and all their assignments.
+pub type BoxCam {
+  BoxCam(
+    sessions: List(box_sessions.Session),
+    assignments: List(assignment_row.Row),
+  )
 }
 
-const development_note =
-  "This is evidence of recorded training activity. It is not proof of player ability."
+pub fn box_cam(read: Read, pid: id.PlayerId) -> Result(BoxCam, Fail(e)) {
+  use all <- result.try(box_sessions.finished_for_player(read, pid, None))
+  use assignments <- result.map(box_sessions.assignments_for_player(read, pid))
+  BoxCam(
+    sessions: list.filter(all, fn(s) {
+      s.row.finalized_at != None
+      && s.row.verification_state
+      != Some(session_row.VerificationStateCancelled)
+      && s.row.verification_state
+      != Some(session_row.VerificationStateInvalidated)
+    }),
+    assignments:,
+  )
+}
+
+/// Box Cam's development activity over the last 30 days.
+pub fn box_activity(b: BoxCam, now: Int) -> box_rules.Activity {
+  box_rules.development_activity(
+    list.map(b.sessions, box_sessions.finished),
+    list.filter_map(b.assignments, fn(a) {
+      case a.state {
+        assignment_row.Cancelled -> Error(Nil)
+        state ->
+          Ok(box_rules.ActivityAssignment(
+            created_at: a.created_at,
+            cancelled: False,
+            completed: state == assignment_row.Completed,
+          ))
+      }
+    }),
+    30,
+    now,
+  )
+}
+
+/// The activity a Room shows, under its own note.
+pub fn room_activity(
+  read: Read,
+  pid: id.PlayerId,
+  now: Int,
+  note: String,
+) -> Result(Json, Fail(e)) {
+  use b <- result.map(box_cam(read, pid))
+  box_rules.activity_json(box_activity(b, now), note)
+}
+
+fn displayable(s: box_sessions.Session) -> Bool {
+  s.row.verification_state == Some(session_row.VerificationStateVerified)
+  || s.row.verification_state
+  == Some(session_row.VerificationStatePartiallyVerified)
+}
+
+/// Milestones only (a target completed, or 15 minutes verified), newest ten, so the timeline is not flooded.
+fn box_milestones(b: BoxCam) -> List(rules.BoxSessionSource) {
+  b.sessions
+  |> list.filter(fn(s) {
+    displayable(s)
+    && {
+      s.row.target_completed == Some(True)
+      || option.unwrap(s.row.verified_active_ms, 0.0) >=. 900_000.0
+    }
+  })
+  |> list.sort(fn(a, b) {
+    int.compare(
+      option.unwrap(b.row.ended_at, 0),
+      option.unwrap(a.row.ended_at, 0),
+    )
+  })
+  |> list.take(10)
+  |> list.map(fn(s) {
+    rules.BoxSessionSource(
+      id: id.box_session_to_string(s.row.id),
+      ended_at: s.row.ended_at,
+      drill_title: box_sessions.drill_title(s.row.drill_id),
+      verified_active: box_rules.fmt_ms(option.unwrap(
+        s.row.verified_active_ms,
+        0.0,
+      )),
+      verified_reps: s.row.verified_reps,
+      target_completed: s.row.target_completed == Some(True),
+      assigned_by_org: option.then(s.row.assignment_id, fn(aid) {
+        list.find(b.assignments, fn(a) { a.id == aid })
+        |> option.from_result
+        |> option.map(fn(a) { #(a.org_id, a.org_name) })
+      }),
+    )
+  })
+}
 
 fn combine_projection() -> Json {
   json.object([
@@ -604,6 +688,8 @@ pub fn assemble(
   ))
   use representation <- result.try(representation(read, pid, now))
   use box_share <- result.try(combine.shares_development(read, pid))
+  use box <- result.try(box_cam(read, pid))
+  use challenges <- result.try(box_sessions.completions(read, pid))
   use sharing_active <- result.map(store.one(
     read,
     "SELECT COUNT(*) FROM passport_shares WHERE player_id = ? AND revoked_at IS NULL AND expires_at > ?",
@@ -649,8 +735,9 @@ pub fn assemble(
       has_availability: prefs.availability != None,
       identity_confirmed: identity,
       history_rows: list.length(history.rows),
-      // Not ported yet: Box Cam's recent verified sessions.
-      has_recent_training_evidence: False,
+      has_recent_training_evidence: list.any(box.sessions, fn(s) {
+        displayable(s) && option.unwrap(s.row.ended_at, 0) > now - 45 * day_ms
+      }),
     )
   let trial_sources = list.map(all_trials, trial_source)
   let timeline = case light {
@@ -678,6 +765,19 @@ pub fn assemble(
         outcomes: h.outcomes,
         achievements:,
         position_history: prefs.position_history,
+        box_sessions: box_milestones(box),
+        box_challenges: list.map(challenges, fn(c) {
+          rules.BoxChallengeSource(
+            entry_id: id.box_challenge_entry_to_string(c.entry_id),
+            completed_at: c.completed_at,
+            title: c.title,
+            publisher_name: case c.publisher_org {
+              Some(#(_, name)) -> name
+              None -> None
+            },
+            publisher_org: c.publisher_org,
+          )
+        }),
       ))
   }
   rules.Full(
@@ -717,7 +817,10 @@ pub fn assemble(
       list.count(all_trials, fn(t) { t.report != None }),
     ),
     completeness: rules.completeness(facts),
-    development_activity: Some(development_activity(development_note)),
+    development_activity: Some(box_rules.activity_json(
+      box_activity(box, now),
+      box_rules.dev_activity_note,
+    )),
     combine: Some(combine_projection()),
     box_share_recruitment: box_share,
     sharing_active:,

@@ -45,4 +45,5 @@ export const BATTERIES = [
   'agents/crossAppAdversarial',
   'scouting/clubWorkflows',
   'passport/passport',
+  'development/boxCam',
 ];

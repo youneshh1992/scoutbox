@@ -85,6 +85,7 @@ pub const policy = [
   #("second_look_action", second_look_action_policy),
   #("nobody_missed_action", nobody_missed_action_policy),
   #("passport_share_read", passport_share_read_policy),
+  #("box_session_create", box_session_create_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -128,6 +129,11 @@ pub type Action {
   ContactExternalRecord
   /// Production CV finalizations, per player: only bounds a retry loop.
   BoxCvFinalize
+  /// Box Cam capture sessions minted, per player.
+  BoxSessionCreate
+  /// Box Cam disputes filed, per player. The TypeScript server keeps this window in training.mjs (five a day), not
+  /// as its RATE_LIMIT_POLICY entry.
+  BoxDispute
   /// Public Passport share link reads, per client address: enumeration is refused long before the keyspace matters.
   PassportShareRead
   /// Trial invitations, per organisation.
@@ -224,6 +230,10 @@ const contact_external_record_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
+const box_session_create_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const box_dispute_policy = Policy(max: 5, window_ms: 86_400_000)
+
 const passport_share_read_policy = Policy(max: 30, window_ms: 60_000)
 
 const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
@@ -302,6 +312,8 @@ fn action_name(action: Action) -> String {
     ContactSend -> "contact_send"
     ContactExternalRecord -> "contact_external_record"
     BoxCvFinalize -> "box_cv_finalize"
+    BoxSessionCreate -> "box_session_create"
+    BoxDispute -> "box_dispute"
     PassportShareRead -> "passport_share_read"
     TrialInvite -> "trial_invite"
     TrialSchedule -> "trial_schedule"
@@ -354,6 +366,8 @@ fn action_policy(action: Action) -> Policy {
     ContactSend -> contact_send_policy
     ContactExternalRecord -> contact_external_record_policy
     BoxCvFinalize -> box_cv_finalize_policy
+    BoxSessionCreate -> box_session_create_policy
+    BoxDispute -> box_dispute_policy
     PassportShareRead -> passport_share_read_policy
     TrialInvite -> trial_invite_policy
     TrialSchedule -> trial_schedule_policy

@@ -49,6 +49,9 @@ pub type Config {
     /// Development only: a route may inject a named fault for a test of its failure path (the dashboard's
     /// `simulateFailure`), as the TypeScript server allows outside production.
     dev_faults: Bool,
+    /// BOX_CAM_TEST_PROVIDER=1: Box Cam's scripted observation provider (`local_test`), whose results are always
+    /// labelled simulated.
+    box_cam_test_provider: Bool,
   )
 }
 
@@ -160,6 +163,7 @@ pub fn load() -> Result(Config, String) {
     agent_verification_test: !production
       && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
     dev_faults: !production,
+    box_cam_test_provider: envoy.get("BOX_CAM_TEST_PROVIDER") == Ok("1"),
   ))
 }
 

@@ -4,8 +4,7 @@
 ////
 //// It also holds the one Box Cam CV route a battery reaches: the finalize budget.
 ////
-//// Not ported yet: the rest of Box Cam (sessions, challenges, assignments, disputes; its analysis is moving to a
-//// service of its own), and the ledger row's detail.
+//// Not ported yet: the ledger row's detail.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

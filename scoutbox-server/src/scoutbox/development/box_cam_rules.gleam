@@ -994,3 +994,107 @@ pub fn box_cam_detail(
       <> "."
   }
 }
+
+// ------------------------------------------------------------------------------------------ development activity
+
+/// An assignment as the activity summary counts it.
+pub type ActivityAssignment {
+  ActivityAssignment(created_at: Int, cancelled: Bool, completed: Bool)
+}
+
+/// The last `days` of recorded training: finished sessions that still stand, the verified time among them and
+/// the categories it went to (at most three, most time first), and the assignments set in the window.
+pub type Activity {
+  Activity(
+    days: Int,
+    box_sessions: Int,
+    verified_active_ms: Float,
+    assigned: Int,
+    assigned_completed: Int,
+    focus: List(#(String, Float)),
+  )
+}
+
+pub fn development_activity(
+  sessions: List(Finished),
+  assignments: List(ActivityAssignment),
+  days: Int,
+  now: Int,
+) -> Activity {
+  let since = now - days * 86_400_000
+  let recent =
+    list.filter(sessions, fn(s) {
+      case s.state {
+        Some(session_row.VerificationStateCancelled)
+        | Some(session_row.VerificationStateInvalidated)
+        | None -> False
+        Some(_) -> s.at >= since
+      }
+    })
+  let verified = list.filter(recent, counts)
+  let #(order, by_category) =
+    list.fold(verified, #([], dict.new()), fn(acc, s) {
+      let #(order, totals) = acc
+      let category = case latest_drill(s.drill_id) {
+        Some(d) -> d.category
+        None -> "training"
+      }
+      case dict.get(totals, category) {
+        Ok(ms) -> #(
+          order,
+          dict.insert(totals, category, ms +. s.verified_active_ms),
+        )
+        Error(Nil) -> #(
+          [category, ..order],
+          dict.insert(totals, category, s.verified_active_ms),
+        )
+      }
+    })
+  let focus =
+    list.reverse(order)
+    |> list.filter_map(fn(c) {
+      dict.get(by_category, c) |> result_map(fn(ms) { #(c, ms) })
+    })
+    |> list.sort(fn(a, b) { float.compare(b.1, a.1) })
+    |> list.take(3)
+  let assigned =
+    list.filter(assignments, fn(a) { a.created_at >= since && !a.cancelled })
+  Activity(
+    days:,
+    box_sessions: list.length(recent),
+    verified_active_ms: list.fold(verified, 0.0, fn(t, s) {
+      t +. s.verified_active_ms
+    }),
+    assigned: list.length(assigned),
+    assigned_completed: list.count(assigned, fn(a) { a.completed }),
+    focus:,
+  )
+}
+
+fn result_map(r: Result(a, Nil), f: fn(a) -> b) -> Result(b, Nil) {
+  case r {
+    Ok(v) -> Ok(f(v))
+    Error(Nil) -> Error(Nil)
+  }
+}
+
+/// The summary under `note`: the Passport's own (`dev_activity_note`), or the Room's.
+pub fn activity_json(a: Activity, note: String) -> json.Json {
+  json.object([
+    #("days", json.int(a.days)),
+    #("boxSessions", json.int(a.box_sessions)),
+    #("verifiedActiveMs", json_text.number(a.verified_active_ms)),
+    #("assigned", json.int(a.assigned)),
+    #("assignedCompleted", json.int(a.assigned_completed)),
+    #(
+      "focus",
+      json.array(a.focus, fn(f) {
+        json.object([
+          #("category", json.string(f.0)),
+          #("activeMs", json_text.number(f.1)),
+        ])
+      }),
+    ),
+    #("note", json.string(note)),
+  ])
+}

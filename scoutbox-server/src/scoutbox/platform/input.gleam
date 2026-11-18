@@ -631,6 +631,11 @@ fn result_map_text(r: Result(String, Issue)) -> Result(NumberOrText, Issue) {
   }
 }
 
+/// Any number JSON can carry (valibot's `number()`).
+pub fn any_number() -> Check(Float) {
+  number_value
+}
+
 /// A number from `min` to `max`.
 pub fn number(min: Int, max: Int) -> Check(Float) {
   fn(v) {

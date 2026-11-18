@@ -8,6 +8,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/development/box_training
 import scoutbox/discovery/second_look
 import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
@@ -379,6 +380,7 @@ pub fn metrics(ctx: Ctx) -> Response {
       use passport <- result.try(football_passport.metrics_json(tx))
       use rooms <- result.try(room_routes.metrics_json(tx))
       use second_look_metrics <- result.try(second_look.metrics_json(tx))
+      use box_cam <- result.try(box_training.metrics_json(tx))
       use delivery <- result.try(audit.ops_count(
         read,
         ops_events.DeliveryFailed,
@@ -389,8 +391,9 @@ pub fn metrics(ctx: Ctx) -> Response {
       json.object([
         #("deliveryFailures", json.int(delivery)),
         // Not ported yet: the process's request counters, job runs, stream connects and the other domains'
-        // groups (Box Cam, development, Passport, Trust, analytics), which come between these.
+        // groups (development, Trust, analytics), which come between these.
         #("verification", verification),
+        #("boxCam", box_cam),
         #("passport", passport),
         #("rooms", rooms),
         #("secondLook", second_look_metrics),

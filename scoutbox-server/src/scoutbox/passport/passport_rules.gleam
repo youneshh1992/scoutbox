@@ -510,9 +510,31 @@ pub type PositionSource {
   )
 }
 
+/// A Box Session the timeline shows: a milestone (its target completed, or 15 minutes of verified activity).
+pub type BoxSessionSource {
+  BoxSessionSource(
+    id: String,
+    ended_at: Option(Int),
+    drill_title: String,
+    verified_active: String,
+    verified_reps: Option(Int),
+    target_completed: Bool,
+    assigned_by_org: Option(#(id.OrgId, Option(String))),
+  )
+}
+
+/// A completed Box Challenge; `publisher_name` is the publishing club's, or None for ScoutBox's own.
+pub type BoxChallengeSource {
+  BoxChallengeSource(
+    entry_id: String,
+    completed_at: Option(Int),
+    title: String,
+    publisher_name: Option(String),
+    publisher_org: Option(#(id.OrgId, Option(String))),
+  )
+}
+
 /// Everything the timeline is built from (buildTimeline's `src`).
-///
-/// Not ported yet: Box Cam's milestone sessions and completed challenges, which the timeline also shows.
 pub type Sources {
   Sources(
     career_entries: List(career_row.Row),
@@ -528,6 +550,8 @@ pub type Sources {
     outcomes: List(OutcomeSource),
     achievements: List(achievement_row.Row),
     position_history: List(PositionSource),
+    box_sessions: List(BoxSessionSource),
+    box_challenges: List(BoxChallengeSource),
   )
 }
 
@@ -546,6 +570,8 @@ pub const no_sources =
     outcomes: [],
     achievements: [],
     position_history: [],
+    box_sessions: [],
+    box_challenges: [],
   )
 
 // ------------------------------------------------------------------------------------------------ timeline
@@ -888,6 +914,47 @@ pub fn build_timeline(src: Sources) -> List(Event) {
           |> eligible
       }
     })
+  // The caller passes milestones only, so the timeline is not flooded with every minor session.
+  let box_sessions =
+    list.flat_map(src.box_sessions, fn(b) {
+      event(
+        "box_session",
+        b.id,
+        "box_session_completed",
+        option.map(b.ended_at, when_at),
+        [
+          #("drill", Text(b.drill_title)),
+          #("verifiedActive", Text(b.verified_active)),
+          #("reps", case b.verified_reps {
+            Some(n) -> Count(n)
+            None -> Null
+          }),
+          #("targetCompleted", Flag(b.target_completed)),
+        ],
+        option.map(b.assigned_by_org, fn(o) { EventOrg(Some(o.0), o.1) }),
+        BoxCamObserved,
+        Private,
+        "box_session",
+      )
+    })
+  let box_challenges =
+    list.flat_map(src.box_challenges, fn(c) {
+      event(
+        "box_challenge",
+        c.entry_id,
+        "box_challenge_completed",
+        option.map(c.completed_at, when_at),
+        [
+          #("label", Text(c.title)),
+          #("publisher", Text(option.unwrap(c.publisher_name, "ScoutBox"))),
+        ],
+        option.map(c.publisher_org, fn(o) { EventOrg(Some(o.0), o.1) }),
+        BoxCamObserved,
+        Recruitment,
+        "box_challenge_entry",
+      )
+      |> eligible
+    })
   let positions =
     list.flat_map(src.position_history, fn(p) {
       event(
@@ -918,6 +985,8 @@ pub fn build_timeline(src: Sources) -> List(Event) {
     signings,
     outcomes,
     achievements,
+    box_sessions,
+    box_challenges,
     positions,
   ]
   |> list.flatten
@@ -1484,9 +1553,10 @@ pub type Full {
     /// Trials, and those with a report.
     trials_summary: #(Int, Int),
     completeness: Completeness,
-    /// Not ported yet: Box Cam's development activity, its Combine results and the player's recruitment opt-in for
-    /// them, which the Passport shows; the sources pass what TypeScript writes for a player with none.
+    /// Box Cam's development activity over the last 30 days.
     development_activity: Option(Json),
+    /// Not ported yet: Combine results from verified attempts; the sources pass what TypeScript writes for a player
+    /// with none.
     combine: Option(Json),
     box_share_recruitment: Bool,
     sharing_active: Int,
