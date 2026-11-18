@@ -12,6 +12,7 @@ import scoutbox/platform/canonical.{type Value}
 import scoutbox/platform/secrets
 import scoutbox/rows/agent_transactions as tx_row
 import scoutbox/rows/id
+import scoutbox/rows/transaction_history as event_row
 import scoutbox/rows/transaction_parties as party_row
 import scoutbox/vocab/context_outcome.{
   type ContextOutcome, Clear, InsufficientData, ManualRegulatoryReviewRequired,
@@ -67,12 +68,35 @@ pub fn actor_transitions(from: TransactionStatus) -> List(TransactionStatus) {
   }
 }
 
-/// A draft makes no compliance claim, so an evaluation never moves it.
-pub fn compliance_transition_allowed(
+const all_statuses = [
+  Draft,
+  PartiesConfirmed,
+  CompliancePending,
+  ComplianceBlocked,
+  Ready,
+  Active,
+  OnHold,
+  Cancelled,
+  Closed,
+  Archived,
+]
+
+pub fn actor_transition_allowed(
   from: TransactionStatus,
   to: TransactionStatus,
 ) -> Bool {
-  let allowed = case from {
+  list.contains(actor_transitions(from), to)
+}
+
+/// The statuses an actor's move to `to` may start from.
+pub fn leading_to(to: TransactionStatus) -> List(TransactionStatus) {
+  list.filter(all_statuses, fn(from) { actor_transition_allowed(from, to) })
+}
+
+pub fn compliance_transitions(
+  from: TransactionStatus,
+) -> List(TransactionStatus) {
+  case from {
     PartiesConfirmed -> [Ready, CompliancePending, ComplianceBlocked]
     CompliancePending -> [Ready, ComplianceBlocked, PartiesConfirmed]
     ComplianceBlocked -> [Ready, CompliancePending, PartiesConfirmed]
@@ -80,7 +104,31 @@ pub fn compliance_transition_allowed(
     Active -> [CompliancePending, ComplianceBlocked]
     _ -> []
   }
-  list.contains(allowed, to)
+}
+
+/// ALL_TRANSITIONS: each status with the moves an actor and the compliance layer may make from it.
+pub fn all_transitions_json() -> Json {
+  json.array(all_statuses, fn(from) {
+    json.object([
+      #("from", transaction_status.to_json(from)),
+      #(
+        "byActor",
+        json.array(actor_transitions(from), transaction_status.to_json),
+      ),
+      #(
+        "byCompliance",
+        json.array(compliance_transitions(from), transaction_status.to_json),
+      ),
+    ])
+  })
+}
+
+/// A draft makes no compliance claim, so an evaluation never moves it.
+pub fn compliance_transition_allowed(
+  from: TransactionStatus,
+  to: TransactionStatus,
+) -> Bool {
+  list.contains(compliance_transitions(from), to)
 }
 
 // ------------------------------------------------------------------------------------------------- parties
@@ -563,4 +611,71 @@ pub fn actor(kind: String, name: Option(String)) -> #(String, String) {
 pub fn actor_label(kind: String, name: Option(String)) -> Json {
   let #(k, label) = actor(kind, name)
   json.object([#("kind", json.string(k)), #("label", json.string(label))])
+}
+
+// ------------------------------------------------------------------------------------------------- timeline
+
+/// Who a history entry reaches. `PerDocument` entries reach exactly the parties the document's own class admits.
+pub type Audience {
+  AllParties
+  AgentOnly
+  PlayerAndAgent
+  ClubSide
+  PerDocument
+  AuditOnly
+}
+
+pub fn audience_to_string(a: Audience) -> String {
+  case a {
+    AllParties -> "all_parties"
+    AgentOnly -> "agent_only"
+    PlayerAndAgent -> "player_and_agent"
+    ClubSide -> "club_side"
+    PerDocument -> "per_document"
+    AuditOnly -> "audit_only"
+  }
+}
+
+pub fn audience_of(action: event_row.Action) -> Audience {
+  case action {
+    event_row.TransactionDocumentAdded
+    | event_row.TransactionDocumentSuperseded -> PerDocument
+    // A representation is the agent's own regulated act.
+    event_row.TransactionRepresentationAttached
+    | event_row.TransactionRepresentationWithdrawn -> AgentOnly
+    event_row.TransactionNoteAdded | event_row.TransactionSubjectTombstoned ->
+      AuditOnly
+    _ -> AllParties
+  }
+}
+
+/// A `PerDocument` entry with no class is withheld.
+pub fn timeline_visible(
+  audience: Audience,
+  roles: List(RoomRole),
+  party_role: Option(PartyRole),
+  visibility: Option(DocumentVisibility),
+) -> Bool {
+  let has = list.contains(roles, _)
+  case audience, roles {
+    AuditOnly, _ -> False
+    _, [] -> False
+    _, _ ->
+      case has(TrustSafety), audience {
+        True, _ -> True
+        _, PerDocument ->
+          case visibility {
+            Some(v) -> can_see(v, roles, party_role)
+            None -> False
+          }
+        _, AllParties -> True
+        _, AgentOnly -> has(RepresentingAgent)
+        _, PlayerAndAgent -> has(RepresentingAgent) || has(PartyIndividual)
+        _, ClubSide ->
+          has(PartyClubSignatory)
+          || has(PartyClubMember)
+          || { has(RepresentingAgent) && party_role != None }
+        _, AuditOnly -> False
+      }
+  }
 }

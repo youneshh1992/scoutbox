@@ -9,6 +9,8 @@
 //// DRAFT here with its parties unconfirmed.
 
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -29,6 +31,7 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
+import scoutbox/messaging/channels
 import scoutbox/messaging/notifications
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
@@ -38,30 +41,38 @@ import scoutbox/platform/idempotency
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
+import scoutbox/platform/paging
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/domain_errors.{Contract}
 import scoutbox/rows/agent_transactions as tx_row
 import scoutbox/rows/id
+import scoutbox/rows/transaction_documents as doc_row
 import scoutbox/rows/transaction_history as event_row
+import scoutbox/rows/transaction_linked_threads as thread_row
 import scoutbox/rows/transaction_notes as note_row
 import scoutbox/rows/transaction_parties as party_row
+import scoutbox/rows/transaction_representation_scopes as scope_row
+import scoutbox/rows/transaction_terms_versions as terms_row
 import scoutbox/verification/records
 import scoutbox/vocab/agent_facet
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
 import scoutbox/vocab/context_type.{type ContextType}
+import scoutbox/vocab/declared_representation_status
 import scoutbox/vocab/document_visibility
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/org_type
+import scoutbox/vocab/party
 import scoutbox/vocab/party_role.{type PartyRole}
 import scoutbox/vocab/pending_reason
 import scoutbox/vocab/rule_status
 import scoutbox/vocab/staleness
 import scoutbox/vocab/subject_kind.{type SubjectKind}
 import scoutbox/vocab/transaction_status
+import sqlight
 import wisp.{type Request, type Response}
 
 // ------------------------------------------------------------------------------------------------- refusals
@@ -133,7 +144,7 @@ pub const contract =
     unmapped: "TRANSACTION_STATE_UNKNOWN",
   )
 
-fn err(
+pub fn err(
   code: String,
   message: String,
   fields: List(#(String, Json)),
@@ -141,7 +152,7 @@ fn err(
   domain_errors.refuse(contract, code, message, fields)
 }
 
-fn not_found() -> Response {
+pub fn not_found() -> Response {
   err(
     "TRANSACTION_NOT_FOUND",
     "No transaction with that reference is available to you.",
@@ -149,7 +160,7 @@ fn not_found() -> Response {
   )
 }
 
-fn rate_limited(action: limits.Action) -> Response {
+pub fn rate_limited(action: limits.Action) -> Response {
   http.json(
     429,
     json.object(
@@ -158,11 +169,11 @@ fn rate_limited(action: limits.Action) -> Response {
   )
 }
 
-fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
+pub fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   store.map_refusal(r, fn(_) { http.error(500, "INTERNAL") })
 }
 
-fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
+pub fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
   case r {
     Ok(response) -> response
     Error(store.Refused(response)) -> response
@@ -171,7 +182,7 @@ fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
   }
 }
 
-fn reading(
+pub fn reading(
   ctx: Ctx,
   f: fn(Read) -> Result(a, Fail(e)),
   next: fn(a) -> Response,
@@ -188,7 +199,7 @@ const field_codes = [
   #("expectedVersion", "EXPECTED_REV_INVALID"),
 ]
 
-fn body(
+pub fn body(
   req: Request,
   shape: input.Shape(a),
   default: String,
@@ -205,7 +216,7 @@ fn body(
 
 // ------------------------------------------------------------------------------------------------- actors
 
-fn by_agent(a: OrgAccess) -> By {
+pub fn by_agent(a: OrgAccess) -> By {
   compliance_store.By(
     kind: compliance_actor_kind.Org,
     id: Some(id.org_user_to_string(a.user.id)),
@@ -215,7 +226,7 @@ fn by_agent(a: OrgAccess) -> By {
   )
 }
 
-fn agent_viewer(m: Member) -> Viewer {
+pub fn agent_viewer(m: Member) -> Viewer {
   AgencyViewer(
     org_id: id.org_to_string(m.access.org.id),
     user_id: id.org_user_to_string(m.access.user.id),
@@ -238,7 +249,7 @@ fn stored_of(row: tx_row.Row) -> Option(transaction_rules.Stored) {
 }
 
 /// The snapshot as it reads now: what it says, read back from the evaluation it names.
-fn compliance_of(
+pub fn compliance_of(
   read: Read,
   t: Transaction,
 ) -> Result(Option(transaction_rules.View), Fail(e)) {
@@ -264,6 +275,16 @@ fn live_players(t: Transaction) -> List(party_row.Row) {
 fn current_party_revision(
   read: Read,
   t: Transaction,
+  now: Int,
+) -> Result(String, Fail(e)) {
+  use reps <- result.try(transaction_store.representations(read, t.row.id))
+  party_revision_with(read, t, reps, now)
+}
+
+fn party_revision_with(
+  read: Read,
+  t: Transaction,
+  reps: List(transaction_store.Representation),
   now: Int,
 ) -> Result(String, Fail(e)) {
   use agency <- result.try(orgs.by_id(read, t.row.agency_org_id))
@@ -306,8 +327,15 @@ fn current_party_revision(
   transaction_rules.party_revision(
     t.parties,
     id.org_user_to_string(t.row.agent_user_id),
-    // Not ported yet: representations and consents, so the workspace has none.
-    [],
+    list.map(reps, fn(r) {
+      #(
+        id.org_user_to_string(r.row.agent_user_id),
+        r.row.party_role,
+        declared_representation_status.to_string(r.row.status),
+        option.map(r.row.agreement_id, id.agreement_to_string),
+      )
+    }),
+    // Not ported yet: regulatory consents (the consent routes), so a workspace has none.
     [],
     case profile {
       Some(p) -> compliance_store.facet_states(p, now)
@@ -320,13 +348,24 @@ fn current_party_revision(
 }
 
 /// Reported on a read, never repaired. A new policy version flags the context, which reads as POLICY_CHANGED.
-fn staleness_of(
+pub fn staleness_of(
   read: Read,
   t: Transaction,
   view: Option(transaction_rules.View),
   now: Int,
 ) -> Result(Option(staleness.Staleness), Fail(e)) {
-  use current <- result.try(current_party_revision(read, t, now))
+  use reps <- result.try(transaction_store.representations(read, t.row.id))
+  staleness_with(read, t, reps, view, now)
+}
+
+fn staleness_with(
+  read: Read,
+  t: Transaction,
+  reps: List(transaction_store.Representation),
+  view: Option(transaction_rules.View),
+  now: Int,
+) -> Result(Option(staleness.Staleness), Fail(e)) {
+  use current <- result.try(party_revision_with(read, t, reps, now))
   use flagged <- result.map(compliance_store.re_evaluation_pending(
     read,
     t.row.context_id,
@@ -339,7 +378,7 @@ fn staleness_of(
 }
 
 /// Checked before relationship scope and the engine, so a regulatory clear cannot override it.
-fn safeguarding_problem(
+pub fn safeguarding_problem(
   read: Read,
   t: Transaction,
   now: Int,
@@ -379,6 +418,13 @@ fn gate_of(problem: compliance_store.GateProblem) -> tx_row.ComplianceGate {
   }
 }
 
+/// What a re-check found: a safeguarding problem (no compliance verdict is recorded), or the state it recorded and
+/// the status the transaction is now at.
+pub type Recheck {
+  Guarded(String)
+  Checked(state: State, status: transaction_status.TransactionStatus)
+}
+
 /// Run after every material act, so an old evaluation can never authorise a new one. The status moves through
 /// the compliance transition map only.
 pub fn recheck(
@@ -386,14 +432,14 @@ pub fn recheck(
   transaction_id: id.TransactionId,
   by: By,
   now: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(Recheck, Fail(e)) {
   let read = store.reading(tx)
   use found <- result.try(transaction_store.by_id(read, transaction_id))
   let assert Some(t) = found as "the transaction was just written"
   use guard <- result.try(safeguarding_problem(read, t, now))
   case guard {
     // Not a compliance verdict: the snapshot is not refreshed.
-    Some(_) -> Ok(Nil)
+    Some(problem) -> Ok(Guarded(problem))
     None -> {
       let confirmed =
         transaction_rules.parties_confirmed(t.row.type_, t.parties)
@@ -420,6 +466,7 @@ pub fn recheck(
               confirmed,
             )
           snapshot(tx, t, state, Gated(gate), [], by, now)
+          |> result.map(Checked(state, _))
         }
         None -> {
           use ctx <- result.try(compliance_store.by_id(read, t.row.context_id))
@@ -464,6 +511,7 @@ pub fn recheck(
             by,
             now,
           )
+          |> result.map(Checked(state, _))
         }
       }
     }
@@ -484,7 +532,7 @@ fn snapshot(
   policy_versions: List(id.PolicyId),
   by: By,
   now: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(transaction_status.TransactionStatus, Fail(e)) {
   let read = store.reading(tx)
   use prev <- result.try(compliance_of(read, t))
   use revision <- result.try(current_party_revision(read, t, now))
@@ -563,6 +611,7 @@ fn snapshot(
   ))
   let org_id = id.org_to_string(t.row.agency_org_id)
   let tx_id = id.transaction_to_string(t.row.id)
+  let status = option.unwrap(to, t.row.status)
   case to {
     Some(to) ->
       store.emit(
@@ -575,7 +624,7 @@ fn snapshot(
       )
     None -> Nil
   }
-  case option.map(prev, fn(v) { v.state }) == Some(state) {
+  use _ <- result.map(case option.map(prev, fn(v) { v.state }) == Some(state) {
     True -> Ok(Nil)
     False -> {
       store.emit(
@@ -611,7 +660,8 @@ fn snapshot(
         at: now,
       )
     }
-  }
+  })
+  status
 }
 
 // ------------------------------------------------------------------------------------------------- projection
@@ -657,12 +707,187 @@ fn party_name(
   }
 }
 
-fn note_visibility(
+pub fn note_visibility(
   v: note_row.Visibility,
 ) -> document_visibility.DocumentVisibility {
   let assert Ok(d) =
     document_visibility.from_string(note_row.visibility_to_string(v))
     as "every note class is a document class"
+  d
+}
+
+/// The viewer's side, for a club; the individual, for a player.
+pub fn side_of(t: Transaction, viewer: Viewer) -> Option(PartyRole) {
+  case viewer {
+    transaction_rules.ClubViewer(org_id:, ..) ->
+      transaction_rules.club_party_role(t.parties, org_id)
+    transaction_rules.PlayerViewer(_) -> Some(party_role.Individual)
+    _ -> None
+  }
+}
+
+pub fn roles_of(t: Transaction, viewer: Viewer) -> List(RoomRole) {
+  transaction_rules.room_roles(
+    id.org_to_string(t.row.agency_org_id),
+    id.org_user_to_string(t.row.agent_user_id),
+    t.parties,
+    viewer,
+  )
+}
+
+/// Transaction membership does not make a linked thread readable: the Inbox's own gate decides.
+fn channel_readable(
+  read: Read,
+  channel_id: id.ChannelId,
+  viewer: Viewer,
+) -> Result(Bool, Fail(e)) {
+  use found <- result.map(channels.by_id(read, channel_id))
+  case found, viewer {
+    Some(ch), transaction_rules.PlayerViewer(player_id) ->
+      id.player_to_string(ch.row.player_id) == player_id
+      && ch.row.counterparty == party.Player
+    Some(ch), transaction_rules.ClubViewer(org_id:, ..) ->
+      id.org_to_string(ch.row.org_id) == org_id
+    _, _ -> False
+  }
+}
+
+pub fn thread_json(
+  read: Read,
+  th: thread_row.Row,
+  viewer: Viewer,
+) -> Result(Json, Fail(e)) {
+  use readable <- result.map(channel_readable(read, th.channel_id, viewer))
+  json.object([
+    #("id", id.linked_thread_json(th.id)),
+    #("channelId", id.channel_json(th.channel_id)),
+    #("linkedAt", json.int(th.linked_at)),
+    #("actor", transaction_rules.actor_label("club_user", th.linked_by_name)),
+    #("readable", json.bool(readable)),
+  ])
+}
+
+/// Asked before a club is shown a case reference, so it sees only its own case id.
+fn case_belongs_to(
+  read: Read,
+  case_id: id.RecruitmentCaseId,
+  org_id: String,
+) -> Result(Bool, Fail(e)) {
+  store.one(
+    read,
+    "SELECT org_id FROM recruitment_cases WHERE id = ?",
+    [id.recruitment_case_sql(case_id)],
+    decode.at([0], decode.string),
+  )
+  |> result.map(fn(found) { found == Ok(org_id) })
+}
+
+fn representation_json(
+  r: transaction_store.Representation,
+  is_agent: Bool,
+) -> Json {
+  let row = r.row
+  json.object(
+    list.append(
+      [
+        #("id", id.representation_json(row.id)),
+        #("partyRole", party_role.to_json(row.party_role)),
+        #("agentUserId", id.org_user_json(row.agent_user_id)),
+        #("status", declared_representation_status.to_json(row.status)),
+        #("declaredOnly", json.bool(row.declared_only)),
+        #(
+          "basis",
+          json.string(case row.agreement_id {
+            Some(_) -> "client_confirmed_agreement"
+            None -> "declared"
+          }),
+        ),
+        #("scope", json.array(r.scope, scope_row.scope_to_json)),
+        #(
+          "jurisdictions",
+          json.array(option.values([row.jurisdiction]), json.string),
+        ),
+        #("verifiedAt", json.nullable(row.verified_at, json.int)),
+        #("withdrawnAt", json.nullable(row.withdrawn_at, json.int)),
+        #("createdAt", json.int(row.created_at)),
+      ],
+      case is_agent {
+        True -> [
+          #("agreementId", json.nullable(row.agreement_id, id.agreement_json)),
+          #("reviewId", json.nullable(row.review_id, id.regulatory_review_json)),
+          #("firstActAt", json.nullable(row.first_act_at, json.int)),
+        ]
+        False -> []
+      },
+    ),
+  )
+}
+
+pub fn uploader_kind(d: doc_row.Row) -> String {
+  doc_row.uploaded_by_kind_to_string(d.uploaded_by_kind)
+}
+
+/// An unreadable expiry reads expired, never "current"; none never expires.
+pub fn expired(d: doc_row.Row, now: Int) -> Bool {
+  case d.expires_at {
+    Some(at) -> now >= at
+    None -> False
+  }
+}
+
+pub fn document_json(
+  d: transaction_store.Document,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+  now: Int,
+) -> Json {
+  let r = d.row
+  json.object([
+    #("id", id.transaction_document_json(r.id)),
+    #("documentType", doc_row.document_type_to_json(r.document_type)),
+    #("visibility", document_visibility.to_json(r.visibility)),
+    #("version", json.int(r.version)),
+    #("label", json.string(r.label)),
+    #("ownerKind", doc_row.owner_kind_to_json(r.owner_kind)),
+    #("ownerPartyRole", json.nullable(r.owner_party_role, party_role.to_json)),
+    #("uploadedAt", json.int(r.created_at)),
+    #(
+      "actor",
+      transaction_rules.actor_label(uploader_kind(r), r.uploaded_by_name),
+    ),
+    #("expiresAt", json.nullable(r.expires_at, json.int)),
+    #("expired", json.bool(expired(r, now))),
+    // No writer objectively knows a signature instant, so none is claimed.
+    #("signedAt", json.null()),
+    #(
+      "supersedes",
+      json.nullable(r.supersedes_id, id.transaction_document_json),
+    ),
+    #("evidence", case r.evidence_id {
+      Some(_) ->
+        json.object([
+          #("kind", json.string("verification_evidence")),
+          #("present", json.bool(True)),
+        ])
+      None -> json.null()
+    }),
+    #(
+      "downloadable",
+      json.bool(
+        r.evidence_id != None
+        && transaction_rules.can_see(r.visibility, roles, side),
+      ),
+    ),
+    ..rev.meta(rev.Rev(r.rev, r.rev_at, r.rev_by_name))
+  ])
+}
+
+fn terms_visibility(
+  v: terms_row.Visibility,
+) -> document_visibility.DocumentVisibility {
+  let assert Ok(d) =
+    document_visibility.from_string(terms_row.visibility_to_string(v))
+    as "every terms class is a document class"
   d
 }
 
@@ -674,26 +899,27 @@ pub fn project(
   now: Int,
 ) -> Result(Json, Fail(e)) {
   let r = t.row
-  let roles =
-    transaction_rules.room_roles(
-      id.org_to_string(r.agency_org_id),
-      id.org_user_to_string(r.agent_user_id),
-      t.parties,
-      viewer,
-    )
-  let side = case viewer {
-    transaction_rules.ClubViewer(org_id:, ..) ->
-      transaction_rules.club_party_role(t.parties, org_id)
-    transaction_rules.PlayerViewer(_) -> Some(party_role.Individual)
-    _ -> None
-  }
+  let roles = roles_of(t, viewer)
+  let side = side_of(t, viewer)
   let is_agent = list.contains(roles, RepresentingAgent)
+  use reps <- result.try(transaction_store.representations(read, r.id))
+  use docs <- result.try(transaction_store.documents(read, r.id))
   use view <- result.try(compliance_of(read, t))
-  use stale <- result.try(staleness_of(read, t, view, now))
+  use stale <- result.try(staleness_with(read, t, reps, view, now))
   use agency <- result.try(orgs.by_id(read, r.agency_org_id))
-  use names <- result.map(
+  use names <- result.try(
     list.try_map(t.parties, party_name(read, _, viewer, now)),
   )
+  use threads <- result.try(
+    list.try_map(t.threads, thread_json(read, _, viewer)),
+  )
+  use own_case <- result.map(case r.link_recruitment_case_id, viewer, side {
+    Some(case_id),
+      transaction_rules.ClubViewer(org_id:, ..),
+      Some(party_role.EngagingEntity)
+    -> case_belongs_to(read, case_id, org_id)
+    _, _, _ -> Ok(False)
+  })
   let live = list.filter(t.parties, fn(p) { !p.removed })
   let subject = fn(role) {
     list.find(live, fn(p) { p.party_role == role })
@@ -706,6 +932,10 @@ pub fn project(
       json.string(transaction_rules.room_role_to_string(x))
     })
   }
+  let sees_terms =
+    is_agent
+    || list.contains(roles, transaction_rules.PartyClubSignatory)
+    || list.contains(roles, transaction_rules.PartyIndividual)
   json.object([
     #("id", id.transaction_json(r.id)),
     #("type", context_type.to_json(r.type_)),
@@ -777,11 +1007,20 @@ pub fn project(
       "partiesConfirmed",
       json.bool(transaction_rules.parties_confirmed(r.type_, t.parties)),
     ),
-    // Not ported yet: representations, consents and documents (their routes).
-    #("representations", json.array([], json.string)),
+    // Every party sees who represents which party and on what basis, never fee terms.
+    #("representations", json.array(reps, representation_json(_, is_agent))),
     #("compliance", compliance_json(view, stale, is_agent, r)),
+    // Not ported yet: regulatory consents (the compliance ledger's consent routes), so a workspace has none.
     #("consents", json.array([], json.string)),
-    #("documents", json.array([], json.string)),
+    #(
+      "documents",
+      docs
+        |> list.filter(fn(d) {
+          transaction_rules.can_see(d.row.visibility, roles, side)
+          && d.superseded_by == None
+        })
+        |> json.array(document_json(_, roles, side, now)),
+    ),
     // Absent, not redacted, so a hidden note's existence is not disclosed.
     #(
       "notes",
@@ -791,14 +1030,14 @@ pub fn project(
         })
         |> json.array(note_json),
     ),
-    #("linkedThreads", json.array([], json.string)),
-    // The recruitment case is club-private: only the agent (and the club owning it) sees the reference.
+    #("linkedThreads", json.preprocessed_array(threads)),
+    // The recruitment case is club-private: only the agent and the club that owns it see the reference.
     #(
       "links",
       json.object([
         #("trialId", json.nullable(r.link_trial_id, id.trial_json)),
         #("opportunityId", json.nullable(r.link_opportunity_id, json.string)),
-        ..case r.link_recruitment_case_id, is_agent {
+        ..case r.link_recruitment_case_id, is_agent || own_case {
           Some(case_id), True -> [
             #("recruitmentCaseId", id.recruitment_case_json(case_id)),
           ]
@@ -806,7 +1045,36 @@ pub fn project(
         }
       ]),
     ),
-    #("terms", json.object([#("versions", json.array([], json.string))])),
+    #(
+      "terms",
+      json.object([
+        #("versions", case sees_terms {
+          True ->
+            t.terms
+            |> list.filter(fn(v) {
+              transaction_rules.can_see(
+                terms_visibility(v.visibility),
+                roles,
+                side,
+              )
+            })
+            |> json.array(fn(v) {
+              json.object([
+                #("id", id.terms_version_json(v.id)),
+                #("at", json.int(v.recorded_at)),
+                #("summary", json.string(v.summary)),
+                #("visibility", terms_row.visibility_to_json(v.visibility)),
+                #("recordedFor", party_role.to_json(v.recorded_for)),
+                #(
+                  "actor",
+                  transaction_rules.actor_label("org", v.recorded_by_name),
+                ),
+              ])
+            })
+          False -> json.array([], json.string)
+        }),
+      ]),
+    ),
     #(
       "offerBoundary",
       transaction_rules.readiness_json(transaction_rules.offer_readiness(
@@ -858,7 +1126,7 @@ pub fn project(
   ])
 }
 
-fn note_json(n: note_row.Row) -> Json {
+pub fn note_json(n: note_row.Row) -> Json {
   json.object([
     #("id", id.transaction_note_json(n.id)),
     #("visibility", note_row.visibility_to_json(n.visibility)),
@@ -1454,7 +1722,7 @@ fn create_checked(
 }
 
 /// A player hears directly; a club through its recorded signatories (its verification administrators).
-fn notify_party(
+pub fn notify_party(
   tx: Tx,
   transaction_id: id.TransactionId,
   p: party_row.Row,
@@ -1500,7 +1768,7 @@ type NoteBody {
 }
 
 /// The agent's own workspace. A colleague's is 404, not 403, so a colleague's client work is not disclosed.
-fn own_transaction(
+pub fn own_transaction(
   ctx: Ctx,
   m: Member,
   transaction_id: String,
@@ -1521,7 +1789,7 @@ fn own_transaction(
 
 /// The record stays readable; a write stops with one answer for removed, invisible, blocked and minor, so the
 /// refusal is not an oracle.
-fn writable(ctx: Ctx, t: Transaction, next: fn() -> Response) -> Response {
+pub fn writable(ctx: Ctx, t: Transaction, next: fn() -> Response) -> Response {
   let now = clock.now_ms()
   use guard <- reading(ctx, safeguarding_problem(_, t, now))
   let status = [#("status", transaction_status.to_json(t.row.status))]
@@ -1558,138 +1826,102 @@ pub fn add_note(
   use m <- core_routes.membership(ctx, a)
   use <- core_routes.require(m, "transactions.write")
   use t <- own_transaction(ctx, m, transaction_id)
+  note_by(
+    ctx,
+    req,
+    t,
+    roles_of(t, agent_viewer(m)),
+    None,
+    by_agent(a),
+    note_row.Org,
+    id.org_user_to_string(a.user.id),
+  )
+}
+
+/// Notes use the documents' visibility classes: each names its lane and is absent for anyone the lane excludes.
+pub fn note_by(
+  ctx: Ctx,
+  req: Request,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+  by: By,
+  by_kind: note_row.ByKind,
+  rate_key: String,
+) -> Response {
   use <- writable(ctx, t)
   let now = clock.now_ms()
-  case
-    !http.rerun(req)
-    && limits.limited(
-      ctx.limits,
-      limits.TransactionNoteWrite,
-      id.org_user_to_string(a.user.id),
-      now,
-    )
-  {
-    True -> rate_limited(limits.TransactionNoteWrite)
-    False -> {
-      let shape = {
-        use text <- input.field("text", input.nullish(input.text(note_max)))
-        use visibility <- input.field(
-          "visibility",
-          input.optional(input.text(60)),
-        )
-        use <- rev.fields
-        input.done(NoteBody(text, visibility))
-      }
-      use b, raw <- body(req, shape, "NOTE_INPUT_INVALID")
-      let viewer = agent_viewer(m)
-      let roles =
-        transaction_rules.room_roles(
-          id.org_to_string(t.row.agency_org_id),
-          id.org_user_to_string(t.row.agent_user_id),
-          t.parties,
-          viewer,
-        )
-      let allowed =
-        transaction_rules.uploadable(roles, None)
-        |> list.filter(fn(v) { v != document_visibility.TAndSOnly })
-      let visibility = option.unwrap(b.visibility, "")
-      case option.map(b.text, string.trim) |> option.unwrap("") {
-        "" ->
-          err("NOTE_INPUT_INVALID", "A note needs text.", [
-            #("field", json.string("text")),
-            #("problem", json.string("required")),
-          ])
-        text ->
-          case
-            list.find(allowed, fn(v) {
-              document_visibility.to_string(v) == visibility
-            }),
-            note_row.visibility_from_string(visibility)
-          {
-            Ok(_), Ok(class) ->
-              case list.length(t.notes) >= notes_max {
-                True ->
-                  err(
-                    "NOTE_INPUT_INVALID",
-                    "This transaction already holds the maximum number of notes.",
-                    [#("field", json.string("text"))],
-                  )
-                False -> {
-                  use expected <- rev_expected(raw)
-                  use <- rev.guard(
-                    expected,
-                    rev.Rev(t.row.rev, t.row.rev_at, t.row.rev_by_label),
-                    "TRANSACTION_VERSION_CONFLICT",
-                    [
-                      #(
-                        "current",
-                        json.object([
-                          #("status", transaction_status.to_json(t.row.status)),
-                        ]),
-                      ),
-                    ],
-                  )
-                  write_note(ctx, a, t, class, text, now)
-                }
-              }
-            _, _ ->
-              domain_errors.send(contract, "DOCUMENT_VISIBILITY_NOT_PERMITTED", [
-                #("visibility", case visibility {
-                  "" -> json.null()
-                  v -> json.string(v)
-                }),
-                #("allowed", json.array(allowed, document_visibility.to_json)),
-              ])
+  use <- limited(ctx, req, limits.TransactionNoteWrite, rate_key)
+  let shape = {
+    use text <- input.field("text", input.nullish(input.text(note_max)))
+    use visibility <- input.field("visibility", input.optional(input.text(60)))
+    use <- rev.fields
+    input.done(NoteBody(text, visibility))
+  }
+  use b, raw <- body(req, shape, "NOTE_INPUT_INVALID")
+  let allowed =
+    transaction_rules.uploadable(roles, side)
+    |> list.filter(fn(v) { v != document_visibility.TAndSOnly })
+  let visibility = option.unwrap(b.visibility, "")
+  case option.map(b.text, string.trim) |> option.unwrap("") {
+    "" ->
+      err("NOTE_INPUT_INVALID", "A note needs text.", [
+        #("field", json.string("text")),
+        #("problem", json.string("required")),
+      ])
+    text ->
+      case
+        list.find(allowed, fn(v) {
+          document_visibility.to_string(v) == visibility
+        }),
+        note_row.visibility_from_string(visibility)
+      {
+        Ok(_), Ok(class) ->
+          case list.length(t.notes) >= notes_max {
+            True ->
+              err(
+                "NOTE_INPUT_INVALID",
+                "This transaction already holds the maximum number of notes.",
+                [#("field", json.string("text"))],
+              )
+            False -> {
+              use <- guard_rev(raw, t)
+              use tx <- acting(ctx, t)
+              use note <- result.map(
+                transaction_store.add_note(
+                  tx,
+                  t.row.id,
+                  class,
+                  text,
+                  by,
+                  by_kind,
+                  now,
+                )
+                |> storage,
+              )
+              http.json(201, json.object([#("note", note_json(note))]))
+            }
           }
+        _, _ ->
+          domain_errors.send(contract, "DOCUMENT_VISIBILITY_NOT_PERMITTED", [
+            #("visibility", case visibility {
+              "" -> json.null()
+              v -> json.string(v)
+            }),
+            #("allowed", json.array(allowed, document_visibility.to_json)),
+          ])
       }
-    }
   }
 }
 
-fn rev_expected(raw: Dynamic, next: fn(rev.Expected) -> Response) -> Response {
+pub fn rev_expected(
+  raw: Dynamic,
+  next: fn(rev.Expected) -> Response,
+) -> Response {
   case rev.expected(raw) {
     Ok(e) -> next(e)
     Error(response) -> response
   }
-}
-
-fn write_note(
-  ctx: Ctx,
-  a: OrgAccess,
-  t: Transaction,
-  class: note_row.Visibility,
-  text: String,
-  now: Int,
-) -> Response {
-  let by = by_agent(a)
-  store.unit(ctx.store, fn(tx) {
-    // The rev the checks read must still hold: two notes at once take ords in turn, never the same one.
-    use current <- result.try(
-      transaction_store.by_id(store.reading(tx), t.row.id) |> storage,
-    )
-    case option.map(current, fn(c) { c.row.rev }) == Some(t.row.rev) {
-      False ->
-        store.stale(
-          "the transaction moved from rev " <> string.inspect(t.row.rev),
-        )
-      True -> {
-        use note <- result.map(
-          transaction_store.add_note(
-            tx,
-            t.row.id,
-            class,
-            text,
-            by,
-            note_row.Org,
-            now,
-          )
-          |> storage,
-        )
-        http.json(201, json.object([#("note", note_json(note))]))
-      }
-    }
-  })
-  |> answer
 }
 
 // ------------------------------------------------------------------------------------------------- the Offer seam
@@ -1728,5 +1960,520 @@ pub fn offer_readiness_for(
         _ -> Ok(None)
       }
     _ -> Ok(None)
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- shared lane helpers
+
+/// The query read with its shape, refused under the transaction contract.
+pub fn query(
+  req: Request,
+  shape: input.Shape(a),
+  next: fn(a) -> Response,
+) -> Response {
+  case
+    input.parse_coded(
+      shape,
+      http.query_input(req),
+      root: "query",
+      codes: field_codes,
+      default: "TRANSACTION_INPUT_INVALID",
+    )
+  {
+    Ok(v) -> next(v)
+    Error(r) -> domain_errors.send(contract, r.error, input.refusal_fields(r))
+  }
+}
+
+/// `?limit=&cursor=`, judged as the platform's paging judges them.
+pub fn page(
+  limit: Option(String),
+  cursor: Option(String),
+  next: fn(paging.Page) -> Response,
+) -> Response {
+  case paging.read(paging.Query(limit:, cursor:), [paging.IntKind]) {
+    Ok(p) -> next(p)
+    Error(e) -> {
+      let #(code, message) = paging.error_body(e)
+      http.error_message(400, code, message)
+    }
+  }
+}
+
+pub fn after_of(p: paging.Page) -> Option(Int) {
+  case p.after {
+    Some([paging.IntKey(n)]) -> Some(n)
+    _ -> None
+  }
+}
+
+pub fn paged(
+  rows: List(#(Int, Transaction)),
+  p: paging.Page,
+) -> #(List(Transaction), Option(String)) {
+  let #(items, next) =
+    paging.page_of(rows, p.limit, fn(x) { [paging.IntKey(x.0)] })
+  #(list.map(items, fn(x) { x.1 }), next)
+}
+
+/// A body that may hold nothing but the rev fields.
+pub fn rev_only(req: Request, next: fn(Dynamic) -> Response) -> Response {
+  let shape = {
+    use <- rev.fields
+    input.done(Nil)
+  }
+  use _, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  next(raw)
+}
+
+pub fn guard_rev(
+  raw: Dynamic,
+  t: Transaction,
+  next: fn() -> Response,
+) -> Response {
+  use expected <- rev_expected(raw)
+  use <- rev.guard(expected, tx_rev(t), "TRANSACTION_VERSION_CONFLICT", [
+    #(
+      "current",
+      json.object([#("status", transaction_status.to_json(t.row.status))]),
+    ),
+  ])
+  next()
+}
+
+pub fn tx_rev(t: Transaction) -> rev.Rev {
+  rev.Rev(t.row.rev, t.row.rev_at, t.row.rev_by_label)
+}
+
+/// A unit that acts on the transaction as the checks read it: another request that moved it first makes this a
+/// lost race, re-run from the top.
+pub fn acting(
+  ctx: Ctx,
+  t: Transaction,
+  work: fn(Tx) -> Result(Response, Fail(Response)),
+) -> Response {
+  store.unit(ctx.store, fn(tx) {
+    use current <- result.try(
+      transaction_store.by_id(store.reading(tx), t.row.id) |> storage,
+    )
+    case option.map(current, fn(c) { c.row.rev }) == Some(t.row.rev) {
+      False ->
+        store.stale(
+          "the transaction moved from rev " <> string.inspect(t.row.rev),
+        )
+      True -> work(tx)
+    }
+  })
+  |> answer
+}
+
+/// The transaction re-read inside the unit, projected for the viewer.
+pub fn projected(
+  tx: Tx,
+  transaction_id: id.TransactionId,
+  viewer: Viewer,
+  now: Int,
+) -> Result(Json, Fail(Response)) {
+  let read = store.reading(tx)
+  use stored <- result.try(
+    transaction_store.by_id(read, transaction_id) |> storage,
+  )
+  let assert Some(stored) = stored as "the transaction was just written"
+  project(read, stored, viewer, now) |> storage
+}
+
+pub const document_type_pairs = doc_row.document_type_pairs
+
+pub fn transaction_body(view: Json) -> Json {
+  json.object([#("transaction", view)])
+}
+
+pub fn idempotent_body(view: Json) -> Json {
+  json.object([#("transaction", view), #("idempotent", json.bool(True))])
+}
+
+pub fn limited(
+  ctx: Ctx,
+  req: Request,
+  action: limits.Action,
+  key: String,
+  next: fn() -> Response,
+) -> Response {
+  case
+    !http.rerun(req) && limits.limited(ctx.limits, action, key, clock.now_ms())
+  {
+    True -> rate_limited(action)
+    False -> next()
+  }
+}
+
+/// A transaction that loses its confirmation set falls back out of READY/ACTIVE; a draft whose parties all
+/// confirmed moves to PARTIES_CONFIRMED; compliance is re-evaluated either way.
+pub fn party_changed(
+  tx: Tx,
+  transaction_id: id.TransactionId,
+  by: By,
+  now: Int,
+) -> Result(Recheck, Fail(e)) {
+  let read = store.reading(tx)
+  let reload = fn() {
+    use found <- result.map(transaction_store.by_id(read, transaction_id))
+    let assert Some(t) = found as "the transaction was just written"
+    t
+  }
+  let fallback = fn(t: Transaction, pending) {
+    use _ <- result.try(transaction_store.move_on_party_change(tx, t.row.id))
+    use _ <- result.map(transaction_store.history(
+      tx,
+      t.row.id,
+      event_row.TransactionStatusChanged,
+      by,
+      transaction_store.Detail(
+        ..transaction_store.no_detail,
+        from: Some(t.row.status),
+        to: Some(transaction_status.PartiesConfirmed),
+        pending_reason: pending,
+      ),
+      now,
+    ))
+    store.emit(
+      tx,
+      effect.Live(live_event.AgentTransactionStatusChanged(
+        org_id: id.org_to_string(t.row.agency_org_id),
+        tx_id: id.transaction_to_string(t.row.id),
+        status: "PARTIES_CONFIRMED",
+      )),
+    )
+  }
+  use t <- result.try(reload())
+  let confirmed = transaction_rules.parties_confirmed(t.row.type_, t.parties)
+  use _ <- result.try(case confirmed, t.row.status {
+    False, transaction_status.Ready
+    | False, transaction_status.Active
+    | False, transaction_status.CompliancePending
+    | False, transaction_status.ComplianceBlocked
+    -> fallback(t, Some(pending_reason.PartiesNotConfirmed))
+    _, _ -> Ok(Nil)
+  })
+  use t <- result.try(reload())
+  use _ <- result.try(case confirmed, t.row.status {
+    True, transaction_status.Draft -> fallback(t, None)
+    _, _ -> Ok(Nil)
+  })
+  recheck(tx, transaction_id, by, now)
+}
+
+/// One history entry, then the rev bump an act makes.
+pub fn record_act(
+  tx: Tx,
+  t: Transaction,
+  action: event_row.Action,
+  by: By,
+  detail: transaction_store.Detail,
+  now: Int,
+) -> Result(Nil, Fail(e)) {
+  transaction_store.history(tx, t.row.id, action, by, detail, now)
+}
+
+// ------------------------------------------------------------------------------------------------- the agent's reads
+
+pub fn list_shape() -> input.Shape(
+  #(
+    Option(transaction_status.TransactionStatus),
+    Option(String),
+    Option(String),
+  ),
+) {
+  use status <- input.field(
+    "status",
+    input.optional(input.one_of(transaction_status.pairs)),
+  )
+  use limit <- input.field("limit", input.optional(input.text(1_000_000)))
+  use cursor <- input.field("cursor", input.optional(input.text(1_000_000)))
+  input.done(#(status, limit, cursor))
+}
+
+pub fn codes_json(pairs: List(#(String, a))) -> Json {
+  json.array(pairs, fn(p) { json.string(p.0) })
+}
+
+/// `GET /org/agent/transactions`: a colleague's transactions are neither listed nor counted.
+pub fn list_mine(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use q <- query(req, list_shape())
+  let #(status, limit, cursor) = q
+  use p <- page(limit, cursor)
+  let now = clock.now_ms()
+  let viewer = agent_viewer(m)
+  use #(items, next, counts) <- reading(ctx, fn(r) {
+    use rows <- result.try(transaction_store.agent_page(
+      r,
+      a.org.id,
+      a.user.id,
+      status,
+      after_of(p),
+      p.limit,
+    ))
+    let #(items, next) = paged(rows, p)
+    use views <- result.try(list.try_map(items, project(r, _, viewer, now)))
+    use counts <- result.map(transaction_store.agent_counts(
+      r,
+      a.org.id,
+      a.user.id,
+    ))
+    #(views, next, counts)
+  })
+  http.json(
+    200,
+    json.object([
+      #("items", json.preprocessed_array(items)),
+      #("nextCursor", json.nullable(next, json.string)),
+      #("statuses", codes_json(transaction_status.pairs)),
+      #("types", codes_json(context_type.pairs)),
+      #("partyRoles", codes_json(party_role.pairs)),
+      #("documentTypes", codes_json(doc_row.document_type_pairs)),
+      #("visibilities", codes_json(document_visibility.pairs)),
+      #(
+        "roomRoles",
+        json.array(
+          [
+            "representing_agent", "party_individual", "party_guardian",
+            "party_club_signatory", "party_club_member", "agency_admin_observer",
+            "trust_safety",
+          ],
+          json.string,
+        ),
+      ),
+      #("holdReasonCodes", codes_json(tx_row.hold_reason_code_pairs)),
+      #("cancelReasonCodes", codes_json(tx_row.cancel_reason_code_pairs)),
+      #("closeReasonCodes", codes_json(tx_row.close_reason_code_pairs)),
+      #("transitions", transaction_rules.all_transitions_json()),
+      #("pendingReasons", codes_json(pending_reason.pairs)),
+      #(
+        "counts",
+        json.object([
+          #("live", json.int(counts.live)),
+          #("blocked", json.int(counts.blocked)),
+          #("pending", json.int(counts.pending)),
+          #("ready", json.int(counts.ready)),
+          #("awaitingConfirmation", json.int(counts.awaiting_confirmation)),
+        ]),
+      ),
+      #("honest", json.string(transaction_rules.honest)),
+    ]),
+  )
+}
+
+/// `GET /org/agent/transactions/:id`.
+pub fn get_mine(ctx: Ctx, a: OrgAccess, transaction_id: String) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use view <- reading(ctx, project(_, t, agent_viewer(m), clock.now_ms()))
+  http.json(200, transaction_body(view))
+}
+
+/// Codes, states and counts only: no prose, names or fees.
+fn timeline_detail(e: transaction_store.Event) -> Json {
+  let h = e.row
+  let fields =
+    [
+      #("from", option.map(h.detail_from, transaction_status.to_json)),
+      #("to", option.map(h.detail_to, transaction_status.to_json)),
+      #("partyRole", option.map(h.detail_party_role, party_role.to_json)),
+      #("subjectKind", option.map(h.detail_subject_kind, subject_kind.to_json)),
+      #(
+        "status",
+        option.map(h.detail_status, declared_representation_status.to_json),
+      ),
+      #("outcome", option.map(h.detail_outcome, context_outcome.to_json)),
+      #(
+        "pendingReason",
+        option.map(h.detail_pending_reason, pending_reason.to_json),
+      ),
+      #("reasonCodes", case h.has_reason_codes {
+        True -> Some(json.array(e.reason_codes, json.string))
+        False -> None
+      }),
+      #("policyVersions", case h.has_policy_versions {
+        True -> Some(json.array(e.policy_versions, id.policy_json))
+        False -> None
+      }),
+      #(
+        "documentType",
+        option.map(
+          h.detail_document_type,
+          event_row.detail_document_type_to_json,
+        ),
+      ),
+      #(
+        "visibility",
+        option.map(h.detail_visibility, document_visibility.to_json),
+      ),
+      #("staleness", option.map(h.detail_staleness, staleness.to_json)),
+      #(
+        "holdReasonCode",
+        option.map(h.detail_reason_code, event_row.detail_reason_code_to_json),
+      ),
+      #("version", option.map(h.detail_version, json.int)),
+      #("count", option.map(h.detail_count, json.int)),
+    ]
+    |> list.filter_map(fn(f) {
+      case f.1 {
+        Some(v) -> Ok(#(f.0, v))
+        None -> Error(Nil)
+      }
+    })
+  case fields {
+    [] -> json.null()
+    _ -> json.object(fields)
+  }
+}
+
+/// What these roles may see of what happened, newest first.
+pub fn timeline(
+  read: Read,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+) -> Result(Json, Fail(e)) {
+  use events <- result.map(transaction_store.events(read, t.row.id))
+  let visible =
+    list.filter(events, fn(e) {
+      transaction_rules.timeline_visible(
+        transaction_rules.audience_of(e.row.action),
+        roles,
+        side,
+        e.row.detail_visibility,
+      )
+    })
+  let n = list.length(visible)
+  visible
+  |> list.drop(int.max(0, n - 200))
+  |> list.reverse
+  |> json.array(fn(e) {
+    json.object([
+      #("id", id.transaction_event_json(e.row.id)),
+      #("at", json.int(e.row.at)),
+      #("action", event_row.action_to_json(e.row.action)),
+      #(
+        "audience",
+        json.string(
+          transaction_rules.audience_to_string(transaction_rules.audience_of(
+            e.row.action,
+          )),
+        ),
+      ),
+      #(
+        "actor",
+        transaction_rules.actor_label(
+          compliance_actor_kind.to_string(e.row.by_kind),
+          e.row.by_name,
+        ),
+      ),
+      #("detail", timeline_detail(e)),
+    ])
+  })
+}
+
+/// `GET /org/agent/transactions/:id/timeline`.
+pub fn timeline_mine(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use items <- reading(ctx, timeline(_, t, roles_of(t, agent_viewer(m)), None))
+  http.json(
+    200,
+    json.object([
+      #("items", items),
+      #(
+        "note",
+        json.string(
+          "The timeline is what YOU may see of what happened. The platform audit holds more operational detail and is not this.",
+        ),
+      ),
+    ]),
+  )
+}
+
+// ------------------------------------------------------------------------------------------------- links
+
+/// `POST /org/agent/transactions/:id/links`: an opportunity of the engaging club, by reference.
+pub fn link_opportunity(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  let shape = {
+    use opportunity_id <- input.field(
+      "opportunityId",
+      input.required(input.id()),
+    )
+    use <- rev.fields
+    input.done(opportunity_id)
+  }
+  use opportunity_id, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  let opportunity_id = string.trim(opportunity_id)
+  use owner <- reading(ctx, fn(r) {
+    store.one(
+      r,
+      "SELECT org_id FROM opportunities WHERE id = ?",
+      [sqlight.text(opportunity_id)],
+      decode.at([0], decode.string),
+    )
+  })
+  let engaging =
+    list.find(t.parties, fn(p) {
+      !p.removed && p.party_role == party_role.EngagingEntity
+    })
+  // An unknown and an invisible opportunity answer alike.
+  case owner, engaging {
+    Ok(org), Ok(p) if org == p.subject_id -> {
+      use <- guard_rev(raw, t)
+      let by = by_agent(a)
+      let now = clock.now_ms()
+      use tx <- acting(ctx, t)
+      use _ <- result.try(
+        transaction_store.link_opportunity(tx, t.row.id, opportunity_id)
+        |> storage,
+      )
+      use _ <- result.try(transaction_store.touch(tx, t.row.id, now) |> storage)
+      use _ <- result.try(
+        record_act(
+          tx,
+          t,
+          event_row.TransactionStatusChanged,
+          by,
+          transaction_store.Detail(
+            ..transaction_store.no_detail,
+            from: Some(t.row.status),
+            to: Some(t.row.status),
+          ),
+          now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(
+        transaction_store.bump(tx, t.row.id, by, now) |> storage,
+      )
+      use view <- result.map(projected(tx, t.row.id, agent_viewer(m), now))
+      http.json(200, transaction_body(view))
+    }
+    _, _ ->
+      err(
+        "TRANSACTION_INPUT_INVALID",
+        "No opportunity of the engaging club matches that reference.",
+        [#("field", json.string("opportunityId"))],
+      )
   }
 }

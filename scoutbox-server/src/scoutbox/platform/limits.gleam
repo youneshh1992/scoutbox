@@ -70,6 +70,8 @@ pub const policy = [
   #("transaction_handoff", transaction_handoff_policy),
   #("transaction_write", transaction_write_policy),
   #("transaction_note_write", transaction_note_write_policy),
+  #("transaction_status_write", transaction_write_policy),
+  #("transaction_document_write", transaction_note_write_policy),
   #("analytics_read", analytics_read_policy),
   #("brief_write", brief_write_policy),
   #("matching_query", matching_query_policy),
@@ -157,6 +159,10 @@ pub type Action {
   TransactionWrite
   /// Transaction notes, per writer.
   TransactionNoteWrite
+  /// Transaction status moves and party confirmations, per actor.
+  TransactionStatusWrite
+  /// Transaction document metadata, per writer.
+  TransactionDocumentWrite
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
@@ -276,6 +282,8 @@ fn action_name(action: Action) -> String {
     TransactionHandoff -> "transaction_handoff"
     TransactionWrite -> "transaction_write"
     TransactionNoteWrite -> "transaction_note_write"
+    TransactionStatusWrite -> "transaction_status_write"
+    TransactionDocumentWrite -> "transaction_document_write"
   }
 }
 
@@ -319,6 +327,8 @@ fn action_policy(action: Action) -> Policy {
     TransactionHandoff -> transaction_handoff_policy
     TransactionWrite -> transaction_write_policy
     TransactionNoteWrite -> transaction_note_write_policy
+    TransactionStatusWrite -> transaction_write_policy
+    TransactionDocumentWrite -> transaction_note_write_policy
   }
 }
 

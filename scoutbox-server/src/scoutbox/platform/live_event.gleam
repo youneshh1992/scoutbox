@@ -128,6 +128,20 @@ pub type Event {
   )
   /// A transaction moved status. Private to the agency.
   AgentTransactionStatusChanged(org_id: String, tx_id: String, status: String)
+  /// A party was named, removed or confirmed itself. Private to the agency.
+  AgentTransactionPartyChanged(
+    org_id: String,
+    tx_id: String,
+    party_role: String,
+  )
+  /// A document was filed in a transaction. Private to the agency.
+  AgentTransactionDocumentAdded(org_id: String, tx_id: String, doc_id: String)
+  /// A club linked a conversation. Private to the agency.
+  AgentTransactionMessageLinked(org_id: String, tx_id: String)
+  /// The agent put a transaction on hold, cancelled or closed it. Private to the agency.
+  AgentTransactionHeld(org_id: String, tx_id: String, status: String)
+  AgentTransactionCancelled(org_id: String, tx_id: String, status: String)
+  AgentTransactionClosed(org_id: String, tx_id: String, status: String)
 }
 
 pub type WatchlistChange {
@@ -264,6 +278,12 @@ pub fn name(event: Event) -> String {
     AgentTransactionComplianceUpdated(..) ->
       "agent_transaction_compliance_updated"
     AgentTransactionStatusChanged(..) -> "agent_transaction_status_changed"
+    AgentTransactionPartyChanged(..) -> "agent_transaction_party_changed"
+    AgentTransactionDocumentAdded(..) -> "agent_transaction_document_added"
+    AgentTransactionMessageLinked(..) -> "agent_transaction_message_linked"
+    AgentTransactionHeld(..) -> "agent_transaction_held"
+    AgentTransactionCancelled(..) -> "agent_transaction_cancelled"
+    AgentTransactionClosed(..) -> "agent_transaction_closed"
   }
 }
 
@@ -296,7 +316,13 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | ConflictEvaluated(org_id:, ..)
     | AgentTransactionCreated(org_id:, ..)
     | AgentTransactionComplianceUpdated(org_id:, ..)
-    | AgentTransactionStatusChanged(org_id:, ..) -> Ok(org_id)
+    | AgentTransactionStatusChanged(org_id:, ..)
+    | AgentTransactionPartyChanged(org_id:, ..)
+    | AgentTransactionDocumentAdded(org_id:, ..)
+    | AgentTransactionMessageLinked(org_id:, ..)
+    | AgentTransactionHeld(org_id:, ..)
+    | AgentTransactionCancelled(org_id:, ..)
+    | AgentTransactionClosed(org_id:, ..) -> Ok(org_id)
     Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
   }
 }
@@ -448,10 +474,27 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("txId", json.string(tx_id)),
       #("outcome", json.string(outcome)),
     ]
-    AgentTransactionStatusChanged(org_id:, tx_id:, status:) -> [
+    AgentTransactionStatusChanged(org_id:, tx_id:, status:)
+    | AgentTransactionHeld(org_id:, tx_id:, status:)
+    | AgentTransactionCancelled(org_id:, tx_id:, status:)
+    | AgentTransactionClosed(org_id:, tx_id:, status:) -> [
       #("orgId", json.string(org_id)),
       #("txId", json.string(tx_id)),
       #("status", json.string(status)),
+    ]
+    AgentTransactionPartyChanged(org_id:, tx_id:, party_role:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("partyRole", json.string(party_role)),
+    ]
+    AgentTransactionDocumentAdded(org_id:, tx_id:, doc_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("docId", json.string(doc_id)),
+    ]
+    AgentTransactionMessageLinked(org_id:, tx_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
     ]
   }
 }

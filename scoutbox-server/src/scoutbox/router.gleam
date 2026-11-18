@@ -9,6 +9,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
+import scoutbox/agents/transaction_party_routes as party_lanes
 import scoutbox/agents/transaction_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/box_prefs
@@ -658,6 +659,22 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             threads.org_typing(ctx, req, org, id.channel(id))
           })
+        ["transactions"] ->
+          only(req, Get, fn() { party_lanes.club_list(ctx, req, org) })
+        ["transactions", tid] ->
+          only(req, Get, fn() { party_lanes.club_get(ctx, org, tid) })
+        ["transactions", tid, "confirm"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            party_lanes.club_confirm(ctx, req, org, tid)
+          })
+        ["transactions", tid, "notes"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            party_lanes.club_note(ctx, req, org, tid)
+          })
+        ["transactions", tid, "timeline"] ->
+          only(req, Get, fn() { party_lanes.club_timeline(ctx, org, tid) })
         _ -> not_found()
       }
     }
@@ -708,6 +725,17 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Patch -> box_prefs.update(ctx, req, player)
             _ -> not_found()
           }
+        ["transactions"] ->
+          only(req, Get, fn() { party_lanes.player_list(ctx, player) })
+        ["transactions", tid] ->
+          only(req, Get, fn() { party_lanes.player_get(ctx, player, tid) })
+        ["transactions", tid, "confirm"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            party_lanes.player_confirm(ctx, req, player, tid)
+          })
+        ["transactions", tid, "timeline"] ->
+          only(req, Get, fn() { party_lanes.player_timeline(ctx, player, tid) })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
@@ -1429,7 +1457,20 @@ fn agent_org(
 ) -> Response {
   case path {
     ["transactions"] ->
-      only(req, Post, fn() { transaction_routes.create(ctx, req, org) })
+      case req.method {
+        Get -> transaction_routes.list_mine(ctx, req, org)
+        Post -> transaction_routes.create(ctx, req, org)
+        _ -> not_found()
+      }
+    ["transactions", tid] ->
+      only(req, Get, fn() { transaction_routes.get_mine(ctx, org, tid) })
+    ["transactions", tid, "timeline"] ->
+      only(req, Get, fn() { transaction_routes.timeline_mine(ctx, org, tid) })
+    ["transactions", tid, "links"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.link_opportunity(ctx, req, org, tid)
+      })
     ["transactions", tid, "notes"] ->
       only(req, Post, fn() {
         use req <- contract.rerun_on_stale(req)

@@ -1534,6 +1534,38 @@ pub fn next_ledger_entry(tx: Tx) -> Result(LedgerEntryId, Fail(e)) {
   ids.next(tx, "led") |> result.map(LedgerEntryId)
 }
 
+/// An id of `transaction_linked_threads`.
+pub opaque type LinkedThreadId {
+  LinkedThreadId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn linked_thread(text: String) -> LinkedThreadId {
+  LinkedThreadId(text)
+}
+
+pub fn linked_thread_to_string(id: LinkedThreadId) -> String {
+  let LinkedThreadId(text) = id
+  text
+}
+
+pub fn linked_thread_sql(id: LinkedThreadId) -> sqlight.Value {
+  sqlight.text(linked_thread_to_string(id))
+}
+
+pub fn linked_thread_json(id: LinkedThreadId) -> Json {
+  json.string(linked_thread_to_string(id))
+}
+
+pub fn linked_thread_decoder() -> decode.Decoder(LinkedThreadId) {
+  decode.map(decode.string, LinkedThreadId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_linked_thread(tx: Tx) -> Result(LinkedThreadId, Fail(e)) {
+  ids.next(tx, "txm") |> result.map(LinkedThreadId)
+}
+
 /// An id of `outbox`.
 pub opaque type MailId {
   MailId(String)
@@ -2454,6 +2486,72 @@ pub fn next_report(tx: Tx) -> Result(ReportId, Fail(e)) {
   ids.next(tx, "rep") |> result.map(ReportId)
 }
 
+/// An id of `transaction_representations`.
+pub opaque type RepresentationId {
+  RepresentationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn representation(text: String) -> RepresentationId {
+  RepresentationId(text)
+}
+
+pub fn representation_to_string(id: RepresentationId) -> String {
+  let RepresentationId(text) = id
+  text
+}
+
+pub fn representation_sql(id: RepresentationId) -> sqlight.Value {
+  sqlight.text(representation_to_string(id))
+}
+
+pub fn representation_json(id: RepresentationId) -> Json {
+  json.string(representation_to_string(id))
+}
+
+pub fn representation_decoder() -> decode.Decoder(RepresentationId) {
+  decode.map(decode.string, RepresentationId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_representation(tx: Tx) -> Result(RepresentationId, Fail(e)) {
+  ids.next(tx, "txr") |> result.map(RepresentationId)
+}
+
+/// An id of `transaction_representation_history`.
+pub opaque type RepresentationEventId {
+  RepresentationEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn representation_event(text: String) -> RepresentationEventId {
+  RepresentationEventId(text)
+}
+
+pub fn representation_event_to_string(id: RepresentationEventId) -> String {
+  let RepresentationEventId(text) = id
+  text
+}
+
+pub fn representation_event_sql(id: RepresentationEventId) -> sqlight.Value {
+  sqlight.text(representation_event_to_string(id))
+}
+
+pub fn representation_event_json(id: RepresentationEventId) -> Json {
+  json.string(representation_event_to_string(id))
+}
+
+pub fn representation_event_decoder() -> decode.Decoder(RepresentationEventId) {
+  decode.map(decode.string, RepresentationEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_representation_event(
+  tx: Tx,
+) -> Result(RepresentationEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(RepresentationEventId)
+}
+
 /// An id of `recruitment_requests`.
 pub opaque type RequestId {
   RequestId(String)
@@ -3022,6 +3120,38 @@ pub fn next_task(tx: Tx) -> Result(TaskId, Fail(e)) {
   ids.next(tx, "tsk") |> result.map(TaskId)
 }
 
+/// An id of `transaction_terms_versions`.
+pub opaque type TermsVersionId {
+  TermsVersionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn terms_version(text: String) -> TermsVersionId {
+  TermsVersionId(text)
+}
+
+pub fn terms_version_to_string(id: TermsVersionId) -> String {
+  let TermsVersionId(text) = id
+  text
+}
+
+pub fn terms_version_sql(id: TermsVersionId) -> sqlight.Value {
+  sqlight.text(terms_version_to_string(id))
+}
+
+pub fn terms_version_json(id: TermsVersionId) -> Json {
+  json.string(terms_version_to_string(id))
+}
+
+pub fn terms_version_decoder() -> decode.Decoder(TermsVersionId) {
+  decode.map(decode.string, TermsVersionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_terms_version(tx: Tx) -> Result(TermsVersionId, Fail(e)) {
+  ids.next(tx, "txt") |> result.map(TermsVersionId)
+}
+
 /// An id of `support_tickets`.
 pub opaque type TicketId {
   TicketId(String)
@@ -3084,6 +3214,80 @@ pub fn transaction_decoder() -> decode.Decoder(TransactionId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_transaction(tx: Tx) -> Result(TransactionId, Fail(e)) {
   ids.next(tx, "atx") |> result.map(TransactionId)
+}
+
+/// An id of `transaction_documents`.
+pub opaque type TransactionDocumentId {
+  TransactionDocumentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction_document(text: String) -> TransactionDocumentId {
+  TransactionDocumentId(text)
+}
+
+pub fn transaction_document_to_string(id: TransactionDocumentId) -> String {
+  let TransactionDocumentId(text) = id
+  text
+}
+
+pub fn transaction_document_sql(id: TransactionDocumentId) -> sqlight.Value {
+  sqlight.text(transaction_document_to_string(id))
+}
+
+pub fn transaction_document_json(id: TransactionDocumentId) -> Json {
+  json.string(transaction_document_to_string(id))
+}
+
+pub fn transaction_document_decoder() -> decode.Decoder(TransactionDocumentId) {
+  decode.map(decode.string, TransactionDocumentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction_document(
+  tx: Tx,
+) -> Result(TransactionDocumentId, Fail(e)) {
+  ids.next(tx, "txd") |> result.map(TransactionDocumentId)
+}
+
+/// An id of `transaction_document_history`.
+pub opaque type TransactionDocumentEventId {
+  TransactionDocumentEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction_document_event(text: String) -> TransactionDocumentEventId {
+  TransactionDocumentEventId(text)
+}
+
+pub fn transaction_document_event_to_string(
+  id: TransactionDocumentEventId,
+) -> String {
+  let TransactionDocumentEventId(text) = id
+  text
+}
+
+pub fn transaction_document_event_sql(
+  id: TransactionDocumentEventId,
+) -> sqlight.Value {
+  sqlight.text(transaction_document_event_to_string(id))
+}
+
+pub fn transaction_document_event_json(id: TransactionDocumentEventId) -> Json {
+  json.string(transaction_document_event_to_string(id))
+}
+
+pub fn transaction_document_event_decoder() -> decode.Decoder(
+  TransactionDocumentEventId,
+) {
+  decode.map(decode.string, TransactionDocumentEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction_document_event(
+  tx: Tx,
+) -> Result(TransactionDocumentEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(TransactionDocumentEventId)
 }
 
 /// An id of `transaction_history`.
