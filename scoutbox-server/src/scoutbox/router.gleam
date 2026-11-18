@@ -1709,6 +1709,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
         ["drill-guidance"] ->
           only(req, Get, fn() { drill_guidance.admin_list(ctx) })
+        ["staff-checks"] ->
+          only(req, Get, fn() { trial_day.staff_checks(ctx, req) })
+        ["staff-checks", tid, sid] ->
+          only(req, Post, fn() { trial_day.review_check(ctx, req, tid, sid) })
         ["drill-guidance", did, "review"] ->
           only(req, Post, fn() { drill_guidance.review(ctx, req, did) })
         ["verification", ..path] -> verification_admin(ctx, req, path)

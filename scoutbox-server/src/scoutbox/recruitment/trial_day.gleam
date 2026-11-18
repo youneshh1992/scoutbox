@@ -6,8 +6,7 @@
 //// The day is part of the trial record: a postponement moves the trial's date and report deadline, and a check-in
 //// records the session's attendance.
 ////
-//// Not ported yet: Trust & Safety's review of the staff checks (`/admin/staff-checks`), so a filed check stays
-//// pending here.
+//// Trust & Safety reviews each filed staff check (`/admin/staff-checks`): nothing is approved automatically.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -126,6 +125,177 @@ fn check_state(s: staff_row.Row, now: Int) -> String {
           }
       }
     Some(status) -> staff_row.check_status_to_string(status)
+  }
+}
+
+fn check_json(s: staff_row.Row, now: Int) -> Json {
+  json.object([
+    #("kind", json.nullable(s.check_kind, json.string)),
+    #("ref", json.nullable(s.check_ref, json.string)),
+    #("status", json.nullable(s.check_status, staff_row.check_status_to_json)),
+    #("expiresAt", json.nullable(s.check_expires_at, json.string)),
+    #("reviewedBy", json.nullable(s.check_reviewed_by, json.string)),
+    #("reviewedAt", json.nullable(s.check_reviewed_at, json.int)),
+    #("state", json.string(check_state(s, now))),
+  ])
+}
+
+type ChecksQuery {
+  ChecksQuery(all: Option(Bool), page: paging.Query)
+}
+
+type CheckItem {
+  CheckItem(
+    staff: staff_row.Row,
+    trial_rowid: Int,
+    org_id: id.OrgId,
+    org_name: String,
+  )
+}
+
+/// `GET /admin/staff-checks`: the filed checks, oldest trial first and then by place on the day; pending ones only
+/// unless `?all=1`.
+pub fn staff_checks(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use limit <- input.field("limit", input.optional(input.text(1000)))
+    use cursor <- input.field("cursor", input.optional(input.text(100_000)))
+    use all <- input.field(
+      "all",
+      input.optional(input.one_of([#("0", False), #("1", True)])),
+    )
+    input.done(ChecksQuery(all:, page: paging.Query(limit:, cursor:)))
+  }
+  use q <- http.query(req, shape, [])
+  case paging.read(q.page, [paging.IntKind, paging.IntKind]) {
+    Error(e) -> {
+      let #(code, message) = paging.error_body(e)
+      http.error_message(400, code, message)
+    }
+    Ok(page) -> {
+      let pending = case q.all {
+        Some(True) -> ""
+        _ -> " AND s.check_status = 'pending'"
+      }
+      let #(after, args) = case page.after {
+        Some([IntKey(t), IntKey(p)]) -> #(
+          " AND (t.rowid > ? OR (t.rowid = ? AND s.position > ?))",
+          [sqlight.int(t), sqlight.int(t), sqlight.int(p)],
+        )
+        _ -> #("", [])
+      }
+      use rows <- read(
+        ctx,
+        store.query(
+          _,
+          "SELECT "
+            <> staff_row.qualified("s")
+            <> ", t.rowid, t.org_id, t.org_name FROM trial_day_staff s JOIN trials t ON t.id = s.trial_id WHERE s.check_status IS NOT NULL"
+            <> pending
+            <> after
+            <> " ORDER BY t.rowid, s.position LIMIT ?",
+          list.append(args, [sqlight.int(page.limit + 1)]),
+          {
+            use staff <- decode.then(staff_row.decoder())
+            use trial_rowid <- decode.field(staff_row.width, decode.int)
+            use org_id <- decode.field(staff_row.width + 1, id.org_decoder())
+            use org_name <- decode.field(staff_row.width + 2, decode.string)
+            decode.success(CheckItem(staff:, trial_rowid:, org_id:, org_name:))
+          },
+        ),
+      )
+      let #(items, next) =
+        paging.page_of(rows, page.limit, fn(r) {
+          [IntKey(r.trial_rowid), IntKey(r.staff.position)]
+        })
+      let now = clock.now_ms()
+      pages.respond(items, next, fn(r) {
+        json.object([
+          #("trialId", id.trial_json(r.staff.trial_id)),
+          #("orgId", id.org_json(r.org_id)),
+          #("orgName", json.string(r.org_name)),
+          #("staffId", id.trial_staff_json(r.staff.id)),
+          #("name", json.string(r.staff.name)),
+          #("role", json.string(r.staff.role)),
+          #("check", check_json(r.staff, now)),
+        ])
+      })
+    }
+  }
+}
+
+/// `POST /admin/staff-checks/:trialId/:staffId`: Trust & Safety's verdict on one filed check.
+pub fn review_check(
+  ctx: Ctx,
+  req: Request,
+  tid: String,
+  staff_id: String,
+) -> Response {
+  use found <- read(ctx, trials.by_id(_, id.trial(tid)))
+  let staff =
+    option.then(found, fn(t) {
+      list.find(t.day.staff, fn(s) {
+        id.trial_staff_to_string(s.id) == staff_id && s.check_status != None
+      })
+      |> option.from_result
+    })
+  case staff {
+    None -> http.error(404, "CHECK_NOT_FOUND")
+    Some(s) -> {
+      let shape = {
+        use status <- input.field(
+          "status",
+          input.required(
+            input.one_of_these(staff_row.check_status_pairs, [
+              staff_row.Reviewed,
+              staff_row.Rejected,
+            ]),
+          ),
+        )
+        use expires <- input.field(
+          "expiresAt",
+          input.optional(input.due_date()),
+        )
+        input.done(#(status, option.flatten(expires)))
+      }
+      use #(status, expires) <- http.body(req, shape, [
+        #("status", "STATUS_INVALID"),
+      ])
+      // A day is kept as the day (valid through it); an instant as its ISO text.
+      let expires_at = case expires {
+        Some(temporal.Day(ms)) -> Some(clock.iso_day(ms))
+        Some(temporal.Instant(ms)) -> Some(clock.iso(ms))
+        None -> None
+      }
+      let now = clock.now_ms()
+      let reviewed =
+        staff_row.Row(
+          ..s,
+          check_status: Some(status),
+          check_reviewed_by: Some("Trust & Safety"),
+          check_reviewed_at: Some(now),
+          check_expires_at: option.or(expires_at, s.check_expires_at),
+        )
+      let saved =
+        store.unit(ctx.store, fn(tx) {
+          store.run(
+            tx,
+            "UPDATE trial_day_staff SET check_status = ?, check_reviewed_by = ?, check_reviewed_at = ?, check_expires_at = ? WHERE trial_id = ? AND id = ? AND check_status IS NOT NULL",
+            [
+              sqlight.text(staff_row.check_status_to_string(status)),
+              sqlight.text("Trust & Safety"),
+              sqlight.int(now),
+              sqlight.nullable(sqlight.text, reviewed.check_expires_at),
+              id.trial_sql(s.trial_id),
+              id.trial_staff_sql(s.id),
+            ],
+          )
+        })
+      case saved {
+        Ok(Nil) ->
+          http.json(200, json.object([#("check", check_json(reviewed, now))]))
+        Error(e) -> http.internal(e)
+      }
+    }
   }
 }
 
