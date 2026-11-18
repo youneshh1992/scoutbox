@@ -965,7 +965,8 @@ let CTX1, CTX1_REV, KOLA_CONSENT, CLUB_CONSENT, MARIA_ID;
   );
   neg(
     expect(k14, 400, 'CONTEXT_INPUT_INVALID') &&
-      k14.body.field === 'parties[0].guardianConsent' &&
+      // Either forged field may be named: JSON object members carry no order a client relies on.
+      ['parties[0].guardianConsent', 'parties[0].dob'].includes(k14.body.field) &&
       k14.body.problem === 'unknown_field' &&
       (await j('GET', '/org/agent/compliance/contexts', undefined, ANA.token)).body.items.length === contextsBeforeK14,
     'K14 a forged guardian consent or a client-supplied date of birth is refused by name, and nothing is opened (#19, #20)',
@@ -1743,7 +1744,8 @@ section('S/T — revocation, stale client submits, party change invalidates the 
     const clean = await j('POST', `/org/agent/compliance/contexts/${CTX1}/evaluate`, {}, ANA.token);
     neg(
       expect(forged, 400, 'CONTEXT_INPUT_INVALID') &&
-        forged.body.field === 'outcome' &&
+        // Either forged field may be named: JSON object members carry no order a client relies on.
+        ['outcome', 'clearance'].includes(forged.body.field) &&
         forged.body.problem === 'unknown_field' &&
         clean.body.evaluation.outcome === 'CLEAR',
       'T7 an outcome in the body is refused by name; the engine alone decides it (#27)',
