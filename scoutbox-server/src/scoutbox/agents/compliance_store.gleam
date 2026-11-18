@@ -905,3 +905,81 @@ pub fn clear_to_declare(
     }
   }
 }
+
+/// A player's account removal: every context naming them keeps the party as an id-only removed party (with its
+/// history entry) and loses the player's name from its history; every consent asking them, its answers, revocation
+/// and history lose the person.
+pub fn forget_player(
+  tx: Tx,
+  player_id: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  let p = sqlight.text(player_id)
+  use touched <- result.try(store.query(
+    store.reading(tx),
+    "SELECT DISTINCT context_id FROM compliance_context_parties WHERE subject_kind = 'player' AND subject_id = ? AND removed = 0 ORDER BY context_id",
+    [p],
+    decode.at([0], id.compliance_context_decoder()),
+  ))
+  use _ <- result.try(
+    list.try_each(touched, fn(context_id) {
+      let c = id.compliance_context_sql(context_id)
+      use _ <- result.try(
+        store.run(
+          tx,
+          "UPDATE compliance_context_parties SET removed = 1, removed_at = ? WHERE context_id = ? AND subject_kind = 'player' AND subject_id = ? AND removed = 0",
+          [sqlight.int(at), c, p],
+        ),
+      )
+      use event_id <- result.try(id.next_context_event(tx))
+      use ord <- result.try(next_ord(tx, event_row.table, "context_id", c))
+      use _ <- result.try(event_row.insert(
+        tx,
+        event_row.Row(
+          ..event_row.new(
+            id: event_id,
+            context_id:,
+            ord:,
+            at:,
+            by_kind: compliance_actor_kind.System,
+            action: event_row.ComplianceContextPartyRemoved,
+          ),
+          by_name: Some("account deletion"),
+          detail_party_role: Some(party_role.Individual),
+        ),
+      ))
+      store.run(
+        tx,
+        "UPDATE compliance_context_history SET by_id = NULL, by_name = NULL WHERE context_id = ? AND by_kind = 'player'",
+        [c],
+      )
+    }),
+  )
+  let sub =
+    "SELECT id FROM regulatory_consents WHERE subject_kind = 'player' AND subject_id = ?"
+  use _ <- result.try(
+    store.run(
+      tx,
+      "UPDATE regulatory_consents SET granted_by_id = CASE WHEN granted_by_kind = 'player' THEN NULL ELSE granted_by_id END, granted_by_name = CASE WHEN granted_by_kind = 'player' THEN NULL ELSE granted_by_name END, declined_by_id = CASE WHEN declined_by_kind = 'player' THEN NULL ELSE declined_by_id END, declined_by_name = CASE WHEN declined_by_kind = 'player' THEN NULL ELSE declined_by_name END WHERE id IN ("
+        <> sub
+        <> ")",
+      [p],
+    ),
+  )
+  use _ <- result.try(
+    store.run(
+      tx,
+      "UPDATE regulatory_consent_revocations SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND consent_id IN ("
+        <> sub
+        <> ")",
+      [p],
+    ),
+  )
+  store.run(
+    tx,
+    "UPDATE regulatory_consent_history SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND consent_id IN ("
+      <> sub
+      <> ")",
+    [p],
+  )
+}

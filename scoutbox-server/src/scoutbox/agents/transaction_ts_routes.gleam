@@ -10,6 +10,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
 import gleam/string
+import scoutbox/agents/agent_audit
 import scoutbox/agents/transaction_routes as shared
 import scoutbox/agents/transaction_store.{type Transaction}
 import scoutbox/app.{type Ctx}
@@ -362,7 +363,7 @@ fn detail_json(fields: List(#(String, Option(Json)))) -> Json {
 
 /// One audit row, with the key it sorts by: newest first, then by id descending.
 pub type AuditRow {
-  AuditRow(at: Int, id: String, json: Json)
+  AuditRow(at: Int, id: String, fields: List(#(String, Json)))
 }
 
 /// Codes, states and counts only: no note text, document content, fee or personal field. The transaction's own
@@ -389,170 +390,146 @@ pub fn audit_rows(
   let tx_rows =
     list.map(events, fn(e) {
       let h = e.row
-      AuditRow(
-        h.at,
-        id.transaction_event_to_string(h.id),
-        json.object([
-          #("id", id.transaction_event_json(h.id)),
-          #("at", json.int(h.at)),
-          #("action", event_row.action_to_json(h.action)),
-          #("domain", json.string("transaction")),
-          #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
-          #(
-            "target",
-            json.object([
-              #("type", json.string("agent_transaction")),
-              #("id", json.string(tid)),
-              #("transactionType", context_type.to_json(t.row.type_)),
-              #("status", transaction_status.to_json(t.row.status)),
-            ]),
-          ),
-          #("complianceSnapshot", snapshot),
-          #(
-            "detail",
-            detail_json([
-              #("from", option.map(h.detail_from, transaction_status.to_json)),
-              #("to", option.map(h.detail_to, transaction_status.to_json)),
-              #(
-                "partyRole",
-                option.map(h.detail_party_role, party_role.to_json),
+      AuditRow(h.at, id.transaction_event_to_string(h.id), [
+        #("id", id.transaction_event_json(h.id)),
+        #("at", json.int(h.at)),
+        #("action", event_row.action_to_json(h.action)),
+        #("domain", json.string("transaction")),
+        #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
+        #(
+          "target",
+          json.object([
+            #("type", json.string("agent_transaction")),
+            #("id", json.string(tid)),
+            #("transactionType", context_type.to_json(t.row.type_)),
+            #("status", transaction_status.to_json(t.row.status)),
+          ]),
+        ),
+        #("complianceSnapshot", snapshot),
+        #(
+          "detail",
+          detail_json([
+            #("from", option.map(h.detail_from, transaction_status.to_json)),
+            #("to", option.map(h.detail_to, transaction_status.to_json)),
+            #("partyRole", option.map(h.detail_party_role, party_role.to_json)),
+            #(
+              "subjectKind",
+              option.map(h.detail_subject_kind, subject_kind.to_json),
+            ),
+            #(
+              "status",
+              option.map(
+                h.detail_status,
+                declared_representation_status.to_json,
               ),
-              #(
-                "subjectKind",
-                option.map(h.detail_subject_kind, subject_kind.to_json),
+            ),
+            #("outcome", option.map(h.detail_outcome, context_outcome.to_json)),
+            #(
+              "pendingReason",
+              option.map(h.detail_pending_reason, pending_reason.to_json),
+            ),
+            #("reasonCodes", case h.has_reason_codes {
+              True -> Some(json.array(e.reason_codes, json.string))
+              False -> None
+            }),
+            #("policyVersions", case h.has_policy_versions {
+              True -> Some(json.array(e.policy_versions, id.policy_json))
+              False -> None
+            }),
+            #(
+              "documentType",
+              option.map(
+                h.detail_document_type,
+                event_row.detail_document_type_to_json,
               ),
-              #(
-                "status",
-                option.map(
-                  h.detail_status,
-                  declared_representation_status.to_json,
-                ),
+            ),
+            #(
+              "visibility",
+              option.map(h.detail_visibility, document_visibility.to_json),
+            ),
+            #(
+              "holdReasonCode",
+              option.map(
+                h.detail_reason_code,
+                event_row.detail_reason_code_to_json,
               ),
-              #(
-                "outcome",
-                option.map(h.detail_outcome, context_outcome.to_json),
-              ),
-              #(
-                "pendingReason",
-                option.map(h.detail_pending_reason, pending_reason.to_json),
-              ),
-              #("reasonCodes", case h.has_reason_codes {
-                True -> Some(json.array(e.reason_codes, json.string))
-                False -> None
-              }),
-              #("policyVersions", case h.has_policy_versions {
-                True -> Some(json.array(e.policy_versions, id.policy_json))
-                False -> None
-              }),
-              #(
-                "documentType",
-                option.map(
-                  h.detail_document_type,
-                  event_row.detail_document_type_to_json,
-                ),
-              ),
-              #(
-                "visibility",
-                option.map(h.detail_visibility, document_visibility.to_json),
-              ),
-              #(
-                "holdReasonCode",
-                option.map(
-                  h.detail_reason_code,
-                  event_row.detail_reason_code_to_json,
-                ),
-              ),
-              #("version", option.map(h.detail_version, json.int)),
-              #("count", option.map(h.detail_count, json.int)),
-              #("staleness", option.map(h.detail_staleness, staleness.to_json)),
-            ]),
-          ),
-        ]),
-      )
+            ),
+            #("version", option.map(h.detail_version, json.int)),
+            #("count", option.map(h.detail_count, json.int)),
+            #("staleness", option.map(h.detail_staleness, staleness.to_json)),
+          ]),
+        ),
+      ])
     })
   let doc_rows =
     list.map(docs, fn(x) {
       let #(d, h) = x
-      AuditRow(
-        h.at,
-        id.transaction_document_event_to_string(h.id),
-        json.object([
-          #("id", id.transaction_document_event_json(h.id)),
-          #("at", json.int(h.at)),
-          #("action", doc_event_row.action_to_json(h.action)),
-          #("domain", json.string("transaction")),
-          #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
-          #(
-            "target",
+      AuditRow(h.at, id.transaction_document_event_to_string(h.id), [
+        #("id", id.transaction_document_event_json(h.id)),
+        #("at", json.int(h.at)),
+        #("action", doc_event_row.action_to_json(h.action)),
+        #("domain", json.string("transaction")),
+        #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
+        #(
+          "target",
+          json.object([
+            #("type", json.string("transaction_document")),
+            #("id", id.transaction_document_json(d.id)),
+            #("transactionId", json.string(tid)),
+            #("documentType", doc_row.document_type_to_json(d.document_type)),
+          ]),
+        ),
+        #("complianceSnapshot", json.null()),
+        // A document's entry repeats the document's own fields.
+        #("detail", case h.action {
+          doc_event_row.TransactionDocumentAdded ->
             json.object([
-              #("type", json.string("transaction_document")),
-              #("id", id.transaction_document_json(d.id)),
-              #("transactionId", json.string(tid)),
               #("documentType", doc_row.document_type_to_json(d.document_type)),
-            ]),
-          ),
-          #("complianceSnapshot", json.null()),
-          // A document's entry repeats the document's own fields.
-          #("detail", case h.action {
-            doc_event_row.TransactionDocumentAdded ->
-              json.object([
-                #(
-                  "documentType",
-                  doc_row.document_type_to_json(d.document_type),
-                ),
-                #("visibility", document_visibility.to_json(d.visibility)),
-                #("version", json.int(d.version)),
-              ])
-            doc_event_row.TransactionDocumentSuperseded ->
-              json.object([#("version", json.int(d.version))])
-          }),
-        ]),
-      )
+              #("visibility", document_visibility.to_json(d.visibility)),
+              #("version", json.int(d.version)),
+            ])
+          doc_event_row.TransactionDocumentSuperseded ->
+            json.object([#("version", json.int(d.version))])
+        }),
+      ])
     })
   let rep_rows =
     list.map(reps, fn(x) {
       let #(r, h, pvs) = x
-      AuditRow(
-        h.at,
-        id.representation_event_to_string(h.id),
-        json.object([
-          #("id", id.representation_event_json(h.id)),
-          #("at", json.int(h.at)),
-          #("action", rep_event_row.action_to_json(h.action)),
-          #("domain", json.string("transaction")),
-          #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
-          #(
-            "target",
-            json.object([
-              #("type", json.string("transaction_representation")),
-              #("id", id.representation_json(r.id)),
-              #("transactionId", json.string(tid)),
-              #("partyRole", party_role.to_json(r.party_role)),
-            ]),
-          ),
-          #("complianceSnapshot", json.null()),
-          #(
-            "detail",
-            detail_json([
-              #(
-                "partyRole",
-                option.map(h.detail_party_role, party_role.to_json),
+      AuditRow(h.at, id.representation_event_to_string(h.id), [
+        #("id", id.representation_event_json(h.id)),
+        #("at", json.int(h.at)),
+        #("action", rep_event_row.action_to_json(h.action)),
+        #("domain", json.string("transaction")),
+        #("actor", actor_of(h.by_kind, h.by_id, h.by_name, h.by_org_id)),
+        #(
+          "target",
+          json.object([
+            #("type", json.string("transaction_representation")),
+            #("id", id.representation_json(r.id)),
+            #("transactionId", json.string(tid)),
+            #("partyRole", party_role.to_json(r.party_role)),
+          ]),
+        ),
+        #("complianceSnapshot", json.null()),
+        #(
+          "detail",
+          detail_json([
+            #("partyRole", option.map(h.detail_party_role, party_role.to_json)),
+            #(
+              "status",
+              option.map(
+                h.detail_status,
+                declared_representation_status.to_json,
               ),
-              #(
-                "status",
-                option.map(
-                  h.detail_status,
-                  declared_representation_status.to_json,
-                ),
-              ),
-              #("policyVersions", case h.has_policy_versions {
-                True -> Some(json.array(pvs, id.policy_json))
-                False -> None
-              }),
-            ]),
-          ),
-        ]),
-      )
+            ),
+            #("policyVersions", case h.has_policy_versions {
+              True -> Some(json.array(pvs, id.policy_json))
+              False -> None
+            }),
+          ]),
+        ),
+      ])
     })
   list.flatten([tx_rows, doc_rows, rep_rows])
 }
@@ -589,9 +566,20 @@ pub fn get_one(
         200,
         json.object([
           #("transaction", view),
-          #("audit", json.array(audit, fn(a) { a.json })),
+          #("audit", json.array(audit, fn(a) { json.object(a.fields) })),
         ]),
       )
     }
   }
+}
+
+/// The agency's transaction rows, for its audit feed.
+pub fn agency_rows(
+  read: Read,
+  org: id.OrgId,
+) -> Result(List(agent_audit.Row), Fail(e)) {
+  use txs <- result.try(transaction_store.for_agency(read, org))
+  use rows <- result.map(list.try_map(txs, audit_rows(read, _)))
+  list.flatten(rows)
+  |> list.map(fn(r) { agent_audit.Row(r.id, r.at, r.fields) })
 }

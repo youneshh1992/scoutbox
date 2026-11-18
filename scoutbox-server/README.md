@@ -11,8 +11,10 @@ lifetime (`SESSION_TTL_DAYS`) and the production boot refusals, and Recruitment 
 evidence, missing-evidence suggestions and Combine requests they read), the recruitment case's journey, lifecycle
 actions and formal decision, Offers, the agent core (profiles and verification facets, agency membership,
 representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
-items it opens), the organisation audit and a player's erasure, and the start of an agent's transaction workspace
-(opening one from a club's handoff, its notes and the readiness an Offer reads), Trials (the invitation, acceptance,
+items it opens), the organisation audit and a player's erasure, an agent's transaction workspace (its parties and their own confirmation,
+representation bindings, status moves, terms, documents, notes, links, timelines, the club's, player's and Trust &
+Safety lanes, and the readiness an Offer reads), the slice of the compliance ledger it reaches (reviewer sign-in,
+the review queue and the decision on a declared binding, and regulatory consents), Trials (the invitation, acceptance,
 schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
 calendar export and the mandatory report), structured assessments, the Football Passport's trial timeline, and
 Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query),

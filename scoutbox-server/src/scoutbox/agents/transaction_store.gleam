@@ -1415,3 +1415,91 @@ pub fn representation_events(
   })
   |> result.map(list.flatten)
 }
+
+// ------------------------------------------------------------------------------------------------- erasure
+
+/// A player's account removal: every transaction naming them keeps its ids, roles, states and times and loses the
+/// person. The party row is tombstoned, the player's confirmation and own history entries lose their id and name,
+/// their own documents are removed and lose their owner, every live binding is withdrawn, and the tombstone is
+/// recorded.
+pub fn forget_player(
+  tx: Tx,
+  player_id: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  let p = sqlight.text(player_id)
+  let when = sqlight.int(at)
+  use touched <- result.try(store.query(
+    store.reading(tx),
+    "SELECT DISTINCT transaction_id FROM transaction_parties WHERE subject_kind = 'player' AND subject_id = ? ORDER BY transaction_id",
+    [p],
+    decode.at([0], id.transaction_decoder()),
+  ))
+  list.try_each(touched, fn(transaction_id) {
+    let t = id.transaction_sql(transaction_id)
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE transaction_representations SET status = 'withdrawn', withdrawn_at = ?, withdrawn_reason = 'subject_removed' WHERE transaction_id = ? AND status <> 'withdrawn'",
+        [when, t],
+      ),
+    )
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE transaction_documents SET removed_at = COALESCE(removed_at, ?), owner_id = NULL WHERE transaction_id = ? AND owner_kind = 'player' AND owner_id = ?",
+        [when, t, p],
+      ),
+    )
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE transaction_documents SET uploaded_by_id = NULL, uploaded_by_name = NULL WHERE transaction_id = ? AND uploaded_by_kind = 'player' AND uploaded_by_id = ?",
+        [t, p],
+      ),
+    )
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE transaction_parties SET removed = 1, removed_at = COALESCE(removed_at, ?), subject_removed_at = ?, confirmed_by_id = CASE WHEN confirmed_by_kind = 'player' THEN NULL ELSE confirmed_by_id END, confirmed_by_name = CASE WHEN confirmed_by_kind = 'player' THEN NULL ELSE confirmed_by_name END WHERE transaction_id = ? AND subject_kind = 'player' AND subject_id = ?",
+        [when, when, t, p],
+      ),
+    )
+    use _ <- result.try(touch(tx, transaction_id, at))
+    use _ <- result.try(history(
+      tx,
+      transaction_id,
+      event_row.TransactionSubjectTombstoned,
+      compliance_store.By(
+        kind: compliance_actor_kind.System,
+        id: None,
+        name: Some("account deletion"),
+        role: None,
+        org_id: None,
+      ),
+      Detail(..no_detail, party_role: Some(party_role.Individual)),
+      at,
+    ))
+    // Only the deleted player's own entries: another player once named keeps their provenance.
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE transaction_history SET by_id = NULL, by_name = NULL WHERE transaction_id = ? AND by_kind = 'player' AND by_id = ?",
+        [t, p],
+      ),
+    )
+    store.run(
+      tx,
+      "UPDATE transaction_document_history SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND by_id = ? AND document_id IN (SELECT id FROM transaction_documents WHERE transaction_id = ?)",
+      [p, t],
+    )
+  })
+}
+
+/// The agency's transactions, oldest first (the agency audit).
+pub fn for_agency(
+  read: Read,
+  agency: id.OrgId,
+) -> Result(List(Transaction), Fail(e)) {
+  where(read, "agency_org_id = ? ORDER BY rowid", [id.org_sql(agency)])
+}

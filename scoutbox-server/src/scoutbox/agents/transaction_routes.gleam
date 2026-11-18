@@ -731,7 +731,8 @@ fn party_name(
             now,
           ))
           case found {
-            Some(#(pl, access)) if access.visible -> Some(pl.row.name)
+            Some(#(pl, access)) if access.visible && !access.blocked ->
+              Some(pl.row.name)
             _ -> None
           }
         }

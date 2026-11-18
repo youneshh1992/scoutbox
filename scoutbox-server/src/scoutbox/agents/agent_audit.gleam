@@ -1,7 +1,9 @@
 //// The agency's audit feed (domains/agents/core/audit.mjs and compliance/audit.mjs): what happened and who did it,
 //// never what was said. A player is named only while the organisation may see them; a reviewer appears as a role.
 ////
-//// Not ported yet: compliance contexts' and consents' rows, and the transaction workspace's.
+//// The transaction workspace's rows come from its own module (`transaction_ts_routes.agency_rows`).
+////
+//// Not ported yet: compliance contexts' and consents' rows.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -188,7 +190,11 @@ pub fn rows(read: Read, org: Org, now: Int) -> Result(List(Row), Fail(e)) {
     list.flatten(agreement_rows),
     review_rows,
   ])
-  |> list.sort(fn(x, y) {
+  |> newest_first
+}
+
+pub fn newest_first(rows: List(Row)) -> List(Row) {
+  list.sort(rows, fn(x, y) {
     case int.compare(y.at, x.at) {
       order.Eq -> string.compare(y.id, x.id)
       o -> o

@@ -1667,7 +1667,11 @@ fn agent_org(
     ["agency", "compliance"] ->
       only(req, Get, fn() { agent.compliance(ctx, org) })
     ["agency", "audit"] ->
-      only(req, Get, fn() { agent.agency_audit(ctx, req, org) })
+      only(req, Get, fn() {
+        agent.agency_audit(ctx, req, org, [
+          transaction_ts_routes.agency_rows(_, org.org.id),
+        ])
+      })
     ["players"] -> only(req, Get, fn() { agent.players_lookup(ctx, req, org) })
     ["clients"] -> only(req, Get, fn() { agent.clients(ctx, org) })
     ["clients", "request"] ->

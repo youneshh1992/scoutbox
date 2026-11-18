@@ -564,7 +564,13 @@ pub fn resolve(
     tx,
     "UPDATE regulatory_reviews SET status = ?, decided_at = ?, decision_reviewer_id = ?, decision_reviewer_name = ?, decision_reviewer_role = ?, decision_outcome = ?, decision_reason_code = ?, decision_reason = ?, decision_at = ?, prior_status = ?, prior_context_outcome = ?, prior_representation_status = ?, result_context_outcome = ?, result_representation_status = ?, result_note = ?, resolve_key = ?, resolve_fp = ?, rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ? AND status IN ('PENDING','IN_REVIEW') RETURNING 1",
     [
-      sqlight.text(review_row.decision_outcome_to_string(d.outcome)),
+      sqlight.text(
+        review_status.to_string(case d.outcome {
+          review_row.Approved -> review_status.Approved
+          review_row.Rejected -> review_status.Rejected
+          review_row.Cancelled -> review_status.Cancelled
+        }),
+      ),
       sqlight.int(d.at),
       sqlight.text(d.reviewer_id),
       sqlight.text(d.reviewer_name),

@@ -2359,12 +2359,21 @@ fn audit_query_shape() -> input.Shape(AuditQuery) {
 }
 
 /// `GET /org/agent/agency/audit`: the agency's agent, membership, representation and compliance rows, newest first.
-pub fn agency_audit(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+pub fn agency_audit(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  sources: List(fn(Read) -> Result(List(agent_audit.Row), Fail(Nil))),
+) -> Response {
   use m <- membership(ctx, a)
   use <- require(m, "agency.audit.read")
   use q <- query(req, audit_query_shape())
   let now = clock.now_ms()
-  use all <- reading(ctx, fn(r) { agent_audit.rows(r, a.org, now) })
+  use all <- reading(ctx, fn(r) {
+    use own <- result.try(agent_audit.rows(r, a.org, now))
+    use extra <- result.map(list.try_map(sources, fn(source) { source(r) }))
+    agent_audit.newest_first(list.flatten([own, ..extra]))
+  })
   let limit = option.unwrap(q.limit, 25)
   let start = case q.cursor {
     None -> Ok(0)

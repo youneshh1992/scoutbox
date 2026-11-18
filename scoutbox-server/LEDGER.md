@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 4 | 2 | 187 / 133 | 35 / 36 | 7 to go |
+| agents | 9 | 4 | 3 | 187 / 133 | 35 / 36 | 7 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -42,7 +42,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
 | `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  |  | 5 / 128 | 0 / 1 | not answered; 128 cases pending; 1 hand-port calls |
-| `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  |  | 0 / 5 |  | not answered; 5 cases pending |
+| `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
 | `development/boxCam` | not yet neutral | 3 → 3 | 150 | 150 |  |  |  |  |  | not untangled; not answered |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
