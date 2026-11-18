@@ -7,6 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import scoutbox/agents/compliance_routes as compliance
 import scoutbox/agents/core_routes as agent
 import scoutbox/agents/handoffs
 import scoutbox/agents/transaction_party_routes as party_lanes
@@ -161,6 +162,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["player", "login"] ->
           only(req, Post, fn() { player_routes.login(ctx, req) })
+        ["reviewer", "login"] ->
+          only(req, Post, fn() { compliance.login(ctx, req) })
         ["player", "signup"] ->
           only(req, Post, fn() { player_routes.signup(ctx, req) })
         ["guardian", "signup"] ->
@@ -659,6 +662,24 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             threads.org_typing(ctx, req, org, id.channel(id))
           })
+        ["compliance", "consents"] ->
+          only(req, Get, fn() { compliance.club_consents(ctx, org) })
+        ["compliance", "consents", cid, action] -> {
+          let act = case action {
+            "grant" -> Ok(compliance.GrantIt)
+            "decline" -> Ok(compliance.DeclineIt)
+            "revoke" -> Ok(compliance.RevokeIt)
+            _ -> Error(Nil)
+          }
+          case act {
+            Ok(act) ->
+              only(req, Post, fn() {
+                use req <- contract.rerun_on_stale(req)
+                compliance.club_answer(ctx, req, org, cid, act)
+              })
+            Error(Nil) -> not_found()
+          }
+        }
         ["transactions"] ->
           only(req, Get, fn() { party_lanes.club_list(ctx, req, org) })
         ["transactions", tid] ->
@@ -748,6 +769,24 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Patch -> box_prefs.update(ctx, req, player)
             _ -> not_found()
           }
+        ["agent", "consents"] ->
+          only(req, Get, fn() { compliance.player_consents(ctx, player) })
+        ["agent", "consents", cid, action] -> {
+          let act = case action {
+            "grant" -> Ok(compliance.GrantIt)
+            "decline" -> Ok(compliance.DeclineIt)
+            "revoke" -> Ok(compliance.RevokeIt)
+            _ -> Error(Nil)
+          }
+          case act {
+            Ok(act) ->
+              only(req, Post, fn() {
+                use req <- contract.rerun_on_stale(req)
+                compliance.player_answer(ctx, req, player, cid, act)
+              })
+            Error(Nil) -> not_found()
+          }
+        }
         ["transactions"] ->
           only(req, Get, fn() { party_lanes.player_list(ctx, player) })
         ["transactions", tid] ->
@@ -1250,6 +1289,25 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         _ -> not_found()
       }
     }
+    ["ts", ..rest] -> {
+      use reviewer <- compliance.reviewer_session(ctx, req)
+      case rest {
+        ["compliance", "reviews"] ->
+          only(req, Get, fn() { compliance.review_queue(ctx, req, reviewer) })
+        ["compliance", "reviews", rid, "resolve"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            compliance.resolve_review(
+              ctx,
+              req,
+              reviewer,
+              rid,
+              transaction_routes.binding_decided,
+            )
+          })
+        _ -> not_found()
+      }
+    }
     ["admin", ..rest] -> {
       use <- access.admin(ctx, req)
       case rest {
@@ -1557,6 +1615,11 @@ fn agent_org(
       })
     ["transactions", tid, "messages"] ->
       only(req, Get, fn() { transaction_routes.messages_mine(ctx, org, tid) })
+    ["transactions", tid, "consents", "request"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.request_consent(ctx, req, org, tid)
+      })
     ["transactions", tid, "evaluate"] ->
       only(req, Post, fn() {
         use req <- contract.rerun_on_stale(req)

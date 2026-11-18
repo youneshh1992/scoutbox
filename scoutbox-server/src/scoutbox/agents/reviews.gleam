@@ -24,10 +24,12 @@ import scoutbox/vocab/agent_facet.{type AgentFacet}
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind.{type ComplianceActorKind}
 import scoutbox/vocab/context_outcome
+import scoutbox/vocab/declared_representation_status
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction.{type Jurisdiction}
 import scoutbox/vocab/party_role
 import scoutbox/vocab/review_status
+import scoutbox/vocab/reviewer_role
 import sqlight
 
 /// Who asked for the review.
@@ -424,4 +426,214 @@ fn blank(
     requested_by_name: by.name,
     rev_at: Some(now),
   )
+}
+
+// ------------------------------------------------------------------------------------------------- reading
+
+/// A review item with its reasons, policy versions and the evidence its decision cited.
+pub type Review {
+  Review(
+    row: review_row.Row,
+    reasons: List(reason_row.Row),
+    policy_versions: List(id.PolicyId),
+    evidence_refs: List(String),
+  )
+}
+
+fn load(read: Read, r: review_row.Row) -> Result(Review, Fail(e)) {
+  let rid = id.regulatory_review_sql(r.id)
+  use reasons <- result.try(store.query(
+    read,
+    "SELECT "
+      <> reason_row.columns
+      <> " FROM regulatory_review_reasons WHERE review_id = ? ORDER BY ord",
+    [rid],
+    reason_row.decoder(),
+  ))
+  use pvs <- result.try(store.query(
+    read,
+    "SELECT policy_version_id FROM regulatory_review_policy_versions WHERE review_id = ? ORDER BY ord",
+    [rid],
+    decode.at([0], id.policy_decoder()),
+  ))
+  use refs <- result.map(store.query(
+    read,
+    "SELECT ref FROM regulatory_review_evidence_refs WHERE review_id = ? ORDER BY ord",
+    [rid],
+    decode.at([0], decode.string),
+  ))
+  Review(r, reasons, pvs, refs)
+}
+
+pub fn by_id(
+  read: Read,
+  review_id: id.RegulatoryReviewId,
+) -> Result(Option(Review), Fail(e)) {
+  use found <- result.try(store.one(
+    read,
+    "SELECT " <> review_row.columns <> " FROM regulatory_reviews WHERE id = ?",
+    [id.regulatory_review_sql(review_id)],
+    review_row.decoder(),
+  ))
+  case found {
+    Ok(r) -> load(read, r) |> result.map(Some)
+    Error(Nil) -> Ok(None)
+  }
+}
+
+/// Open items first, each part oldest first, by cursor: each row with its `[rank, requested_at, rowid]` key.
+pub fn queue_page(
+  read: Read,
+  status: Option(review_status.ReviewStatus),
+  after: Option(#(Int, Int, Int)),
+  limit: Int,
+) -> Result(List(#(#(Int, Int, Int), Review)), Fail(e)) {
+  let open = "CASE WHEN status IN ('PENDING','IN_REVIEW') THEN 0 ELSE 1 END"
+  let s =
+    sqlight.nullable(sqlight.text, option.map(status, review_status.to_string))
+  let key = fn(f) { sqlight.nullable(sqlight.int, option.map(after, f)) }
+  use rows <- result.try(
+    store.query(
+      read,
+      "SELECT "
+        <> review_row.columns
+        <> ", "
+        <> open
+        <> ", requested_at, rowid FROM regulatory_reviews WHERE (? IS NULL OR status = ?) AND (? IS NULL OR ("
+        <> open
+        <> ", requested_at, rowid) > (?, ?, ?)) ORDER BY "
+        <> open
+        <> ", requested_at, rowid LIMIT ?",
+      [
+        s,
+        s,
+        key(fn(k) { k.0 }),
+        key(fn(k) { k.0 }),
+        key(fn(k) { k.1 }),
+        key(fn(k) { k.2 }),
+        sqlight.int(limit + 1),
+      ],
+      {
+        use r <- decode.then(review_row.decoder())
+        use rank <- decode.field(review_row.width, decode.int)
+        use at <- decode.field(review_row.width + 1, decode.int)
+        use rid <- decode.field(review_row.width + 2, decode.int)
+        decode.success(#(#(rank, at, rid), r))
+      },
+    ),
+  )
+  list.try_map(rows, fn(x) {
+    load(read, x.1) |> result.map(fn(r) { #(x.0, r) })
+  })
+}
+
+/// What a named reviewer decided, with the state before and after.
+pub type Decision {
+  Decision(
+    reviewer_id: String,
+    reviewer_name: String,
+    reviewer_role: reviewer_role.ReviewerRole,
+    outcome: review_row.DecisionOutcome,
+    reason_code: String,
+    reason: String,
+    evidence_refs: List(String),
+    prior_status: review_status.ReviewStatus,
+    prior_context_outcome: Option(context_outcome.ContextOutcome),
+    prior_representation_status: Option(
+      declared_representation_status.DeclaredRepresentationStatus,
+    ),
+    result_context_outcome: Option(context_outcome.ContextOutcome),
+    result_representation_status: Option(
+      declared_representation_status.DeclaredRepresentationStatus,
+    ),
+    result_note: Option(review_row.ResultNote),
+    at: Int,
+  )
+}
+
+/// An open item is decided, its decision recorded with the evidence it cites and its rev moved by the reviewer.
+pub fn resolve(
+  tx: Tx,
+  r: Review,
+  d: Decision,
+  key: Option(#(String, String)),
+) -> Result(Nil, Fail(e)) {
+  let rid = id.regulatory_review_sql(r.row.id)
+  let text = sqlight.nullable(sqlight.text, _)
+  use rows <- result.try(store.write(
+    tx,
+    "UPDATE regulatory_reviews SET status = ?, decided_at = ?, decision_reviewer_id = ?, decision_reviewer_name = ?, decision_reviewer_role = ?, decision_outcome = ?, decision_reason_code = ?, decision_reason = ?, decision_at = ?, prior_status = ?, prior_context_outcome = ?, prior_representation_status = ?, result_context_outcome = ?, result_representation_status = ?, result_note = ?, resolve_key = ?, resolve_fp = ?, rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ? AND status IN ('PENDING','IN_REVIEW') RETURNING 1",
+    [
+      sqlight.text(review_row.decision_outcome_to_string(d.outcome)),
+      sqlight.int(d.at),
+      sqlight.text(d.reviewer_id),
+      sqlight.text(d.reviewer_name),
+      sqlight.text(reviewer_role.to_string(d.reviewer_role)),
+      sqlight.text(review_row.decision_outcome_to_string(d.outcome)),
+      sqlight.text(d.reason_code),
+      sqlight.text(d.reason),
+      sqlight.int(d.at),
+      sqlight.text(review_status.to_string(d.prior_status)),
+      text(option.map(d.prior_context_outcome, context_outcome.to_string)),
+      text(option.map(
+        d.prior_representation_status,
+        declared_representation_status.to_string,
+      )),
+      text(option.map(d.result_context_outcome, context_outcome.to_string)),
+      text(option.map(
+        d.result_representation_status,
+        declared_representation_status.to_string,
+      )),
+      text(option.map(d.result_note, review_row.result_note_to_string)),
+      text(option.map(key, fn(k) { k.0 })),
+      text(option.map(key, fn(k) { k.1 })),
+      sqlight.int(d.at),
+      sqlight.text(d.reviewer_id),
+      sqlight.text(d.reviewer_name),
+      rid,
+    ],
+    decode.at([0], decode.int),
+  ))
+  case rows {
+    [] -> store.stale("the review is no longer open")
+    _ -> {
+      use _ <- result.try(
+        list.index_map(d.evidence_refs, fn(ref, i) { #(i, ref) })
+        |> list.try_each(fn(p) {
+          store.run(
+            tx,
+            "INSERT INTO regulatory_review_evidence_refs (review_id, ord, ref) VALUES (?, ?, ?)",
+            [rid, sqlight.int(p.0), sqlight.text(p.1)],
+          )
+        }),
+      )
+      use ord <- result.try(
+        store.one(
+          store.reading(tx),
+          "SELECT COALESCE(MAX(ord) + 1, 0) FROM regulatory_review_history WHERE review_id = ?",
+          [rid],
+          decode.at([0], decode.int),
+        )
+        |> result.map(result.unwrap(_, 0)),
+      )
+      use event_id <- result.try(id.next_review_event(tx))
+      event_row.insert(
+        tx,
+        event_row.Row(
+          ..event_row.new(
+            id: event_id,
+            review_id: r.row.id,
+            ord:,
+            at: d.at,
+            by_kind: compliance_actor_kind.TsReviewer,
+            action: event_row.RegulatoryReviewResolved,
+          ),
+          by_id: Some(d.reviewer_id),
+          by_name: Some(d.reviewer_name),
+          by_role: Some(reviewer_role.to_string(d.reviewer_role)),
+          detail_rev: Some(r.row.rev),
+        ),
+      )
+    }
+  }
 }

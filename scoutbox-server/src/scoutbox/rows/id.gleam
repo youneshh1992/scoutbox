@@ -814,6 +814,102 @@ pub fn next_conflict(tx: Tx) -> Result(ConflictId, Fail(e)) {
   ids.next(tx, "vcoi") |> result.map(ConflictId)
 }
 
+/// An id of `regulatory_consents`.
+pub opaque type ConsentId {
+  ConsentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn consent(text: String) -> ConsentId {
+  ConsentId(text)
+}
+
+pub fn consent_to_string(id: ConsentId) -> String {
+  let ConsentId(text) = id
+  text
+}
+
+pub fn consent_sql(id: ConsentId) -> sqlight.Value {
+  sqlight.text(consent_to_string(id))
+}
+
+pub fn consent_json(id: ConsentId) -> Json {
+  json.string(consent_to_string(id))
+}
+
+pub fn consent_decoder() -> decode.Decoder(ConsentId) {
+  decode.map(decode.string, ConsentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_consent(tx: Tx) -> Result(ConsentId, Fail(e)) {
+  ids.next(tx, "rcs") |> result.map(ConsentId)
+}
+
+/// An id of `regulatory_consent_history`.
+pub opaque type ConsentEventId {
+  ConsentEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn consent_event(text: String) -> ConsentEventId {
+  ConsentEventId(text)
+}
+
+pub fn consent_event_to_string(id: ConsentEventId) -> String {
+  let ConsentEventId(text) = id
+  text
+}
+
+pub fn consent_event_sql(id: ConsentEventId) -> sqlight.Value {
+  sqlight.text(consent_event_to_string(id))
+}
+
+pub fn consent_event_json(id: ConsentEventId) -> Json {
+  json.string(consent_event_to_string(id))
+}
+
+pub fn consent_event_decoder() -> decode.Decoder(ConsentEventId) {
+  decode.map(decode.string, ConsentEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_consent_event(tx: Tx) -> Result(ConsentEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ConsentEventId)
+}
+
+/// An id of `regulatory_consent_revocations`.
+pub opaque type ConsentRevocationId {
+  ConsentRevocationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn consent_revocation(text: String) -> ConsentRevocationId {
+  ConsentRevocationId(text)
+}
+
+pub fn consent_revocation_to_string(id: ConsentRevocationId) -> String {
+  let ConsentRevocationId(text) = id
+  text
+}
+
+pub fn consent_revocation_sql(id: ConsentRevocationId) -> sqlight.Value {
+  sqlight.text(consent_revocation_to_string(id))
+}
+
+pub fn consent_revocation_json(id: ConsentRevocationId) -> Json {
+  json.string(consent_revocation_to_string(id))
+}
+
+pub fn consent_revocation_decoder() -> decode.Decoder(ConsentRevocationId) {
+  decode.map(decode.string, ConsentRevocationId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_consent_revocation(tx: Tx) -> Result(ConsentRevocationId, Fail(e)) {
+  ids.next(tx, "rcs") |> result.map(ConsentRevocationId)
+}
+
 /// An id of `recruitment_contacts`.
 pub opaque type ContactId {
   ContactId(String)
@@ -2614,6 +2710,33 @@ pub fn review_event_decoder() -> decode.Decoder(ReviewEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_review_event(tx: Tx) -> Result(ReviewEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(ReviewEventId)
+}
+
+/// An id of `ts_reviewers`.
+pub opaque type ReviewerId {
+  ReviewerId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn reviewer(text: String) -> ReviewerId {
+  ReviewerId(text)
+}
+
+pub fn reviewer_to_string(id: ReviewerId) -> String {
+  let ReviewerId(text) = id
+  text
+}
+
+pub fn reviewer_sql(id: ReviewerId) -> sqlight.Value {
+  sqlight.text(reviewer_to_string(id))
+}
+
+pub fn reviewer_json(id: ReviewerId) -> Json {
+  json.string(reviewer_to_string(id))
+}
+
+pub fn reviewer_decoder() -> decode.Decoder(ReviewerId) {
+  decode.map(decode.string, ReviewerId)
 }
 
 /// An id of `room_comments`.

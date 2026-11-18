@@ -19,8 +19,10 @@ import gleam/string
 import scoutbox/agents/agent_rules
 import scoutbox/agents/agent_store
 import scoutbox/agents/approach_policy
+import scoutbox/agents/compliance_routes
 import scoutbox/agents/compliance_store.{type By}
 import scoutbox/agents/conflict
+import scoutbox/agents/consent_store
 import scoutbox/agents/core_routes.{type Member}
 import scoutbox/agents/handoffs
 import scoutbox/agents/reviews
@@ -50,6 +52,7 @@ import scoutbox/recruitment/domain_errors.{Contract}
 import scoutbox/rows/agent_transactions as tx_row
 import scoutbox/rows/agreement_scopes as agreement_scope_row
 import scoutbox/rows/id
+import scoutbox/rows/regulatory_consents as consent_row
 import scoutbox/rows/regulatory_reviews as review_row
 import scoutbox/rows/transaction_documents as doc_row
 import scoutbox/rows/transaction_history as event_row
@@ -331,6 +334,7 @@ fn party_revision_with(
         None -> Error(Nil)
       }
     })
+  use consents <- result.try(consent_store.for_context(read, t.row.context_id))
   use profile <- result.try(agent_store.profile_for_user(
     read,
     t.row.agent_user_id,
@@ -350,8 +354,9 @@ fn party_revision_with(
         option.map(r.row.agreement_id, id.agreement_to_string),
       )
     }),
-    // Not ported yet: regulatory consents (the consent routes), so a workspace has none.
-    [],
+    list.map(consents, fn(k) {
+      #(id.consent_to_string(k.row.id), consent_store.status(k))
+    }),
     case profile {
       Some(p) -> compliance_store.facet_states(p, now)
       None -> canonical.Object([])
@@ -501,12 +506,17 @@ pub fn recheck(
           use ctx <- result.try(compliance_store.by_id(read, t.row.context_id))
           let assert Some(ctx) = ctx as "a transaction has its context"
           use policies <- result.try(approach_policy.published(read))
+          use consents <- result.try(consent_store.engine_consents(
+            read,
+            ctx.row.id,
+          ))
           use engine <- result.try(compliance_store.engine_input(
             read,
             ctx,
             policies,
             now,
             None,
+            consents,
           ))
           let result = conflict.evaluate(engine)
           use evaluation_id <- result.try(compliance_store.record_evaluation(
@@ -914,6 +924,63 @@ fn terms_visibility(
   d
 }
 
+fn consent_json(
+  k: consent_store.Consent,
+  viewer: Viewer,
+  is_agent: Bool,
+) -> Json {
+  let r = k.row
+  let mine = case viewer, r.subject_kind {
+    transaction_rules.PlayerViewer(player_id), subject_kind.Player ->
+      r.subject_id == player_id
+    transaction_rules.ClubViewer(org_id:, ..), subject_kind.Club ->
+      r.subject_id == org_id
+    _, _ -> False
+  }
+  json.object(
+    list.append(
+      [
+        #("id", case mine || is_agent {
+          True -> id.consent_json(r.id)
+          False -> json.null()
+        }),
+        #("kind", consent_row.kind_to_json(r.kind)),
+        #("partyRole", party_role.to_json(r.party_role)),
+        #("status", json.string(consent_store.status(k))),
+        #("requestedAt", json.int(r.requested_at)),
+        #("grantedAt", json.nullable(r.granted_at, json.int)),
+        #("declinedAt", json.nullable(r.declined_at, json.int)),
+        #("revokedAt", json.nullable(consent_store.revoked_at(k), json.int)),
+        #("mine", json.bool(mine)),
+      ],
+      case mine {
+        True -> [
+          #("particulars", consent_particulars(r)),
+          #("policyVersions", json.array(k.policy_versions, id.policy_json)),
+        ]
+        False -> []
+      },
+    ),
+  )
+}
+
+pub fn consent_particulars(r: consent_row.Row) -> Json {
+  json.object([
+    #("fullParticularsProvided", json.bool(r.full_particulars_provided)),
+    #("legalAdviceOffered", json.bool(r.legal_advice_offered)),
+    #("proposedFeeDisclosed", json.bool(r.proposed_fee_disclosed)),
+    #("acknowledged", case r.acknowledged_at {
+      Some(at) ->
+        json.object([
+          #("particulars", json.bool(True)),
+          #("legalAdvice", json.bool(True)),
+          #("at", json.int(at)),
+        ])
+      None -> json.null()
+    }),
+  ])
+}
+
 /// One workspace, projected for one viewer from the roles the server derived.
 pub fn project(
   read: Read,
@@ -927,6 +994,7 @@ pub fn project(
   let is_agent = list.contains(roles, RepresentingAgent)
   use reps <- result.try(transaction_store.representations(read, r.id))
   use docs <- result.try(transaction_store.documents(read, r.id))
+  use consents <- result.try(consent_store.for_context(read, r.context_id))
   use view <- result.try(compliance_of(read, t))
   use stale <- result.try(staleness_with(read, t, reps, view, now))
   use agency <- result.try(orgs.by_id(read, r.agency_org_id))
@@ -1033,8 +1101,8 @@ pub fn project(
     // Every party sees who represents which party and on what basis, never fee terms.
     #("representations", json.array(reps, representation_json(_, is_agent))),
     #("compliance", compliance_json(view, stale, is_agent, r)),
-    // Not ported yet: regulatory consents (the compliance ledger's consent routes), so a workspace has none.
-    #("consents", json.array([], json.string)),
+    // A party sees its own consent in full and another party's as a state only.
+    #("consents", json.array(consents, consent_json(_, viewer, is_agent))),
     #(
       "documents",
       docs
@@ -2840,8 +2908,18 @@ fn attach_in_unit(
       via_colleague: False,
     )
   use policies <- result.try(approach_policy.published(read) |> storage)
+  use consents <- result.try(
+    consent_store.engine_consents(read, c.row.id) |> storage,
+  )
   use engine <- result.try(
-    compliance_store.engine_input(read, c, policies, now, Some(proposed))
+    compliance_store.engine_input(
+      read,
+      c,
+      policies,
+      now,
+      Some(proposed),
+      consents,
+    )
     |> storage,
   )
   let result = conflict.evaluate(engine)
@@ -3823,12 +3901,10 @@ pub fn add_document(
   use <- writable(ctx, t)
   use <- limited(ctx, req, limits.TransactionDocumentWrite, rate_key)
   // An unreadable date is refused under the route's own code (DATE_INVALID is renamed, as in TypeScript).
-  use b, _ <- body_coded(
-    req,
-    document_shape(),
-    "DOCUMENT_INPUT_INVALID",
-    [#("expiresAt", "DOCUMENT_INPUT_INVALID"), ..field_codes],
-  )
+  use b, _ <- body_coded(req, document_shape(), "DOCUMENT_INPUT_INVALID", [
+    #("expiresAt", "DOCUMENT_INPUT_INVALID"),
+    ..field_codes
+  ])
   use key <- client_key(b.client_key)
   let now = clock.now_ms()
   let label = input.filled(b.label) |> option.unwrap("")
@@ -4821,4 +4897,133 @@ pub fn messages_mine(
       ),
     ]),
   )
+}
+
+// ------------------------------------------------------------------------------------------------- the compliance seams
+
+/// `POST /org/agent/transactions/:id/consents/request`: through the compliance ledger's own request. The context is
+/// re-projected from the transaction's rows first, as its own write.
+pub fn request_consent(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  let projected =
+    store.unit(ctx.store, fn(tx) {
+      let read = store.reading(tx)
+      use found <- result.try(compliance_store.by_id(read, t.row.context_id))
+      case found {
+        None -> Ok(None)
+        Some(c) -> {
+          use reps <- result.try(transaction_store.representations(
+            read,
+            t.row.id,
+          ))
+          let live =
+            reps
+            |> list.filter(fn(r) {
+              r.row.status != declared_representation_status.Withdrawn
+            })
+            |> list.map(fn(r) { r.row })
+          use _ <- result.try(compliance_store.project(
+            tx,
+            c.row.id,
+            t.parties,
+            live,
+          ))
+          compliance_store.by_id(read, c.row.id)
+        }
+      }
+    })
+  case projected {
+    Ok(Some(c)) -> compliance_routes.request_consent(ctx, req, a, c)
+    Ok(None) -> not_found()
+    Error(e) -> http.internal(e)
+  }
+}
+
+/// A reviewer decided a declared-only binding. An approval records no act by the agent: `first_act_at` stays
+/// empty, so a later party-specific consent still counts as given in advance.
+pub fn binding_decided(
+  tx: Tx,
+  transaction_id: String,
+  representation_id: String,
+  approved: Bool,
+  by: By,
+  review_id: id.RegulatoryReviewId,
+  now: Int,
+) -> Result(Nil, Fail(Response)) {
+  let read = store.reading(tx)
+  let tid = id.transaction(transaction_id)
+  use t <- result.try(transaction_store.by_id(read, tid) |> storage)
+  use rep <- result.try(
+    transaction_store.representation_by_id(
+      read,
+      id.representation(representation_id),
+    )
+    |> storage,
+  )
+  case t, rep {
+    Some(t), Some(r)
+      if r.row.transaction_id == tid
+      && r.row.status == declared_representation_status.PendingReview
+    -> {
+      let status = case approved {
+        True -> declared_representation_status.Verified
+        False -> declared_representation_status.Withdrawn
+      }
+      use _ <- result.try(
+        case approved {
+          True ->
+            transaction_store.verify_representation(
+              tx,
+              r.row,
+              review_id,
+              by,
+              now,
+            )
+          False ->
+            transaction_store.withdraw_representation(
+              tx,
+              r.row,
+              rep_row.ReviewRejected,
+              by,
+              Some(declared_representation_status.Withdrawn),
+              None,
+              now,
+            )
+        }
+        |> storage,
+      )
+      use _ <- result.try(
+        transaction_store.history(
+          tx,
+          tid,
+          case approved {
+            True -> event_row.TransactionRepresentationAttached
+            False -> event_row.TransactionRepresentationWithdrawn
+          },
+          by,
+          transaction_store.Detail(
+            ..transaction_store.no_detail,
+            party_role: Some(r.row.party_role),
+            status: Some(status),
+          ),
+          now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(transaction_store.touch(tx, tid, now) |> storage)
+      case transaction_rules.is_live(t.row.status) {
+        True -> recheck(tx, tid, by, now) |> storage |> result.replace(Nil)
+        False -> Ok(Nil)
+      }
+    }
+    _, _ -> Ok(Nil)
+  }
 }

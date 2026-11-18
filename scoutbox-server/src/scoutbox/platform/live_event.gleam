@@ -142,6 +142,22 @@ pub type Event {
   AgentTransactionHeld(org_id: String, tx_id: String, status: String)
   AgentTransactionCancelled(org_id: String, tx_id: String, status: String)
   AgentTransactionClosed(org_id: String, tx_id: String, status: String)
+  /// A named reviewer decided a review item. Private to the agency.
+  RegulatoryReviewResolved(org_id: String, review_id: String, outcome: String)
+  /// A party was asked for, or answered, a regulatory consent. Private to the agency.
+  RegulatoryConsentChanged(
+    change: ConsentChange,
+    org_id: String,
+    consent_id: String,
+    ctx_id: String,
+  )
+}
+
+pub type ConsentChange {
+  ConsentRequested
+  ConsentGranted
+  ConsentDeclined
+  ConsentRevoked
 }
 
 pub type WatchlistChange {
@@ -284,6 +300,14 @@ pub fn name(event: Event) -> String {
     AgentTransactionHeld(..) -> "agent_transaction_held"
     AgentTransactionCancelled(..) -> "agent_transaction_cancelled"
     AgentTransactionClosed(..) -> "agent_transaction_closed"
+    RegulatoryReviewResolved(..) -> "regulatory_review_resolved"
+    RegulatoryConsentChanged(change:, ..) ->
+      case change {
+        ConsentRequested -> "regulatory_consent_requested"
+        ConsentGranted -> "regulatory_consent_granted"
+        ConsentDeclined -> "regulatory_consent_declined"
+        ConsentRevoked -> "regulatory_consent_revoked"
+      }
   }
 }
 
@@ -322,7 +346,9 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | AgentTransactionMessageLinked(org_id:, ..)
     | AgentTransactionHeld(org_id:, ..)
     | AgentTransactionCancelled(org_id:, ..)
-    | AgentTransactionClosed(org_id:, ..) -> Ok(org_id)
+    | AgentTransactionClosed(org_id:, ..)
+    | RegulatoryReviewResolved(org_id:, ..)
+    | RegulatoryConsentChanged(org_id:, ..) -> Ok(org_id)
     Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
   }
 }
@@ -495,6 +521,16 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
     AgentTransactionMessageLinked(org_id:, tx_id:) -> [
       #("orgId", json.string(org_id)),
       #("txId", json.string(tx_id)),
+    ]
+    RegulatoryReviewResolved(org_id:, review_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    RegulatoryConsentChanged(org_id:, consent_id:, ctx_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("consentId", json.string(consent_id)),
+      #("ctxId", json.string(ctx_id)),
     ]
   }
 }

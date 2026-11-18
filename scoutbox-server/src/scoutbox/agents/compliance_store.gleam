@@ -2,8 +2,7 @@
 //// one: opened with the transaction, its parties projected from the transaction's, and each evaluation recorded
 //// append-only with the reasons, outstanding consents, policy versions and the parties it saw.
 ////
-//// Not ported yet: regulatory consents (the consent routes) and the agent's own context routes, so a context here
-//// has no consent.
+//// Not ported yet: the agent's own context routes (`/agent/compliance/contexts`).
 
 import gleam/dynamic/decode
 import gleam/int
@@ -399,6 +398,7 @@ pub fn engine_input(
   policies: List(approach_policy.Policy),
   now: Int,
   proposed: Option(conflict.Representation),
+  consents: List(conflict.Consent),
 ) -> Result(conflict.Input, Fail(e)) {
   let opener = c.row.agent_user_id
   use agency <- result.try(orgs.by_id(read, c.row.agency_org_id))
@@ -516,8 +516,7 @@ pub fn engine_input(
     representations: reps,
     evaluate_agent_user_ids: [opener_text],
     agents:,
-    // Not ported yet: regulatory consents (the consent routes).
-    consents: [],
+    consents:,
     policies: set.policies,
     missing: set.missing,
     now:,
