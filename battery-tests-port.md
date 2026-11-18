@@ -188,8 +188,8 @@ are for surprising facts or points that later work depends on, not implementatio
       The agent contract gives a field's own code only to a field the request declares (`declaredCodes`): an unknown
       `clientKey` is `AGENT_INPUT_INVALID`.
 4. `scouting/clubWorkflows`. It needs the uploads check first. Opportunity creation, the club's list and the
-   board's club rows are in, and match the TypeScript server response for response. Applications, closing and the
-   structured requirements are not. The battery now passes as far as its cases section (assigning): the list
+   board's club rows are in, and match the TypeScript server response for response. The structured requirements
+   are not. The battery now passes as far as its cases section (assigning): the list
    queries, template versions, published feedback, video segments and playlists are in. The `feedback` live event
    reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
    as a drawing (docs/known-issues.md). The case workspace is whole (reading one, assigning, completing tasks,
