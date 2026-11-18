@@ -23,6 +23,7 @@ import scoutbox/development/box_prefs
 import scoutbox/development/combine
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
+import scoutbox/development/objectives
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
 import scoutbox/discovery/directory
@@ -568,6 +569,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             combine.player_results(ctx, org, id.player(id))
           })
+        ["players", pid, "objectives"] ->
+          only(req, Get, fn() { objectives.org_list(ctx, org, id.player(pid)) })
+        ["reassessments", rid, "outcome"] ->
+          only(req, Post, fn() {
+            objectives.outcome(ctx, req, org, id.reassessment(rid))
+          })
         ["players", id, "trust-profile"] ->
           only(req, Get, fn() { trust.org_view(ctx, org, id.player(id)) })
         ["players", id, "football-passport"] ->
@@ -1063,6 +1070,24 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["drill-guidance"] ->
           only(req, Get, fn() { drill_guidance.player_list(ctx) })
+        ["objectives"] ->
+          case req.method {
+            Get -> objectives.player_list(ctx, player)
+            Post -> objectives.player_create(ctx, req, player)
+            _ -> not_found()
+          }
+        ["objectives", oid, "progress"] ->
+          only(req, Post, fn() {
+            objectives.progress(ctx, req, player, id.objective(oid))
+          })
+        ["objectives", oid, "share"] ->
+          only(req, Post, fn() {
+            objectives.player_share(ctx, req, player, id.objective(oid))
+          })
+        ["objectives", oid, "reassessment"] ->
+          only(req, Post, fn() {
+            objectives.player_reassessment(ctx, req, player, id.objective(oid))
+          })
         ["applications"] ->
           only(req, Get, fn() { applies.player_list(ctx, player) })
         ["applications", aid, "withdraw"] ->
@@ -1311,6 +1336,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "objectives"] ->
+          case req.method {
+            Get -> objectives.guardian_list(ctx, guardian, id.player(cid))
+            Post ->
+              objectives.guardian_create(ctx, req, guardian, id.player(cid))
+            _ -> not_found()
+          }
+        ["objectives", oid, "share"] ->
+          only(req, Post, fn() {
+            objectives.guardian_share(ctx, req, guardian, id.objective(oid))
+          })
+        ["objectives", oid, "reassessment"] ->
+          only(req, Post, fn() {
+            objectives.guardian_reassessment(
+              ctx,
+              req,
+              guardian,
+              id.objective(oid),
+            )
           })
         ["children", cid, "feedback"] ->
           only(req, Get, fn() {

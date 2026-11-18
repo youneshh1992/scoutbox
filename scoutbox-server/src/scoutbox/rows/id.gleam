@@ -2159,6 +2159,102 @@ pub fn next_notification(tx: Tx) -> Result(NotificationId, Fail(e)) {
   ids.next(tx, "ntf") |> result.map(NotificationId)
 }
 
+/// An id of `dev_objectives`.
+pub opaque type ObjectiveId {
+  ObjectiveId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn objective(text: String) -> ObjectiveId {
+  ObjectiveId(text)
+}
+
+pub fn objective_to_string(id: ObjectiveId) -> String {
+  let ObjectiveId(text) = id
+  text
+}
+
+pub fn objective_sql(id: ObjectiveId) -> sqlight.Value {
+  sqlight.text(objective_to_string(id))
+}
+
+pub fn objective_json(id: ObjectiveId) -> Json {
+  json.string(objective_to_string(id))
+}
+
+pub fn objective_decoder() -> decode.Decoder(ObjectiveId) {
+  decode.map(decode.string, ObjectiveId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_objective(tx: Tx) -> Result(ObjectiveId, Fail(e)) {
+  ids.next(tx, "obj") |> result.map(ObjectiveId)
+}
+
+/// An id of `dev_objective_items`.
+pub opaque type ObjectiveItemId {
+  ObjectiveItemId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn objective_item(text: String) -> ObjectiveItemId {
+  ObjectiveItemId(text)
+}
+
+pub fn objective_item_to_string(id: ObjectiveItemId) -> String {
+  let ObjectiveItemId(text) = id
+  text
+}
+
+pub fn objective_item_sql(id: ObjectiveItemId) -> sqlight.Value {
+  sqlight.text(objective_item_to_string(id))
+}
+
+pub fn objective_item_json(id: ObjectiveItemId) -> Json {
+  json.string(objective_item_to_string(id))
+}
+
+pub fn objective_item_decoder() -> decode.Decoder(ObjectiveItemId) {
+  decode.map(decode.string, ObjectiveItemId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_objective_item(tx: Tx) -> Result(ObjectiveItemId, Fail(e)) {
+  ids.next(tx, "objx") |> result.map(ObjectiveItemId)
+}
+
+/// An id of `dev_objective_progress`.
+pub opaque type ObjectiveProgressId {
+  ObjectiveProgressId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn objective_progress(text: String) -> ObjectiveProgressId {
+  ObjectiveProgressId(text)
+}
+
+pub fn objective_progress_to_string(id: ObjectiveProgressId) -> String {
+  let ObjectiveProgressId(text) = id
+  text
+}
+
+pub fn objective_progress_sql(id: ObjectiveProgressId) -> sqlight.Value {
+  sqlight.text(objective_progress_to_string(id))
+}
+
+pub fn objective_progress_json(id: ObjectiveProgressId) -> Json {
+  json.string(objective_progress_to_string(id))
+}
+
+pub fn objective_progress_decoder() -> decode.Decoder(ObjectiveProgressId) {
+  decode.map(decode.string, ObjectiveProgressId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_objective_progress(tx: Tx) -> Result(ObjectiveProgressId, Fail(e)) {
+  ids.next(tx, "prg") |> result.map(ObjectiveProgressId)
+}
+
 /// An id of `recruitment_offers`.
 pub opaque type OfferId {
   OfferId(String)
@@ -2819,6 +2915,38 @@ pub fn push_decoder() -> decode.Decoder(PushId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_push(tx: Tx) -> Result(PushId, Fail(e)) {
   ids.next(tx, "push") |> result.map(PushId)
+}
+
+/// An id of `dev_objective_reassessments`.
+pub opaque type ReassessmentId {
+  ReassessmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn reassessment(text: String) -> ReassessmentId {
+  ReassessmentId(text)
+}
+
+pub fn reassessment_to_string(id: ReassessmentId) -> String {
+  let ReassessmentId(text) = id
+  text
+}
+
+pub fn reassessment_sql(id: ReassessmentId) -> sqlight.Value {
+  sqlight.text(reassessment_to_string(id))
+}
+
+pub fn reassessment_json(id: ReassessmentId) -> Json {
+  json.string(reassessment_to_string(id))
+}
+
+pub fn reassessment_decoder() -> decode.Decoder(ReassessmentId) {
+  decode.map(decode.string, ReassessmentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_reassessment(tx: Tx) -> Result(ReassessmentId, Fail(e)) {
+  ids.next(tx, "ras") |> result.map(ReassessmentId)
 }
 
 /// An id of `recruitment_cases`.
