@@ -12,10 +12,28 @@
     "CLOSED",
     "ARCHIVED"
   ],
+  "LIVE_STATUSES": [
+    "DRAFT",
+    "PARTIES_CONFIRMED",
+    "COMPLIANCE_PENDING",
+    "COMPLIANCE_BLOCKED",
+    "READY",
+    "ACTIVE",
+    "ON_HOLD"
+  ],
   "TERMINAL_STATUSES": [
     "CANCELLED",
     "CLOSED",
     "ARCHIVED"
+  ],
+  "ROOM_ROLES": [
+    "representing_agent",
+    "party_individual",
+    "party_guardian",
+    "party_club_signatory",
+    "party_club_member",
+    "agency_admin_observer",
+    "trust_safety"
   ],
   "DOCUMENT_TYPES": [
     "representation_agreement_reference",

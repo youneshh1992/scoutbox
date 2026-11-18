@@ -7,100 +7,125 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#affiliationActive",
         "calls": 6,
-        "cases": 6,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an affiliation without a start {\"endedAt\":null}": 1,
+          "Gleam's types can't hold its arguments: an affiliation without a start null": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#affiliationChangeProblem",
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agentTransitionAllowed",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementForAgent",
         "calls": 4,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an Agreement always has jurisdiction": 4
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementForClient",
         "calls": 2,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an Agreement always has jurisdiction": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
         "calls": 11,
-        "cases": 11,
-        "handPort": {},
-        "status": "pending"
+        "cases": 9,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an agreement without a status null": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementSummaryForStaff",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#can",
         "calls": 213,
-        "cases": 121,
+        "cases": 115,
         "handPort": {
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/vocab/agency_tier.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/vocab/agency_tier.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"hasOwnProperty\" as a value of scoutbox/vocab/agency_tier.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"prototype\" as a value of scoutbox/vocab/agency_tier.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a value of scoutbox/vocab/agency_tier.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a List": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#capabilitiesOf",
         "calls": 3,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#clientTransitionAllowed",
         "calls": 5,
-        "cases": 5,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
-        "status": "pending"
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an agreement without a status null": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#effectiveFacetState",
         "calls": 9,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"approved\" as a value of scoutbox/vocab/facet_state.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/vocab/facet_state.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#evaluateSubmission",
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#newFacets",
@@ -119,30 +144,32 @@
       {
         "function": "domains/agents/core/shared.mjs#normaliseTiers",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"licensed_agent\" as a List": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#requestConflict",
         "calls": 8,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#requiredFacetsFor",
         "calls": 7,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#termEndAt",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#termMonthsOf",
@@ -163,7 +190,7 @@
         "calls": 11,
         "cases": 9,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -173,32 +200,40 @@
       {
         "function": "domains/agents/core/shared.mjs#agentTransitionAllowed",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
         "calls": 4,
-        "cases": 3,
+        "cases": 0,
         "handPort": {
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#clientTransitionAllowed",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/rows/representation_agreements.status_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#effectiveFacetState",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"approved\" as a value of scoutbox/vocab/facet_state.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#newFacets",
@@ -210,7 +245,175 @@
       {
         "function": "domains/agents/core/shared.mjs#verificationGap",
         "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"approved\" as a value of scoutbox/vocab/facet_state.pairs": 1
+        },
+        "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "agents/transactions",
+    "functions": [
+      {
+        "function": "domains/agents/core/shared.mjs#can",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/agents/transactions/audit.mjs#transactionAuditRows",
+        "calls": 1,
         "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/errors.mjs#publicErrorBody",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#actorLabel",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#actorTransitionAllowed",
+        "calls": 12,
+        "cases": 11,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#canSeeVisibility",
+        "calls": 36,
+        "cases": 36,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#complianceStateFrom",
+        "calls": 14,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#complianceTransitionAllowed",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#offerReadiness",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#partiesAwaitingConfirmation",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#partiesConfirmed",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#partyRevisionOf",
+        "calls": 13,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#requiredPartyRoles",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#snapshotStaleness",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#statusForComplianceState",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#timelineAudienceOf",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#timelineFor",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#timelineVisible",
+        "calls": 15,
+        "cases": 15,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#uploadableVisibilities",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "agents/transactionsPersistence",
+    "functions": [
+      {
+        "function": "domains/agents/transactions/transaction.mjs#actorTransitionAllowed",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#partyRevisionOf",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/transactions/transaction.mjs#snapshotStaleness",
+        "calls": 2,
+        "cases": 2,
         "handPort": {},
         "status": "pending"
       }
@@ -780,30 +983,50 @@
       {
         "function": "domains/agents/core/shared.mjs#affiliationActive",
         "calls": 28,
-        "cases": 21,
+        "cases": 1,
         "handPort": {
           "args[].endedAt is -Infinity": 1,
           "args[].endedAt is Infinity": 1,
           "args[].endedAt is NaN": 1,
           "args[].startedAt is -Infinity": 1,
           "args[].startedAt is Infinity": 1,
-          "args[].startedAt is NaN": 1
+          "args[].startedAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2030-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print null as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
         "calls": 26,
-        "cases": 19,
+        "cases": 1,
         "handPort": {
           "args[].endAt is -Infinity": 1,
           "args[].endAt is Infinity": 1,
           "args[].endAt is NaN": 2,
           "args[].startAt is -Infinity": 1,
           "args[].startAt is Infinity": 1,
-          "args[].startAt is NaN": 1
+          "args[].startAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
@@ -812,18 +1035,27 @@
         "handPort": {
           "args[].endAt is NaN": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#effectiveFacetState",
         "calls": 17,
-        "cases": 13,
+        "cases": 4,
         "handPort": {
           "args[].recheckAt is -Infinity": 1,
           "args[].recheckAt is Infinity": 1,
-          "args[].recheckAt is NaN": 1
+          "args[].recheckAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#verificationGap",
@@ -832,7 +1064,7 @@
         "handPort": {
           "args[].facets.fifa_licence.recheckAt is NaN": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#effectiveHandoffStatus",

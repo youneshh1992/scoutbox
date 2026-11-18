@@ -1169,8 +1169,284 @@ const DISCOVERY_MAP = {
   },
 };
 
+// -------------------------------------------------------------------------------------------------- agent core
+
+const AGENT = 'domains/agents/core';
+const AR = 'scoutbox/agents/agent_rules';
+const facetV = vocab('scoutbox/vocab/agent_facet');
+const facetState = vocab('scoutbox/vocab/facet_state');
+const jurisdictionV = vocab('scoutbox/vocab/jurisdiction');
+const tier = vocab('scoutbox/vocab/agency_tier');
+const agreementStatus = vocab('scoutbox/vocab/agreement_status');
+const storedStatus = vocab('scoutbox/rows/representation_agreements', 'status_pairs');
+const scopeV = vocab('scoutbox/rows/agreement_scopes', 'scope_pairs');
+/** A key whose only value here is null: the Gleam record has no field for anything else in it. */
+const onlyNull = (what) => (v) => {
+  if (v !== null) throw new Error(`no Gleam field for ${what} ${JSON.stringify(v)}`);
+  return [];
+};
+
+/** A facet as the profile stores it. Where it is stored (`$at`: its facet and member association, given by the
+ *  profile it is in) is what Gleam keys it by; its own `memberAssociation` copy is not read by any rule. */
+const facet = record({
+  module: 'scoutbox/rows/agent_profile_facets',
+  constructor: 'Row',
+  base: call(BASE, 'facet'),
+  fields: {
+    $at: ([kind, ma], ctx) => [
+      ['facet', facetV(kind, ctx)],
+      ['member_association', jurisdictionV(ma, ctx)],
+    ],
+    state: ['state', facetState],
+    reference: ['reference', option(string)],
+    memberAssociation: () => [],
+    provenance: onlyNull('a facet provenance'),
+    submittedAt: ['submitted_at', option(int)],
+    verifiedAt: ['verified_at', option(int)],
+    recheckAt: ['recheck_at', option(int)],
+    note: ['note', option(string)],
+  },
+});
+const facetAt = (kind, ma) => (v, ctx) => {
+  if (v === null || typeof v !== 'object') throw new Error(`cannot print ${JSON.stringify(v)} as a stored facet`);
+  return facet({ $at: [kind, ma], ...v }, ctx);
+};
+
+const profileRow = record({
+  module: 'scoutbox/rows/agent_profiles',
+  constructor: 'Row',
+  base: call(BASE, 'agent_profile'),
+  fields: {
+    id: ['id', ident('agent_profile')],
+    userId: ['user_id', ident('org_user')],
+    agencyOrgId: ['agency_org_id', ident('org')],
+    displayName: ['display_name', string],
+    createdAt: ['created_at', int],
+    updatedAt: ['updated_at', int],
+    rev: ['rev', int],
+    revAt: ['rev_at', option(int)],
+    revBy: onlyNull('a profile revBy'),
+    declared: (v, ctx) => [['declared_fifa_licence_number', option(string)(v?.fifaLicenceNumber, ctx)]],
+  },
+  ignore: ['facets', 'history'],
+});
+
+/** A profile: the stored facets (the FIFA licence under INT, the others keyed by member association) in order. */
+const profile = (v, ctx) => {
+  if (v === null || typeof v !== 'object') throw new Error(`cannot print ${JSON.stringify(v)} as a Profile`);
+  if ((v.history ?? []).length) throw new Error('a profile with history');
+  const facets = [];
+  for (const [kind, x] of Object.entries(v.facets ?? {})) {
+    if (kind === 'fifa_licence') facets.push(facetAt(kind, 'INT')(x, ctx));
+    else for (const [ma, f] of Object.entries(x)) facets.push(facetAt(kind, ma)(f, ctx));
+  }
+  return `${ctx.use(AR)}.Profile(row: ${profileRow(v, ctx)}, jurisdictions: ${list(jurisdictionV)(v.declared?.jurisdictions ?? [], ctx)}, facets: [${facets.join(', ')}], history: [])`;
+};
+
+const gap = (v, ctx) => {
+  if (v.error === 'AGENT_PROFILE_REQUIRED') return `${ctx.use(AR)}.ProfileRequired`;
+  if (v.error !== 'AGENT_VERIFICATION_REQUIRED') throw new Error(`no Gap for ${v.error}`);
+  return `${ctx.use(AR)}.VerificationRequired(${facetV(v.facet, ctx)}, ${option(jurisdictionV)(v.memberAssociation, ctx)}, ${facetState(v.state, ctx)})`;
+};
+
+const PROVIDERS = { none: 'NoProvider', 'local-synthetic-test-provider': 'SyntheticProvider' };
+const submission = (v, ctx) => {
+  const p = PROVIDERS[v.provenance?.provider];
+  if (!p) throw new Error(`no Provider for ${JSON.stringify(v.provenance)}`);
+  return `${ctx.use(AR)}.Submission(state: ${facetState(v.state, ctx)}, verified_at: ${option(int)(v.verifiedAt, ctx)}, recheck_at: ${option(int)(v.recheckAt, ctx)}, provider: ${ctx.use(AR)}.${p}, at: ${int(v.provenance.at)}, note: ${string(v.note)})`;
+};
+
+/** A membership. A start is required: the TypeScript rule reads a missing one as never started, and every stored
+ *  membership has one. Its roles are as given (the TypeScript rule drops unknown ones; Gleam can't hold them). */
+const affiliation = (v, ctx) => {
+  if (v === null || typeof v !== 'object' || !('startedAt' in v)) throw new Error(`an affiliation without a start ${JSON.stringify(v)}`);
+  const row = record({
+    module: 'scoutbox/rows/agency_affiliations',
+    constructor: 'Row',
+    base: call(BASE, 'affiliation'),
+    fields: {
+      id: ['id', ident('affiliation')],
+      agencyOrgId: ['agency_org_id', ident('org')],
+      userId: ['user_id', ident('org_user')],
+      startedAt: ['started_at', int],
+      endedAt: ['ended_at', option(int)],
+    },
+    ignore: ['tiers'],
+  })(v, ctx);
+  return `${ctx.use(AR)}.Affiliation(row: ${row}, tiers: ${list(tier)(v.tiers ?? [], ctx)})`;
+};
+
+/** An agreement row. Its status is required (every stored agreement has one). */
+const agreementRowOf = record({
+  module: 'scoutbox/rows/representation_agreements',
+  constructor: 'Row',
+  base: call(BASE, 'agreement'),
+  fields: {
+    id: ['id', ident('agreement')],
+    agentUserId: ['agent_user_id', ident('org_user')],
+    agencyOrgId: ['agency_org_id', ident('org')],
+    clientKind: ['client_kind', vocab('scoutbox/rows/representation_agreements', 'client_kind_pairs')],
+    clientId: ['client_id', string],
+    jurisdiction: ['jurisdiction', jurisdictionV],
+    exclusive: ['exclusive', bool],
+    termMonths: ['term_months', int],
+    startAt: ['start_at', option(int)],
+    endAt: ['end_at', option(int)],
+    status: ['status', storedStatus],
+    proposedAt: ['proposed_at', int],
+    confirmedAt: ['confirmed_at', option(int)],
+    confirmedBy: (v, ctx) => {
+      if (v?.kind !== 'player') throw new Error(`no Gleam field for confirmedBy ${JSON.stringify(v)}`);
+      return [['confirmed_by_player_id', `Some(${ident('player')(v.id, ctx)})`]];
+    },
+    declinedAt: ['declined_at', option(int)],
+    terminatedAt: ['terminated_at', option(int)],
+    terminatedBy: ['terminated_by', option(vocab('scoutbox/vocab/terminator'))],
+    terminationReasonCode: ['termination_reason_code', option(string)],
+    disputedAt: ['disputed_at', option(int)],
+    disputeReason: ['dispute_reason', option(string)],
+    shareWithAgencyStaff: ['share_with_agency_staff', bool],
+    createdAt: ['created_at', int],
+    rev: ['rev', int],
+    revAt: ['rev_at', option(int)],
+    revBy: onlyNull('an agreement revBy'),
+    keys: (v) => {
+      if (Object.keys(v ?? {}).length) throw new Error(`no Gleam field for keys ${JSON.stringify(v)}`);
+      return [];
+    },
+  },
+  // Kept beside the row in Gleam (Agreement), and read by no rule that takes a row.
+  ignore: ['scope', 'policyVersions', 'history'],
+});
+const agreementRow = (v, ctx) => {
+  if (v === null || typeof v !== 'object' || !('status' in v)) throw new Error(`an agreement without a status ${JSON.stringify(v)}`);
+  return agreementRowOf(v, ctx);
+};
+
+/** A whole agreement, for the projections. A stored agreement always has a jurisdiction, a term and a proposal time,
+ *  which the projections write; and its history's details are typed columns. */
+const agreement = (v, ctx) => {
+  for (const k of ['jurisdiction', 'termMonths', 'proposedAt'])
+    if (v?.[k] === undefined) throw new Error(`an Agreement always has ${k}`);
+  if ((v.history ?? []).length) throw new Error('an Agreement history entry with a free-form detail');
+  return `${ctx.use(AR)}.Agreement(row: ${agreementRow(v, ctx)}, scope: ${list(scopeV)(v.scope ?? [], ctx)}, policy_versions: ${list(ident('policy'))(v.policyVersions ?? [], ctx)}, history: [])`;
+};
+
+const conflict = (v, ctx) => {
+  if (v.error === 'REPRESENTATION_ALREADY_EXISTS')
+    return `${ctx.use(AR)}.AlreadyExists(${ident('agreement')(v.agreementId, ctx)}, ${agreementStatus(v.status, ctx)})`;
+  if (v.error === 'REPRESENTATION_COOLDOWN') return `${ctx.use(AR)}.Cooldown(${int(v.retryAt)})`;
+  throw new Error(`no Conflict for ${v.error}`);
+};
+
+const nowArg = (v, ctx) => int(v ?? ctx.now);
+const agent = plainIn(AR);
+const withNow = (fnName, args, result) => ({
+  module: AR,
+  now: true,
+  test: (c, ctx) =>
+    eq(
+      `${ctx.use(AR)}.${fnName}(${args.map((p, i) => p(c.args[i], ctx)).join(', ')}, ${nowArg(c.args[args.length], ctx)})`,
+      result(c.result, ctx),
+    ),
+});
+const agreementJson = (fnName) => ({
+  module: AR,
+  now: true,
+  test: (c, ctx) =>
+    eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(AR)}.${fnName}(${agreement(c.args[0], ctx)}, ${nowArg(c.args[1], ctx)}))`, c.result, ctx),
+});
+/** An agreement for the access rule: one naming no agent can't be held (the base names one). */
+const grantee = (v, ctx) => {
+  const row = agreementRow(v, ctx);
+  if (v.agentUserId === undefined) throw new Error('an agreement naming no agent');
+  return row;
+};
+
+const AGENT_MAP = {
+  [`${AGENT}/shared.mjs#effectiveFacetState`]: withNow('effective_facet_state', [option(facet)], facetState),
+  [`${AGENT}/shared.mjs#evaluateSubmission`]: {
+    module: AR,
+    now: true,
+    test: (c, ctx) => {
+      const { facet: f, reference = '', testProviderEnabled = false, now, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`evaluate_submission has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(AR)}.evaluate_submission(${facetV(f, ctx)}, ${string(reference)}, ${bool(testProviderEnabled)}, ${nowArg(now, ctx)})`,
+        submission(c.result, ctx),
+      );
+    },
+  },
+  [`${AGENT}/shared.mjs#requiredFacetsFor`]: agent('required_facets_for', [jurisdictionV], (v, ctx) =>
+    list((r) => `#(${facetV(r.facet, ctx)}, ${option(jurisdictionV)(r.ma, ctx)})`)(v, ctx),
+  ),
+  [`${AGENT}/shared.mjs#verificationGap`]: withNow('verification_gap', [option(profile), jurisdictionV], option(gap)),
+  [`${AGENT}/shared.mjs#normaliseTiers`]: agent('normalise_tiers', [list(string)], list(tier)),
+  [`${AGENT}/shared.mjs#affiliationActive`]: {
+    module: AR,
+    now: true,
+    test: (c, ctx) => {
+      const [a, now] = c.args;
+      if (a === null || typeof a !== 'object' || !('startedAt' in a)) throw new Error(`an affiliation without a start ${JSON.stringify(a)}`);
+      return eq(`${ctx.use(AR)}.affiliation_active(${int(a.startedAt)}, ${option(int)(a.endedAt, ctx)}, ${nowArg(now, ctx)})`, bool(c.result));
+    },
+  },
+  [`${AGENT}/shared.mjs#can`]: agent('can', [list(tier), string], bool),
+  [`${AGENT}/shared.mjs#capabilitiesOf`]: agent('capabilities_of', [list(tier)], list(string)),
+  [`${AGENT}/shared.mjs#affiliationChangeProblem`]: {
+    module: AR,
+    now: true,
+    test: (c, ctx) => {
+      const { affiliations, target, actorUserId, nextTiers, now, ending = false, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`affiliation_change_problem has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(AR)}.affiliation_change_problem(${list(affiliation)(affiliations, ctx)}, ${affiliation(target, ctx)}, ${ident('org_user')(actorUserId, ctx)}, ${list(tier)(nextTiers, ctx)}, ${bool(ending)}, ${nowArg(now, ctx)})`,
+        option(code(AR, 'change_problem_code'))(c.result, ctx),
+      );
+    },
+  },
+  [`${AGENT}/shared.mjs#termEndAt`]: agent('term_end_at', [int, int], int),
+  [`${AGENT}/shared.mjs#effectiveAgreementStatus`]: withNow('effective_status', [agreementRow], agreementStatus),
+  [`${AGENT}/shared.mjs#agreementGrantsAccess`]: withNow('grants_access', [grantee, ident('org_user')], bool),
+  [`${AGENT}/shared.mjs#clientTransitionAllowed`]: withNow('client_transition_allowed', [agreementRow, agreementStatus], bool),
+  [`${AGENT}/shared.mjs#agentTransitionAllowed`]: withNow('agent_transition_allowed', [agreementRow, agreementStatus], bool),
+  [`${AGENT}/shared.mjs#requestConflict`]: {
+    module: AR,
+    now: true,
+    test: (c, ctx) => {
+      const [agreements, { agentUserId, playerId, now, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`request_conflict has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(AR)}.request_conflict(${list(agreementRow)(agreements, ctx)}, ${ident('org_user')(agentUserId, ctx)}, ${string(playerId)}, ${nowArg(now, ctx)})`,
+        option(conflict)(c.result, ctx),
+      );
+    },
+  },
+  [`${AGENT}/shared.mjs#agreementForAgent`]: agreementJson('agreement_for_agent'),
+  [`${AGENT}/shared.mjs#agreementForClient`]: agreementJson('agreement_for_client'),
+  [`${AGENT}/shared.mjs#agreementSummaryForStaff`]: {
+    module: AR,
+    now: true,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(AR)}.summary_for_staff(${agreementRow(c.args[0], ctx)}, ${nowArg(c.args[1], ctx)}))`, c.result, ctx),
+  },
+  [`${AGENT}/errors.mjs#publicErrorBody`]: {
+    module: 'scoutbox/agents/core_routes',
+    test: (c, ctx) => {
+      const { error, ...fields } = c.args[0];
+      if ('reasons' in fields) throw new Error('publicErrorBody with reasons: the Gleam routes write them already shaped');
+      const list_ = Object.entries(fields).map(([k, v]) => `#(${string(k)}, ${jsonValue(v, ctx)})`);
+      return eq(
+        `${ctx.use('wisp/simulate')}.read_body(${ctx.use('scoutbox/recruitment/domain_errors')}.send(${ctx.use('scoutbox/agents/core_routes')}.contract, ${string(error)}, [${list_.join(', ')}]))`,
+        string(JSON.stringify(c.result)),
+      );
+    },
+  },
+};
+
 export const MAP = {
   ...ROOM_MAP,
+  ...AGENT_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
@@ -1236,6 +1512,21 @@ export const MAP = {
  * suite's checks of it by hand. dev/ledger.mjs counts a function's hand-port calls as done once it is listed here.
  */
 export const HAND_PORTED = {
+  ...Object.fromEntries(
+    [
+      'affiliationActive',
+      'agentTransitionAllowed',
+      'agreementForAgent',
+      'agreementForClient',
+      'agreementGrantsAccess',
+      'can',
+      'clientTransitionAllowed',
+      'effectiveAgreementStatus',
+      'effectiveFacetState',
+      'normaliseTiers',
+      'verificationGap',
+    ].map((f) => [`domains/agents/core/shared.mjs#${f}`, 'test/scoutbox/agents/agent_rules_test.gleam']),
+  ),
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
   ...Object.fromEntries(

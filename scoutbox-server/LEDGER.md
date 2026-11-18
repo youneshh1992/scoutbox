@@ -17,12 +17,12 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 2 | 2 | 0 / 224 | 0 / 2 | 9 to go |
+| agents | 9 | 4 | 2 | 187 / 149 | 32 / 33 | 9 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 13 | 9 | 46 / 2314 | 0 / 191 | 5 to go |
+| platform | 13 | 13 | 9 | 52 / 2261 | 67 / 239 | 5 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -37,12 +37,12 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliance` | not yet neutral | 14 → 14 | 342 | 342 |  |  |  |  |  | not untangled; not answered |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
-| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 0 / 216 | 0 / 1 | 216 cases pending; 1 hand-port calls |
-| `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 8 | 0 / 1 | 8 cases pending; 1 hand-port calls |
+| `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 15 | 24 / 24 | 15 cases pending |
+| `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 1 | 8 / 8 | 1 cases pending |
 | `agents/crossApp` | not yet neutral | 13 → 13 | 380 | 380 |  |  |  |  |  | not untangled; not answered |
 | `agents/crossAppAdversarial` | not yet neutral | 2 → 2 | 94 | 94 |  |  |  |  |  | not untangled; not answered |
-| `agents/transactions` | not yet neutral | 11 → 11 | 370 | 370 |  |  |  |  |  | not untangled; not answered |
-| `agents/transactionsPersistence` | not yet neutral | 4 → 4 | 58 | 58 |  |  |  |  |  | not untangled; not answered |
+| `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  |  | 5 / 128 | 0 / 1 | not answered; 128 cases pending; 1 hand-port calls |
+| `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  |  | 0 / 5 |  | not answered; 5 cases pending |
 | `development/boxCam` | not yet neutral | 3 → 3 | 150 | 150 |  |  |  |  |  | not untangled; not answered |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
@@ -58,7 +58,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 13 / 37 | 0 / 25 | not answered; 37 cases pending; 25 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 11 / 2242 | 0 / 135 | not answered; 2242 cases pending; 135 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 17 / 2189 | 67 / 183 | not answered; 2189 cases pending; 116 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -128,8 +128,21 @@ ported by hand to a gleeunit test.
 
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
-| `agents/core` | `domains/agents/core/shared.mjs#can` | 1 | args[] is undefined | to do |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 1 | args[] is undefined | to do |
+| `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 2 | Gleam's types can't hold its arguments: an affiliation without a start {"endedAt":null}; Gleam's types can't hold its arguments: an affiliation without a start null | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 4 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#agreementForClient` | 2 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 2 | Gleam's types can't hold its arguments: an agreement without a status null; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#can` | 7 | args[] is undefined; Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/vocab/agency_tier.pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/vocab/agency_tier.pairs; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a value of scoutbox/vocab/agency_tier.pairs; Gleam's types can't hold its arguments: cannot print "prototype" as a value of scoutbox/vocab/agency_tier.pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/vocab/agency_tier.pairs; Gleam's types can't hold its arguments: cannot print null as a List | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 3 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | Gleam's types can't hold its arguments: an agreement without a status null | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#effectiveFacetState` | 2 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/core` | `domains/agents/core/shared.mjs#normaliseTiers` | 1 | Gleam's types can't hold its arguments: cannot print "licensed_agent" as a List | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#agentTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 4 | args[] is undefined; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/representation_agreements.status_pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#effectiveFacetState` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/corePersistence` | `domains/agents/core/shared.mjs#verificationGap` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
@@ -143,11 +156,11 @@ ported by hand to a gleeunit test.
 | `platform/dates` | `domain.ts#isAdult` | 21 | args[] is a ; args[].dob is NaN | to do |
 | `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
 | `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 7 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN | to do |
-| `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 6 | args[].endedAt is -Infinity; args[].endedAt is Infinity; args[].endedAt is NaN; args[].startedAt is -Infinity; args[].startedAt is Infinity; args[].startedAt is NaN | to do |
-| `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 7 | args[].endAt is -Infinity; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is -Infinity; args[].startAt is Infinity; args[].startAt is NaN | to do |
-| `platform/dates` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | args[].endAt is NaN | to do |
-| `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 3 | args[].recheckAt is -Infinity; args[].recheckAt is Infinity; args[].recheckAt is NaN | to do |
-| `platform/dates` | `domains/agents/core/shared.mjs#verificationGap` | 2 | args[].facets.fifa_licence.recheckAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 26 | args[].endedAt is -Infinity; args[].endedAt is Infinity; args[].endedAt is NaN; args[].startedAt is -Infinity; args[].startedAt is Infinity; args[].startedAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "2030-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 25 | args[].endAt is -Infinity; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is -Infinity; args[].startAt is Infinity; args[].startAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `platform/dates` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | args[].endAt is NaN | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 13 | args[].recheckAt is -Infinity; args[].recheckAt is Infinity; args[].recheckAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `platform/dates` | `domains/agents/core/shared.mjs#verificationGap` | 2 | args[].facets.fifa_licence.recheckAt is NaN | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 4 | args[].invitedAt is -Infinity; args[].invitedAt is Infinity; args[].invitedAt is NaN | to do |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 4 | args[][].deliveredAt is -Infinity; args[][].deliveredAt is Infinity; args[][].deliveredAt is NaN | to do |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 8 | args[].mintId is a function | to do |
@@ -226,35 +239,32 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
-| `agents/core` | `domains/agents/core/errors.mjs#publicErrorBody` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 6 |
-| `agents/core` | `domains/agents/core/shared.mjs#affiliationChangeProblem` | 7 |
-| `agents/core` | `domains/agents/core/shared.mjs#agentTransitionAllowed` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#agreementForClient` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 11 |
-| `agents/core` | `domains/agents/core/shared.mjs#agreementSummaryForStaff` | 1 |
-| `agents/core` | `domains/agents/core/shared.mjs#can` | 121 |
-| `agents/core` | `domains/agents/core/shared.mjs#capabilitiesOf` | 2 |
-| `agents/core` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 5 |
-| `agents/core` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 4 |
-| `agents/core` | `domains/agents/core/shared.mjs#effectiveFacetState` | 9 |
-| `agents/core` | `domains/agents/core/shared.mjs#evaluateSubmission` | 5 |
 | `agents/core` | `domains/agents/core/shared.mjs#newFacets` | 1 |
 | `agents/core` | `domains/agents/core/shared.mjs#normaliseScope` | 3 |
-| `agents/core` | `domains/agents/core/shared.mjs#normaliseTiers` | 7 |
-| `agents/core` | `domains/agents/core/shared.mjs#requestConflict` | 7 |
-| `agents/core` | `domains/agents/core/shared.mjs#requiredFacetsFor` | 2 |
-| `agents/core` | `domains/agents/core/shared.mjs#termEndAt` | 1 |
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
-| `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#agentTransitionAllowed` | 1 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 3 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#clientTransitionAllowed` | 1 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#effectiveFacetState` | 1 |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 |
-| `agents/corePersistence` | `domains/agents/core/shared.mjs#verificationGap` | 1 |
+| `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
+| `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 11 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#canSeeVisibility` | 36 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceStateFrom` | 12 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceTransitionAllowed` | 1 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#offerReadiness` | 7 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partiesAwaitingConfirmation` | 1 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partiesConfirmed` | 4 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 10 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#requiredPartyRoles` | 2 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 5 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#statusForComplianceState` | 5 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineAudienceOf` | 7 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineFor` | 1 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineVisible` | 15 |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#uploadableVisibilities` | 3 |
+| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
+| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
+| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |
@@ -279,9 +289,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 2 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
-| `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 21 |
-| `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 19 |
-| `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 13 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 |
 | `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
