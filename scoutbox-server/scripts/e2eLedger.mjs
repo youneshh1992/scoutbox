@@ -35,6 +35,23 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'scouting/clubWorkflows': {
+    moved: [
+      {
+        checks: 26,
+        to: 'e2e/platform/uploads.mjs',
+        why: 'The resumable uploads, the media link refusal and the captions moved whole to their own battery, so this one runs on a server without the upload subsystem. The campaign attempt plants its clip as an upload stores it',
+      },
+    ],
+  },
+  'platform/uploads': {
+    added: [
+      {
+        checks: 26,
+        why: "Moved whole from scouting/clubWorkflows's access section (resumable uploads, media links, captions)",
+      },
+    ],
+  },
   'recruitment/journeyAdversarial': {
     moved: [
       {

@@ -24,6 +24,7 @@ export const BATTERIES = [
   'recruitment/offersAdversarial',
   'recruitment/journeyAdversarial',
   'platform/connectedMode',
+  'platform/uploads',
   'operations/clubOperations',
   'recruitment/offers',
   'recruitment/signings',
