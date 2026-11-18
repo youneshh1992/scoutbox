@@ -25,7 +25,6 @@ export const NOT_YET_NEUTRAL = [
   'agents/adversarial',
   'agents/compliance',
   'agents/compliancePersistence',
-  'agents/corePersistence',
   'agents/crossApp',
   'agents/crossAppAdversarial',
   'agents/transactions',

@@ -1,7 +1,8 @@
 // Persistence, migration and restart audit for the Agent core: (1) migration 0026, (2) staff with no agent rows get
 // nothing bootstrapped, (3) the first member into an agency becomes its administrator, (4) a full relationship
-// survives a restart byte for byte, (5) junk is refused by the typed write, and an odd row a typed table CAN hold (an
-// active agreement nobody confirmed) grants nothing.
+// survives a restart byte for byte, (5) junk is refused by the schema, and an odd row a typed table CAN hold (an
+// active agreement nobody confirmed) grants nothing. The pure rules' view of the same records is the rules suite's
+// (scripts/rules/agents/corePersistence.mjs).
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -9,18 +10,8 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
-import {
-  effectiveFacetState,
-  agreementGrantsAccess,
-  clientTransitionAllowed,
-  agentTransitionAllowed,
-  verificationGap,
-  newFacets,
-} from '../../domains/agents/core/shared.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
+import { writeFixture, SCHEMA_VERSION, TABLE_MIGRATIONS } from '../support/sqlFixture.mjs';
+import { readRows, rows } from '../support/sqlRows.mjs';
 import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
@@ -106,72 +97,59 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
 
 const PORT = await freePort();
-const SCHEMA_VERSION = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-);
 /** The table migrations recorded in a data directory's file, with when each ran. */
-const appliedMigrations = (dir) => {
-  const st = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+const appliedMigrations = (dir) => rows(dir, 'data_migrations').map((r) => ({ id: r.id, at: r.applied_at }));
+/** Every table's rows as stored: what a stopped server left on disk. */
+const stored = (dir) => {
+  const R = readRows(dir);
   try {
-    return st
-      .prepare('SELECT id, applied_at FROM data_migrations ORDER BY id')
-      .all()
-      .map((r) => ({ id: r.id, at: r.applied_at }));
+    return R.all();
   } finally {
-    st.close();
+    R.close();
   }
 };
+const AGENT_CORE_MIGRATION = '0026_agent_core';
+const AGENT_TABLES = ['agent_profiles', 'agency_affiliations', 'representation_agreements'];
 const T0 = 1_700_000_000_000; // 2023-11-14 — firmly in the past, so createdAt-based windows have started
 
 // ------------------------------------------------------------- fixtures
+// Rows in the stored shape, as the repositories wrote them in a probe run of the original fixture.
 
-// A removed staff member is created and then removed, as the team route does (the shared users writer creates only).
-const fixture = (dir, collections) => writeFixture(dir, collections);
+const player = (id, name, birthDate) => ({
+  id,
+  name,
+  birth_date: birthDate,
+  country: 'GB',
+  city: 'London',
+  availability: 'not_seeking',
+  contract_status: 'unknown',
+  level: 'amateur',
+  lat: 51.5,
+  lng: -0.1,
+  medical_shared: 0,
+  medical_condition_status: 'unknown',
+  profile_signal: 30,
+});
+const user = (id, orgId, name, role, createdAt, removedAt = null) => ({
+  id,
+  org_id: orgId,
+  name,
+  name_key: name.toLowerCase(),
+  role,
+  created_at: createdAt,
+  removed_at: removedAt,
+});
 
 /** One club, one agency with three staff (one lead, one removed), two agencies, two adult players; no agent rows. */
 function staffSnapshot() {
   return {
-    players: [
-      {
-        id: 'pl-a',
-        name: 'Adult A',
-        dob: '1999-01-01',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-      {
-        id: 'pl-b',
-        name: 'Adult B',
-        dob: '1998-01-01',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
+    players: [player('pl-a', 'Adult A', '1999-01-01'), player('pl-b', 'Adult B', '1998-01-01')],
     orgs: [
       {
         id: 'org-club',
@@ -179,56 +157,102 @@ function staffSnapshot() {
         type: 'club',
         level: 'pro',
         plan: 'Pro',
-        verified: true,
-        safeguardingContractSigned: true,
-        location: { lat: 51.5, lng: -0.1 },
+        verified: 1,
+        safeguarding_contract_signed: 1,
+        lat: 51.5,
+        lng: -0.1,
+        created_at: T0,
       },
-      {
-        id: 'org-ag',
-        name: 'Agency',
-        type: 'agency',
-        level: 'agency',
-        plan: 'Agency',
-        verified: false,
-        location: null,
-      },
+      { id: 'org-ag', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: 0, created_at: T0 },
       {
         id: 'org-ag2',
         name: 'Agency Two',
         type: 'agency',
         level: 'agency',
         plan: 'Agency',
-        verified: false,
-        location: null,
+        verified: 0,
+        created_at: T0,
       },
     ],
-    guardians: [],
-    sessions: [],
-    ledger: [],
-    notifications: [],
-    blocks: [],
-    users: [
-      { id: 'usr-lead', orgId: 'org-ag', name: 'Lead Person', role: 'Managing Director', createdAt: T0 },
-      { id: 'usr-staff', orgId: 'org-ag', name: 'Staff Person', role: 'Scout', createdAt: T0 + 1 },
-      {
-        id: 'usr-gone',
-        orgId: 'org-ag',
-        name: 'Gone Person',
-        role: 'Head of Everything',
-        createdAt: T0 + 2,
-        removedAt: T0 + 3,
-      },
-      { id: 'usr-club', orgId: 'org-club', name: 'Club Person', role: 'Head of Recruitment', createdAt: T0 },
-      { id: 'usr-ag2-a', orgId: 'org-ag2', name: 'Second A', role: 'Scout', createdAt: T0 + 5 },
-      { id: 'usr-ag2-b', orgId: 'org-ag2', name: 'Second B', role: 'Scout', createdAt: T0 + 6 },
+    org_users: [
+      user('usr-lead', 'org-ag', 'Lead Person', 'Managing Director', T0),
+      user('usr-staff', 'org-ag', 'Staff Person', 'Scout', T0 + 1),
+      user('usr-gone', 'org-ag', 'Gone Person', 'Head of Everything', T0 + 2, T0 + 3),
+      user('usr-club', 'org-club', 'Club Person', 'Head of Recruitment', T0),
+      user('usr-ag2-a', 'org-ag2', 'Second A', 'Scout', T0 + 5),
+      user('usr-ag2-b', 'org-ag2', 'Second B', 'Scout', T0 + 6),
     ],
   };
 }
+const fixture = (dir, tables) => writeFixture(dir, { rows: tables });
+
+/** An agreement's rows: the agreement and its one scope. */
+const agreementRows = (over) => ({
+  representation_agreements: [
+    {
+      agent_user_id: 'usr-lead',
+      agency_org_id: 'org-ag',
+      client_kind: 'player',
+      jurisdiction: 'INT',
+      exclusive: 0,
+      term_months: 12,
+      start_at: T0,
+      end_at: T0 + 1e10,
+      status: 'active',
+      proposed_at: T0,
+      confirmed_at: T0,
+      share_with_agency_staff: 0,
+      disclosure_club_presence: 0,
+      disclosure_contact_routing: 0,
+      disclosure_trial_visibility: 0,
+      created_at: T0,
+      rev: 1,
+      rev_at: T0,
+      ...over,
+    },
+  ],
+  agreement_scopes: [{ agreement_id: over.id, ord: 0, scope: 'employment' }],
+});
+/** A profile's rows: the profile, its one jurisdiction, and its FIFA licence facet. */
+const profileRows = (facet = {}) => ({
+  agent_profiles: [
+    {
+      id: 'agp-x',
+      user_id: 'usr-lead',
+      agency_org_id: 'org-ag',
+      display_name: 'Lead Person',
+      created_at: T0,
+      updated_at: T0,
+      rev: 1,
+      rev_at: T0,
+    },
+  ],
+  agent_profile_jurisdictions: [{ profile_id: 'agp-x', ord: 0, jurisdiction: 'INT' }],
+  agent_profile_facets: [
+    { profile_id: 'agp-x', facet: 'fifa_licence', member_association: 'INT', state: 'UNVERIFIED', ...facet },
+  ],
+});
+/** An affiliation's rows: the affiliation and its tiers. */
+const affiliationRows = (id, userId, over = {}) => ({
+  agency_affiliations: [
+    { id, agency_org_id: 'org-ag', user_id: userId, started_at: T0, created_at: T0, rev: 1, rev_at: T0, ...over },
+  ],
+  agency_affiliation_tiers: [
+    { affiliation_id: id, ord: 0, tier: 'agency_admin' },
+    { affiliation_id: id, ord: 1, tier: 'licensed_agent' },
+  ],
+});
+/** Tables merged in order, parents first. */
+const merge = (...parts) => {
+  const out = {};
+  for (const p of parts) for (const [t, r] of Object.entries(p)) out[t] = [...(out[t] ?? []), ...r];
+  return out;
+};
 
 // ======================================================= 1 — the migration
 section('1 — migration 0026: registered once; a clean database holds no agent record');
 {
-  const ids = DATA_MIGRATIONS.map((m) => m.id);
+  const ids = TABLE_MIGRATIONS;
   ok(
     ids.filter((id) => id === AGENT_CORE_MIGRATION).length === 1 && SCHEMA_VERSION >= 26,
     `${AGENT_CORE_MIGRATION} is registered once, and the schema has only moved forward since (now ${SCHEMA_VERSION})`,
@@ -239,25 +263,22 @@ section('1 — migration 0026: registered once; a clean database holds no agent 
     `every schema version is reached by exactly one migration, none above the reported schema (${SCHEMA_VERSION})`,
   );
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p1-'));
-  const fresh = readRecords(freshDir);
+  const fresh = stored(freshDir);
   ok(
-    fresh.agentProfiles.length === 0 &&
-      fresh.agencyAffiliations.length === 0 &&
-      fresh.representationAgreements.length === 0,
+    AGENT_TABLES.every((t) => fresh[t].length === 0),
     'a clean database holds no agent record: the agent core is tables (migration 0026)',
   );
   neg(
-    !['agentAuth', 'agentSessions', 'agentUsers', 'offers'].some((n) => TABLE_BACKED.includes(n)),
+    !['agent_auth', 'agent_sessions', 'agent_users', 'offers'].some((t) => t in fresh),
     'no agent auth database and no offers store exists',
   );
   const recordsBefore = appliedMigrations(freshDir);
   ok(
-    stableJson(readRecords(freshDir)) === stableJson(fresh) &&
+    stableJson(stored(freshDir)) === stableJson(fresh) &&
       stableJson(appliedMigrations(freshDir)) === stableJson(recordsBefore),
     'reopening the file changes no table and records no migration again',
   );
-  for (const s2 of ['agentProfiles', 'agencyAffiliations', 'representationAgreements'])
-    ok(TABLE_BACKED.includes(s2), `${s2} is a table of the agent core, not a collection`);
+  for (const t of AGENT_TABLES) ok(t in fresh, `${t} is a table of the agent core, not a collection`);
 }
 
 // ======================================================= 2 — staff, no agent rows
@@ -266,34 +287,17 @@ section('2 — a database of staff: nothing bootstrapped, nothing mirrored');
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p2-'));
   const db = staffSnapshot();
   fixture(dir, db);
-  const back = readRecords(dir);
+  const back = stored(dir);
   neg(
-    back.agencyAffiliations.length === 0 &&
-      back.agentProfiles.length === 0 &&
-      back.representationAgreements.length === 0,
+    AGENT_TABLES.every((t) => back[t].length === 0),
     'no agent record is created: staff exist only from their first login',
-  );
-  const mirror = {
-    id: 'rep-x',
-    agentUserId: null,
-    clientId: 'pl-a',
-    status: 'active',
-    confirmedAt: T0 + 10,
-    startAt: T0 + 10,
-    endAt: T0 + 400 * 24 * 3600 * 1000,
-  };
-  neg(
-    !agreementGrantsAccess(mirror, null, T0 + 20) &&
-      !agreementGrantsAccess(mirror, 'usr-lead', T0 + 20) &&
-      !agreementGrantsAccess(mirror, undefined, T0 + 20),
-    'an ACTIVE agreement naming no agent grants access to nobody — null, the admin, undefined',
   );
   const staffFacts = (users) =>
     users
-      .map((u) => `${u.id}:${u.orgId}:${u.name}:${u.role}:${u.removedAt ?? ''}`)
+      .map((u) => `${u.id}:${u.org_id}:${u.name}:${u.role}:${u.removed_at ?? ''}`)
       .sort()
       .join();
-  neg(staffFacts(back.users) === staffFacts(db.users), 'no user row was touched');
+  neg(staffFacts(back.org_users) === staffFacts(db.org_users), 'no user row was touched');
 }
 
 // ======================================================= 3 — boot over it
@@ -419,28 +423,28 @@ section('4 — clean boot → relationship → stop → read back → reboot');
   const snap = await s.stop();
   const recordsAtStop = appliedMigrations(dir);
   ok(
-    snap &&
-      Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION &&
-      snap.representationAgreements.length === 1 &&
-      snap.agentProfiles.length === 1 &&
-      snap.agencyAffiliations.length === 2,
+    Number(recordsAtStop.at(-1)?.id.slice(0, 4)) === SCHEMA_VERSION &&
+      snap.representation_agreements.length === 1 &&
+      snap.agent_profiles.length === 1 &&
+      snap.agency_affiliations.length === 2,
     'the database holds one agreement, one profile, two affiliations (read from the tables)',
   );
-  const row = snap.representationAgreements[0];
+  const row = snap.representation_agreements[0];
   ok(
-    row.keys.request.key === 'rt-1' &&
-      row.keys.confirm.key === 'rt-c' &&
+    row.request_key === 'rt-1' &&
+      row.confirm_key === 'rt-c' &&
       row.rev === 2 &&
-      row.history.length === 2 &&
-      row.confirmedBy?.id === 'pl-adeyemi',
+      snap.agreement_history.filter((h) => h.agreement_id === row.id).length === 2 &&
+      row.confirmed_by_player_id === 'pl-adeyemi',
     'keys, rev, history and confirmation are on disk',
   );
   ok(
-    snap.agentProfiles[0].facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider',
+    snap.agent_profile_facets.find((f) => f.profile_id === snap.agent_profiles[0].id && f.facet === 'fifa_licence')
+      ?.provenance_provider === 'local-synthetic-test-provider',
     'provenance is on disk',
   );
   neg(
-    !('trust' in row) && !('passport' in row) && !('offer' in row),
+    !Object.keys(row).some((c) => /^(trust|passport|offer)/.test(c)),
     'the row carries no trust, passport or offer field',
   );
   s = await bootOn(dir, await freePort());
@@ -482,108 +486,57 @@ section('4 — clean boot → relationship → stop → read back → reboot');
   const snap2 = await s.stop();
   ok(
     appliedMigrations(dir).filter((r) => r.id === AGENT_CORE_MIGRATION).length === 1 &&
-      snap2.representationAgreements.length === 1,
+      snap2.representation_agreements.length === 1,
     'one migration record, still',
   );
 }
 
 // ======================================================= 5 — corruption
-section('5 — junk is refused by the typed write; what a typed row can hold is judged on read, never repaired');
+section('5 — junk is refused by the schema; what a typed row can hold is judged on read, never repaired');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-'));
   const db = staffSnapshot();
-  const profile = {
-    id: 'agp-x',
-    userId: 'usr-lead',
-    agencyOrgId: 'org-ag',
-    displayName: 'Lead Person',
-    declared: { fifaLicenceNumber: null, jurisdictions: ['INT'] },
-    facets: { ...newFacets(), fifa_licence: { ...newFacets().fifa_licence, state: 'approved', reference: 'X' } },
-    createdAt: T0,
-    updatedAt: T0,
-    rev: 1,
-    revAt: T0,
-    revBy: null,
-    history: [],
-  };
-  const signed = {
-    id: 'rep-x',
-    agentUserId: 'usr-lead',
-    agencyOrgId: 'org-ag',
-    clientKind: 'player',
-    clientId: 'pl-b',
-    jurisdiction: 'INT',
-    exclusive: false,
-    status: 'signed',
-    confirmedAt: T0,
-    confirmedBy: { kind: 'player', id: 'pl-b' },
-    scope: ['employment'],
-    termMonths: 12,
-    startAt: T0,
-    endAt: T0 + 1e10,
-    proposedAt: T0,
-    declinedAt: null,
-    terminatedAt: null,
-    terminatedBy: null,
-    terminationReasonCode: null,
-    disputedAt: null,
-    disputeReason: null,
-    shareWithAgencyStaff: false,
-    policyVersions: [],
-    keys: {},
-    createdAt: T0,
-    rev: 1,
-    revAt: T0,
-    revBy: null,
-    history: [],
-  };
-  // The pure rules still judge such records, wherever they might come from.
-  neg(
-    effectiveFacetState(profile.facets.fifa_licence, T0) === 'MANUAL_REVIEW_REQUIRED',
-    'an unknown facet state "approved" reads as MANUAL_REVIEW_REQUIRED',
-  );
-  neg(verificationGap(profile, 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'and is a verification gap');
-  neg(!agreementGrantsAccess(signed, 'usr-lead', T0 + 1), 'an agreement with status "signed" grants NO access');
-  neg(
-    !clientTransitionAllowed(signed, 'active', T0 + 1) &&
-      !agentTransitionAllowed(signed, 'terminated_by_agent', T0 + 1),
-    'and moves nowhere',
-  );
-  // The repository's typed create refuses both, naming the record; nothing is written.
-  let refused = null;
+  // The schema refuses both, and the fixture's transaction writes nothing.
   const junkDir = () => mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-junk-'));
-  try {
-    fixture(junkDir(), { ...db, agentProfiles: [profile] });
-  } catch (e) {
-    refused = e;
-  }
+  const refusedBy = (tables) => {
+    const d = junkDir();
+    try {
+      fixture(d, merge(db, tables));
+      return { error: null, dir: d };
+    } catch (e) {
+      return { error: e, dir: d };
+    }
+  };
+  let r = refusedBy(profileRows({ state: 'approved', reference: 'X' }));
   neg(
-    refused?.code === 'AGENT_CORE_INPUT_INVALID' && /agp-x/.test(refused.message) && /state/.test(refused.message),
-    `a facet state the table does not know is refused by the repository, naming the profile (${refused?.message ?? 'saved'})`,
+    /CHECK constraint failed/.test(r.error?.message) &&
+      /state/.test(r.error.message) &&
+      !stored(r.dir).agent_profiles.length,
+    `a facet state the table does not know is refused, and no profile is written (${r.error?.message ?? 'saved'})`,
   );
-  refused = null;
-  try {
-    fixture(junkDir(), { ...db, representationAgreements: [signed] });
-  } catch (e) {
-    refused = e;
-  }
+  r = refusedBy(agreementRows({ id: 'rep-x', client_id: 'pl-b', status: 'signed', confirmed_by_player_id: 'pl-b' }));
   neg(
-    refused?.code === 'AGENT_CORE_INPUT_INVALID' && /rep-x/.test(refused.message) && /status/.test(refused.message),
-    `an agreement status the table does not know is refused by the repository, naming the agreement (${refused?.message ?? 'saved'})`,
+    /CHECK constraint failed/.test(r.error?.message) &&
+      /status/.test(r.error.message) &&
+      !stored(r.dir).representation_agreements.length,
+    `an agreement status the table does not know is refused, and no agreement is written (${r.error?.message ?? 'saved'})`,
   );
   // An odd row a typed table CAN hold: an ACTIVE agreement nobody confirmed (a dispute of a proposal reinstated by review).
-  const unconfirmed = {
-    ...signed,
-    id: 'rep-y',
-    status: 'active',
-    confirmedAt: null,
-    confirmedBy: null,
-    endAt: Date.now() + 1e10,
-  };
-  db.agentProfiles = [{ ...profile, facets: newFacets(), userId: 'usr-lead' }];
-  db.representationAgreements = [unconfirmed];
-  fixture(dir, db);
-  const stored = stableJson(readRecords(dir).representationAgreements.find((r) => r.id === 'rep-y'));
+  fixture(
+    dir,
+    merge(
+      db,
+      profileRows(),
+      agreementRows({ id: 'rep-y', client_id: 'pl-b', confirmed_at: null, end_at: Date.now() + 1e10 }),
+    ),
+  );
+  const agreementOf = (all) =>
+    stableJson({
+      agreement: all.representation_agreements.find((a) => a.id === 'rep-y'),
+      scopes: all.agreement_scopes.filter((a) => a.agreement_id === 'rep-y'),
+      history: all.agreement_history.filter((a) => a.agreement_id === 'rep-y'),
+    });
+  const before = agreementOf(stored(dir));
   const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over the odd row');
   if (s.up) {
@@ -618,10 +571,7 @@ section('5 — junk is refused by the typed write; what a typed row can hold is 
       'and opens no board',
     );
     const after = await s.stop();
-    neg(
-      stableJson(after.representationAgreements.find((r) => r.id === 'rep-y')) === stored,
-      'nothing was repaired on boot or by reading — the bytes are the bytes',
-    );
+    neg(agreementOf(after) === before, 'nothing was repaired on boot or by reading — the bytes are the bytes');
     ok(add.status === 201, '(setup)');
   }
 }
@@ -630,66 +580,30 @@ section('5 — junk is refused by the typed write; what a typed row can hold is 
 section('6 — the sweep tells a current member once that a relationship is ending; an agent who left is not told');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p6-'));
-  const db = staffSnapshot();
-  const aff = (id, userId, over = {}) => ({
-    id,
-    agencyOrgId: 'org-ag',
-    userId,
-    tiers: ['agency_admin', 'licensed_agent'],
-    startedAt: T0,
-    endedAt: null,
-    endedReason: null,
-    createdAt: T0,
-    rev: 1,
-    revAt: T0,
-    revBy: null,
-    keys: {},
-    history: [],
-    ...over,
-  });
-  const ending = (id, agentUserId, clientId) => ({
-    id,
-    agentUserId,
-    agencyOrgId: 'org-ag',
-    clientKind: 'player',
-    clientId,
-    jurisdiction: 'INT',
-    exclusive: false,
-    termMonths: 12,
-    startAt: T0,
-    endAt: Date.now() + 10 * 86_400_000,
-    status: 'active',
-    proposedAt: T0,
-    confirmedAt: T0,
-    confirmedBy: { kind: 'player', id: clientId },
-    declinedAt: null,
-    terminatedAt: null,
-    terminatedBy: null,
-    terminationReasonCode: null,
-    disputedAt: null,
-    disputeReason: null,
-    shareWithAgencyStaff: false,
-    scope: ['employment'],
-    policyVersions: [],
-    keys: {},
-    createdAt: T0,
-    rev: 1,
-    revAt: T0,
-    revBy: null,
-    history: [],
-  });
-  db.agencyAffiliations = [
-    aff('aff-lead', 'usr-lead'),
-    aff('aff-staff', 'usr-staff', { endedAt: T0 + 5, endedReason: 'left' }),
-  ];
-  db.representationAgreements = [ending('rep-live', 'usr-lead', 'pl-a'), ending('rep-left', 'usr-staff', 'pl-b')];
-  fixture(dir, db);
+  const ending = (id, agentUserId, clientId) =>
+    agreementRows({
+      id,
+      agent_user_id: agentUserId,
+      client_id: clientId,
+      end_at: Date.now() + 10 * 86_400_000,
+      confirmed_by_player_id: clientId,
+    });
+  fixture(
+    dir,
+    merge(
+      staffSnapshot(),
+      affiliationRows('aff-lead', 'usr-lead'),
+      affiliationRows('aff-staff', 'usr-staff', { ended_at: T0 + 5, ended_reason: 'left' }),
+      ending('rep-live', 'usr-lead', 'pl-a'),
+      ending('rep-left', 'usr-staff', 'pl-b'),
+    ),
+  );
   const s = await bootOn(dir, await freePort());
   ok(s.up, 'the server boots over two relationships ending within 30 days');
   if (s.up) {
     await sleep(500); // the sweep runs once at boot
     const after = await s.stop();
-    const expiring = (after.notifications ?? []).filter((n) => n.type === 'representation_expiring');
+    const expiring = after.notifications.filter((n) => n.type === 'representation_expiring');
     ok(
       expiring.length === 1 &&
         JSON.stringify(expiring[0]).includes('usr-lead') &&
@@ -698,7 +612,7 @@ section('6 — the sweep tells a current member once that a relationship is endi
     );
     neg(!expiring.some((n) => JSON.stringify(n).includes('usr-staff')), 'an agent whose membership ended is not told');
     neg(
-      after.representationAgreements.every((a) => typeof a.expiryNotifiedAt === 'number'),
+      after.representation_agreements.every((a) => typeof a.expiry_notified_at === 'number'),
       'both relationships are marked, so neither is looked at again',
     );
   }
