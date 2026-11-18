@@ -7,6 +7,7 @@ import gleam/io
 import gleam/result
 import gleam/string
 import scoutbox/agents/agent_sweep
+import scoutbox/agents/dev_reviewers
 import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
 import scoutbox/integrations/webhooks
@@ -78,6 +79,10 @@ fn boot() -> Result(Nil, String) {
     demo: config.seed_demo,
     data_dir: config.data_dir,
   ))
+  use _ <- result.try(
+    dev_reviewers.seed(store, clock.now_ms(), dev_logins: config.dev_logins)
+    |> result.map_error(fn(e) { "dev reviewers: " <> string.inspect(e) }),
+  )
   // The match facts are re-derived inside every unit from here on, just before its COMMIT. Not before: until the
   // migrations have run there is no table to derive them into. The dispatcher's own units see the same store.
   let store = store.with_before_commit(store, match_facts.drain)

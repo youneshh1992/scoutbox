@@ -91,7 +91,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 43 of 53 neutral]
+### Untangling [in progress: 44 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 38 batteries pass unchanged]
+### Porting, domain by domain [in progress: 39 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -116,7 +116,7 @@ of the product, so they aren't one slice.
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
-| Agents: core, core persistence, transactions, transactions persistence, compliance | 5 | the workspace and the compliance engine are in |
+| Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence | 6 | the workspace and the compliance engine are in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -172,7 +172,12 @@ are for surprising facts or points that later work depends on, not implementatio
       player from an agency's compliance context as it does from everything else (`orgCanSee`). Bodies are now read
       in the order their keys were sent (`platform/key_order`): a policy version's rules keep that order, which is an
       API shape to change after the port (docs/known-issues.md).
-   5. `agents/compliancePersistence`, `adversarial`, `crossApp`, `crossAppAdversarial`: not untangled.
+   5. `agents/compliancePersistence` [**done**; its 2 rule cases are pending with compliance's]. The dev reviewers
+      are seeded at any boot that finds the reviewer table empty with dev logins on, not only by the demo seed, so a
+      fixture database has them too (`agents/dev_reviewers`). `/ts/compliance/policies` leaves out a rule's
+      `overrides` and its own `effectiveFrom`, on both servers: the battery compares whole seeded rules from the
+      stored rows instead, decoding each parameter by its type in the snapshot's `RULE_PARAMS`.
+   6. `agents/adversarial`, `crossApp`, `crossAppAdversarial`: not untangled.
 4. `scouting/clubWorkflows`. It needs the uploads check first. Opportunity creation, the club's list and the
    board's club rows are in, and match the TypeScript server response for response. Applications, closing and the
    structured requirements are not.

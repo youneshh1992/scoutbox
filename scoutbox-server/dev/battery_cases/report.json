@@ -133,6 +133,25 @@
     ]
   },
   {
+    "battery": "agents/compliancePersistence",
+    "functions": [
+      {
+        "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#applicablePolicySet",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "agents/core",
     "functions": [
       {

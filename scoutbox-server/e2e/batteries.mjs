@@ -39,4 +39,5 @@ export const BATTERIES = [
   'agents/transactionsPersistence',
   'agents/transactions',
   'agents/compliance',
+  'agents/compliancePersistence',
 ];

@@ -13,7 +13,7 @@ actions and formal decision, Offers, the agent core (profiles and verification f
 representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
 items it opens), the organisation audit and a player's erasure, an agent's transaction workspace (its parties and their own confirmation,
 representation bindings, status moves, terms, documents, notes, links, timelines, the club's, player's and Trust &
-Safety lanes, and the readiness an Offer reads), the Conflict & Compliance Engine (reviewer sign-in and
+Safety lanes, and the readiness an Offer reads), the Conflict & Compliance Engine (reviewer sign-in, the dev reviewers seeded into an empty table, and
 administration, the agent's own compliance contexts and their conflict evaluation, regulatory consents, facet
 rechecks, the compliance overview, the review lifecycle and every kind of decision, dual-control policy versions,
 and the Trust & Safety audit and metrics), Trials (the invitation, acceptance,
