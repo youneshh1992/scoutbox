@@ -63,20 +63,36 @@ and these files are never edited by hand. `cases:check`, part of `e2e:check`, fa
   printer refuses a JavaScript field it has no mapping for.
 - **Not birdie.** The expected values have to come from TypeScript, not from Gleam's own first run.
 
-## Box Cam: records only
+## Box Cam: everything but the video
 
-Box Cam's video analysis is moving to a separate service, so the Gleam port takes only the records and the read
-rules other domains apply to them.
+Box Cam's video analysis is moving to a separate service. The Gleam port takes the rest of Box Cam: the records, the
+routes and the rules over observations. Server-side video work is all in the TypeScript tree's
+`domains/development/boxcam/cv/` (frame decoding, the detection, tracking and scene engine, the holdout evaluation and
+the `production_cv` provider). Nothing outside `cv/` touches a frame.
 
-- `development/boxCamCvProvider`, `boxCamCvRobustness` and `combineProductionGate` are `TYPESCRIPT_ONLY` for good.
-- `development/boxCam` and `development/combine` will each be split into a records battery, which is ported, and an
-  analysis battery, which becomes TypeScript only.
-- Batteries outside Box Cam that start the server with `BOX_CAM_TEST_PROVIDER=1` should get their results from
-  `sqlFixture.mjs` rows when they are untangled. This applies to `passport/trustScore`,
-  `discovery/matchingAndWatchlists`, `discovery/secondLookAndNobodyMissed`, `development/hub` and
-  `platform/contracts`.
-- How the video service will hand results over isn't designed yet. Combine results, and so the Passport's Trust
-  Score in real use, wait on that design.
+- **Ported:** sessions, training (assignments, challenges, the development plan, preferences, disputes, restores),
+  the At-Home Combine and the drills. That includes the rules that turn a session's stored observations into active
+  time, reps and a verification state, and the streak and challenge-progress rules. Clients send observations as JSON
+  batches, so these rules are pure and get rule cases like any other domain.
+- **`local_test` is ported.** It is the test-only observation provider (`BOX_CAM_TEST_PROVIDER=1`), not a video
+  analyser: a scripted observation stream whose results are always labelled simulated.
+- **`production_cv` is a stub:** one small module whose provider health is always `unavailable`. `/cv/begin`,
+  `/cv/frames`, `/cv/finalize` and `/cv/cancel` answer `503 PROVIDER_UNAVAILABLE`, a code already in the TypeScript
+  contract, so a client treats it as an outage. `/box-cam/cv/ready-check` reports the provider unavailable.
+  `/admin/box-cam/cv/results/:id` only reads stored `box_cam_cv_results` rows, so it is ported properly.
+- **The provider registry is spec data.** `DRILLS`, `PROVIDERS`, the Combine protocols, `cv/eligibility`'s tables and
+  the gate's `evaluation.json` are snapshotted to `e2e/support/spec/`. The Gleam server serves the snapshot as it is,
+  so it reports `production_cv` as `configured`, as TypeScript does. A deployment sees that this server has no CV from
+  the provider's health. This also settles what `/capabilities` reports for `productionHardening`.
+- **Batteries:** `development/boxCamCvProvider`, `boxCamCvRobustness` and `combineProductionGate` are
+  `TYPESCRIPT_ONLY` for good. `development/boxCam` and `development/combine` are not split. They call no CV route,
+  and their only `cv/` coupling is two imported eligibility functions, which the spec snapshot replaces. They are
+  untangled like any other battery.
+- Batteries outside Box Cam that start the server with `BOX_CAM_TEST_PROVIDER=1` (`passport/trustScore`,
+  `discovery/matchingAndWatchlists`, `discovery/secondLookAndNobodyMissed`, `development/hub`,
+  `platform/contracts`) keep using `local_test`. They need no fixture rows.
+- How the video service will hand results over isn't designed yet. That decides only where real results come from:
+  Combine results in tests come from `local_test`, so nothing in the port waits on it.
 
 ## Progress
 
@@ -118,6 +134,7 @@ of the product, so they aren't one slice.
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
+| Development: Box Cam, the Combine, the hub | 0 | next |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -198,10 +215,13 @@ are for surprising facts or points that later work depends on, not implementatio
    TypeScript sweep (application reminders, trial-feedback escalation, the completed-trial assessment reminder,
    upload clean-up) is marked `Not ported yet:` there, for `operations/clubOperations`. The benchmarks' position
    groups come from the newly snapshotted `PROGRAMME_TRACKS` (`spec/grassrootsJourney.json`).
-5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
-6. `operations/clubOperations`, then the Box Cam records batteries.
-7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
-8. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
+5. **Box Cam** (see "Box Cam: everything but the video"). Untangle `development/boxCam` and `development/combine`
+   first, then port sessions, training and the Combine with the `production_cv` stub, then `development/hub`.
+   `passport/trustScore` reads Combine results, so this goes before the Passport.
+6. **Passport.** `passport/passport`, then `trustScore`.
+7. `operations/clubOperations`.
+8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
+9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible
    (sets and dicts for membership and de-duplication, a length taken once), and move the hot call sites onto it.
@@ -249,8 +269,6 @@ Measured trade-offs to keep in mind:
 
 Open questions:
 
-- **`productionHardening`** expects `/capabilities` to report `production_cv` as configured. This server says it
-  isn't, because the analysis is moving out. Decide which before porting the battery.
 - **Reviewer verdicts** in `ACCEPTED` are missing for the moves to TypeScript unit suites made while untangling
   `sessionsAndPorts` and `contracts`.
 - **The process contract** still lacks `SCOUTBOX_TRUST_PROXY` and the dev mail transport's full-text copy
