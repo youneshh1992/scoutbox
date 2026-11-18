@@ -3,9 +3,8 @@
 //// when the club may no longer see the player (a block, a suspension, a visibility change), the Room keeps the
 //// club's own record and shows nothing of the player, with no cached name, stale Passport or last-known score.
 ////
-//// Not ported yet, inside a Room: most of the Football Passport (its revision, identity and status, timeline,
-//// evidence summary, references, achievements, assessments and trials, development activity and Combine), the
-//// Combine results (from verified attempts), development activity, and the snapshot's Passport revision.
+//// Not ported yet, inside a Room: the Combine results (from verified attempts) and Box Cam's development activity,
+//// which the Room's Passport and development section show as a player's with none.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -20,6 +19,7 @@ import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players.{type Player}
 import scoutbox/identity/staff
 import scoutbox/insight/evidence_gaps
+import scoutbox/passport/football_passport
 import scoutbox/passport/passport_rules
 import scoutbox/passport/sources
 import scoutbox/passport/trust
@@ -43,8 +43,6 @@ import scoutbox/rows/trials as trial_row
 import scoutbox/rules/visibility
 import scoutbox/scouting/evidence
 import scoutbox/vocab/org_type
-import scoutbox/vocab/playing_level
-import scoutbox/vocab/position as positions
 import scoutbox/vocab/room_status
 import scoutbox/vocab/source_context
 import scoutbox/vocab/task_state
@@ -70,14 +68,6 @@ fn trust_viewer(org: orgs.Row) -> Option(trust_rules.Viewer) {
     org_type.Agency, _ -> None
     _, orgs.LevelGrassroots -> Some(trust_rules.GrassrootsClubViewer)
     _, _ -> Some(trust_rules.ProClubViewer)
-  }
-}
-
-fn viewer_kind(org: orgs.Row) -> String {
-  case org.type_, level(org) {
-    org_type.Agency, _ -> "agency"
-    _, orgs.LevelGrassroots -> "grassroots_club"
-    _, _ -> "pro_club"
   }
 }
 
@@ -371,64 +361,21 @@ fn assessment_json(a: Assessment) -> Json {
 
 // ---------------------------------------------------------------------------------------------------- passport
 
-const passport_note =
-  "A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement."
-
-/// The club's Football Passport, as far as it is ported: its version, the player and the club history.
-fn passport_json(
+/// The club's Football Passport: what this organisation sees of the assembled Passport.
+fn passport_full(
   read: Read,
-  org: orgs.Row,
   s: Sources,
   now: Int,
-) -> Result(Json, Fail(e)) {
-  let r = s.player.row
-  let minor = !players.is_adult(s.player, now)
-  use history <- result.map(sources.history(read, r.id))
-  json.object([
-    #("passportVersion", json.int(1)),
-    // Not ported yet: the revision (a hash of the assembled Passport).
-    #("passportRevision", json.null()),
-    #(
-      "player",
-      json.object([
-        #("id", id.player_json(r.id)),
-        #("name", json.string(r.name)),
-        #("age", json.nullable(players.age_now(s.player, now), json.int)),
-        #(
-          "position",
-          json.nullable(
-            r.position |> option.map(positions.to_string),
-            json.string,
-          ),
-        ),
-        // City only, and none for a minor in any organisation's view.
-        #("location", case minor {
-          True -> json.null()
-          False -> json.nullable(r.city, json.string)
-        }),
-        #("level", json.string(playing_level.to_string(r.level))),
-      ]),
-    ),
-    #("note", json.string(passport_note)),
-    #("viewer", json.string(viewer_kind(org))),
-    #(
-      "clubHistory",
-      json.array(history.rows, fn(h) {
-        json.object([
-          #("orgName", json.nullable(h.org_name, json.string)),
-          #("current", json.bool(h.current)),
-          #(
-            "provenance",
-            json.string(passport_rules.provenance_to_string(h.provenance)),
-          ),
-          #(
-            "provenanceCopy",
-            json.string(passport_rules.provenance_copy(h.provenance)),
-          ),
-        ])
-      }),
-    ),
-  ])
+) -> Result(passport_rules.Full, Fail(e)) {
+  sources.assemble(read, s.player, False, now)
+}
+
+fn passport_json(org: orgs.Row, full: passport_rules.Full) -> Json {
+  passport_rules.project(
+    full,
+    football_passport.org_viewer(org),
+    passport_rules.Opts(org_id: Some(org.id), share_mode: None),
+  )
 }
 
 // ---------------------------------------------------------------------------------------------------- the room
@@ -610,7 +557,8 @@ pub fn build(
         read,
         p.row.id,
       ))
-      use passport <- result.try(passport_json(read, org, s, now))
+      use full <- result.try(passport_full(read, s, now))
+      let passport = passport_json(org, full)
       let readiness =
         room_rules.decision_readiness(room_rules.ReadinessInput(
           assessments_assigned: case
@@ -628,10 +576,10 @@ pub fn build(
             e.row.claim_type == evidence_row.Footage
             && e.row.recorded_at > now - 180 * day_ms
           }),
-          // Not ported yet: the Passport's references, which a coach reference is also read from.
           coach_reference: list.any(records, fn(e) {
             e.row.verification_status == evidence_row.CoachConfirmed
-          }),
+          })
+            || full.references != [],
           // Not ported yet: verified Combine results.
           combine_verified: 0,
           combine_requested: list.count(requests, fn(q) {
@@ -756,8 +704,7 @@ pub fn build(
                 ])
             }),
             #("development", case shares_development {
-              // Not ported yet: the development activity itself.
-              True -> json.object([#("note", json.string(room_rules.dev_note))])
+              True -> sources.development_activity(room_rules.dev_note)
               False ->
                 json.object([
                   #("shared", json.bool(False)),
@@ -832,6 +779,7 @@ pub fn capture_snapshot(
     None -> Ok(None)
     Some(s) -> {
       let t = trust_rules.snapshot(s.profile)
+      use full <- result.try(passport_full(read, s, now))
       use records <- result.try(evidence.current_for_player(
         read,
         s.player.row.id,
@@ -859,8 +807,7 @@ pub fn capture_snapshot(
           // The TypeScript server reads the version from its light Passport assembly, which has none, so a
           // snapshot records it as null.
           passport_version: None,
-          // Not ported yet: the Passport revision.
-          passport_revision: None,
+          passport_revision: Some(passport_rules.passport_revision(full)),
           evidence_ids: list.map(records, fn(e) {
             id.scouting_evidence_to_string(e.row.id)
           }),

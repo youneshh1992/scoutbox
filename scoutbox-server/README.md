@@ -158,8 +158,7 @@ for players (a new player account stores a hash no password matches). `dev/shape
   the first in the order sent.
 - A Trust Score never says `simulatedEvidenceIncluded: true`: no provider here produces simulated evidence. The
   TypeScript server says true whenever `BOX_CAM_TEST_PROVIDER` is set.
-- Inside a Room, the Passport is its version, the player and the club history only, and has no revision; a
-  snapshot records no Passport revision either. A Room's Combine results, development activity and the
+- A Room's Combine results, Box Cam's development activity (shown as a player's with none) and the
   missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
 - The journey, the evidence provider and the decision surface see no Contact records or Trials (`Not ported yet:`):
   no route here records one.

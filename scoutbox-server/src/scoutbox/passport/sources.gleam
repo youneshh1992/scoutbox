@@ -401,7 +401,8 @@ fn representation(
 
 /// What the self view shows of Box Cam for a player with none of it. Not ported yet: Box Cam's sessions,
 /// assignments and Combine results, which fill these in.
-fn development_activity() -> Json {
+/// Box Cam's development activity over the last 30 days, under `note`: the Passport's own note, or the Room's.
+pub fn development_activity(note: String) -> Json {
   json.object([
     #("days", json.int(30)),
     #("boxSessions", json.int(0)),
@@ -409,14 +410,12 @@ fn development_activity() -> Json {
     #("assigned", json.int(0)),
     #("assignedCompleted", json.int(0)),
     #("focus", json.preprocessed_array([])),
-    #(
-      "note",
-      json.string(
-        "This is evidence of recorded training activity. It is not proof of player ability.",
-      ),
-    ),
+    #("note", json.string(note)),
   ])
 }
+
+const development_note =
+  "This is evidence of recorded training activity. It is not proof of player ability."
 
 fn combine_projection() -> Json {
   json.object([
@@ -718,7 +717,7 @@ pub fn assemble(
       list.count(all_trials, fn(t) { t.report != None }),
     ),
     completeness: rules.completeness(facts),
-    development_activity: Some(development_activity()),
+    development_activity: Some(development_activity(development_note)),
     combine: Some(combine_projection()),
     box_share_recruitment: box_share,
     sharing_active:,

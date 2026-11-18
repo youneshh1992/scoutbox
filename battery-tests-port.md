@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 43 batteries pass unchanged]
+### Porting, domain by domain [in progress: 44 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -135,6 +135,7 @@ of the product, so they aren't one slice.
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
 | Development: Box Cam, the Combine, the hub | 0 | next |
+| Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -225,7 +226,11 @@ are for surprising facts or points that later work depends on, not implementatio
    2. The engine (`passport/passport_rules`) [**done**: 68 rule cases]. The recorder seeds randomness as it freezes
       the clock, so a rule called with a random value records the same each run; a rule whose result is random is
       listed in `RANDOM` and ported by hand.
-   3. The routes, on the engine, with `passport/sources` reading the stores.
+   3. The routes, on the engine, with `passport/sources` reading the stores [**done**: `passport/passport` passes,
+      and 42 Passport requests answer exactly as TypeScript's do]. A Passport preference that moves the primary
+      position writes the `position_changed` source change Second Look reads; nothing here wrote one before.
+   4. A Room's Passport is the club's whole projection, and a snapshot records its revision [**done**]. Box Cam's
+      sections (development activity, Combine results) are a player's with none until Box Cam is ported.
 7. `operations/clubOperations`.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
