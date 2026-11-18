@@ -6,6 +6,7 @@
 //// a review's start, cancel and supersede, and a decision on a facet, a dispute or a conflict evaluation
 //// (answered 501), and the reviewer's full evaluation snapshot (a reviewer reads the summary a party reads).
 
+import gleam/bool
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json.{type Json}
@@ -44,6 +45,7 @@ import scoutbox/rows/compliance_contexts as context_row
 import scoutbox/rows/id
 import scoutbox/rows/regulatory_consents as consent_row
 import scoutbox/rows/regulatory_reviews as review_row
+import scoutbox/rows/ts_reviewer_history as reviewer_event_row
 import scoutbox/rows/ts_reviewers as reviewer_row
 import scoutbox/verification/claims
 import scoutbox/verification/records
@@ -152,6 +154,18 @@ fn err(
   domain_errors.refuse(contract, code, message, fields)
 }
 
+/// A refusal in this domain's format, for a compliance route another module serves. An empty message sends none.
+pub fn refusal(
+  code: String,
+  message: String,
+  fields: List(#(String, Json)),
+) -> Response {
+  case message {
+    "" -> bare(code, fields)
+    _ -> err(code, message, fields)
+  }
+}
+
 fn bare(code: String, fields: List(#(String, Json))) -> Response {
   domain_errors.send(contract, code, fields)
 }
@@ -208,6 +222,17 @@ fn body(
   use raw <- http.json_body(req)
   use v <- parsed(shape, raw, "body", default)
   next(v, raw)
+}
+
+/// The JSON body read with `shape` under this domain's refusal format, for a compliance route another module serves.
+pub fn parsed_body(
+  req: Request,
+  shape: input.Shape(a),
+  default: String,
+  next: fn(a) -> Response,
+) -> Response {
+  use v, _ <- body(req, shape, default)
+  next(v)
 }
 
 fn client_key(
@@ -406,6 +431,325 @@ fn by_reviewer(r: reviewer_row.Row) -> By {
     role: Some(reviewer_role.to_string(r.role)),
     org_id: None,
   )
+}
+
+// --------------------------------------------------------------------------------------- reviewer administration
+
+/// How records made through the shared admin key are kept (reviewers.mjs `REVIEWER_LEGACY_NOTE`).
+pub const legacy_note =
+  "Records made through the shared admin key before reviewers had their own sign-in carry attribution \"shared_admin_key\" and are preserved as legacy/unattributed. They were never rewritten and are not authoritative compliance decisions."
+
+/// The reviewer holds `role`; an administrator holds the reviewer's role too.
+fn require_role(
+  reviewer: reviewer_row.Row,
+  role: reviewer_role.ReviewerRole,
+  next: fn() -> Response,
+) -> Response {
+  case reviewer.role == role || role == reviewer_role.TrustSafetyReviewer {
+    True -> next()
+    False -> {
+      let name = reviewer_role.to_string(role)
+      err(
+        "REVIEWER_ROLE_REQUIRED",
+        "This action needs the " <> name <> " role.",
+        [
+          #("role", json.string(name)),
+        ],
+      )
+    }
+  }
+}
+
+/// `GET /ts/me`.
+pub fn me(reviewer: reviewer_row.Row) -> Response {
+  http.json(
+    200,
+    json.object([
+      #("reviewer", public_reviewer(reviewer)),
+      #("attribution", json.string("authenticated_reviewer")),
+      #(
+        "note",
+        json.string(
+          "Every authoritative compliance action is recorded against this identity.",
+        ),
+      ),
+    ]),
+  )
+}
+
+fn reviewer_by_id(
+  read: Read,
+  reviewer_id: id.ReviewerId,
+) -> Result(Option(reviewer_row.Row), Fail(e)) {
+  store.one(
+    read,
+    "SELECT " <> reviewer_row.columns <> " FROM ts_reviewers WHERE id = ?",
+    [id.reviewer_sql(reviewer_id)],
+    reviewer_row.decoder(),
+  )
+  |> result.map(option.from_result)
+}
+
+/// `GET /ts/reviewers`: the Trust & Safety team, oldest first. Administrators only.
+pub fn reviewers(ctx: Ctx, reviewer: reviewer_row.Row) -> Response {
+  use <- require_role(reviewer, reviewer_role.TrustSafetyAdmin)
+  use all <- reading(ctx, fn(r) {
+    store.query(
+      r,
+      "SELECT " <> reviewer_row.columns <> " FROM ts_reviewers ORDER BY rowid",
+      [],
+      reviewer_row.decoder(),
+    )
+  })
+  http.json(
+    200,
+    json.object([
+      #("items", json.array(all, public_reviewer)),
+      #("legacyNote", json.string(legacy_note)),
+    ]),
+  )
+}
+
+fn reviewer_event(
+  tx: Tx,
+  reviewer_id: id.ReviewerId,
+  by: reviewer_row.Row,
+  action: reviewer_event_row.Action,
+  detail_role: Option(reviewer_role.ReviewerRole),
+  detail_reason: Option(String),
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use event_id <- result.try(id.next_reviewer_event(tx))
+  use ord <- result.try(store.one(
+    store.reading(tx),
+    "SELECT COUNT(*) FROM ts_reviewer_history WHERE reviewer_id = ?",
+    [id.reviewer_sql(reviewer_id)],
+    decode.at([0], decode.int),
+  ))
+  reviewer_event_row.insert(
+    tx,
+    reviewer_event_row.Row(
+      id: event_id,
+      reviewer_id:,
+      ord: result.unwrap(ord, 0),
+      at:,
+      by_kind: reviewer_event_row.TsReviewer,
+      by_id: Some(id.reviewer_to_string(by.id)),
+      by_name: Some(by.name),
+      by_role: Some(by.role),
+      action:,
+      detail_role:,
+      detail_reason:,
+    ),
+  )
+}
+
+/// `POST /ts/reviewers`: an administrator provisions a reviewer. The secret is hashed before the unit.
+pub fn create_reviewer(
+  ctx: Ctx,
+  req: Request,
+  reviewer: reviewer_row.Row,
+) -> Response {
+  use <- require_role(reviewer, reviewer_role.TrustSafetyAdmin)
+  let shape = {
+    use new_id <- input.field(
+      "id",
+      input.required(input.matching("[a-zA-Z0-9][a-zA-Z0-9-]{2,39}")),
+    )
+    use name <- input.field("name", input.required(input.required_text(80)))
+    use role <- input.field(
+      "role",
+      input.optional(input.one_of(reviewer_role.pairs)),
+    )
+    use secret <- input.field(
+      "secret",
+      input.required(input.text_between(12, 200)),
+    )
+    input.done(#(new_id, string.trim(name), role, secret))
+  }
+  use b, _ <- body(req, shape, "COMPLIANCE_INPUT_INVALID")
+  let #(new_id, name, role, secret) = b
+  let role = option.unwrap(role, reviewer_role.TrustSafetyReviewer)
+  use existing <- reading(ctx, reviewer_by_id(_, id.reviewer(new_id)))
+  case existing {
+    Some(_) -> bare("REVIEWER_EXISTS", [])
+    None -> {
+      let secret_hash = passwords.hash(secret)
+      let now = clock.now_ms()
+      let created =
+        store.unit(ctx.store, fn(tx) {
+          let r =
+            reviewer_row.Row(
+              id: id.reviewer(new_id),
+              name:,
+              role:,
+              status: reviewer_row.Active,
+              secret_hash:,
+              created_at: now,
+              created_by_kind: reviewer_row.TsReviewer,
+              created_by_id: Some(id.reviewer_to_string(reviewer.id)),
+              created_by_name: Some(reviewer.name),
+              created_by_role: Some(reviewer_role.to_string(reviewer.role)),
+              revoked_at: None,
+              revoked_by_id: None,
+              revoked_by_name: None,
+              rev: 1,
+              rev_at: Some(now),
+              rev_by_name: None,
+              rev_by_id: None,
+            )
+          use _ <- result.try(reviewer_row.insert(tx, r))
+          use _ <- result.map(reviewer_event(
+            tx,
+            r.id,
+            reviewer,
+            reviewer_event_row.ReviewerCreated,
+            Some(role),
+            None,
+            now,
+          ))
+          r
+        })
+      case created {
+        Ok(r) ->
+          http.json(201, json.object([#("reviewer", public_reviewer(r))]))
+        Error(e) -> http.internal(e)
+      }
+    }
+  }
+}
+
+/// `POST /ts/reviewers/:id/revoke`: final, and the reviewer's sessions end with it. The last administrator stays.
+pub fn revoke_reviewer(
+  ctx: Ctx,
+  req: Request,
+  reviewer: reviewer_row.Row,
+  target_id: String,
+) -> Response {
+  use <- require_role(reviewer, reviewer_role.TrustSafetyAdmin)
+  use target <- reading(ctx, reviewer_by_id(_, id.reviewer(target_id)))
+  case target {
+    None -> bare("REVIEWER_NOT_FOUND", [])
+    Some(t) -> {
+      let shape = {
+        use reason <- input.field("reason", input.nullish(input.text(200)))
+        use <- rev.fields
+        input.done(reason)
+      }
+      use reason, raw <- body(req, shape, "COMPLIANCE_INPUT_INVALID")
+      case t.status {
+        reviewer_row.Revoked ->
+          http.json(
+            200,
+            json.object([
+              #("reviewer", public_reviewer(t)),
+              #("idempotent", json.bool(True)),
+            ]),
+          )
+        reviewer_row.Active -> {
+          use admins <- reading(ctx, fn(r) {
+            store.one(
+              r,
+              "SELECT COUNT(*) FROM ts_reviewers WHERE status = 'active' AND role = 'trust_safety_admin'",
+              [],
+              decode.at([0], decode.int),
+            )
+            |> result.map(result.unwrap(_, 0))
+          })
+          case t.role == reviewer_role.TrustSafetyAdmin && admins <= 1 {
+            True ->
+              err(
+                "LAST_REVIEWER_ADMIN",
+                "At least one Trust & Safety administrator must remain.",
+                [],
+              )
+            False -> {
+              use <- guard_rev(
+                raw,
+                rev.Rev(t.rev, t.rev_at, t.rev_by_name),
+                "REVIEWER_VERSION_CONFLICT",
+                [],
+              )
+              let now = clock.now_ms()
+              answer_unit(
+                store.unit(ctx.store, fn(tx) {
+                  use revoked <- result.try(
+                    store.write(
+                      tx,
+                      "UPDATE ts_reviewers SET status = 'revoked', revoked_at = ?, revoked_by_id = ?, revoked_by_name = ? WHERE id = ? AND status = 'active' RETURNING 1",
+                      [
+                        sqlight.int(now),
+                        id.reviewer_sql(reviewer.id),
+                        sqlight.text(reviewer.name),
+                        id.reviewer_sql(t.id),
+                      ],
+                      decode.at([0], decode.int),
+                    )
+                    |> storage,
+                  )
+                  // Another administrator revoked them first: answer from the new state.
+                  use <- bool.guard(revoked == [], store.stale("a reviewer"))
+                  // Two administrators revoking each other at once would leave none: the later one re-runs and is
+                  // refused as the last.
+                  use admins_left <- result.try(
+                    store.one(
+                      store.reading(tx),
+                      "SELECT COUNT(*) FROM ts_reviewers WHERE status = 'active' AND role = 'trust_safety_admin'",
+                      [],
+                      decode.at([0], decode.int),
+                    )
+                    |> storage,
+                  )
+                  use <- bool.guard(
+                    admins_left == Ok(0),
+                    store.stale("the last administrator"),
+                  )
+                  use _ <- result.try(
+                    store.run(
+                      tx,
+                      "UPDATE ts_reviewers SET rev = rev + 1, rev_at = ?, rev_by_id = ?, rev_by_name = ? WHERE id = ?",
+                      [
+                        sqlight.int(now),
+                        id.reviewer_sql(reviewer.id),
+                        sqlight.text(reviewer.name),
+                        id.reviewer_sql(t.id),
+                      ],
+                    )
+                    |> storage,
+                  )
+                  use _ <- result.try(
+                    reviewer_event(
+                      tx,
+                      t.id,
+                      reviewer,
+                      reviewer_event_row.ReviewerRevoked,
+                      None,
+                      input.filled(reason),
+                      now,
+                    )
+                    |> storage,
+                  )
+                  use _ <- result.try(
+                    sessions.revoke_reviewer(tx, id.reviewer_to_string(t.id))
+                    |> storage,
+                  )
+                  use after <- result.map(
+                    reviewer_by_id(store.reading(tx), t.id)
+                    |> storage,
+                  )
+                  let assert Some(after) = after
+                  http.json(
+                    200,
+                    json.object([#("reviewer", public_reviewer(after))]),
+                  )
+                }),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // ------------------------------------------------------------------------------------------------- reviews
@@ -618,6 +962,45 @@ pub fn review_queue(
   req: Request,
   reviewer: reviewer_row.Row,
 ) -> Response {
+  use items, next <- queue(ctx, req, True)
+  http.json(
+    200,
+    json.object([
+      #("items", items),
+      #("nextCursor", json.nullable(next, json.string)),
+      #("statuses", json.array(review_status.pairs, fn(x) { json.string(x.0) })),
+      #("kinds", json.array(review_row.kind_pairs, fn(x) { json.string(x.0) })),
+      #("reviewer", public_reviewer(reviewer)),
+    ]),
+  )
+}
+
+/// `GET /admin/compliance/reviews`: the shared key reads the queue, and can adjudicate nothing.
+pub fn admin_review_queue(ctx: Ctx, req: Request) -> Response {
+  use items, next <- queue(ctx, req, False)
+  http.json(
+    200,
+    json.object([
+      #("items", items),
+      #("nextCursor", json.nullable(next, json.string)),
+      #("readOnly", json.bool(True)),
+      #(
+        "note",
+        json.string(
+          "Read-only. Starting, resolving, cancelling or superseding a review requires an authenticated reviewer session (/ts). The shared key can adjudicate nothing.",
+        ),
+      ),
+    ]),
+  )
+}
+
+/// A page of the queue, each review as `for_reviewer` sees it.
+fn queue(
+  ctx: Ctx,
+  req: Request,
+  for_reviewer: Bool,
+  next: fn(Json, Option(String)) -> Response,
+) -> Response {
   let shape = {
     use status <- input.field(
       "status",
@@ -646,27 +1029,12 @@ pub fn review_queue(
         _ -> None
       }
       use rows <- reading(ctx, reviews.queue_page(_, q.0, after, p.limit))
-      let #(items, next) =
+      let #(items, cursor) =
         paging.page_of(rows, p.limit, fn(x) {
           let #(a, b, c) = x.0
           [paging.IntKey(a), paging.IntKey(b), paging.IntKey(c)]
         })
-      http.json(
-        200,
-        json.object([
-          #("items", json.array(items, fn(x) { review_json(x.1, True) })),
-          #("nextCursor", json.nullable(next, json.string)),
-          #(
-            "statuses",
-            json.array(review_status.pairs, fn(x) { json.string(x.0) }),
-          ),
-          #(
-            "kinds",
-            json.array(review_row.kind_pairs, fn(x) { json.string(x.0) }),
-          ),
-          #("reviewer", public_reviewer(reviewer)),
-        ]),
-      )
+      next(json.array(items, fn(x) { review_json(x.1, for_reviewer) }), cursor)
     }
   }
 }

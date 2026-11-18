@@ -1,5 +1,138 @@
 [
   {
+    "battery": "agents/compliance",
+    "functions": [
+      {
+        "function": "domains/agents/compliance/conflict.mjs#conflictSummaryForParty",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#evaluateConflict",
+        "calls": 44,
+        "cases": 36,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#inputHashOf",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#mostSevere",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/errors.mjs#publicErrorBody",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#applicablePolicySet",
+        "calls": 12,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#earliestPermittedApproachAt",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
+        "calls": 22,
+        "cases": 17,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#evaluatePolicy",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#representationScopeProblem",
+        "calls": 12,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#resolveScope",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#ruleAt",
+        "calls": 8,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/provider.mjs#createVerificationProvider",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "result.verifyFifaLicence is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/provider.mjs#facetFromProviderAnswer",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#can",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "agents/core",
     "functions": [
       {

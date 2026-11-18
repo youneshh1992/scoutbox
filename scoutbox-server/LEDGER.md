@@ -17,7 +17,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 4 | 4 | 187 / 133 | 35 / 36 | 7 to go |
+| agents | 9 | 5 | 4 | 193 / 248 | 35 / 38 | 7 to go |
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
@@ -35,7 +35,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `agents/adversarial` | not yet neutral | 11 → 11 | 174 | 174 |  |  |  |  |  | not untangled; not answered |
-| `agents/compliance` | not yet neutral | 14 → 14 | 342 | 342 |  |  |  |  |  | not untangled; not answered |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  |  | 6 / 115 | 0 / 2 | not answered; 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | not yet neutral | 8 → 8 | 76 | 76 |  |  |  |  |  | not untangled; not answered |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
@@ -128,6 +128,7 @@ ported by hand to a gleeunit test.
 
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
+| `agents/compliance` | `domains/agents/compliance/provider.mjs#createVerificationProvider` | 2 | result.verifyFifaLicence is a function | to do |
 | `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 2 | Gleam's types can't hold its arguments: an affiliation without a start {"endedAt":null}; Gleam's types can't hold its arguments: an affiliation without a start null | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 4 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForClient` | 2 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -240,6 +241,22 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#conflictSummaryForParty` | 1 |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#evaluateConflict` | 36 |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 2 |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#mostSevere` | 3 |
+| `agents/compliance` | `domains/agents/compliance/errors.mjs#publicErrorBody` | 1 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#applicablePolicySet` | 8 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 4 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 17 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluatePolicy` | 4 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 4 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#representationScopeProblem` | 12 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#resolveScope` | 6 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#ruleAt` | 7 |
+| `agents/compliance` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 6 |
+| `agents/compliance` | `domains/agents/compliance/provider.mjs#facetFromProviderAnswer` | 3 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |

@@ -298,6 +298,21 @@ pub type ProfileDetail {
     from: facet_state.FacetState,
     to: facet_state.FacetState,
   )
+  /// A recheck against the register: the effective states before and after it.
+  FacetRechecked(
+    facet: AgentFacet,
+    ma: Option(Jurisdiction),
+    from: facet_state.FacetState,
+    to: facet_state.FacetState,
+  )
+  /// A recheck that changed the effective state: `state` is the stored one it left.
+  FacetRecheckChanged(
+    facet: AgentFacet,
+    ma: Option(Jurisdiction),
+    from: facet_state.FacetState,
+    to: facet_state.FacetState,
+    state: facet_state.FacetState,
+  )
 }
 
 pub fn profile_event(
@@ -318,7 +333,9 @@ pub fn profile_event(
     ProfileCreated -> profile_event_row.AgentProfileCreated
     ProfileUpdated(..) -> profile_event_row.AgentProfileUpdated
     FacetSubmitted(..) -> profile_event_row.AgentVerificationSubmitted
-    FacetStateChanged(..) -> profile_event_row.AgentVerificationStateChanged
+    FacetStateChanged(..) | FacetRecheckChanged(..) ->
+      profile_event_row.AgentVerificationStateChanged
+    FacetRechecked(..) -> profile_event_row.AgentFacetRechecked
   }
   let base =
     profile_event_row.Row(
@@ -352,6 +369,23 @@ pub fn profile_event(
         detail_from: Some(from),
         detail_to: Some(to),
         detail_state: Some(to),
+      )
+    FacetRechecked(facet:, ma:, from:, to:) ->
+      profile_event_row.Row(
+        ..base,
+        detail_facet: Some(facet),
+        detail_ma: ma,
+        detail_from: Some(from),
+        detail_to: Some(to),
+      )
+    FacetRecheckChanged(facet:, ma:, from:, to:, state:) ->
+      profile_event_row.Row(
+        ..base,
+        detail_facet: Some(facet),
+        detail_ma: ma,
+        detail_from: Some(from),
+        detail_to: Some(to),
+        detail_state: Some(state),
       )
   })
 }

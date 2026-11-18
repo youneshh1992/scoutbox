@@ -84,6 +84,10 @@ for (const table of ours) {
     rows++;
   }
 }
+// The id counter where the seed left it, so an id minted after the seed never repeats one the seed wrote.
+const counter = db.prepare("SELECT value FROM counters WHERE name = 'id'").get();
+if (!counter) throw new Error("the TypeScript seed has no 'id' counter");
+sql += `UPDATE counters SET value = ${counter.value} WHERE name = 'id';\n`;
 fs.writeFileSync(OUT, sql);
 fs.rmSync(data, { recursive: true, force: true });
 console.log(`wrote ${rows} rows to ${path.relative(process.cwd(), OUT)}`);

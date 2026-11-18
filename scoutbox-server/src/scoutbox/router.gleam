@@ -1302,6 +1302,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["compliance", "reviews"] ->
           only(req, Get, fn() { compliance.review_queue(ctx, req, reviewer) })
+        ["me"] -> only(req, Get, fn() { compliance.me(reviewer) })
+        ["reviewers"] ->
+          case req.method {
+            Get -> compliance.reviewers(ctx, reviewer)
+            Post -> compliance.create_reviewer(ctx, req, reviewer)
+            _ -> not_found()
+          }
+        ["reviewers", rid, "revoke"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            compliance.revoke_reviewer(ctx, req, reviewer, rid)
+          })
         ["transactions"] ->
           only(req, Get, fn() {
             transaction_ts_routes.list_all(ctx, req, reviewer)
@@ -1330,6 +1342,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       use <- access.admin(ctx, req)
       case rest {
         ["verification", ..path] -> verification_admin(ctx, req, path)
+        ["compliance", "reviews"] ->
+          only(req, Get, fn() { compliance.admin_review_queue(ctx, req) })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.admin_relationships(ctx, req) })
         ["agent", "profiles"] ->
@@ -1656,6 +1670,8 @@ fn agent_org(
         Post -> agent.save_profile(ctx, req, org)
         _ -> not_found()
       }
+    ["compliance", "facets", facet, "recheck"] ->
+      only(req, Post, fn() { agent.recheck_facet(ctx, req, org, facet) })
     ["profile", "facets", facet, "submit"] ->
       only(req, Post, fn() { agent.submit_facet(ctx, req, org, facet) })
     ["agency"] -> only(req, Get, fn() { agent.agency(ctx, org) })

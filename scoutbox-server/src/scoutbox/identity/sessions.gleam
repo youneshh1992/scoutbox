@@ -132,6 +132,15 @@ pub fn revoke_sid(tx: Tx, sid: String) -> Result(Nil, Fail(e)) {
   store.run(tx, "DELETE FROM sessions WHERE sid = ?", [sqlight.text(sid)])
 }
 
+/// Ends every session of a Trust & Safety reviewer.
+pub fn revoke_reviewer(tx: Tx, reviewer_id: String) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "DELETE FROM sessions WHERE kind = 'ts_reviewer' AND ref_id = ?",
+    [sqlight.text(reviewer_id)],
+  )
+}
+
 /// Ends every session of a staff member.
 pub fn revoke_org_user(tx: Tx, user_id: id.OrgUserId) -> Result(Nil, Fail(e)) {
   store.run(tx, "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ?", [

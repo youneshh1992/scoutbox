@@ -2803,6 +2803,38 @@ pub fn reviewer_decoder() -> decode.Decoder(ReviewerId) {
   decode.map(decode.string, ReviewerId)
 }
 
+/// An id of `ts_reviewer_history`.
+pub opaque type ReviewerEventId {
+  ReviewerEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn reviewer_event(text: String) -> ReviewerEventId {
+  ReviewerEventId(text)
+}
+
+pub fn reviewer_event_to_string(id: ReviewerEventId) -> String {
+  let ReviewerEventId(text) = id
+  text
+}
+
+pub fn reviewer_event_sql(id: ReviewerEventId) -> sqlight.Value {
+  sqlight.text(reviewer_event_to_string(id))
+}
+
+pub fn reviewer_event_json(id: ReviewerEventId) -> Json {
+  json.string(reviewer_event_to_string(id))
+}
+
+pub fn reviewer_event_decoder() -> decode.Decoder(ReviewerEventId) {
+  decode.map(decode.string, ReviewerEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_reviewer_event(tx: Tx) -> Result(ReviewerEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ReviewerEventId)
+}
+
 /// An id of `room_comments`.
 pub opaque type RoomCommentId {
   RoomCommentId(String)

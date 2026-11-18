@@ -118,6 +118,7 @@ pub fn a_storage_refusal_rolls_back_the_whole_unit_test() {
 
 pub fn units_are_serialised_test() {
   let s = support.fresh_store(fn(_) { Nil })
+  let start = count(s, "SELECT value FROM counters WHERE name = 'id'")
   let done = process.new_subject()
   // 20 processes each read-modify-write the same row, yielding between the read and the write.
   list.repeat(Nil, 20)
@@ -144,7 +145,7 @@ pub fn units_are_serialised_test() {
   list.each(list.repeat(Nil, 20), fn(_) {
     let assert Ok(Nil) = process.receive(done, 5000)
   })
-  assert count(s, "SELECT value FROM counters WHERE name = 'id'") == 1020
+  assert count(s, "SELECT value FROM counters WHERE name = 'id'") == start + 20
 }
 
 pub fn a_read_connection_cannot_write_test() {

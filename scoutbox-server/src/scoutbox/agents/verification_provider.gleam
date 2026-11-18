@@ -5,6 +5,7 @@
 ////
 //// UNAVAILABLE never permits anything: the route answers 503 and writes nothing.
 
+import gleam/json.{type Json}
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import scoutbox/agents/agent_rules
@@ -170,4 +171,35 @@ pub fn facet_record(
         ),
       )
   }
+}
+
+/// What the provider says about itself (provider.mjs `status`): no governing-body register is connected.
+pub fn status_json(synthetic: Bool) -> Json {
+  json.object([
+    #(
+      "provider",
+      json.string(case synthetic {
+        True -> "local-synthetic-test-provider"
+        False -> "none"
+      }),
+    ),
+    #("live", json.bool(False)),
+    #(
+      "registers",
+      json.object([
+        #("fifa", json.string("not_connected")),
+        #("fa", json.string("not_connected")),
+        #("ussf", json.string("not_connected")),
+      ]),
+    ),
+    #(
+      "note",
+      json.string(case synthetic {
+        True ->
+          "LOCAL SYNTHETIC test provider active. Verifies only TEST-* references. Never exists in production."
+        False ->
+          "No governing-body register is connected. Submissions are queued for attributed Trust & Safety review; a cached VERIFIED facet is usable only until its own recheck date."
+      }),
+    ),
+  ])
 }

@@ -24,6 +24,7 @@ import scoutbox/agents/agent_rules.{
 }
 import scoutbox/agents/agent_store.{type Actor, Actor}
 import scoutbox/agents/approach_policy
+import scoutbox/agents/compliance_routes
 import scoutbox/agents/reviews
 import scoutbox/agents/verification_provider
 import scoutbox/app.{type Ctx}
@@ -1727,6 +1728,214 @@ fn submit(
               True -> "local-synthetic-test-provider"
               False -> "none"
             }),
+          ),
+        ]),
+      )
+    }
+  }
+}
+
+/// `POST /org/agent/compliance/facets/:facet/recheck` (domains/agents/compliance/facetRoutes.mjs): the reference
+/// already on record asked of the register again. An unavailable register changes nothing. Refusals are the
+/// compliance domain's.
+pub fn recheck_facet(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  facet_name: String,
+) -> Response {
+  use m <- membership(ctx, a)
+  use <- require(m, "verification.submit")
+  use <- limited(
+    ctx,
+    limits.AgentProfileWrite,
+    id.org_user_to_string(a.user.id),
+  )
+  let refuse = compliance_routes.refusal
+  case agent_facet.from_string(facet_name) {
+    Error(Nil) ->
+      refuse("COMPLIANCE_INPUT_INVALID", "", [
+        #("field", json.string("facet")),
+        #("allowed", json.array(agent_facet.pairs, fn(x) { json.string(x.0) })),
+      ])
+    Ok(facet) -> {
+      use found <- reading(ctx, fn(r) {
+        agent_store.profile_for_user(r, a.user.id)
+      })
+      case found {
+        None ->
+          refuse(
+            "AGENT_VERIFICATION_REQUIRED",
+            "Create your agent profile first.",
+            [],
+          )
+        Some(p) -> {
+          let shape = {
+            use ma <- input.field(
+              "memberAssociation",
+              input.nullish(input.matching("[A-Za-z]{3}")),
+            )
+            input.done(ma)
+          }
+          use ma <- compliance_routes.parsed_body(
+            req,
+            shape,
+            "COMPLIANCE_INPUT_INVALID",
+          )
+          // The licence has no association; any other facet is the one recorded under the association named.
+          let current = case facet {
+            FifaLicence -> agent_rules.facet_of(p, facet, None)
+            _ ->
+              case
+                jurisdiction.from_string(
+                  string.uppercase(option.unwrap(ma, "")),
+                )
+              {
+                Ok(j) if j != jurisdiction.INT ->
+                  agent_rules.facet_of(p, facet, Some(j))
+                _ -> None
+              }
+          }
+          case current {
+            Some(cur) ->
+              case cur.reference {
+                Some(reference) -> recheck(ctx, a, p, cur, reference)
+                None -> nothing_submitted()
+              }
+            None -> nothing_submitted()
+          }
+        }
+      }
+    }
+  }
+}
+
+fn nothing_submitted() -> Response {
+  compliance_routes.refusal(
+    "COMPLIANCE_INPUT_INVALID",
+    "Nothing has been submitted for this facet yet.",
+    [#("field", json.string("facet"))],
+  )
+}
+
+fn recheck(
+  ctx: Ctx,
+  a: OrgAccess,
+  p: Profile,
+  cur: facet_row.Row,
+  reference: String,
+) -> Response {
+  let now = clock.now_ms()
+  let facet = cur.facet
+  let ma = facet_ma(cur)
+  let answer =
+    verification_provider.answer(
+      ctx.config.agent_verification_test,
+      facet,
+      reference,
+      now,
+    )
+  case
+    verification_provider.facet_record(
+      answer,
+      p.row.id,
+      facet,
+      ma,
+      reference,
+      now,
+    )
+  {
+    None ->
+      compliance_routes.refusal(
+        "REGULATORY_PROVIDER_UNAVAILABLE",
+        "The verification source is unavailable. Nothing was changed; a cached VERIFIED facet stays usable only until its own recheck date.",
+        [#("retryAfter", json.int(300))],
+      )
+    Some(next) -> {
+      let prev = agent_rules.effective_facet_state(Some(cur), now)
+      let after = agent_rules.effective_facet_state(Some(next), now)
+      let changed = prev != after
+      use _ <- act(ctx, fn(tx) {
+        use _ <- result.try(agent_store.set_facet(tx, next) |> storage)
+        use _ <- result.try(
+          agent_store.bump_profile(
+            tx,
+            p.row.id,
+            agent_store.bump_by(now, by_org(a)),
+            True,
+          )
+          |> storage,
+        )
+        use _ <- result.try(
+          agent_store.profile_event(
+            tx,
+            p.row.id,
+            now,
+            by_org(a),
+            agent_store.FacetRechecked(facet, ma, prev, after),
+          )
+          |> storage,
+        )
+        use _ <- result.try(case changed {
+          True ->
+            agent_store.profile_event(
+              tx,
+              p.row.id,
+              now,
+              by_org(a),
+              agent_store.FacetRecheckChanged(
+                facet,
+                ma,
+                prev,
+                after,
+                next.state,
+              ),
+            )
+            |> storage
+          False -> Ok(Nil)
+        })
+        use _ <- result.try(case next.state {
+          facet_state.ManualReviewRequired ->
+            facet_needs_review(tx, a, p, facet, ma, now) |> storage
+          _ -> Ok(Nil)
+        })
+        case changed {
+          True ->
+            live(
+              tx,
+              live_event.AgentVerificationStateChanged(
+                id.org_to_string(a.org.id),
+                id.org_user_to_string(p.row.user_id),
+                agent_facet.to_string(facet),
+                facet_state.to_string(after),
+              ),
+            )
+          False -> Nil
+        }
+        Ok(Nil)
+      })
+      // The provider's record in its own order, then the state it was stored as.
+      let view = facet_view(next, now)
+      let keys = [
+        "state", "reference", "memberAssociation", "provenance", "submittedAt",
+        "verifiedAt", "recheckAt", "note", "storedState",
+      ]
+      http.json(
+        200,
+        json.object([
+          #(
+            "facet",
+            json.object(
+              list.filter_map(keys, fn(k) {
+                list.key_find(view, k) |> result.map(fn(v) { #(k, v) })
+              }),
+            ),
+          ),
+          #(
+            "provider",
+            verification_provider.status_json(
+              ctx.config.agent_verification_test,
+            ),
           ),
         ]),
       )

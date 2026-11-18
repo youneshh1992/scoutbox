@@ -440,6 +440,32 @@ pub fn id_of(max: Int) -> Check(String) {
   }
 }
 
+/// Text of `min` to `max` characters (valibot's `pipe(string(), minLength(min), maxLength(max))`), judged in that
+/// order. Length counts UTF-16 code units.
+pub fn text_between(min: Int, max: Int) -> Check(String) {
+  fn(v) {
+    case string_check(v) {
+      Error(e) -> Error(e)
+      Ok(s) ->
+        case utf16_length(s) < min {
+          True ->
+            Error(
+              Issue(
+                ..issue(
+                  TooShort,
+                  "must be at least "
+                    <> int.to_string(min)
+                    <> " characters long",
+                ),
+                min: Some(min),
+              ),
+            )
+          False -> at_most(s, max)
+        }
+    }
+  }
+}
+
 /// Text with something other than spaces in it, of at most `max` characters.
 pub fn required_text(max: Int) -> Check(String) {
   fn(v) {
