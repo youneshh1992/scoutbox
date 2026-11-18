@@ -19,12 +19,10 @@ import scoutbox/identity/players.{type Player}
 import scoutbox/identity/staff
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
-import scoutbox/platform/distance
 import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/live_event
-import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/application_history as history_row
 import scoutbox/rows/application_suitability as suitability_row
@@ -150,33 +148,6 @@ fn live_for(
     decode.at([0], decode.int),
   ))
   result.is_ok(found)
-}
-
-/// The distance in km from the club, as it is now, to the player; `None` when either place is unknown.
-fn km_from_club(
-  read: Read,
-  org_id: id.OrgId,
-  p: Player,
-) -> Result(Option(Float), Fail(e)) {
-  case p.row.lat, p.row.lng {
-    Some(lat), Some(lng) -> {
-      let q =
-        sql.concat([
-          sql.text("SELECT "),
-          distance.km(distance.Columns("o.lat", "o.lng"), distance.At(lat, lng)),
-          sql.text(" FROM orgs o WHERE o.id = "),
-          sql.arg(id.org_sql(org_id)),
-        ])
-      use found <- result.map(store.one(
-        read,
-        q.sql,
-        q.args,
-        decode.at([0], decode.optional(decode.float)),
-      ))
-      found |> option.from_result |> option.flatten
-    }
-    _, _ -> Ok(None)
-  }
 }
 
 // ------------------------------------------------------------------------------------------------- the view
@@ -439,7 +410,11 @@ fn gate(
           })
           case seen {
             Some(#(_, access)) if access.visible && !access.blocked -> {
-              use km <- result.try(km_from_club(read, o.row.org_id, p))
+              use km <- result.try(opportunities.km_from_club(
+                read,
+                o.row.org_id,
+                p,
+              ))
               case
                 opportunities.reasons(
                   opportunities.eligibility(o.row),

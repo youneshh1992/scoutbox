@@ -160,6 +160,33 @@ pub fn open_on(
   list.zip(opps, list.map(found, fn(f) { f.1 }))
 }
 
+/// The distance in km from the club, as it is now, to the player; `None` when either place is unknown.
+pub fn km_from_club(
+  read: Read,
+  org_id: id.OrgId,
+  p: Player,
+) -> Result(Option(Float), Fail(e)) {
+  case p.row.lat, p.row.lng {
+    Some(lat), Some(lng) -> {
+      let q =
+        sql.concat([
+          sql.text("SELECT "),
+          distance.km(distance.Columns("o.lat", "o.lng"), distance.At(lat, lng)),
+          sql.text(" FROM orgs o WHERE o.id = "),
+          sql.arg(id.org_sql(org_id)),
+        ])
+      use found <- result.map(store.one(
+        read,
+        q.sql,
+        q.args,
+        decode.at([0], decode.optional(decode.float)),
+      ))
+      found |> option.from_result |> option.flatten
+    }
+    _, _ -> Ok(None)
+  }
+}
+
 /// The club's opportunities, newest first, by cursor (the key is the rowid).
 fn page_for_org(
   read: Read,
@@ -364,7 +391,7 @@ fn finite(v: Dynamic) -> Option(Float) {
 }
 
 /// A refusal of the eligibility: the field it names (`eligibility.minAge`) and its message.
-type Bad {
+pub type Bad {
   Bad(field: String, message: String)
 }
 
@@ -375,11 +402,12 @@ fn bad(field: String, what: String) -> Bad {
 /// The eligibility sent with an opportunity, typed (journeys.mjs `eligibilityOrRefuse` and repository
 /// `typeEligibility`). A Grassroots club's is forced to amateur and semi-pro players within the Grassroots radius.
 /// Its category is the opportunity's: one sent inside the eligibility is taken as a field and then ignored, as the
-/// TypeScript server does.
-fn type_eligibility(
+/// TypeScript server does. A campaign's eligibility has no category (`None`): it takes no `category` field, and
+/// reads as mixed.
+pub fn type_eligibility(
   raw: Option(Dynamic),
   grassroots: Bool,
-  category: row.Category,
+  category: Option(row.Category),
 ) -> Result(Eligibility, Bad) {
   use fields <- result.try(case raw {
     None -> Ok(dict.new())
@@ -394,9 +422,12 @@ fn type_eligibility(
           ))
       }
   })
-  let known = [
-    "minAge", "maxAge", "positionGroup", "maxLevel", "radiusKm", "category",
-  ]
+  let known = case category {
+    Some(_) -> [
+      "minAge", "maxAge", "positionGroup", "maxLevel", "radiusKm", "category",
+    ]
+    None -> ["minAge", "maxAge", "positionGroup", "maxLevel", "radiusKm"]
+  }
   // The TypeScript server names the first unknown field in the order sent; a map has no order, so here it is the
   // first in key order, as `input` does.
   use <- unknown_first(
@@ -482,7 +513,9 @@ fn type_eligibility(
   })
   use <- below_min(min, max)
   let assert Ok(category) =
-    row.elig_category_from_string(row.category_to_string(category))
+    row.elig_category_from_string(
+      option.map(category, row.category_to_string) |> option.unwrap("mixed"),
+    )
   Ok(Eligibility(
     min_age: min,
     max_age: max,
@@ -519,14 +552,28 @@ fn below_min(
 // ------------------------------------------------------------------------------------------------- views
 
 fn eligibility_json(e: Eligibility) -> Json {
-  json.object([
-    #("minAge", json.nullable(e.min_age, json.int)),
-    #("maxAge", json.nullable(e.max_age, json.int)),
-    #("positionGroup", row.elig_position_group_to_json(e.position_group)),
-    #("category", row.elig_category_to_json(e.category)),
-    #("maxLevel", json.nullable(e.max_level, playing_level.to_json)),
-    #("radiusKm", json.nullable(e.radius_km, json_text.number)),
-  ])
+  eligibility_view(e, True)
+}
+
+/// views.mjs `eligibilityView`: a campaign's has no category.
+pub fn eligibility_view(e: Eligibility, with_category: Bool) -> Json {
+  json.object(
+    list.flatten([
+      [
+        #("minAge", json.nullable(e.min_age, json.int)),
+        #("maxAge", json.nullable(e.max_age, json.int)),
+        #("positionGroup", row.elig_position_group_to_json(e.position_group)),
+      ],
+      case with_category {
+        True -> [#("category", row.elig_category_to_json(e.category))]
+        False -> []
+      },
+      [
+        #("maxLevel", json.nullable(e.max_level, playing_level.to_json)),
+        #("radiusKm", json.nullable(e.radius_km, json_text.number)),
+      ],
+    ]),
+  )
 }
 
 fn structured_json(o: Opportunity) -> Json {
@@ -684,7 +731,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       use <- moderated(ctx, a, or_none(b.description))
       let category = option.unwrap(b.category, row.CategoryMixed)
       let grassroots = a.org.level == Some(org_row.LevelGrassroots)
-      case type_eligibility(b.eligibility, grassroots, category) {
+      case type_eligibility(b.eligibility, grassroots, Some(category)) {
         Error(Bad(field:, message:)) ->
           http.json(
             400,

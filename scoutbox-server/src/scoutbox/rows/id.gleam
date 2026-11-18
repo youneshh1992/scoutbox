@@ -632,6 +632,104 @@ pub fn next_calibration_session(
   ids.next(tx, "cal") |> result.map(CalibrationSessionId)
 }
 
+/// An id of `campaigns`.
+pub opaque type CampaignId {
+  CampaignId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn campaign(text: String) -> CampaignId {
+  CampaignId(text)
+}
+
+pub fn campaign_to_string(id: CampaignId) -> String {
+  let CampaignId(text) = id
+  text
+}
+
+pub fn campaign_sql(id: CampaignId) -> sqlight.Value {
+  sqlight.text(campaign_to_string(id))
+}
+
+pub fn campaign_json(id: CampaignId) -> Json {
+  json.string(campaign_to_string(id))
+}
+
+pub fn campaign_decoder() -> decode.Decoder(CampaignId) {
+  decode.map(decode.string, CampaignId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_campaign(tx: Tx) -> Result(CampaignId, Fail(e)) {
+  ids.next(tx, "cmp") |> result.map(CampaignId)
+}
+
+/// An id of `campaign_attempts`.
+pub opaque type CampaignAttemptId {
+  CampaignAttemptId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn campaign_attempt(text: String) -> CampaignAttemptId {
+  CampaignAttemptId(text)
+}
+
+pub fn campaign_attempt_to_string(id: CampaignAttemptId) -> String {
+  let CampaignAttemptId(text) = id
+  text
+}
+
+pub fn campaign_attempt_sql(id: CampaignAttemptId) -> sqlight.Value {
+  sqlight.text(campaign_attempt_to_string(id))
+}
+
+pub fn campaign_attempt_json(id: CampaignAttemptId) -> Json {
+  json.string(campaign_attempt_to_string(id))
+}
+
+pub fn campaign_attempt_decoder() -> decode.Decoder(CampaignAttemptId) {
+  decode.map(decode.string, CampaignAttemptId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_campaign_attempt(tx: Tx) -> Result(CampaignAttemptId, Fail(e)) {
+  ids.next(tx, "att") |> result.map(CampaignAttemptId)
+}
+
+/// An id of `campaign_submissions`.
+pub opaque type CampaignSubmissionId {
+  CampaignSubmissionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn campaign_submission(text: String) -> CampaignSubmissionId {
+  CampaignSubmissionId(text)
+}
+
+pub fn campaign_submission_to_string(id: CampaignSubmissionId) -> String {
+  let CampaignSubmissionId(text) = id
+  text
+}
+
+pub fn campaign_submission_sql(id: CampaignSubmissionId) -> sqlight.Value {
+  sqlight.text(campaign_submission_to_string(id))
+}
+
+pub fn campaign_submission_json(id: CampaignSubmissionId) -> Json {
+  json.string(campaign_submission_to_string(id))
+}
+
+pub fn campaign_submission_decoder() -> decode.Decoder(CampaignSubmissionId) {
+  decode.map(decode.string, CampaignSubmissionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_campaign_submission(
+  tx: Tx,
+) -> Result(CampaignSubmissionId, Fail(e)) {
+  ids.next(tx, "csb") |> result.map(CampaignSubmissionId)
+}
+
 /// An id of `passport_career_entries`.
 pub opaque type CareerEntryId {
   CareerEntryId(String)

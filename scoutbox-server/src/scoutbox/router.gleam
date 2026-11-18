@@ -21,6 +21,7 @@ import scoutbox/agents/transaction_ts_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/box_prefs
 import scoutbox/development/combine
+import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
@@ -96,6 +97,7 @@ import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
 import scoutbox/scouting/assessments
 import scoutbox/scouting/board_routes
+import scoutbox/scouting/campaigns
 import scoutbox/scouting/coaches
 import scoutbox/scouting/opportunities
 import scoutbox/scouting/opportunity_applications as applies
@@ -792,6 +794,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             Post -> opportunities.create(ctx, req, org)
             _ -> not_found()
           }
+        ["campaigns"] ->
+          case req.method {
+            Get -> campaigns.list_for_org(ctx, req, org)
+            Post -> campaigns.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["campaigns", cid, "review-queue"] ->
+          only(req, Get, fn() {
+            campaigns.review_queue(ctx, org, id.campaign(cid))
+          })
+        ["campaign-attempts", aid, "review"] ->
+          only(req, Post, fn() {
+            campaigns.review(ctx, req, org, id.campaign_attempt(aid))
+          })
         ["opportunities", oid, "applications"] ->
           only(req, Get, fn() {
             applies.list_for_opportunity(ctx, req, org, id.opportunity(oid))
@@ -1039,6 +1055,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             applies.player_apply(ctx, req, player, id.opportunity(oid))
           })
+        ["campaigns"] ->
+          only(req, Get, fn() { campaigns.player_list(ctx, player) })
+        ["campaigns", cid, "submit"] ->
+          only(req, Post, fn() {
+            campaigns.player_submit(ctx, req, player, id.campaign(cid))
+          })
+        ["drill-guidance"] ->
+          only(req, Get, fn() { drill_guidance.player_list(ctx) })
         ["applications"] ->
           only(req, Get, fn() { applies.player_list(ctx, player) })
         ["applications", aid, "withdraw"] ->
@@ -1254,6 +1278,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["guardian", ..rest] -> {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
+        ["children", cid, "campaigns"] ->
+          only(req, Get, fn() {
+            campaigns.guardian_list(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "campaigns", camp, "submit"] ->
+          only(req, Post, fn() {
+            campaigns.guardian_submit(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+              id.campaign(camp),
+            )
+          })
         ["children", cid, "opportunities", oid, "apply"] ->
           only(req, Post, fn() {
             applies.guardian_apply(
@@ -1624,6 +1662,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["vouches", vid, "withdraw"] ->
           only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
+        ["drill-guidance"] ->
+          only(req, Get, fn() { drill_guidance.admin_list(ctx) })
+        ["drill-guidance", did, "review"] ->
+          only(req, Post, fn() { drill_guidance.review(ctx, req, did) })
         ["verification", ..path] -> verification_admin(ctx, req, path)
         ["compliance", "reviews"] ->
           only(req, Get, fn() { compliance.admin_review_queue(ctx, req) })

@@ -11,6 +11,7 @@ import gleam/string
 import scoutbox/agents/core_routes
 import scoutbox/agents/policy_routes
 import scoutbox/agents/transaction_routes
+import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
 import scoutbox/recruitment/analytics
@@ -248,4 +249,28 @@ pub fn policy_rule_params_test() {
       decode.at(["TEXT_STATUSES"], decode.list(decode.string)),
     )
   assert list.map(policy_routes.text_statuses, fn(p) { p.0 }) == statuses
+}
+
+/// The drill library's ids, in order, and its filming guidance, key by key in order.
+pub fn drill_library_test() {
+  let ids =
+    snapshot(
+      "development/record.json",
+      decode.at(["DRILLS"], decode.list(decode.at(["id"], decode.string))),
+    )
+  assert drill_guidance.drill_ids == ids
+  let assert Ok(text) =
+    simplifile.read("e2e/support/spec/development/objectives.json")
+  let recording =
+    list.map(drill_guidance.recording, fn(r) {
+      "\"" <> r.0 <> "\": " <> json.to_string(json.string(r.1))
+    })
+    |> string.join(",\n    ")
+  assert string.contains(text, recording)
+  let snapshot_recording =
+    snapshot(
+      "development/objectives.json",
+      decode.at(["DRILL_RECORDING"], decode.dict(decode.string, decode.string)),
+    )
+  assert dict.from_list(drill_guidance.recording) == snapshot_recording
 }

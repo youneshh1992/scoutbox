@@ -197,7 +197,10 @@ are for surprising facts or points that later work depends on, not implementatio
    squad, the squad planner, the grassroots squad and match days. The opportunities section is whole: applying (an adult
    for themselves, a guardian for a child), withdrawing, the club's list and answer, and closing; every response
    matches the TypeScript server's, notifications included. The `applications` live event reaches no stream, as
-   `feedback` doesn't. The battery now stops at its campaigns section. A save refused after the TypeScript server minted a new role's id still burns that id there, so id
+   `feedback` doesn't. Campaigns are in (publishing, the lists, submitting with the file checks, the review queue and
+   review) and so is the drill guidance, whose library is now snapshotted (`spec/development/`). The battery now stops
+   at its first upload: `/player/media` with a `dataUrl` still answers 501, and a campaign attempt passes its file
+   checks only once the clip's bytes are stored. A save refused after the TypeScript server minted a new role's id still burns that id there, so id
    numbers drift between the servers; no battery reads them.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
