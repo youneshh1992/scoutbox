@@ -20,7 +20,8 @@ import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players.{type Player}
 import scoutbox/identity/staff
 import scoutbox/insight/evidence_gaps
-import scoutbox/passport/history
+import scoutbox/passport/passport_rules
+import scoutbox/passport/sources
 import scoutbox/passport/trust
 import scoutbox/passport/trust_rules.{type Profile}
 import scoutbox/platform/rev
@@ -418,7 +419,7 @@ fn passport_json(
 ) -> Result(Json, Fail(e)) {
   let r = s.player.row
   let minor = !players.is_adult(s.player, now)
-  use rows <- result.map(history.for_player(read, r.id))
+  use history <- result.map(sources.history(read, r.id))
   json.object([
     #("passportVersion", json.int(1)),
     // Not ported yet: the revision (a hash of the assembled Passport).
@@ -448,14 +449,17 @@ fn passport_json(
     #("viewer", json.string(viewer_kind(org))),
     #(
       "clubHistory",
-      json.array(rows, fn(h) {
+      json.array(history.rows, fn(h) {
         json.object([
           #("orgName", json.nullable(h.org_name, json.string)),
           #("current", json.bool(h.current)),
-          #("provenance", json.string(h.provenance)),
+          #(
+            "provenance",
+            json.string(passport_rules.provenance_to_string(h.provenance)),
+          ),
           #(
             "provenanceCopy",
-            json.nullable(provenance_copy(h.provenance), json.string),
+            json.string(passport_rules.provenance_copy(h.provenance)),
           ),
         ])
       }),

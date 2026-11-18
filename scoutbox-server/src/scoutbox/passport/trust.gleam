@@ -15,7 +15,8 @@ import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/players.{type Player}
-import scoutbox/passport/history
+import scoutbox/passport/passport_rules
+import scoutbox/passport/sources
 import scoutbox/passport/trust_rules.{type Profile}
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -373,7 +374,7 @@ fn assessments(
 /// The player's Trust Score, derived at read time from canonical records. It cannot be set.
 pub fn profile(read: Read, p: Player, now: Int) -> Result(Profile, Fail(e)) {
   use assurance <- result.try(identity(read, p, now))
-  use hist <- result.try(history.for_player(read, p.row.id))
+  use hist <- result.try(sources.history(read, p.row.id))
   use refs <- result.try(rows_for(
     read,
     reference_row.columns,
@@ -396,10 +397,10 @@ pub fn profile(read: Read, p: Player, now: Int) -> Result(Profile, Fail(e)) {
   trust_rules.calculate(trust_rules.Input(
     is_adult: players.is_adult(p, now),
     identity: assurance,
-    history: list.map(hist, fn(r) {
+    history: list.map(hist.rows, fn(r) {
       trust_rules.HistoryRow(
-        key: "hist:" <> r.source_type <> ":" <> r.source_id,
-        provenance: r.provenance,
+        key: "hist:" <> r.source.type_ <> ":" <> r.source.id,
+        provenance: passport_rules.provenance_to_string(r.provenance),
         current: r.current,
       )
     }),
