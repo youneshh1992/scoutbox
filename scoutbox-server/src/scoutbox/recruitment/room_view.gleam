@@ -374,42 +374,6 @@ fn assessment_json(a: Assessment) -> Json {
 const passport_note =
   "A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement."
 
-pub fn provenance_copy(p: String) -> Option(String) {
-  case p {
-    "player_submitted" ->
-      Some(
-        "Provided by the player. ScoutBox has not independently confirmed this item.",
-      )
-    "guardian_submitted" ->
-      Some(
-        "Provided by the player’s guardian. ScoutBox has not independently confirmed this item.",
-      )
-    "system_recorded" ->
-      Some("Recorded automatically by ScoutBox from platform activity.")
-    "historical_migration" ->
-      Some("Carried forward from an earlier ScoutBox record.")
-    "scoutbox_reviewed" ->
-      Some(
-        "Reviewed by ScoutBox Trust & Safety — a document review, not an independent register check.",
-      )
-    "verified_coach_confirmed" ->
-      Some(
-        "Confirmed by a coach whose club affiliation was verified when they confirmed it.",
-      )
-    "verified_club_confirmed" ->
-      Some(
-        "Confirmed by an authorised administrator of the named organisation.",
-      )
-    "authoritative_registry" ->
-      Some("Confirmed against an authoritative registry.")
-    "box_cam_observed" ->
-      Some(
-        "Recorded live through ScoutBox Box Cam. ScoutBox observed activity consistent with the selected supported drill — this describes observed training, not football ability.",
-      )
-    _ -> None
-  }
-}
-
 /// The club's Football Passport, as far as it is ported: its version, the player and the club history.
 fn passport_json(
   read: Read,

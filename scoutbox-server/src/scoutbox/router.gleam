@@ -67,6 +67,7 @@ import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/operations/follow_ups
 import scoutbox/passport/football_passport
+import scoutbox/passport/sharing
 import scoutbox/passport/trust
 import scoutbox/platform/clock
 import scoutbox/platform/fault_routes
@@ -141,6 +142,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["vouch", "submit"] -> only(req, Post, fn() { vouches.submit(ctx, req) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
+    ["passport", "shared", token] ->
+      only(req, Get, fn() { sharing.open_public(ctx, req, token) })
     ["meta"] -> only(req, Get, operator.meta)
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
@@ -589,6 +592,19 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             football_passport.org_view(ctx, org, id.player(id))
           })
+        ["players", pid, "football-passport", "achievements", aid, "confirm"] ->
+          only(req, Post, fn() {
+            football_passport.confirm_achievement(
+              ctx,
+              org,
+              id.player(pid),
+              id.achievement(aid),
+            )
+          })
+        ["football-passports"] ->
+          only(req, Get, fn() { football_passport.batch(ctx, req, org) })
+        ["passport", "shared", token] ->
+          only(req, Get, fn() { sharing.open_recruitment(ctx, org, token) })
         ["trust-summaries"] ->
           only(req, Get, fn() { trust.org_summaries(ctx, req, org) })
         ["players", pid, "assessment-compare"] ->
@@ -955,6 +971,44 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["football-passport"] ->
           only(req, Get, fn() { football_passport.player_view(ctx, player) })
+        ["football-passport", "prefs"] ->
+          only(req, Patch, fn() {
+            football_passport.player_prefs(ctx, req, player)
+          })
+        ["football-passport", "career"] ->
+          only(req, Post, fn() {
+            football_passport.player_career(ctx, req, player)
+          })
+        ["football-passport", "career", eid, "withdraw"] ->
+          only(req, Post, fn() {
+            football_passport.withdraw_career(ctx, player, id.career_entry(eid))
+          })
+        ["football-passport", "achievements"] ->
+          only(req, Post, fn() {
+            football_passport.player_achievement(ctx, req, player)
+          })
+        ["football-passport", "achievements", aid, "withdraw"] ->
+          only(req, Post, fn() {
+            football_passport.withdraw_achievement(
+              ctx,
+              player,
+              id.achievement(aid),
+            )
+          })
+        ["football-passport", "corrections"] ->
+          only(req, Post, fn() {
+            football_passport.player_correction(ctx, req, player)
+          })
+        ["football-passport", "shares"] ->
+          case req.method {
+            Get -> sharing.player_list(ctx, player)
+            Post -> sharing.player_create(ctx, req, player)
+            _ -> not_found()
+          }
+        ["football-passport", "shares", sid, "revoke"] ->
+          only(req, Post, fn() {
+            sharing.player_revoke(ctx, player, id.passport_share(sid))
+          })
         ["insights"] -> only(req, Get, fn() { insights.show(ctx, player) })
         ["exposure"] ->
           only(req, Get, fn() { exposure.player_view(ctx, player) })
@@ -1353,6 +1407,56 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             applies.guardian_withdraw(ctx, req, guardian, id.application(aid))
           })
+        ["children", cid, "football-passport"] ->
+          only(req, Get, fn() {
+            football_passport.guardian_view(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "football-passport", "prefs"] ->
+          only(req, Patch, fn() {
+            football_passport.guardian_prefs(ctx, req, guardian, id.player(cid))
+          })
+        ["children", cid, "football-passport", "career"] ->
+          only(req, Post, fn() {
+            football_passport.guardian_career(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+            )
+          })
+        ["children", cid, "football-passport", "achievements"] ->
+          only(req, Post, fn() {
+            football_passport.guardian_achievement(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+            )
+          })
+        ["children", cid, "football-passport", "corrections"] ->
+          only(req, Post, fn() {
+            football_passport.guardian_correction(
+              ctx,
+              req,
+              guardian,
+              id.player(cid),
+            )
+          })
+        ["children", cid, "football-passport", "shares"] ->
+          case req.method {
+            Get -> sharing.guardian_list(ctx, guardian, id.player(cid))
+            Post -> sharing.guardian_create(ctx, req, guardian, id.player(cid))
+            _ -> not_found()
+          }
+        ["children", cid, "football-passport", "shares", sid, "revoke"] ->
+          only(req, Post, fn() {
+            sharing.guardian_revoke(
+              ctx,
+              guardian,
+              id.player(cid),
+              id.passport_share(sid),
+            )
+          })
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))
@@ -1727,6 +1831,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["evidence", "disputes"] ->
           only(req, Get, fn() { passport_routes.admin_disputes(ctx, req) })
+        ["passport", "corrections"] ->
+          only(req, Get, fn() { football_passport.admin_corrections(ctx, req) })
+        ["passport", "corrections", cid, "resolve"] ->
+          only(req, Post, fn() {
+            football_passport.admin_resolve(
+              ctx,
+              req,
+              id.passport_correction(cid),
+            )
+          })
+        ["passport", "shares"] ->
+          only(req, Get, fn() { sharing.admin_list(ctx, req) })
+        ["passport", "shares", sid, "revoke"] ->
+          only(req, Post, fn() {
+            sharing.admin_revoke(ctx, id.passport_share(sid))
+          })
+        ["passport", pid, "graph"] ->
+          only(req, Get, fn() {
+            football_passport.admin_graph(ctx, id.player(pid))
+          })
         ["evidence", "disputes", did, "resolve"] ->
           only(req, Post, fn() {
             passport_routes.admin_resolve(ctx, req, id.evidence_dispute(did))

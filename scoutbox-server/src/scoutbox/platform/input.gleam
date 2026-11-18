@@ -348,6 +348,27 @@ pub fn day_or_blank() -> Check(Option(String)) {
   }
 }
 
+/// A date written in one of the forms `expected` names (schemas.mjs `dateWrittenAs`): `read` gives what the
+/// route keeps of a value it accepts, and Error for anything else, which is DATE_INVALID.
+pub fn date_written_as(
+  read: fn(Dynamic) -> Result(a, Nil),
+  expected: String,
+) -> Check(a) {
+  fn(v) {
+    case read(v) {
+      Ok(a) -> Ok(a)
+      Error(Nil) ->
+        Error(
+          Issue(
+            ..issue(NotADate, "must be a date written " <> expected),
+            expected: Some(expected),
+            code: Some("DATE_INVALID"),
+          ),
+        )
+    }
+  }
+}
+
 /// A calendar day `YYYY-MM-DD` (schemas.mjs `dateOnly`): anything else, "" included, is DATE_INVALID.
 pub fn date_only() -> Check(String) {
   fn(v) {

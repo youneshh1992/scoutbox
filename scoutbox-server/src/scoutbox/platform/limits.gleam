@@ -84,6 +84,7 @@ pub const policy = [
   #("watchlist_write", watchlist_write_policy),
   #("second_look_action", second_look_action_policy),
   #("nobody_missed_action", nobody_missed_action_policy),
+  #("passport_share_read", passport_share_read_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -127,6 +128,8 @@ pub type Action {
   ContactExternalRecord
   /// Production CV finalizations, per player: only bounds a retry loop.
   BoxCvFinalize
+  /// Public Passport share link reads, per client address: enumeration is refused long before the keyspace matters.
+  PassportShareRead
   /// Trial invitations, per organisation.
   TrialInvite
   /// Recruitment analytics reads (the dashboard and its drill-down rows), per organisation.
@@ -221,6 +224,8 @@ const contact_external_record_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
+const passport_share_read_policy = Policy(max: 30, window_ms: 60_000)
+
 const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const analytics_read_policy = Policy(max: 600, window_ms: 3_600_000)
@@ -297,6 +302,7 @@ fn action_name(action: Action) -> String {
     ContactSend -> "contact_send"
     ContactExternalRecord -> "contact_external_record"
     BoxCvFinalize -> "box_cv_finalize"
+    PassportShareRead -> "passport_share_read"
     TrialInvite -> "trial_invite"
     TrialSchedule -> "trial_schedule"
     TrialResponse -> "trial_response"
@@ -348,6 +354,7 @@ fn action_policy(action: Action) -> Policy {
     ContactSend -> contact_send_policy
     ContactExternalRecord -> contact_external_record_policy
     BoxCvFinalize -> box_cv_finalize_policy
+    PassportShareRead -> passport_share_read_policy
     TrialInvite -> trial_invite_policy
     TrialSchedule -> trial_schedule_policy
     TrialResponse -> trial_response_policy

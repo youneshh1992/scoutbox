@@ -549,6 +549,7 @@ pub const tables = [
   "signing_revision_parties",
   "signing_revisions",
   "signings",
+  "source_changes",
   "squad_invites",
   "support_ticket_refs",
   "support_ticket_replies",
@@ -700,6 +701,7 @@ pub const ided = [
   Ided("passport_shares", "PassportShare", Some("pshr")),
   Ided("passport_corrections", "PassportCorrection", Some("pcor")),
   Ided("passport_position_history", "PositionEntry", Some("ppos")),
+  Ided("source_changes", "SourceChange", Some("srcc")),
   Ided("representation_agreements", "Agreement", Some("rep")),
   Ided("agent_profiles", "AgentProfile", Some("agp")),
   Ided("agent_profile_history", "ProfileEvent", Some("aud")),
@@ -1010,6 +1012,10 @@ pub const id_columns = [
   Untyped("requested_by_id", "polymorphic: its kind is in another column"),
   RefersTo("org_agency_jurisdictions.org_id", "orgs"),
   RefersTo("player_id", "players"),
+  Untyped(
+    "source_changes.source_id",
+    "the changed record's own key, of whichever source system the row names",
+  ),
   // The Passport's child tables key on the player through passport_prefs, whose key is the player's id.
   RefersTo("passport_pref_positions.player_id", "players"),
   RefersTo("passport_position_history.player_id", "players"),
@@ -1399,6 +1405,8 @@ pub const id_columns = [
   Untyped("detail_challenge_id", "its table is not ported yet"),
   Untyped("detail_attempt_id", "its table is not ported yet"),
   RefersTo("detail_share_id", "agreement_opportunity_shares"),
+  // The ledger's is a Passport share's: only passport_share_created and passport_share_revoked carry it.
+  RefersTo("ledger.detail_share_id", "passport_shares"),
   Untyped("detail_dispute_id", "its table is not ported yet"),
   Untyped("detail_request_id", "its table is not ported yet"),
 ]

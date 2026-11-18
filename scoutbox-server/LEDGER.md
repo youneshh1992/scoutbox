@@ -21,7 +21,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | development | 3 | 0 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
-| passport | 2 | 1 | 0 | 68 / 0 | 3 / 3 | 2 to go |
+| passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
 | platform | 14 | 14 | 9 | 59 / 2254 | 67 / 239 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
@@ -53,7 +53,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
-| `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  |  | 68 / 0 | 3 / 3 | not answered |
+| `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |

@@ -3974,6 +3974,38 @@ pub fn next_signing_revision(tx: Tx) -> Result(SigningRevisionId, Fail(e)) {
   ids.next(tx, "spr") |> result.map(SigningRevisionId)
 }
 
+/// An id of `source_changes`.
+pub opaque type SourceChangeId {
+  SourceChangeId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn source_change(text: String) -> SourceChangeId {
+  SourceChangeId(text)
+}
+
+pub fn source_change_to_string(id: SourceChangeId) -> String {
+  let SourceChangeId(text) = id
+  text
+}
+
+pub fn source_change_sql(id: SourceChangeId) -> sqlight.Value {
+  sqlight.text(source_change_to_string(id))
+}
+
+pub fn source_change_json(id: SourceChangeId) -> Json {
+  json.string(source_change_to_string(id))
+}
+
+pub fn source_change_decoder() -> decode.Decoder(SourceChangeId) {
+  decode.map(decode.string, SourceChangeId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_source_change(tx: Tx) -> Result(SourceChangeId, Fail(e)) {
+  ids.next(tx, "srcc") |> result.map(SourceChangeId)
+}
+
 /// An id of `org_squad_members`.
 pub opaque type SquadEntryId {
   SquadEntryId(String)
