@@ -45,6 +45,7 @@ import scoutbox/platform/live_event
 import scoutbox/platform/paging
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/domain_errors.{Contract}
 import scoutbox/rows/agent_transactions as tx_row
 import scoutbox/rows/agreement_scopes as agreement_scope_row
@@ -52,6 +53,7 @@ import scoutbox/rows/id
 import scoutbox/rows/regulatory_reviews as review_row
 import scoutbox/rows/transaction_documents as doc_row
 import scoutbox/rows/transaction_history as event_row
+import scoutbox/rows/transaction_keys as key_row
 import scoutbox/rows/transaction_linked_threads as thread_row
 import scoutbox/rows/transaction_notes as note_row
 import scoutbox/rows/transaction_parties as party_row
@@ -210,10 +212,18 @@ pub fn body(
   default: String,
   next: fn(a, Dynamic) -> Response,
 ) -> Response {
+  body_coded(req, shape, default, field_codes, next)
+}
+
+fn body_coded(
+  req: Request,
+  shape: input.Shape(a),
+  default: String,
+  codes: List(#(String, String)),
+  next: fn(a, Dynamic) -> Response,
+) -> Response {
   use raw <- http.json_body(req)
-  case
-    input.parse_coded(shape, raw, root: "body", codes: field_codes, default:)
-  {
+  case input.parse_coded(shape, raw, root: "body", codes:, default:) {
     Ok(v) -> next(v, raw)
     Error(r) -> domain_errors.send(contract, r.error, input.refusal_fields(r))
   }
@@ -3230,4 +3240,1585 @@ pub fn evaluate(
   use _ <- result.try(transaction_store.bump(tx, t.row.id, by, now) |> storage)
   use view <- result.map(projected(tx, t.row.id, agent_viewer(m), now))
   http.json(200, transaction_body(view))
+}
+
+// ------------------------------------------------------------------------------------------------- status
+
+type StatusBody {
+  StatusBody(
+    to: transaction_status.TransactionStatus,
+    reason_code: Option(String),
+    reason: Option(String),
+    client_key: Option(String),
+  )
+}
+
+/// A hold, cancellation or closure needs a code of its own kind; any other move takes none.
+fn reason_codes_for(
+  to: transaction_status.TransactionStatus,
+) -> Option(List(String)) {
+  let codes = fn(pairs: List(#(String, a))) {
+    Some(list.map(pairs, fn(p) { p.0 }))
+  }
+  case to {
+    transaction_status.OnHold -> codes(tx_row.hold_reason_code_pairs)
+    transaction_status.Cancelled -> codes(tx_row.cancel_reason_code_pairs)
+    transaction_status.Closed -> codes(tx_row.close_reason_code_pairs)
+    _ -> None
+  }
+}
+
+fn status_words(s: transaction_status.TransactionStatus) -> String {
+  transaction_status.to_string(s)
+  |> string.replace("_", " ")
+  |> string.lowercase
+}
+
+fn transition_refusal(
+  from: transaction_status.TransactionStatus,
+  to: transaction_status.TransactionStatus,
+  message: Option(String),
+) -> Response {
+  domain_errors.send(
+    contract,
+    "TRANSACTION_TRANSITION_NOT_ALLOWED",
+    list.flatten([
+      case message {
+        Some(m) -> [#("message", json.string(m))]
+        None -> []
+      },
+      [
+        #("from", transaction_status.to_json(from)),
+        #("to", transaction_status.to_json(to)),
+        #(
+          "allowed",
+          json.array(
+            transaction_rules.actor_transitions(from),
+            transaction_status.to_json,
+          ),
+        ),
+      ],
+    ]),
+  )
+}
+
+fn code_reasons(codes: List(String)) -> Json {
+  json.array(codes, fn(code) {
+    json.object([
+      #("code", json.string(code)),
+      #("ruleId", json.null()),
+      #("ruleStatus", json.null()),
+      #("policyVersion", json.null()),
+    ])
+  })
+}
+
+/// `POST /org/agent/transactions/:id/status`: a move to ACTIVE needs a snapshot that is clear and current,
+/// recomputed in this request.
+pub fn move_status(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  let shape = {
+    use to <- input.field(
+      "to",
+      input.required(input.one_of(transaction_status.pairs)),
+    )
+    use reason_code <- input.field("reasonCode", input.nullish(input.text(60)))
+    use reason <- input.field("reason", input.nullish(input.text(400)))
+    use client_key <- input.field(
+      "clientKey",
+      input.nullish(input.text(1_000_000)),
+    )
+    use <- rev.fields
+    input.done(StatusBody(to, reason_code, reason, client_key))
+  }
+  use b, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  let now = clock.now_ms()
+  let to = b.to
+  case t.row.status {
+    transaction_status.Archived ->
+      err("TRANSACTION_ARCHIVED", "An archived transaction is read-only.", [
+        #("status", transaction_status.to_json(t.row.status)),
+      ])
+    _ -> {
+      use guard <- reading(ctx, safeguarding_problem(_, t, now))
+      // Archiving stays possible: shelving a record nobody can act on is the safe move.
+      case guard != None && to != transaction_status.Archived {
+        True ->
+          err(
+            "TRANSACTION_PARTY_UNAVAILABLE",
+            "A party to this transaction is no longer available to your organisation. It can be archived; it cannot be progressed.",
+            [],
+          )
+        False -> {
+          use key <- client_key(b.client_key)
+          let reason_code = input.filled(b.reason_code) |> option.unwrap("")
+          let reason = input.filled(b.reason) |> option.unwrap("")
+          let fp =
+            canonical.Object([
+              #("to", canonical.Str(transaction_status.to_string(to))),
+              #("reasonCode", canonical.Str(reason_code)),
+              #("reason", canonical.Str(reason)),
+            ])
+            |> canonical.to_string
+          let viewer = agent_viewer(m)
+          // Before the transition check: a replay must answer "already done", not "not allowed from here".
+          let replay = case key {
+            Some(k) -> transaction_store.key_fp(t, key_row.Status, k)
+            None -> None
+          }
+          case replay {
+            Some(stored) if stored == fp -> {
+              use view <- reading(ctx, project(_, t, viewer, now))
+              http.json(200, idempotent_body(view))
+            }
+            Some(_) ->
+              domain_errors.send(
+                contract,
+                "TRANSACTION_IDEMPOTENCY_CONFLICT",
+                [],
+              )
+            None ->
+              case
+                transaction_rules.actor_transition_allowed(t.row.status, to)
+              {
+                False ->
+                  transition_refusal(
+                    t.row.status,
+                    to,
+                    Some(
+                      "That is not a transition this transaction can make from its current state.",
+                    ),
+                  )
+                True -> {
+                  use <- limited(
+                    ctx,
+                    req,
+                    limits.TransactionStatusWrite,
+                    id.org_user_to_string(a.user.id),
+                  )
+                  let awaiting =
+                    transaction_rules.awaiting_confirmation(
+                      t.row.type_,
+                      t.parties,
+                    )
+                  case
+                    to == transaction_status.PartiesConfirmed && awaiting != []
+                  {
+                    True ->
+                      err(
+                        "TRANSACTION_PARTIES_NOT_CONFIRMED",
+                        "Every required party must confirm its own participation first. Naming a party is not confirming it.",
+                        [
+                          #(
+                            "awaiting",
+                            json.array(awaiting, party_role.to_json),
+                          ),
+                        ],
+                      )
+                    False -> {
+                      let codes = reason_codes_for(to)
+                      let code_ok = case codes {
+                        Some(cs) -> list.contains(cs, reason_code)
+                        None -> reason_code == ""
+                      }
+                      case code_ok {
+                        False ->
+                          domain_errors.send(
+                            contract,
+                            "TRANSACTION_INPUT_INVALID",
+                            list.flatten([
+                              case codes {
+                                None -> [
+                                  #(
+                                    "message",
+                                    json.string(
+                                      "A move to "
+                                      <> transaction_status.to_string(to)
+                                      <> " takes no reason code.",
+                                    ),
+                                  ),
+                                ]
+                                Some(_) -> []
+                              },
+                              [
+                                #("field", json.string("reasonCode")),
+                                #(
+                                  "allowed",
+                                  json.array(
+                                    option.unwrap(codes, []),
+                                    json.string,
+                                  ),
+                                ),
+                              ],
+                            ]),
+                          )
+                        True ->
+                          status_in_unit(
+                            ctx,
+                            a,
+                            viewer,
+                            t,
+                            b,
+                            raw,
+                            key,
+                            fp,
+                            input.filled(b.reason_code),
+                            input.filled(b.reason),
+                            now,
+                          )
+                      }
+                    }
+                  }
+                }
+              }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn status_in_unit(
+  ctx: Ctx,
+  a: OrgAccess,
+  viewer: Viewer,
+  t: Transaction,
+  b: StatusBody,
+  raw: Dynamic,
+  key: Option(String),
+  fp: String,
+  reason_code: Option(String),
+  reason: Option(String),
+  now: Int,
+) -> Response {
+  let to = b.to
+  let by = by_agent(a)
+  use expected <- rev_expected(raw)
+  use tx <- acting(ctx, t)
+  let read = store.reading(tx)
+  let bump = fn() { transaction_store.bump(tx, t.row.id, by, now) |> storage }
+  let rest = fn() {
+    // A stale rev rolls back the re-evaluation above with the rest.
+    use _ <- result.try(
+      case
+        rev.check(expected, tx_rev(t), "TRANSACTION_VERSION_CONFLICT", [
+          #(
+            "current",
+            json.object([#("status", transaction_status.to_json(t.row.status))]),
+          ),
+        ])
+      {
+        Ok(Nil) -> Ok(Nil)
+        Error(conflict) -> store.refuse(conflict)
+      },
+    )
+    use current <- result.try(
+      transaction_store.by_id(read, t.row.id) |> storage,
+    )
+    let assert Some(current) = current
+    let from = current.row.status
+    let action = case to {
+      transaction_status.OnHold -> event_row.TransactionHeld
+      transaction_status.Cancelled -> event_row.TransactionCancelled
+      transaction_status.Closed -> event_row.TransactionClosed
+      transaction_status.Archived -> event_row.TransactionArchived
+      _ -> event_row.TransactionStatusChanged
+    }
+    use _ <- result.try(
+      transaction_store.move_by_actor(
+        tx,
+        current,
+        to,
+        reason_code,
+        reason,
+        option.map(key, fn(k) { #(k, fp) }),
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.try(transaction_store.touch(tx, t.row.id, now) |> storage)
+    use _ <- result.try(
+      transaction_store.history(
+        tx,
+        t.row.id,
+        action,
+        by,
+        transaction_store.Detail(
+          ..transaction_store.no_detail,
+          from: Some(from),
+          to: Some(to),
+          reason_code: option.then(reason_code, fn(c) {
+            event_row.detail_reason_code_from_string(c) |> option.from_result
+          }),
+        ),
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.try(bump())
+    use _ <- result.try(case to {
+      transaction_status.Cancelled | transaction_status.Closed -> {
+        use c <- result.try(
+          compliance_store.by_id(read, t.row.context_id) |> storage,
+        )
+        case c {
+          Some(c) -> compliance_store.close(tx, c, by, now) |> storage
+          None -> Ok(Nil)
+        }
+      }
+      _ -> Ok(Nil)
+    })
+    let org_id = id.org_to_string(t.row.agency_org_id)
+    let tx_id = id.transaction_to_string(t.row.id)
+    let status = transaction_status.to_string(to)
+    store.emit(
+      tx,
+      effect.Live(case to {
+        transaction_status.OnHold ->
+          live_event.AgentTransactionHeld(org_id:, tx_id:, status:)
+        transaction_status.Cancelled ->
+          live_event.AgentTransactionCancelled(org_id:, tx_id:, status:)
+        transaction_status.Closed ->
+          live_event.AgentTransactionClosed(org_id:, tx_id:, status:)
+        _ -> live_event.AgentTransactionStatusChanged(org_id:, tx_id:, status:)
+      }),
+    )
+    use _ <- result.try(
+      t.parties
+      |> list.filter(fn(p) { !p.removed })
+      |> list.try_each(fn(p) {
+        notify_party_as(
+          tx,
+          t.row.id,
+          p,
+          "agent_transaction",
+          "A transaction you are party to is now \""
+            <> status_words(to)
+            <> "\". Nothing has been agreed or signed.",
+          now,
+        )
+      })
+      |> storage,
+    )
+    use view <- result.map(projected(tx, t.row.id, viewer, now))
+    http.json(200, transaction_body(view))
+  }
+  case to {
+    transaction_status.Active -> {
+      // Refused before the re-check, so the caller cannot enter the live workflow on facts they have not seen:
+      // they must re-evaluate and read the answer first. The flag commits with the refusal.
+      use view <- result.try(compliance_of(read, t) |> storage)
+      use stale <- result.try(staleness_of(read, t, view, now) |> storage)
+      case stale {
+        Some(s) -> {
+          use _ <- result.try(
+            transaction_store.flag_stale(tx, t.row.id) |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.history(
+              tx,
+              t.row.id,
+              event_row.TransactionComplianceStale,
+              by,
+              transaction_store.Detail(
+                ..transaction_store.no_detail,
+                staleness: Some(s),
+              ),
+              now,
+            )
+            |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.touch(tx, t.row.id, now) |> storage,
+          )
+          use _ <- result.map(bump())
+          err(
+            "TRANSACTION_COMPLIANCE_STALE",
+            "The recorded compliance evaluation no longer matches the current facts. Re-evaluate and read the new answer before progressing.",
+            [#("staleness", staleness.to_json(s))],
+          )
+        }
+        None -> {
+          use checked <- result.try(recheck(tx, t.row.id, by, now) |> storage)
+          case checked {
+            Guarded(_) -> Ok(not_found())
+            Checked(state:, status:) -> {
+              let allowed =
+                transaction_rules.actor_transition_allowed(status, to)
+              case state.blocked, state.clear, allowed {
+                True, _, _ -> {
+                  use _ <- result.map(bump())
+                  err(
+                    "TRANSACTION_COMPLIANCE_BLOCKED",
+                    "An encoded ACTIVE rule prohibits this combination. A reviewer cannot approve past it; only changed facts or a new policy version can.",
+                    [
+                      #(
+                        "outcome",
+                        json.nullable(state.outcome, context_outcome.to_json),
+                      ),
+                      #("reasons", code_reasons(state.reason_codes)),
+                    ],
+                  )
+                }
+                _, False, _ -> {
+                  use _ <- result.map(bump())
+                  err(
+                    "TRANSACTION_COMPLIANCE_PENDING",
+                    "This transaction cannot progress while compliance is outstanding.",
+                    [
+                      #(
+                        "pendingReason",
+                        json.nullable(
+                          state.pending_reason,
+                          pending_reason.to_json,
+                        ),
+                      ),
+                      #(
+                        "outcome",
+                        json.nullable(state.outcome, context_outcome.to_json),
+                      ),
+                      #("reasons", code_reasons(state.reason_codes)),
+                    ],
+                  )
+                }
+                // The re-evaluation may have moved the status.
+                _, _, False -> {
+                  use _ <- result.map(bump())
+                  transition_refusal(status, to, None)
+                }
+                _, _, True -> rest()
+              }
+            }
+          }
+        }
+      }
+    }
+    _ -> rest()
+  }
+}
+
+/// A notice to a party: a player directly, a club through its recorded signatories.
+pub fn notify_party_as(
+  tx: Tx,
+  transaction_id: id.TransactionId,
+  p: party_row.Row,
+  type_: String,
+  text: String,
+  now: Int,
+) -> Result(Nil, Fail(e)) {
+  let ref = Some(id.transaction_to_string(transaction_id))
+  case p.subject_kind {
+    subject_kind.Player ->
+      notifications.notify(
+        tx,
+        to: audience.Player,
+        id: p.subject_id,
+        type_:,
+        text:,
+        ref_id: ref,
+        at: now,
+      )
+    subject_kind.Club -> {
+      use admins <- result.try(records.active_admins_of(
+        store.reading(tx),
+        id.org(p.subject_id),
+      ))
+      list.try_each(admins, fn(admin) {
+        notifications.notify(
+          tx,
+          to: audience.OrgUser,
+          id: id.org_user_to_string(admin.user_id),
+          type_:,
+          text:,
+          ref_id: ref,
+          at: now,
+        )
+      })
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- documents
+
+/// Who files a document: the agent, a club or the player.
+pub type Owner {
+  AgentOwner(user_id: id.OrgUserId)
+  ClubOwner(org_id: id.OrgId)
+  PlayerOwner(player_id: id.PlayerId)
+}
+
+type DocumentBody {
+  DocumentBody(
+    document_type: doc_row.DocumentType,
+    visibility: Option(String),
+    label: Option(String),
+    evidence_id: Option(String),
+    expires_at: Option(temporal.Due),
+    client_key: Option(String),
+  )
+}
+
+fn document_shape() -> input.Shape(DocumentBody) {
+  let evidence = {
+    use _ <- input.field(
+      "kind",
+      input.required(input.one_of([#("verification_evidence", Nil)])),
+    )
+    use evidence_id <- input.field("id", input.required(input.id()))
+    input.done(evidence_id)
+  }
+  use document_type <- input.field(
+    "documentType",
+    input.required(input.one_of(doc_row.document_type_pairs)),
+  )
+  use visibility <- input.field("visibility", input.optional(input.text(60)))
+  use label <- input.field("label", input.nullish(input.text(120)))
+  use evidence_id <- input.field(
+    "evidenceRef",
+    input.nullish(input.object(evidence)),
+  )
+  use expires_at <- input.field("expiresAt", input.optional(input.due_date()))
+  use client_key <- input.field(
+    "clientKey",
+    input.nullish(input.text(1_000_000)),
+  )
+  use <- rev.fields
+  input.done(DocumentBody(
+    document_type:,
+    visibility:,
+    label:,
+    evidence_id:,
+    expires_at: option.flatten(expires_at),
+    client_key:,
+  ))
+}
+
+fn uploaded_kind(by: By) -> doc_row.UploadedByKind {
+  case by.kind {
+    compliance_actor_kind.ClubUser -> doc_row.ClubUser
+    compliance_actor_kind.Player -> doc_row.UploadedByKindPlayer
+    _ -> doc_row.Org
+  }
+}
+
+/// No bytes are stored here: `evidenceRef` points into the evidence vault, and without one a document is a
+/// placeholder.
+pub fn add_document(
+  ctx: Ctx,
+  req: Request,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+  owner: Owner,
+  by: By,
+  rate_key: String,
+) -> Response {
+  use <- writable(ctx, t)
+  use <- limited(ctx, req, limits.TransactionDocumentWrite, rate_key)
+  // An unreadable date is refused under the route's own code (DATE_INVALID is renamed, as in TypeScript).
+  use b, _ <- body_coded(
+    req,
+    document_shape(),
+    "DOCUMENT_INPUT_INVALID",
+    [#("expiresAt", "DOCUMENT_INPUT_INVALID"), ..field_codes],
+  )
+  use key <- client_key(b.client_key)
+  let now = clock.now_ms()
+  let label = input.filled(b.label) |> option.unwrap("")
+  let allowed = transaction_rules.uploadable(roles, side)
+  let visibility = option.unwrap(b.visibility, "")
+  case
+    list.find(allowed, fn(v) { document_visibility.to_string(v) == visibility })
+  {
+    Error(Nil) ->
+      err(
+        "DOCUMENT_VISIBILITY_NOT_PERMITTED",
+        "You cannot file a document into a lane you do not sit in, and nobody may file into the Trust & Safety lane.",
+        [
+          #("visibility", case visibility {
+            "" -> json.null()
+            v -> json.string(v)
+          }),
+          #("allowed", json.array(allowed, document_visibility.to_json)),
+        ],
+      )
+    Ok(class) ->
+      case label {
+        "" ->
+          err(
+            "DOCUMENT_INPUT_INVALID",
+            "A document needs a label the other parties can read.",
+            [
+              #("field", json.string("label")),
+              #("problem", json.string("required")),
+            ],
+          )
+        _ -> {
+          use evidence <- reading(ctx, fn(r) {
+            case b.evidence_id {
+              None -> Ok(Ok(None))
+              Some(eid) -> {
+                use ev <- result.map(records.evidence(
+                  r,
+                  id.evidence(string.trim(eid)),
+                ))
+                let agency = Some(t.row.agency_org_id)
+                // The uploader must own the evidence; an unknown id and a foreign id answer alike.
+                case ev, owner {
+                  Some(e), ClubOwner(org) ->
+                    case e.org_id == Some(org) {
+                      True -> Ok(Some(e.id))
+                      False -> Error(Nil)
+                    }
+                  Some(e), AgentOwner(_) if e.org_id == agency -> Ok(Some(e.id))
+                  _, _ -> Error(Nil)
+                }
+              }
+            }
+          })
+          case evidence {
+            Error(Nil) ->
+              err(
+                "DOCUMENT_INPUT_INVALID",
+                "No evidence record of yours matches that reference.",
+                [
+                  #("field", json.string("evidenceRef")),
+                ],
+              )
+            Ok(evidence) -> {
+              // A calendar day is valid through that day.
+              let expires = option.map(b.expires_at, temporal.end)
+              case expires {
+                Some(at) if at <= now ->
+                  err(
+                    "DOCUMENT_INPUT_INVALID",
+                    "An expiry must be a future timestamp.",
+                    [
+                      #("field", json.string("expiresAt")),
+                    ],
+                  )
+                _ ->
+                  add_document_checked(
+                    ctx,
+                    t,
+                    roles,
+                    side,
+                    owner,
+                    by,
+                    b,
+                    class,
+                    label,
+                    evidence,
+                    expires,
+                    key,
+                    now,
+                  )
+              }
+            }
+          }
+        }
+      }
+  }
+}
+
+fn add_document_checked(
+  ctx: Ctx,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+  owner: Owner,
+  by: By,
+  b: DocumentBody,
+  class: document_visibility.DocumentVisibility,
+  label: String,
+  evidence: Option(id.EvidenceId),
+  expires: Option(Int),
+  key: Option(String),
+  now: Int,
+) -> Response {
+  let fp =
+    canonical.Object([
+      #(
+        "documentType",
+        canonical.Str(doc_row.document_type_to_string(b.document_type)),
+      ),
+      #("visibility", canonical.Str(document_visibility.to_string(class))),
+      #("label", canonical.Str(label)),
+      #("evidenceRef", case evidence {
+        Some(e) ->
+          canonical.Object([
+            #("kind", canonical.Str("verification_evidence")),
+            #("id", canonical.Str(id.evidence_to_string(e))),
+          ])
+        None -> canonical.Null
+      }),
+    ])
+    |> canonical.to_string
+  use found <- reading(ctx, fn(r) {
+    use hit <- result.try(case key {
+      Some(k) -> transaction_store.document_by_add_key(r, t.row.id, k)
+      None -> Ok(None)
+    })
+    use docs <- result.map(transaction_store.documents(r, t.row.id))
+    #(hit, list.length(docs))
+  })
+  case found {
+    #(Some(hit), _) ->
+      case hit.row.add_fp == Some(fp) {
+        True ->
+          http.json(
+            200,
+            json.object([
+              #("document", document_json(hit, roles, side, now)),
+              #("idempotent", json.bool(True)),
+            ]),
+          )
+        False ->
+          domain_errors.send(contract, "TRANSACTION_IDEMPOTENCY_CONFLICT", [])
+      }
+    #(None, count) if count >= 200 ->
+      err(
+        "DOCUMENT_INPUT_INVALID",
+        "This transaction already holds the maximum number of documents.",
+        [#("field", json.string("documentType"))],
+      )
+    #(None, _) -> {
+      let #(owner_kind, owner_id) = case owner {
+        AgentOwner(u) -> #(doc_row.Agent, id.org_user_to_string(u))
+        ClubOwner(o) -> #(doc_row.Club, id.org_to_string(o))
+        PlayerOwner(p) -> #(doc_row.OwnerKindPlayer, id.player_to_string(p))
+      }
+      use tx <- acting(ctx, t)
+      use doc_id <- result.try(id.next_transaction_document(tx) |> storage)
+      let d =
+        doc_row.Row(
+          ..doc_row.new(
+            id: doc_id,
+            transaction_id: t.row.id,
+            document_type: b.document_type,
+            visibility: class,
+            label:,
+            version: 1,
+            owner_kind:,
+            uploaded_by_kind: uploaded_kind(by),
+            created_at: now,
+            rev: 1,
+          ),
+          owner_id: Some(owner_id),
+          owner_party_role: side,
+          uploaded_by_id: by.id,
+          uploaded_by_name: by.name,
+          uploaded_by_org_id: by.org_id,
+          expires_at: expires,
+          evidence_id: evidence,
+          add_key: key,
+          add_fp: option.map(key, fn(_) { fp }),
+          rev_at: Some(now),
+        )
+      use _ <- result.try(
+        transaction_store.create_document(tx, d, by) |> storage,
+      )
+      use _ <- result.try(
+        transaction_store.history(
+          tx,
+          t.row.id,
+          event_row.TransactionDocumentAdded,
+          by,
+          transaction_store.Detail(
+            ..transaction_store.no_detail,
+            document_type: event_type(b.document_type),
+            visibility: Some(class),
+          ),
+          now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(transaction_store.touch(tx, t.row.id, now) |> storage)
+      store.emit(
+        tx,
+        effect.Live(live_event.AgentTransactionDocumentAdded(
+          org_id: id.org_to_string(t.row.agency_org_id),
+          tx_id: id.transaction_to_string(t.row.id),
+          doc_id: id.transaction_document_to_string(doc_id),
+        )),
+      )
+      // A notification is a disclosure: only parties the visibility class admits hear of it.
+      use _ <- result.try(case class {
+        document_visibility.AgentPrivate -> Ok(Nil)
+        _ -> {
+          use _ <- result.try(
+            t.parties
+            |> list.filter(fn(p) { !p.removed })
+            |> list.try_each(fn(p) {
+              let other = case p.subject_kind {
+                subject_kind.Player -> [transaction_rules.PartyIndividual]
+                subject_kind.Club -> [transaction_rules.PartyClubSignatory]
+              }
+              let own = case p.subject_kind, owner {
+                subject_kind.Player, PlayerOwner(me) ->
+                  p.subject_id == id.player_to_string(me)
+                subject_kind.Club, ClubOwner(me) ->
+                  p.subject_id == id.org_to_string(me)
+                _, _ -> False
+              }
+              case
+                transaction_rules.can_see(class, other, Some(p.party_role))
+                && !own
+              {
+                True ->
+                  notify_party_as(
+                    tx,
+                    t.row.id,
+                    p,
+                    "agent_transaction",
+                    "A document has been shared in a transaction you are party to: "
+                      <> label
+                      <> ".",
+                    now,
+                  )
+                False -> Ok(Nil)
+              }
+            })
+            |> storage,
+          )
+          case owner {
+            AgentOwner(_) -> Ok(Nil)
+            _ ->
+              notifications.notify(
+                tx,
+                to: audience.OrgUser,
+                id: id.org_user_to_string(t.row.agent_user_id),
+                type_: "agent_transaction",
+                text: "A party shared a document in a transaction: "
+                  <> label
+                  <> ".",
+                ref_id: Some(id.transaction_to_string(t.row.id)),
+                at: now,
+              )
+              |> storage
+          }
+        }
+      })
+      Ok(http.json(
+        201,
+        json.object([
+          #(
+            "document",
+            document_json(transaction_store.Document(d, None), roles, side, now),
+          ),
+        ]),
+      ))
+    }
+  }
+}
+
+fn event_type(t: doc_row.DocumentType) -> Option(event_row.DetailDocumentType) {
+  event_row.detail_document_type_from_string(doc_row.document_type_to_string(t))
+  |> option.from_result
+}
+
+/// A document's reference, reauthorised every time: a reference is never a standing permission.
+pub fn document_reference(
+  ctx: Ctx,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+  document_id: String,
+) -> Response {
+  let now = clock.now_ms()
+  use docs <- reading(ctx, transaction_store.documents(_, t.row.id))
+  let gone = fn() {
+    err(
+      "DOCUMENT_NOT_FOUND",
+      "No document with that reference is available to you.",
+      [],
+    )
+  }
+  case
+    list.find(docs, fn(d) {
+      id.transaction_document_to_string(d.row.id) == document_id
+    })
+  {
+    Ok(d) ->
+      case
+        transaction_rules.can_see(d.row.visibility, roles, side)
+        && !expired(d.row, now)
+      {
+        False -> gone()
+        True ->
+          http.json(
+            200,
+            json.object(case d.row.evidence_id {
+              None -> [
+                #("document", document_json(d, roles, side, now)),
+                #("reference", json.null()),
+                #(
+                  "note",
+                  json.string(
+                    "This document is a placeholder: no file has been attached to it in the evidence vault.",
+                  ),
+                ),
+              ]
+              Some(e) -> [
+                #("document", document_json(d, roles, side, now)),
+                #(
+                  "reference",
+                  json.object([
+                    #("kind", json.string("verification_evidence")),
+                    #("id", id.evidence_json(e)),
+                  ]),
+                ),
+                #(
+                  "note",
+                  json.string(
+                    "Fetch the file through the canonical evidence route, which authorises the download itself. Holding this reference is not authority to read the file.",
+                  ),
+                ),
+              ]
+            }),
+          )
+      }
+    Error(Nil) -> gone()
+  }
+}
+
+/// A party's list: what its lane admits, superseded versions left out.
+pub fn party_documents(
+  ctx: Ctx,
+  t: Transaction,
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+) -> Response {
+  let now = clock.now_ms()
+  use docs <- reading(ctx, transaction_store.documents(_, t.row.id))
+  http.json(
+    200,
+    json.object([
+      #(
+        "items",
+        docs
+          |> list.filter(fn(d) {
+            transaction_rules.can_see(d.row.visibility, roles, side)
+            && d.superseded_by == None
+          })
+          |> json.array(document_json(_, roles, side, now)),
+      ),
+      #(
+        "uploadable",
+        json.array(
+          transaction_rules.uploadable(roles, side),
+          document_visibility.to_json,
+        ),
+      ),
+      #("documentTypes", codes_json(doc_row.document_type_pairs)),
+    ]),
+  )
+}
+
+/// `GET /org/agent/transactions/:id/documents`: every version the agent's lanes admit.
+pub fn documents_mine(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use t <- own_transaction(ctx, m, transaction_id)
+  let roles = roles_of(t, agent_viewer(m))
+  let now = clock.now_ms()
+  use docs <- reading(ctx, transaction_store.documents(_, t.row.id))
+  http.json(
+    200,
+    json.object([
+      #(
+        "items",
+        docs
+          |> list.filter(fn(d) {
+            transaction_rules.can_see(d.row.visibility, roles, None)
+          })
+          |> json.array(document_json(_, roles, None, now)),
+      ),
+      #("documentTypes", codes_json(doc_row.document_type_pairs)),
+      #(
+        "uploadable",
+        json.array(
+          transaction_rules.uploadable(roles, None),
+          document_visibility.to_json,
+        ),
+      ),
+    ]),
+  )
+}
+
+/// `POST /org/agent/transactions/:id/documents`.
+pub fn add_document_mine(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  add_document(
+    ctx,
+    req,
+    t,
+    roles_of(t, agent_viewer(m)),
+    None,
+    AgentOwner(a.user.id),
+    by_agent(a),
+    id.org_user_to_string(a.user.id),
+  )
+}
+
+/// `GET /org/agent/transactions/:id/documents/:docId/reference`.
+pub fn document_reference_mine(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+  document_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use t <- own_transaction(ctx, m, transaction_id)
+  document_reference(ctx, t, roles_of(t, agent_viewer(m)), None, document_id)
+}
+
+/// `POST /org/agent/transactions/:id/documents/:docId/supersede`: the old row is kept, untouched but for its
+/// link.
+pub fn supersede_document(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+  document_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  let roles = roles_of(t, agent_viewer(m))
+  let now = clock.now_ms()
+  use docs <- reading(ctx, transaction_store.documents(_, t.row.id))
+  case
+    list.find(docs, fn(d) {
+      id.transaction_document_to_string(d.row.id) == document_id
+      && d.row.owner_kind == doc_row.Agent
+      && transaction_rules.can_see(d.row.visibility, roles, None)
+    })
+  {
+    Error(Nil) -> domain_errors.send(contract, "DOCUMENT_NOT_FOUND", [])
+    Ok(old) if old.superseded_by != None ->
+      err(
+        "DOCUMENT_SUPERSEDED",
+        "That version has already been superseded.",
+        [],
+      )
+    Ok(old) -> {
+      let shape = {
+        use label <- input.field("label", input.nullish(input.text(120)))
+        use <- rev.fields
+        input.done(label)
+      }
+      use label, raw <- body(req, shape, "DOCUMENT_INPUT_INVALID")
+      let label = input.filled(label) |> option.unwrap(old.row.label)
+      use expected <- rev_expected(raw)
+      use <- rev.guard(
+        expected,
+        rev.Rev(old.row.rev, old.row.rev_at, old.row.rev_by_name),
+        "DOCUMENT_VERSION_CONFLICT",
+        [#("current", json.object([#("version", json.int(old.row.version))]))],
+      )
+      let by = by_agent(a)
+      use tx <- acting(ctx, t)
+      use doc_id <- result.try(id.next_transaction_document(tx) |> storage)
+      let next =
+        doc_row.Row(
+          ..old.row,
+          id: doc_id,
+          label:,
+          version: old.row.version + 1,
+          uploaded_by_kind: doc_row.Org,
+          uploaded_by_id: by.id,
+          uploaded_by_name: by.name,
+          uploaded_by_org_id: None,
+          created_at: now,
+          supersedes_id: Some(old.row.id),
+          removed_at: None,
+          add_key: None,
+          add_fp: None,
+          rev: 1,
+          rev_at: Some(now),
+          rev_by_id: None,
+          rev_by_name: None,
+        )
+      use _ <- result.try(
+        transaction_store.supersede_document(tx, old.row, next, by, now)
+        |> storage,
+      )
+      use _ <- result.try(
+        transaction_store.history(
+          tx,
+          t.row.id,
+          event_row.TransactionDocumentSuperseded,
+          by,
+          transaction_store.Detail(
+            ..transaction_store.no_detail,
+            document_type: event_type(next.document_type),
+            version: Some(next.version),
+          ),
+          now,
+        )
+        |> storage,
+      )
+      use _ <- result.try(transaction_store.touch(tx, t.row.id, now) |> storage)
+      Ok(http.json(
+        201,
+        json.object([
+          #(
+            "document",
+            document_json(
+              transaction_store.Document(next, None),
+              roles,
+              None,
+              now,
+            ),
+          ),
+        ]),
+      ))
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- terms
+
+type TermsBody {
+  TermsBody(
+    summary: Option(String),
+    recorded_for: PartyRole,
+    visibility: Option(String),
+  )
+}
+
+/// `POST /org/agent/transactions/:id/terms`: recorded as data, not validated. Validating a suspended fee rule
+/// would be wrong, and proposing terms would make ScoutBox the negotiator.
+pub fn record_terms(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  use <- limited(
+    ctx,
+    req,
+    limits.TransactionWrite,
+    id.org_user_to_string(a.user.id),
+  )
+  let shape = {
+    use summary <- input.field("summary", input.nullish(input.text(note_max)))
+    use recorded_for <- input.field(
+      "recordedFor",
+      input.required(input.one_of(party_role.pairs)),
+    )
+    use visibility <- input.field("visibility", input.optional(input.text(60)))
+    use <- rev.fields
+    input.done(TermsBody(summary, recorded_for, visibility))
+  }
+  use b, raw <- body(req, shape, "TERMS_INPUT_INVALID")
+  let viewer = agent_viewer(m)
+  let roles = roles_of(t, viewer)
+  let allowed = transaction_rules.uploadable(roles, None)
+  let visibility = option.unwrap(b.visibility, "")
+  case input.filled(b.summary) {
+    None ->
+      err(
+        "TERMS_INPUT_INVALID",
+        "A terms version needs a written summary of what the parties recorded.",
+        [
+          #("field", json.string("summary")),
+          #("problem", json.string("required")),
+        ],
+      )
+    Some(summary) ->
+      case
+        list.find(allowed, fn(v) {
+          document_visibility.to_string(v) == visibility
+        }),
+        terms_row.visibility_from_string(visibility)
+      {
+        Ok(class), Ok(stored) ->
+          case list.length(t.terms) >= 50 {
+            True ->
+              err(
+                "TERMS_INPUT_INVALID",
+                "This transaction already holds the maximum number of recorded terms versions.",
+                [#("field", json.string("summary"))],
+              )
+            False -> {
+              use <- guard_rev(raw, t)
+              let by = by_agent(a)
+              let now = clock.now_ms()
+              let version = list.length(t.terms) + 1
+              use tx <- acting(ctx, t)
+              use terms_id <- result.try(id.next_terms_version(tx) |> storage)
+              use _ <- result.try(
+                transaction_store.record_terms(
+                  tx,
+                  t,
+                  terms_row.Row(
+                    ..terms_row.new(
+                      id: terms_id,
+                      transaction_id: t.row.id,
+                      version:,
+                      recorded_at: now,
+                      recorded_by_id: a.user.id,
+                      recorded_for: b.recorded_for,
+                      visibility: stored,
+                      summary:,
+                    ),
+                    recorded_by_name: Some(a.user.name),
+                  ),
+                )
+                |> storage,
+              )
+              use _ <- result.try(
+                transaction_store.history(
+                  tx,
+                  t.row.id,
+                  event_row.TransactionTermsRecorded,
+                  by,
+                  transaction_store.Detail(
+                    ..transaction_store.no_detail,
+                    party_role: Some(b.recorded_for),
+                    visibility: Some(class),
+                    version: Some(version),
+                  ),
+                  now,
+                )
+                |> storage,
+              )
+              use _ <- result.try(
+                transaction_store.touch(tx, t.row.id, now) |> storage,
+              )
+              use _ <- result.try(
+                transaction_store.bump(tx, t.row.id, by, now) |> storage,
+              )
+              use view <- result.map(projected(tx, t.row.id, viewer, now))
+              http.json(201, transaction_body(view))
+            }
+          }
+        _, _ ->
+          domain_errors.send(contract, "DOCUMENT_VISIBILITY_NOT_PERMITTED", [
+            #("visibility", case visibility {
+              "" -> json.null()
+              v -> json.string(v)
+            }),
+            #("allowed", json.array(allowed, document_visibility.to_json)),
+          ])
+      }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- parties
+
+type PartyBody {
+  PartyBody(party: PartyInput, client_key: Option(String))
+}
+
+/// `POST /org/agent/transactions/:id/parties`.
+pub fn add_party(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  use <- limited(
+    ctx,
+    req,
+    limits.TransactionWrite,
+    id.org_user_to_string(a.user.id),
+  )
+  let shape = {
+    use role <- input.field(
+      "partyRole",
+      input.required(input.one_of(party_role.pairs)),
+    )
+    use kind <- input.field(
+      "subjectKind",
+      input.required(input.one_of(subject_kind.pairs)),
+    )
+    use subject_id <- input.field("subjectId", input.required(input.id()))
+    use client_key <- input.field(
+      "clientKey",
+      input.nullish(input.text(1_000_000)),
+    )
+    use <- rev.fields
+    input.done(PartyBody(PartyInput(role, kind, subject_id), client_key))
+  }
+  use b, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  use key <- client_key(b.client_key)
+  let now = clock.now_ms()
+  use resolved <- reading(ctx, resolve_parties(
+    _,
+    a,
+    [b.party],
+    t.row.type_,
+    now,
+  ))
+  case resolved {
+    Error(response) -> response
+    Ok(_) -> {
+      let p = b.party
+      let viewer = agent_viewer(m)
+      let fp =
+        canonical.Object([
+          #("partyRole", canonical.Str(party_role.to_string(p.role))),
+          #("subjectId", canonical.Str(p.subject_id)),
+        ])
+        |> canonical.to_string
+      let replay = case key {
+        Some(k) -> transaction_store.key_fp(t, key_row.Party, k)
+        None -> None
+      }
+      case replay {
+        Some(stored) if stored == fp -> {
+          use view <- reading(ctx, project(_, t, viewer, now))
+          http.json(200, idempotent_body(view))
+        }
+        Some(_) ->
+          domain_errors.send(contract, "TRANSACTION_IDEMPOTENCY_CONFLICT", [])
+        None ->
+          case
+            list.any(t.parties, fn(x) { !x.removed && x.party_role == p.role }),
+            list.length(t.parties) >= parties_max * 3
+          {
+            True, _ ->
+              domain_errors.send(contract, "TRANSACTION_PARTY_EXISTS", [
+                #("partyRole", party_role.to_json(p.role)),
+              ])
+            _, True ->
+              err(
+                "TRANSACTION_INPUT_INVALID",
+                "This transaction already holds the maximum number of party records.",
+                [#("field", json.string("parties"))],
+              )
+            False, False -> {
+              use <- guard_rev(raw, t)
+              let by = by_agent(a)
+              use tx <- acting(ctx, t)
+              use party_id <- result.try(
+                id.next_transaction_party(tx) |> storage,
+              )
+              let row =
+                party_row.Row(
+                  ..party_row.new(
+                    id: party_id,
+                    transaction_id: t.row.id,
+                    transaction_type: t.row.type_,
+                    ord: 0,
+                    party_role: p.role,
+                    subject_kind: p.kind,
+                    subject_id: p.subject_id,
+                    added_at: now,
+                    added_by_id: a.user.id,
+                    removed: False,
+                  ),
+                  added_by_name: Some(a.user.name),
+                )
+              use _ <- result.try(
+                transaction_store.add_party(
+                  tx,
+                  t,
+                  row,
+                  option.map(key, fn(k) { #(k, fp) }),
+                )
+                |> storage,
+              )
+              use _ <- result.try(
+                transaction_store.history(
+                  tx,
+                  t.row.id,
+                  event_row.TransactionPartyAdded,
+                  by,
+                  transaction_store.Detail(
+                    ..transaction_store.no_detail,
+                    party_role: Some(p.role),
+                    subject_kind: Some(p.kind),
+                  ),
+                  now,
+                )
+                |> storage,
+              )
+              use _ <- result.try(
+                party_changed(tx, t.row.id, by, now) |> storage,
+              )
+              use _ <- result.try(
+                transaction_store.bump(tx, t.row.id, by, now) |> storage,
+              )
+              store.emit(
+                tx,
+                effect.Live(live_event.AgentTransactionPartyChanged(
+                  org_id: id.org_to_string(t.row.agency_org_id),
+                  tx_id: id.transaction_to_string(t.row.id),
+                  party_role: party_role.to_string(p.role),
+                )),
+              )
+              use _ <- result.try(
+                notify_party_as(
+                  tx,
+                  t.row.id,
+                  row,
+                  "agent_transaction_action",
+                  "A transaction workspace now names you as the "
+                    <> string.replace(party_role.to_string(p.role), "_", " ")
+                    <> ". Confirm your participation to let it proceed. Confirming does not agree to any terms.",
+                  now,
+                )
+                |> storage,
+              )
+              use view <- result.map(projected(tx, t.row.id, viewer, now))
+              http.json(201, transaction_body(view))
+            }
+          }
+      }
+    }
+  }
+}
+
+/// `POST /org/agent/transactions/:id/parties/:pid/remove`: the party row stays with its `removedAt`; every
+/// representation naming that role is withdrawn.
+pub fn remove_party(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+  party_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  case
+    list.find(t.parties, fn(p) {
+      id.transaction_party_to_string(p.id) == party_id
+    })
+  {
+    Error(Nil) ->
+      domain_errors.send(contract, "TRANSACTION_PARTY_NOT_FOUND", [])
+    Ok(party) -> {
+      use raw <- rev_only(req)
+      let viewer = agent_viewer(m)
+      let now = clock.now_ms()
+      case party.removed {
+        True -> {
+          use view <- reading(ctx, project(_, t, viewer, now))
+          http.json(200, idempotent_body(view))
+        }
+        False -> {
+          use <- guard_rev(raw, t)
+          let by = by_agent(a)
+          use tx <- acting(ctx, t)
+          let read = store.reading(tx)
+          use reps <- result.try(
+            transaction_store.representations(read, t.row.id) |> storage,
+          )
+          use _ <- result.try(
+            reps
+            |> list.filter(fn(r) {
+              r.row.party_role == party.party_role
+              && r.row.status != declared_representation_status.Withdrawn
+            })
+            |> list.try_each(fn(r) {
+              transaction_store.withdraw_representation(
+                tx,
+                r.row,
+                rep_row.PartyRemoved,
+                by,
+                Some(declared_representation_status.Withdrawn),
+                Some(#(a.user.id, a.user.name)),
+                now,
+              )
+            })
+            |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.remove_party(tx, t.row.id, party.id, now)
+            |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.history(
+              tx,
+              t.row.id,
+              event_row.TransactionPartyRemoved,
+              by,
+              transaction_store.Detail(
+                ..transaction_store.no_detail,
+                party_role: Some(party.party_role),
+                subject_kind: Some(party.subject_kind),
+              ),
+              now,
+            )
+            |> storage,
+          )
+          use _ <- result.try(party_changed(tx, t.row.id, by, now) |> storage)
+          use _ <- result.try(
+            transaction_store.bump(tx, t.row.id, by, now) |> storage,
+          )
+          store.emit(
+            tx,
+            effect.Live(live_event.AgentTransactionPartyChanged(
+              org_id: id.org_to_string(t.row.agency_org_id),
+              tx_id: id.transaction_to_string(t.row.id),
+              party_role: party_role.to_string(party.party_role),
+            )),
+          )
+          use view <- result.map(projected(tx, t.row.id, viewer, now))
+          http.json(200, transaction_body(view))
+        }
+      }
+    }
+  }
+}
+
+/// `GET /org/agent/transactions/:id/messages`.
+pub fn messages_mine(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.read")
+  use t <- own_transaction(ctx, m, transaction_id)
+  let viewer = agent_viewer(m)
+  use threads <- reading(ctx, fn(r) {
+    list.try_map(t.threads, thread_json(r, _, viewer))
+  })
+  http.json(
+    200,
+    json.object([
+      #("items", json.preprocessed_array(threads)),
+      #(
+        "note",
+        json.string(
+          "Correspondence lives in the canonical ScoutBox Inbox. A link records that a conversation exists and who shared it; reading it still needs the Inbox's own authorisation, which transaction membership alone does not give. ScoutBox never negotiates and never replies for anyone.",
+        ),
+      ),
+    ]),
+  )
 }

@@ -4,6 +4,7 @@
 //// A party sees only its own slice. A club that is not a party, and a player who is not the individual, are told
 //// nothing exists.
 
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -15,6 +16,7 @@ import scoutbox/agents/transaction_rules.{type Viewer}
 import scoutbox/agents/transaction_store.{type Transaction}
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
+import scoutbox/messaging/channels
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/effect
@@ -22,9 +24,11 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
+import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
 import scoutbox/rows/transaction_history as event_row
+import scoutbox/rows/transaction_linked_threads as thread_row
 import scoutbox/rows/transaction_notes as note_row
 import scoutbox/rows/transaction_parties as party_row
 import scoutbox/verification/claims
@@ -503,4 +507,301 @@ pub fn player_timeline(
     Some(party_role.Individual),
     "The timeline is what you may see of what happened in this transaction.",
   )
+}
+
+// ------------------------------------------------------------------------------------------------- documents
+
+/// `GET /org/transactions/:id/documents`.
+pub fn club_documents(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use t, viewer, side <- club_transaction(ctx, a, transaction_id, False)
+  shared.party_documents(ctx, t, shared.roles_of(t, viewer), Some(side))
+}
+
+/// `POST /org/transactions/:id/documents`: a signatory files for the club.
+pub fn club_add_document(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use t, viewer, side <- club_transaction(ctx, a, transaction_id, True)
+  shared.add_document(
+    ctx,
+    req,
+    t,
+    shared.roles_of(t, viewer),
+    Some(side),
+    shared.ClubOwner(a.org.id),
+    by_club_user(a),
+    id.org_user_to_string(a.user.id),
+  )
+}
+
+/// `GET /org/transactions/:id/documents/:docId/reference`.
+pub fn club_document_reference(
+  ctx: Ctx,
+  a: OrgAccess,
+  transaction_id: String,
+  document_id: String,
+) -> Response {
+  use t, viewer, side <- club_transaction(ctx, a, transaction_id, False)
+  shared.document_reference(
+    ctx,
+    t,
+    shared.roles_of(t, viewer),
+    Some(side),
+    document_id,
+  )
+}
+
+/// `GET /player/transactions/:id/documents`.
+pub fn player_documents(
+  ctx: Ctx,
+  p: PlayerAccess,
+  transaction_id: String,
+) -> Response {
+  use t <- player_transaction(ctx, p, transaction_id)
+  shared.party_documents(
+    ctx,
+    t,
+    shared.roles_of(t, player_viewer(p)),
+    Some(party_role.Individual),
+  )
+}
+
+/// `POST /player/transactions/:id/documents`.
+pub fn player_add_document(
+  ctx: Ctx,
+  req: Request,
+  p: PlayerAccess,
+  transaction_id: String,
+) -> Response {
+  use t <- player_transaction(ctx, p, transaction_id)
+  shared.add_document(
+    ctx,
+    req,
+    t,
+    shared.roles_of(t, player_viewer(p)),
+    Some(party_role.Individual),
+    shared.PlayerOwner(p.player.row.id),
+    by_player(p),
+    id.player_to_string(p.player.row.id),
+  )
+}
+
+/// `GET /player/transactions/:id/documents/:docId/reference`.
+pub fn player_document_reference(
+  ctx: Ctx,
+  p: PlayerAccess,
+  transaction_id: String,
+  document_id: String,
+) -> Response {
+  use t <- player_transaction(ctx, p, transaction_id)
+  shared.document_reference(
+    ctx,
+    t,
+    shared.roles_of(t, player_viewer(p)),
+    Some(party_role.Individual),
+    document_id,
+  )
+}
+
+// ------------------------------------------------------------------------------------------------- links
+
+fn individual_of(t: Transaction) -> Option(String) {
+  list.find(t.parties, fn(p) {
+    !p.removed && p.party_role == party_role.Individual
+  })
+  |> option.from_result
+  |> option.map(fn(p) { p.subject_id })
+}
+
+/// `POST /org/transactions/:id/messages/link`: the linker must pass the channel's own authorisation; linking
+/// discloses only that a conversation exists.
+pub fn club_link_thread(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use t, viewer, _ <- club_transaction(ctx, a, transaction_id, True)
+  use <- shared.writable(ctx, t)
+  let shape = {
+    use channel_id <- input.field("channelId", input.required(input.id()))
+    use <- rev.fields
+    input.done(channel_id)
+  }
+  use channel_id, raw <- shared.body(req, shape, "TRANSACTION_INPUT_INVALID")
+  use found <- shared.reading(ctx, channels.by_id(
+    _,
+    id.channel(string.trim(channel_id)),
+  ))
+  let now = clock.now_ms()
+  let mine =
+    option.then(found, fn(ch) {
+      case
+        ch.row.org_id == a.org.id
+        && individual_of(t) == Some(id.player_to_string(ch.row.player_id))
+      {
+        True -> Some(ch)
+        False -> None
+      }
+    })
+  case mine {
+    Some(ch) ->
+      case list.any(t.threads, fn(th) { th.channel_id == ch.row.id }) {
+        True -> {
+          use view <- shared.reading(ctx, shared.project(_, t, viewer, now))
+          http.json(200, shared.idempotent_body(view))
+        }
+        False ->
+          case list.length(t.threads) >= 20 {
+            True ->
+              shared.err(
+                "TRANSACTION_INPUT_INVALID",
+                "This transaction already links the maximum number of conversations.",
+                [#("field", json.string("channelId"))],
+              )
+            False -> {
+              use <- shared.guard_rev(raw, t)
+              let by = by_club_user(a)
+              use tx <- shared.acting(ctx, t)
+              use thread_id <- result.try(
+                id.next_linked_thread(tx) |> shared.storage,
+              )
+              use _ <- result.try(
+                transaction_store.link_thread(
+                  tx,
+                  t,
+                  thread_row.Row(
+                    ..thread_row.new(
+                      id: thread_id,
+                      transaction_id: t.row.id,
+                      ord: 0,
+                      channel_id: ch.row.id,
+                      linked_by_org_id: a.org.id,
+                      linked_at: now,
+                    ),
+                    linked_by_id: Some(a.user.id),
+                    linked_by_name: Some(a.user.name),
+                  ),
+                )
+                |> shared.storage,
+              )
+              use _ <- result.try(
+                transaction_store.history(
+                  tx,
+                  t.row.id,
+                  event_row.TransactionMessageLinked,
+                  by,
+                  transaction_store.Detail(
+                    ..transaction_store.no_detail,
+                    count: Some(list.length(t.threads) + 1),
+                  ),
+                  now,
+                )
+                |> shared.storage,
+              )
+              use _ <- result.try(
+                transaction_store.touch(tx, t.row.id, now) |> shared.storage,
+              )
+              use _ <- result.try(
+                transaction_store.bump(tx, t.row.id, by, now) |> shared.storage,
+              )
+              store.emit(
+                tx,
+                effect.Live(live_event.AgentTransactionMessageLinked(
+                  org_id: id.org_to_string(t.row.agency_org_id),
+                  tx_id: id.transaction_to_string(t.row.id),
+                )),
+              )
+              use view <- result.map(shared.projected(tx, t.row.id, viewer, now))
+              http.json(201, shared.transaction_body(view))
+            }
+          }
+      }
+    None ->
+      shared.err(
+        "MESSAGE_THREAD_NOT_FOUND",
+        "No conversation of yours with this transaction's individual matches that reference.",
+        [],
+      )
+  }
+}
+
+/// `POST /org/transactions/:id/links`: a trial of this club for this individual, by reference; no assessment
+/// crosses.
+pub fn club_link_trial(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use t, viewer, _ <- club_transaction(ctx, a, transaction_id, True)
+  use <- shared.writable(ctx, t)
+  let shape = {
+    use trial_id <- input.field("trialId", input.required(input.id()))
+    use <- rev.fields
+    input.done(trial_id)
+  }
+  use trial_id, raw <- shared.body(req, shape, "TRANSACTION_INPUT_INVALID")
+  let trial_id = id.trial(string.trim(trial_id))
+  use found <- shared.reading(ctx, fn(r) {
+    store.one(
+      r,
+      "SELECT org_id, player_id FROM trials WHERE id = ?",
+      [id.trial_sql(trial_id)],
+      {
+        use org <- decode.field(0, decode.string)
+        use player <- decode.field(1, decode.string)
+        decode.success(#(org, player))
+      },
+    )
+  })
+  let now = clock.now_ms()
+  let own = id.org_to_string(a.org.id)
+  let individual = individual_of(t)
+  case found {
+    Ok(#(org, player)) if org == own && Some(player) == individual -> {
+      use <- shared.guard_rev(raw, t)
+      let by = by_club_user(a)
+      use tx <- shared.acting(ctx, t)
+      use _ <- result.try(
+        transaction_store.link_trial(tx, t.row.id, trial_id) |> shared.storage,
+      )
+      use _ <- result.try(
+        transaction_store.history(
+          tx,
+          t.row.id,
+          event_row.TransactionStatusChanged,
+          by,
+          transaction_store.Detail(
+            ..transaction_store.no_detail,
+            from: Some(t.row.status),
+            to: Some(t.row.status),
+          ),
+          now,
+        )
+        |> shared.storage,
+      )
+      use _ <- result.try(
+        transaction_store.touch(tx, t.row.id, now) |> shared.storage,
+      )
+      use _ <- result.try(
+        transaction_store.bump(tx, t.row.id, by, now) |> shared.storage,
+      )
+      use view <- result.map(shared.projected(tx, t.row.id, viewer, now))
+      http.json(200, shared.transaction_body(view))
+    }
+    _ ->
+      shared.err(
+        "TRANSACTION_INPUT_INVALID",
+        "No trial of yours with this transaction's individual matches that reference.",
+        [#("field", json.string("trialId"))],
+      )
+  }
 }

@@ -675,6 +675,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["transactions", tid, "timeline"] ->
           only(req, Get, fn() { party_lanes.club_timeline(ctx, org, tid) })
+        ["transactions", tid, "documents"] ->
+          case req.method {
+            Get -> party_lanes.club_documents(ctx, org, tid)
+            Post -> {
+              use req <- contract.rerun_on_stale(req)
+              party_lanes.club_add_document(ctx, req, org, tid)
+            }
+            _ -> not_found()
+          }
+        ["transactions", tid, "documents", did, "reference"] ->
+          only(req, Get, fn() {
+            party_lanes.club_document_reference(ctx, org, tid, did)
+          })
+        ["transactions", tid, "messages", "link"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            party_lanes.club_link_thread(ctx, req, org, tid)
+          })
+        ["transactions", tid, "links"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            party_lanes.club_link_trial(ctx, req, org, tid)
+          })
         _ -> not_found()
       }
     }
@@ -736,6 +759,19 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["transactions", tid, "timeline"] ->
           only(req, Get, fn() { party_lanes.player_timeline(ctx, player, tid) })
+        ["transactions", tid, "documents"] ->
+          case req.method {
+            Get -> party_lanes.player_documents(ctx, player, tid)
+            Post -> {
+              use req <- contract.rerun_on_stale(req)
+              party_lanes.player_add_document(ctx, req, player, tid)
+            }
+            _ -> not_found()
+          }
+        ["transactions", tid, "documents", did, "reference"] ->
+          only(req, Get, fn() {
+            party_lanes.player_document_reference(ctx, player, tid, did)
+          })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
@@ -1481,6 +1517,46 @@ fn agent_org(
         use req <- contract.rerun_on_stale(req)
         transaction_routes.withdraw_representation(ctx, req, org, tid, rid)
       })
+    ["transactions", tid, "status"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.move_status(ctx, req, org, tid)
+      })
+    ["transactions", tid, "terms"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.record_terms(ctx, req, org, tid)
+      })
+    ["transactions", tid, "parties"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.add_party(ctx, req, org, tid)
+      })
+    ["transactions", tid, "parties", pid, "remove"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.remove_party(ctx, req, org, tid, pid)
+      })
+    ["transactions", tid, "documents"] ->
+      case req.method {
+        Get -> transaction_routes.documents_mine(ctx, org, tid)
+        Post -> {
+          use req <- contract.rerun_on_stale(req)
+          transaction_routes.add_document_mine(ctx, req, org, tid)
+        }
+        _ -> not_found()
+      }
+    ["transactions", tid, "documents", did, "reference"] ->
+      only(req, Get, fn() {
+        transaction_routes.document_reference_mine(ctx, org, tid, did)
+      })
+    ["transactions", tid, "documents", did, "supersede"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.supersede_document(ctx, req, org, tid, did)
+      })
+    ["transactions", tid, "messages"] ->
+      only(req, Get, fn() { transaction_routes.messages_mine(ctx, org, tid) })
     ["transactions", tid, "evaluate"] ->
       only(req, Post, fn() {
         use req <- contract.rerun_on_stale(req)
