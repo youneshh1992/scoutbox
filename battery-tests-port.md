@@ -107,7 +107,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 47 of 53 neutral]
+### Untangling [in progress: 48 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -218,7 +218,14 @@ are for surprising facts or points that later work depends on, not implementatio
 5. **Box Cam** (see "Box Cam: everything but the video"). Untangle `development/boxCam` and `development/combine`
    first, then port sessions, training and the Combine with the `production_cv` stub, then `development/hub`.
    `passport/trustScore` reads Combine results, so this goes before the Passport.
-6. **Passport.** `passport/passport`, then `trustScore`.
+6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
+   1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
+      export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared
+      `passport_share_read` (30 a minute), which `RATE_LIMIT_POLICY` had listed but nothing used.
+   2. The engine (`passport/passport_rules`) [**done**: 68 rule cases]. The recorder seeds randomness as it freezes
+      the clock, so a rule called with a random value records the same each run; a rule whose result is random is
+      listed in `RANDOM` and ported by hand.
+   3. The routes, on the engine, with `passport/sources` reading the stores.
 7. `operations/clubOperations`.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
