@@ -2,18 +2,20 @@
 //// one: opened with the transaction, its parties projected from the transaction's, and each evaluation recorded
 //// append-only with the reasons, outstanding consents, policy versions and the parties it saw.
 ////
-//// Not ported yet: representations in a context (`/agent/transactions/:id/representations`), regulatory consents
-//// (the consent routes) and the agent's own context routes, so a context here has no representation or consent.
+//// Not ported yet: regulatory consents (the consent routes) and the agent's own context routes, so a context here
+//// has no consent.
 
 import gleam/dynamic/decode
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/agents/agent_rules
 import scoutbox/agents/agent_store
 import scoutbox/agents/approach_policy
 import scoutbox/agents/conflict
+import scoutbox/agents/reviews
 import scoutbox/agents/transaction_rules
 import scoutbox/identity/orgs
 import scoutbox/identity/players
@@ -25,21 +27,25 @@ import scoutbox/rows/compliance_context_history as event_row
 import scoutbox/rows/compliance_context_history_policy_versions as event_pv_row
 import scoutbox/rows/compliance_context_jurisdictions as jurisdiction_row
 import scoutbox/rows/compliance_context_parties as context_party_row
+import scoutbox/rows/compliance_context_representations as context_rep_row
 import scoutbox/rows/compliance_contexts as context_row
 import scoutbox/rows/compliance_evaluation_consents_outstanding as consent_row
 import scoutbox/rows/compliance_evaluation_policy_versions as evaluation_pv_row
 import scoutbox/rows/compliance_evaluation_reason_items as item_row
 import scoutbox/rows/compliance_evaluation_reasons as reason_row
 import scoutbox/rows/compliance_evaluation_snapshot_parties as snapshot_party_row
+import scoutbox/rows/compliance_evaluation_snapshot_representations as snapshot_rep_row
 import scoutbox/rows/compliance_evaluations as evaluation_row
 import scoutbox/rows/id
 import scoutbox/rows/transaction_parties as party_row
+import scoutbox/rows/transaction_representations as rep_row
 import scoutbox/vocab/agent_facet.{
   DomesticAuthorisation, FifaLicence, MinorsAuthorisation, NationalRegistration,
 }
 import scoutbox/vocab/compliance_actor_kind.{type ComplianceActorKind}
 import scoutbox/vocab/context_outcome
 import scoutbox/vocab/context_type.{type ContextType}
+import scoutbox/vocab/declared_representation_status
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/party_role
@@ -62,6 +68,7 @@ pub type Context {
     row: context_row.Row,
     jurisdictions: List(String),
     parties: List(context_party_row.Row),
+    representations: List(context_rep_row.Row),
   )
 }
 
@@ -199,7 +206,7 @@ pub fn by_id(
         [id.compliance_context_sql(context_id)],
         decode.at([0], decode.string),
       ))
-      use parties <- result.map(store.query(
+      use parties <- result.try(store.query(
         read,
         "SELECT "
           <> context_party_row.columns
@@ -207,13 +214,59 @@ pub fn by_id(
         [id.compliance_context_sql(context_id)],
         context_party_row.decoder(),
       ))
-      Some(Context(row, jurisdictions, parties))
+      use reps <- result.map(store.query(
+        read,
+        "SELECT "
+          <> context_rep_row.columns
+          <> " FROM compliance_context_representations WHERE context_id = ? ORDER BY ord",
+        [id.compliance_context_sql(context_id)],
+        context_rep_row.decoder(),
+      ))
+      Some(Context(row, jurisdictions, parties, reps))
     }
   }
 }
 
-/// The engine's input is rebuilt from the transaction's own parties every time, so it cannot go stale.
+/// The engine's input is rebuilt from the transaction's own parties and live bindings every time, so it cannot go
+/// stale.
 pub fn project(
+  tx: Tx,
+  context_id: id.ComplianceContextId,
+  parties: List(party_row.Row),
+  reps: List(rep_row.Row),
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(project_parties(tx, context_id, parties))
+  use _ <- result.try(
+    store.run(
+      tx,
+      "DELETE FROM compliance_context_representations WHERE context_id = ?",
+      [id.compliance_context_sql(context_id)],
+    ),
+  )
+  list.index_map(reps, fn(r, i) {
+    context_rep_row.insert(
+      tx,
+      context_rep_row.Row(
+        ..context_rep_row.new(
+          context_id:,
+          ord: i,
+          id: r.id,
+          agent_user_id: r.agent_user_id,
+          party_role: r.party_role,
+          status: r.status,
+          declared_only: r.declared_only,
+        ),
+        agreement_id: r.agreement_id,
+        review_id: r.review_id,
+        first_act_at: r.first_act_at,
+      ),
+    )
+  })
+  |> result.all
+  |> result.replace(Nil)
+}
+
+fn project_parties(
   tx: Tx,
   context_id: id.ComplianceContextId,
   parties: List(party_row.Row),
@@ -274,14 +327,78 @@ pub fn facet_states(p: agent_rules.Profile, now: Int) -> Value {
   ])
 }
 
+fn rep_input(
+  r: context_rep_row.Row,
+  via_colleague: Bool,
+) -> conflict.Representation {
+  let pending = r.status == declared_representation_status.PendingReview
+  conflict.Representation(
+    agent_user_id: id.org_user_to_string(r.agent_user_id),
+    party_role: r.party_role,
+    agreement_id: option.map(r.agreement_id, id.agreement_to_string),
+    declared_only: pending,
+    status: case pending {
+      True -> "declared"
+      False -> declared_representation_status.to_string(r.status)
+    },
+    first_act_at: r.first_act_at,
+    via_colleague:,
+  )
+}
+
+/// Two contexts describe the same real-world transaction when they name the same individual and the same
+/// entities.
+fn same_transaction(a: Context, b: Context) -> Bool {
+  let live = fn(c: Context) { list.filter(c.parties, fn(p) { !p.removed }) }
+  let key = fn(c) {
+    live(c)
+    |> list.map(fn(p) {
+      party_role.to_string(p.party_role) <> ":" <> p.subject_id
+    })
+    |> list.sort(string.compare)
+    |> string.join("|")
+  }
+  let individual = fn(c) {
+    list.find(live(c), fn(p) { p.party_role == party_role.Individual })
+    |> result.map(fn(p) { p.subject_id })
+  }
+  case individual(a), individual(b) {
+    Ok(ia), Ok(ib) if ia == ib ->
+      key(a) == key(b)
+      || list.all(live(a), fn(p) {
+        list.any(live(b), fn(q) {
+          q.party_role == p.party_role && q.subject_id == p.subject_id
+        })
+      })
+    _, _ -> False
+  }
+}
+
+fn open_for_agency_except(
+  read: Read,
+  agency: id.OrgId,
+  except: id.ComplianceContextId,
+) -> Result(List(Context), Fail(e)) {
+  use ids <- result.try(store.query(
+    read,
+    "SELECT id FROM compliance_contexts WHERE agency_org_id = ? AND status = 'open' AND id <> ? ORDER BY rowid",
+    [id.org_sql(agency), id.compliance_context_sql(except)],
+    decode.at([0], id.compliance_context_decoder()),
+  ))
+  list.try_map(ids, by_id(read, _))
+  |> result.map(option.values)
+}
+
 /// The engine's input for a context, from live records. A party who left, or whom the agency can no longer see,
-/// is removed from the evaluation, so a regulatory clear never overrides safety. Colleagues in the agency are the
-/// opener's connected agents; their own contexts carry no representations here, so none is attributed.
+/// is removed from the evaluation, so a regulatory clear never overrides safety. A colleague's verified
+/// representation in the same transaction (another open context of the agency naming the same parties) is
+/// attributed to the opener (connected agents); reasons never name the colleague.
 pub fn engine_input(
   read: Read,
   c: Context,
   policies: List(approach_policy.Policy),
   now: Int,
+  proposed: Option(conflict.Representation),
 ) -> Result(conflict.Input, Fail(e)) {
   let opener = c.row.agent_user_id
   use agency <- result.try(orgs.by_id(read, c.row.agency_org_id))
@@ -295,22 +412,64 @@ pub fn engine_input(
       a.row.user_id != opener && agent_rules.active(a, now)
     })
     |> list.map(fn(a) { id.org_user_to_string(a.row.user_id) })
-  use affiliation <- result.try(agent_store.active_affiliation(
+  let own =
+    c.representations
+    |> list.filter(fn(r) {
+      r.status != declared_representation_status.Withdrawn
+    })
+    |> list.map(rep_input(_, False))
+    |> list.append(option.values([proposed]))
+  use others <- result.try(open_for_agency_except(
     read,
-    opener,
     c.row.agency_org_id,
-    now,
+    c.row.id,
   ))
-  use profile <- result.try(agent_store.profile_for_user(read, opener))
-  let licence = case affiliation, profile {
-    Some(_), Some(p) ->
-      facet_state.to_string(agent_rules.effective_facet_state(
-        agent_rules.facet_of(p, FifaLicence, None),
+  let attributed =
+    others
+    |> list.filter(fn(o) {
+      list.contains(colleagues, id.org_user_to_string(o.row.agent_user_id))
+      && same_transaction(c, o)
+    })
+    |> list.flat_map(fn(o) {
+      o.representations
+      |> list.filter(fn(r) {
+        r.status == declared_representation_status.Verified
+        && r.agent_user_id != opener
+      })
+      |> list.map(rep_input(_, True))
+    })
+  let reps = list.append(own, attributed)
+  let opener_text = id.org_user_to_string(opener)
+  let agent_ids =
+    list.unique([opener_text, ..list.map(reps, fn(r) { r.agent_user_id })])
+  use agents <- result.try(
+    list.try_map(agent_ids, fn(agent_id) {
+      let user = id.org_user(agent_id)
+      use affiliation <- result.try(agent_store.active_affiliation(
+        read,
+        user,
+        c.row.agency_org_id,
         now,
       ))
-    Some(_), None -> facet_state.to_string(facet_state.Unverified)
-    None, _ -> "NO_AFFILIATION"
-  }
+      use profile <- result.map(agent_store.profile_for_user(read, user))
+      let licence = case affiliation, profile {
+        Some(_), Some(p) ->
+          facet_state.to_string(agent_rules.effective_facet_state(
+            agent_rules.facet_of(p, FifaLicence, None),
+            now,
+          ))
+        Some(_), None -> facet_state.to_string(facet_state.Unverified)
+        None, _ -> "NO_AFFILIATION"
+      }
+      let connected =
+        list.filter(colleagues, fn(x) { x != agent_id })
+        |> list.append(case agent_id == opener_text {
+          True -> []
+          False -> [opener_text]
+        })
+      #(agent_id, conflict.Agent(licence, connected))
+    }),
+  )
   use parties <- result.try(
     list.try_map(c.parties, fn(p) {
       case p.subject_kind {
@@ -354,16 +513,51 @@ pub fn engine_input(
     context_type: c.row.type_,
     jurisdictions: c.jurisdictions,
     parties:,
-    representations: [],
-    evaluate_agent_user_ids: [id.org_user_to_string(opener)],
-    agents: [
-      #(id.org_user_to_string(opener), conflict.Agent(licence, colleagues)),
-    ],
+    representations: reps,
+    evaluate_agent_user_ids: [opener_text],
+    agents:,
+    // Not ported yet: regulatory consents (the consent routes).
     consents: [],
     policies: set.policies,
     missing: set.missing,
     now:,
   ))
+}
+
+/// The context closes, and its open review items are cancelled with it.
+pub fn close(tx: Tx, c: Context, by: By, at: Int) -> Result(Nil, Fail(e)) {
+  case c.row.status {
+    context_row.Closed -> Ok(Nil)
+    context_row.Open -> {
+      use _ <- result.try(
+        store.run(
+          tx,
+          "UPDATE compliance_contexts SET status = 'closed', closed_at = ? WHERE id = ?",
+          [sqlight.int(at), id.compliance_context_sql(c.row.id)],
+        ),
+      )
+      use _ <- result.try(
+        history(
+          tx,
+          c.row.id,
+          event_row.ComplianceContextClosed,
+          by,
+          at,
+          None,
+          [],
+        ),
+      )
+      use open <- result.try(store.query(
+        store.reading(tx),
+        "SELECT id FROM regulatory_reviews WHERE subject_context_id = ? AND status IN ('PENDING','IN_REVIEW') ORDER BY rowid",
+        [id.compliance_context_sql(c.row.id)],
+        decode.at([0], id.regulatory_review_decoder()),
+      ))
+      list.try_each(open, fn(review_id) {
+        reviews.cancel(tx, review_id, by.kind, by.id, by.name, at)
+      })
+    }
+  }
 }
 
 /// Records an evaluation of the context (append-only), with the parties it saw and the history entry that says
@@ -372,6 +566,7 @@ pub fn record_evaluation(
   tx: Tx,
   c: Context,
   e: conflict.Evaluation,
+  proposed: Option(#(party_role.PartyRole, id.OrgUserId)),
   by: By,
   at: Int,
 ) -> Result(id.EvaluationId, Fail(e)) {
@@ -393,13 +588,17 @@ pub fn record_evaluation(
     )
   use _ <- result.try(evaluation_row.insert(
     tx,
-    evaluation_row.new(
-      id: evaluation_id,
-      context_id:,
-      position:,
-      outcome: e.outcome,
-      evaluated_at: e.evaluated_at,
-      input_hash: e.input_hash,
+    evaluation_row.Row(
+      ..evaluation_row.new(
+        id: evaluation_id,
+        context_id:,
+        position:,
+        outcome: e.outcome,
+        evaluated_at: e.evaluated_at,
+        input_hash: e.input_hash,
+      ),
+      proposed_party_role: option.map(proposed, fn(p) { p.0 }),
+      proposed_agent_user_id: option.map(proposed, fn(p) { p.1 }),
     ),
   ))
   use _ <- result.try(
@@ -443,6 +642,21 @@ pub fn record_evaluation(
           party_role: p.party_role,
           subject_kind: p.subject_kind,
           subject_id: p.subject_id,
+        ),
+      )
+    })
+    |> result.all,
+  )
+  use _ <- result.try(
+    list.index_map(c.representations, fn(r, ord) {
+      snapshot_rep_row.insert(
+        tx,
+        snapshot_rep_row.new(
+          evaluation_id:,
+          ord:,
+          agent_user_id: r.agent_user_id,
+          party_role: r.party_role,
+          status: r.status,
         ),
       )
     })

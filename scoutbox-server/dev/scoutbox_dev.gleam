@@ -371,12 +371,14 @@ pub const tables = [
   "compliance_context_history_policy_versions",
   "compliance_context_jurisdictions",
   "compliance_context_parties",
+  "compliance_context_representations",
   "compliance_contexts",
   "compliance_evaluation_consents_outstanding",
   "compliance_evaluation_policy_versions",
   "compliance_evaluation_reason_items",
   "compliance_evaluation_reasons",
   "compliance_evaluation_snapshot_parties",
+  "compliance_evaluation_snapshot_representations",
   "compliance_evaluations",
   "contact_attempts",
   "contact_history",
@@ -693,6 +695,8 @@ pub const ided = [
 
 /// Id columns no foreign key types. See `codegen.IdColumn`.
 pub const id_columns = [
+  RefersTo("compliance_context_representations.id", "transaction_representations"),
+  RefersTo("compliance_context_representations.review_id", "regulatory_reviews"),
   RefersTo("transaction_documents.transaction_id", "agent_transactions"),
   RefersTo("transaction_documents.supersedes_id", "transaction_documents"),
   Untyped(

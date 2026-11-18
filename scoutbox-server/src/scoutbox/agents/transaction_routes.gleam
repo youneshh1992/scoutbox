@@ -23,6 +23,7 @@ import scoutbox/agents/compliance_store.{type By}
 import scoutbox/agents/conflict
 import scoutbox/agents/core_routes.{type Member}
 import scoutbox/agents/handoffs
+import scoutbox/agents/reviews
 import scoutbox/agents/transaction_rules.{
   type RoomRole, type State, type Viewer, AgencyViewer, RepresentingAgent,
 }
@@ -46,16 +47,20 @@ import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/domain_errors.{Contract}
 import scoutbox/rows/agent_transactions as tx_row
+import scoutbox/rows/agreement_scopes as agreement_scope_row
 import scoutbox/rows/id
+import scoutbox/rows/regulatory_reviews as review_row
 import scoutbox/rows/transaction_documents as doc_row
 import scoutbox/rows/transaction_history as event_row
 import scoutbox/rows/transaction_linked_threads as thread_row
 import scoutbox/rows/transaction_notes as note_row
 import scoutbox/rows/transaction_parties as party_row
 import scoutbox/rows/transaction_representation_scopes as scope_row
+import scoutbox/rows/transaction_representations as rep_row
 import scoutbox/rows/transaction_terms_versions as terms_row
 import scoutbox/verification/records
 import scoutbox/vocab/agent_facet
+import scoutbox/vocab/agreement_status
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
@@ -437,6 +442,12 @@ pub fn recheck(
   use found <- result.try(transaction_store.by_id(read, transaction_id))
   let assert Some(t) = found as "the transaction was just written"
   use guard <- result.try(safeguarding_problem(read, t, now))
+  use reps <- result.try(transaction_store.representations(read, t.row.id))
+  let live_reps =
+    list.filter(reps, fn(r) {
+      r.row.status != declared_representation_status.Withdrawn
+    })
+  let rep_count = list.length(live_reps)
   case guard {
     // Not a compliance verdict: the snapshot is not refreshed.
     Some(problem) -> Ok(Guarded(problem))
@@ -462,7 +473,7 @@ pub fn recheck(
               None,
               Some(transaction_rules.gate_reason(gate)),
               codes,
-              0,
+              rep_count,
               confirmed,
             )
           snapshot(tx, t, state, Gated(gate), [], by, now)
@@ -475,6 +486,7 @@ pub fn recheck(
             tx,
             ctx.row.id,
             t.parties,
+            list.map(live_reps, fn(r) { r.row }),
           ))
           use ctx <- result.try(compliance_store.by_id(read, t.row.context_id))
           let assert Some(ctx) = ctx as "a transaction has its context"
@@ -484,12 +496,14 @@ pub fn recheck(
             ctx,
             policies,
             now,
+            None,
           ))
           let result = conflict.evaluate(engine)
           use evaluation_id <- result.try(compliance_store.record_evaluation(
             tx,
             ctx,
             result,
+            None,
             by,
             now,
           ))
@@ -498,8 +512,7 @@ pub fn recheck(
               Some(result.outcome),
               None,
               conflict.reason_codes(result.reasons),
-              // Not ported yet: representations, so none is counted.
-              0,
+              rep_count,
               confirmed,
             )
           snapshot(
@@ -1412,29 +1425,35 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
 }
 
 fn gate_refusal(problem: compliance_store.GateProblem) -> Response {
+  gate_refusal_saying(
+    problem,
+    "No encoded policy covers this jurisdiction. A transaction cannot be opened for it.",
+  )
+}
+
+fn gate_refusal_saying(
+  problem: compliance_store.GateProblem,
+  unsupported: String,
+) -> Response {
   case problem {
     compliance_store.Unsupported(reasons:, policy_versions:) ->
-      err(
-        "JURISDICTION_UNSUPPORTED",
-        "No encoded policy covers this jurisdiction. A transaction cannot be opened for it.",
-        [
-          #(
-            "reasons",
-            json.array(reasons, fn(r) {
-              json.object([
-                #("code", json.string(r.code)),
-                #("ruleId", json.nullable(r.rule_id, json.string)),
-                #("ruleStatus", rule_status.to_json(r.rule_status)),
-                #(
-                  "policyVersion",
-                  json.nullable(r.policy_version, id.policy_json),
-                ),
-              ])
-            }),
-          ),
-          #("policyVersions", json.array(policy_versions, id.policy_json)),
-        ],
-      )
+      err("JURISDICTION_UNSUPPORTED", unsupported, [
+        #(
+          "reasons",
+          json.array(reasons, fn(r) {
+            json.object([
+              #("code", json.string(r.code)),
+              #("ruleId", json.nullable(r.rule_id, json.string)),
+              #("ruleStatus", rule_status.to_json(r.rule_status)),
+              #(
+                "policyVersion",
+                json.nullable(r.policy_version, id.policy_json),
+              ),
+            ])
+          }),
+        ),
+        #("policyVersions", json.array(policy_versions, id.policy_json)),
+      ])
     compliance_store.FacetMissing(g) ->
       err(
         g.code,
@@ -2476,4 +2495,739 @@ pub fn link_opportunity(
         [#("field", json.string("opportunityId"))],
       )
   }
+}
+
+// ------------------------------------------------------------------------------------------------- representations
+
+/// Reasons reach the wire as codes and rule references only.
+pub fn public_reason(r: conflict.Reason) -> Json {
+  json.object(
+    list.flatten([
+      [
+        #("code", json.string(r.code)),
+        #("ruleId", json.nullable(r.rule_id, json.string)),
+        #("ruleStatus", rule_status.to_json(r.rule_status)),
+        #("policyVersion", json.nullable(r.policy_version, id.policy_json)),
+      ],
+      case r.party_role {
+        Some(role) -> [#("partyRole", party_role.to_json(role))]
+        None -> []
+      },
+      case r.party_roles {
+        Some(roles) -> [#("partyRoles", json.array(roles, party_role.to_json))]
+        None -> []
+      },
+    ]),
+  )
+}
+
+fn reasons_json(reasons: List(conflict.Reason)) -> Json {
+  json.array(reasons, public_reason)
+}
+
+type RepresentationBody {
+  RepresentationBody(
+    party_role: PartyRole,
+    agreement_id: Option(String),
+    client_key: Option(String),
+  )
+}
+
+/// What the agent's scope must cover, by the transaction's type (CONTEXT_TYPE_SCOPES).
+fn needed_scopes(t: ContextType) -> List(String) {
+  case t {
+    context_type.EmploymentContract -> ["employment"]
+    context_type.Transfer | context_type.Loan -> ["transfer", "employment"]
+    context_type.OtherServices -> ["other_services", "commercial"]
+  }
+}
+
+/// `representationScopeProblem`: the refusal code, or none. An agreement for one national association does not
+/// authorise an act in another; INT covers only the international dimension.
+fn scope_problem(
+  a: agent_rules.Agreement,
+  agent: id.OrgUserId,
+  t: Transaction,
+  now: Int,
+) -> Option(String) {
+  let status = agent_rules.effective_status(a.row, now)
+  let confirmed =
+    a.row.confirmed_at != None && agent_rules.grants_access(a.row, agent, now)
+  let scope = list.map(a.scope, agreement_scope_row.scope_to_string)
+  let ma = jurisdiction.to_string(a.row.jurisdiction)
+  case status, confirmed {
+    agreement_status.Expired, _ -> Some("REPRESENTATION_EXPIRED")
+    agreement_status.Active, True ->
+      case list.any(needed_scopes(t.row.type_), list.contains(scope, _)) {
+        False -> Some("REPRESENTATION_SCOPE_INSUFFICIENT")
+        True ->
+          case
+            list.any(t.jurisdictions, fn(m) {
+              m != "INT" && ma != "INT" && m != ma
+            })
+          {
+            True -> Some("REPRESENTATION_SCOPE_INSUFFICIENT")
+            False -> None
+          }
+      }
+    _, _ -> Some("REPRESENTATION_REQUIRED")
+  }
+}
+
+/// `POST /org/agent/transactions/:id/representations`: an agreement active for this player is not by itself
+/// authority here. Its scope must cover this type and every jurisdiction, and the conflict engine must answer with
+/// this binding included.
+pub fn attach_representation(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  let shape = {
+    use role <- input.field(
+      "partyRole",
+      input.required(input.one_of(party_role.pairs)),
+    )
+    use agreement_id <- input.field("agreementId", input.nullish(input.id()))
+    use client_key <- input.field(
+      "clientKey",
+      input.nullish(input.text(1_000_000)),
+    )
+    use <- rev.fields
+    input.done(RepresentationBody(role, agreement_id, client_key))
+  }
+  use b, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  use key <- client_key(b.client_key)
+  let now = clock.now_ms()
+  let viewer = agent_viewer(m)
+  case
+    list.find(t.parties, fn(p) { !p.removed && p.party_role == b.party_role })
+  {
+    Error(Nil) ->
+      domain_errors.send(contract, "TRANSACTION_PARTY_NOT_FOUND", [])
+    Ok(party) -> {
+      let fp =
+        canonical.Object([
+          #("partyRole", canonical.Str(party_role.to_string(b.party_role))),
+          #("agreementId", canonical.text(b.agreement_id)),
+        ])
+        |> canonical.to_string
+      use hit <- reading(ctx, fn(r) {
+        case key {
+          Some(k) ->
+            transaction_store.representation_by_attach_key(r, t.row.id, k)
+          None -> Ok(None)
+        }
+      })
+      case hit {
+        Some(h) ->
+          case h.row.attach_fp == Some(fp) {
+            True -> {
+              use view <- reading(ctx, project(_, t, viewer, now))
+              http.json(200, idempotent_body(view))
+            }
+            False ->
+              domain_errors.send(
+                contract,
+                "TRANSACTION_IDEMPOTENCY_CONFLICT",
+                [],
+              )
+          }
+        None -> {
+          use <- limited(
+            ctx,
+            req,
+            limits.TransactionWrite,
+            id.org_user_to_string(a.user.id),
+          )
+          attach_checked(ctx, a, m, t, party, b, raw, key, fp, now)
+        }
+      }
+    }
+  }
+}
+
+fn attach_checked(
+  ctx: Ctx,
+  a: OrgAccess,
+  m: Member,
+  t: Transaction,
+  party: party_row.Row,
+  b: RepresentationBody,
+  raw: Dynamic,
+  key: Option(String),
+  fp: String,
+  now: Int,
+) -> Response {
+  use reps <- reading(ctx, transaction_store.representations(_, t.row.id))
+  let live =
+    list.filter(reps, fn(r) {
+      r.row.status != declared_representation_status.Withdrawn
+    })
+  case
+    list.any(live, fn(r) {
+      r.row.party_role == b.party_role && r.row.agent_user_id == a.user.id
+    })
+  {
+    True ->
+      err(
+        "TRANSACTION_PARTY_EXISTS",
+        "You already represent this party in this transaction.",
+        [#("partyRole", party_role.to_json(b.party_role))],
+      )
+    False -> {
+      // Safeguarding before scope, so a blocked party reads the same as an unknown one.
+      use basis <- reading(ctx, fn(r) {
+        case party.subject_kind {
+          subject_kind.Club -> Ok(Ok(None))
+          subject_kind.Player -> {
+            use found <- result.try(players.for_org(
+              r,
+              id.player(party.subject_id),
+              a.org,
+              now,
+            ))
+            case found {
+              Some(#(pl, access)) if access.visible && !access.blocked ->
+                case players.is_adult(pl, now) {
+                  False -> Ok(Error("TRANSACTION_PARTY_NOT_FOUND"))
+                  True -> {
+                    use named <- result.map(case b.agreement_id {
+                      Some(aid) ->
+                        agent_store.agreement_by_id(r, id.agreement(aid))
+                      None -> Ok(None)
+                    })
+                    case named {
+                      Some(ag)
+                        if ag.row.agent_user_id == a.user.id
+                        && ag.row.agency_org_id == a.org.id
+                        && ag.row.client_id == party.subject_id
+                      -> Ok(Some(ag))
+                      _ -> Error("REPRESENTATION_REQUIRED")
+                    }
+                  }
+                }
+              _ -> Ok(Error("TRANSACTION_PARTY_NOT_FOUND"))
+            }
+          }
+        }
+      })
+      case basis {
+        Error("REPRESENTATION_REQUIRED") ->
+          err(
+            "REPRESENTATION_REQUIRED",
+            "A client-confirmed, active relationship with this party is required (agreementId).",
+            [],
+          )
+        Error(code) -> domain_errors.send(contract, code, [])
+        Ok(agreement) -> {
+          let problem = case agreement {
+            Some(ag) -> scope_problem(ag, a.user.id, t, now)
+            None -> None
+          }
+          case problem {
+            Some(code) ->
+              err(
+                code,
+                case code {
+                  "REPRESENTATION_SCOPE_INSUFFICIENT" ->
+                    "The relationship does not cover this transaction's scope or jurisdiction."
+                  _ ->
+                    "No active, client-confirmed relationship covers this party."
+                },
+                [],
+              )
+            None -> {
+              use gate <- reading(ctx, compliance_store.facet_gate(
+                _,
+                a.user.id,
+                t.jurisdictions,
+                now,
+              ))
+              case gate {
+                Some(problem) ->
+                  gate_refusal_saying(
+                    problem,
+                    "No encoded policy covers this jurisdiction.",
+                  )
+                None ->
+                  attach_in_unit(
+                    ctx,
+                    a,
+                    m,
+                    t,
+                    b,
+                    raw,
+                    key,
+                    fp,
+                    agreement,
+                    live,
+                    now,
+                  )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn attach_in_unit(
+  ctx: Ctx,
+  a: OrgAccess,
+  m: Member,
+  t: Transaction,
+  b: RepresentationBody,
+  raw: Dynamic,
+  key: Option(String),
+  fp: String,
+  agreement: Option(agent_rules.Agreement),
+  live: List(transaction_store.Representation),
+  now: Int,
+) -> Response {
+  let declared_only = agreement == None
+  let by = by_agent(a)
+  let viewer = agent_viewer(m)
+  use expected <- rev_expected(raw)
+  use tx <- acting(ctx, t)
+  let read = store.reading(tx)
+  // A refusal records no binding, but the evaluation and the snapshot naming it commit.
+  use found <- result.try(
+    compliance_store.by_id(read, t.row.context_id) |> storage,
+  )
+  let assert Some(c) = found as "a transaction has its context"
+  use _ <- result.try(
+    compliance_store.project(
+      tx,
+      c.row.id,
+      t.parties,
+      list.map(live, fn(r) { r.row }),
+    )
+    |> storage,
+  )
+  use found <- result.try(
+    compliance_store.by_id(read, t.row.context_id) |> storage,
+  )
+  let assert Some(c) = found as "a transaction has its context"
+  let proposed =
+    conflict.Representation(
+      agent_user_id: id.org_user_to_string(a.user.id),
+      party_role: b.party_role,
+      agreement_id: option.map(agreement, fn(ag) {
+        id.agreement_to_string(ag.row.id)
+      }),
+      declared_only:,
+      status: case declared_only {
+        True -> "declared"
+        False -> "verified"
+      },
+      first_act_at: Some(now),
+      via_colleague: False,
+    )
+  use policies <- result.try(approach_policy.published(read) |> storage)
+  use engine <- result.try(
+    compliance_store.engine_input(read, c, policies, now, Some(proposed))
+    |> storage,
+  )
+  let result = conflict.evaluate(engine)
+  use evaluation_id <- result.try(
+    compliance_store.record_evaluation(
+      tx,
+      c,
+      result,
+      Some(#(b.party_role, a.user.id)),
+      by,
+      now,
+    )
+    |> storage,
+  )
+  let confirmed = transaction_rules.parties_confirmed(t.row.type_, t.parties)
+  let state_of = fn() {
+    transaction_rules.state_from(
+      Some(result.outcome),
+      None,
+      conflict.reason_codes(result.reasons),
+      list.length(live),
+      confirmed,
+    )
+  }
+  let context_id = id.compliance_context_json(c.row.id)
+  let snapshot_and_answer = fn(response) {
+    use current <- result.try(
+      transaction_store.by_id(read, t.row.id) |> storage,
+    )
+    let assert Some(current) = current
+    use _ <- result.try(
+      snapshot(
+        tx,
+        current,
+        state_of(),
+        Evaluated(evaluation_id),
+        result.policy_versions,
+        by,
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.map(
+      transaction_store.bump(tx, t.row.id, by, now) |> storage,
+    )
+    response
+  }
+  let filtered = fn(codes) {
+    list.filter(result.reasons, fn(r) { list.contains(codes, r.code) })
+  }
+  let policy_json = json.array(result.policy_versions, id.policy_json)
+  let outcome_json = context_outcome.to_json(result.outcome)
+  case result.outcome {
+    context_outcome.ProhibitedConflict ->
+      snapshot_and_answer(
+        err(
+          "REPRESENTATION_CONFLICT",
+          "An encoded ACTIVE rule prohibits this combination of parties. Nothing was recorded.",
+          [
+            #(
+              "reasons",
+              reasons_json(
+                filtered([
+                  "PROHIBITED_COMBINATION", "COMBINATION_NOT_PERMITTED",
+                  "CONNECTED_AGENT_ATTRIBUTION",
+                ]),
+              ),
+            ),
+            #("policyVersions", policy_json),
+            #("outcome", outcome_json),
+          ],
+        ),
+      )
+    context_outcome.PermittedDualRepresentationConsentRequired ->
+      snapshot_and_answer(
+        err(
+          "CONSENT_REQUIRED",
+          "Prior, party-specific written consent is outstanding. Request it; nothing was recorded.",
+          [
+            #(
+              "consentsOutstanding",
+              json.array(result.consents_outstanding, fn(o) {
+                json.object([
+                  #("partyRole", party_role.to_json(o.party_role)),
+                  #("consentKind", json.string(o.consent_kind)),
+                  #("reasonCode", json.string(o.reason_code)),
+                ])
+              }),
+            ),
+            #("reasons", reasons_json(filtered(["CONSENT_REQUIRED"]))),
+            #("policyVersions", policy_json),
+            #("outcome", outcome_json),
+            #("contextId", context_id),
+          ],
+        ),
+      )
+    _ -> {
+      // A stale rev rolls the evaluation back with the rest.
+      use _ <- result.try(
+        case
+          rev.check(expected, tx_rev(t), "TRANSACTION_VERSION_CONFLICT", [
+            #(
+              "current",
+              json.object([
+                #("status", transaction_status.to_json(t.row.status)),
+              ]),
+            ),
+          ])
+        {
+          Ok(Nil) -> Ok(Nil)
+          Error(conflict) -> store.refuse(conflict)
+        },
+      )
+      let needs_review =
+        result.outcome == context_outcome.ManualRegulatoryReviewRequired
+        || result.outcome == context_outcome.InsufficientData
+      let review_reasons =
+        list.filter(result.reasons, fn(r) { r.code != "FACET_VERIFIED" })
+      let requested_by =
+        reviews.RequestedBy(
+          kind: compliance_actor_kind.Org,
+          id: Some(id.org_user_to_string(a.user.id)),
+          name: Some(a.user.name),
+        )
+      let snap = #(result.outcome, Some(evaluation_id), result.evaluated_at)
+      case needs_review && !declared_only {
+        True -> {
+          // A review item instead of the binding.
+          use _ <- result.try(
+            reviews.create_for_context(
+              tx,
+              review_row.ConflictEvaluation,
+              t.row.agency_org_id,
+              a.user.id,
+              reviews.ContextSubject(
+                context_id: c.row.id,
+                transaction_id: id.transaction_to_string(t.row.id),
+                representation_id: None,
+                party_role: b.party_role,
+              ),
+              review_reasons,
+              result.policy_versions,
+              snap,
+              requested_by,
+              now,
+            )
+            |> storage,
+          )
+          snapshot_and_answer(
+            err(
+              "REGULATORY_REVIEW_REQUIRED",
+              "The deciding rule's operative status is uncertain or not encoded. An attributed review item was created; nothing proceeds until it is resolved under a named policy version.",
+              [
+                #("reasons", reasons_json(review_reasons)),
+                #("policyVersions", policy_json),
+                #("outcome", outcome_json),
+                #("contextId", context_id),
+              ],
+            ),
+          )
+        }
+        False -> {
+          use rep_id <- result.try(id.next_representation(tx) |> storage)
+          use review_id <- result.try(case declared_only {
+            True ->
+              reviews.create_for_context(
+                tx,
+                review_row.RepresentationDeclared,
+                t.row.agency_org_id,
+                a.user.id,
+                reviews.ContextSubject(
+                  context_id: c.row.id,
+                  transaction_id: id.transaction_to_string(t.row.id),
+                  representation_id: Some(id.representation_to_string(rep_id)),
+                  party_role: b.party_role,
+                ),
+                review_reasons,
+                result.policy_versions,
+                snap,
+                requested_by,
+                now,
+              )
+              |> result.map(Some)
+              |> storage
+            False -> Ok(None)
+          })
+          let status = case declared_only {
+            True -> declared_representation_status.PendingReview
+            False -> declared_representation_status.Verified
+          }
+          let row =
+            rep_row.Row(
+              ..rep_row.new(
+                id: rep_id,
+                transaction_id: t.row.id,
+                agency_org_id: t.row.agency_org_id,
+                agent_user_id: a.user.id,
+                party_role: b.party_role,
+                declared_only:,
+                status:,
+                created_at: now,
+                rev: 1,
+              ),
+              agreement_id: option.map(agreement, fn(ag) { ag.row.id }),
+              jurisdiction: option.map(agreement, fn(ag) {
+                jurisdiction.to_string(ag.row.jurisdiction)
+              }),
+              review_id:,
+              verified_at: case declared_only {
+                True -> None
+                False -> Some(now)
+              },
+              first_act_at: case declared_only {
+                True -> None
+                False -> Some(now)
+              },
+              attach_key: key,
+              attach_fp: option.map(key, fn(_) { fp }),
+              rev_at: Some(now),
+            )
+          let scope = case agreement {
+            Some(ag) ->
+              list.filter_map(ag.scope, fn(s) {
+                scope_row.scope_from_string(agreement_scope_row.scope_to_string(
+                  s,
+                ))
+              })
+            None -> []
+          }
+          use _ <- result.try(
+            transaction_store.create_representation(
+              tx,
+              row,
+              scope,
+              by,
+              result.policy_versions,
+            )
+            |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.history(
+              tx,
+              t.row.id,
+              event_row.TransactionRepresentationAttached,
+              by,
+              transaction_store.Detail(
+                ..transaction_store.no_detail,
+                party_role: Some(b.party_role),
+                status: Some(status),
+              ),
+              now,
+            )
+            |> storage,
+          )
+          use _ <- result.try(recheck(tx, t.row.id, by, now) |> storage)
+          use _ <- result.try(
+            transaction_store.bump(tx, t.row.id, by, now) |> storage,
+          )
+          case declared_only {
+            // Recorded but not effective until reviewed: 422 rather than 201, which would read as "now in force".
+            True ->
+              Ok(
+                err(
+                  "REGULATORY_REVIEW_REQUIRED",
+                  "Representation of an entity with no ScoutBox agreement is recorded as declared and needs attributed review. It is not effective until a named reviewer confirms it.",
+                  [
+                    #("reasons", reasons_json(review_reasons)),
+                    #("policyVersions", policy_json),
+                    #("outcome", outcome_json),
+                    #("contextId", context_id),
+                    #("partyRole", party_role.to_json(b.party_role)),
+                  ],
+                ),
+              )
+            False -> {
+              use view <- result.map(projected(tx, t.row.id, viewer, now))
+              http.json(
+                201,
+                json.object([
+                  #("transaction", view),
+                  #(
+                    "representation",
+                    json.object([
+                      #("id", id.representation_json(rep_id)),
+                      #("partyRole", party_role.to_json(b.party_role)),
+                      #(
+                        "status",
+                        declared_representation_status.to_json(status),
+                      ),
+                    ]),
+                  ),
+                ]),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// `POST /org/agent/transactions/:id/representations/:rid/withdraw`.
+pub fn withdraw_representation(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+  representation_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  use reps <- reading(ctx, transaction_store.representations(_, t.row.id))
+  case
+    list.find(reps, fn(r) {
+      id.representation_to_string(r.row.id) == representation_id
+      && r.row.agent_user_id == a.user.id
+    })
+  {
+    Error(Nil) -> not_found()
+    Ok(r) -> {
+      use raw <- rev_only(req)
+      let now = clock.now_ms()
+      let viewer = agent_viewer(m)
+      case r.row.status {
+        declared_representation_status.Withdrawn -> {
+          use view <- reading(ctx, project(_, t, viewer, now))
+          http.json(200, idempotent_body(view))
+        }
+        _ -> {
+          use <- guard_rev(raw, t)
+          let by = by_agent(a)
+          use tx <- acting(ctx, t)
+          use _ <- result.try(
+            transaction_store.withdraw_representation(
+              tx,
+              r.row,
+              rep_row.AgentWithdrew,
+              by,
+              None,
+              None,
+              now,
+            )
+            |> storage,
+          )
+          use _ <- result.try(
+            transaction_store.history(
+              tx,
+              t.row.id,
+              event_row.TransactionRepresentationWithdrawn,
+              by,
+              transaction_store.Detail(
+                ..transaction_store.no_detail,
+                party_role: Some(r.row.party_role),
+              ),
+              now,
+            )
+            |> storage,
+          )
+          use _ <- result.try(recheck(tx, t.row.id, by, now) |> storage)
+          use _ <- result.try(
+            transaction_store.bump(tx, t.row.id, by, now) |> storage,
+          )
+          use view <- result.map(projected(tx, t.row.id, viewer, now))
+          http.json(200, transaction_body(view))
+        }
+      }
+    }
+  }
+}
+
+/// `POST /org/agent/transactions/:id/evaluate`.
+pub fn evaluate(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  transaction_id: String,
+) -> Response {
+  use m <- core_routes.membership(ctx, a)
+  use <- core_routes.require(m, "transactions.write")
+  use t <- own_transaction(ctx, m, transaction_id)
+  use <- writable(ctx, t)
+  let shape = input.done(Nil)
+  use _, _ <- body(req, shape, "TRANSACTION_INPUT_INVALID")
+  use <- limited(
+    ctx,
+    req,
+    limits.TransactionWrite,
+    id.org_user_to_string(a.user.id),
+  )
+  let now = clock.now_ms()
+  let by = by_agent(a)
+  use tx <- acting(ctx, t)
+  use _ <- result.try(recheck(tx, t.row.id, by, now) |> storage)
+  use _ <- result.try(transaction_store.bump(tx, t.row.id, by, now) |> storage)
+  use view <- result.map(projected(tx, t.row.id, agent_viewer(m), now))
+  http.json(200, transaction_body(view))
 }

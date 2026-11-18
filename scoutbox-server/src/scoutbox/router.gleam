@@ -1471,6 +1471,21 @@ fn agent_org(
         use req <- contract.rerun_on_stale(req)
         transaction_routes.link_opportunity(ctx, req, org, tid)
       })
+    ["transactions", tid, "representations"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.attach_representation(ctx, req, org, tid)
+      })
+    ["transactions", tid, "representations", rid, "withdraw"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.withdraw_representation(ctx, req, org, tid, rid)
+      })
+    ["transactions", tid, "evaluate"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.evaluate(ctx, req, org, tid)
+      })
     ["transactions", tid, "notes"] ->
       only(req, Post, fn() {
         use req <- contract.rerun_on_stale(req)
