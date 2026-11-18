@@ -48,6 +48,7 @@ export const SPEC = {
   ],
   'domains/development/record.mjs': ['DRILLS'],
   'domains/development/objectives.mjs': ['DRILL_RECORDING'],
+  'grassrootsJourney.mjs': ['PROGRAMME_TRACKS'],
   'domains/discovery/shared.mjs': [
     'POSITIONS',
     'TRUST_BANDS',
