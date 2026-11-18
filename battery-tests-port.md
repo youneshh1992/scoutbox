@@ -192,7 +192,8 @@ are for surprising facts or points that later work depends on, not implementatio
    structured requirements are not. The battery now passes as far as its cases section (assigning): the list
    queries, template versions, published feedback, video segments and playlists are in. The `feedback` live event
    reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
-   as a drawing (docs/known-issues.md).
+   as a drawing (docs/known-issues.md). The case workspace is whole (reading one, assigning, completing tasks,
+   approvals' answers, links), so the battery now passes through its recruitment section and stops at tactical fit.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.

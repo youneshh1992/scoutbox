@@ -89,13 +89,17 @@ pub fn is_lead(user: Staff) -> Bool {
 pub fn require_lead(access: OrgAccess, next: fn() -> Response) -> Response {
   case is_lead(access.user) {
     True -> next()
-    False ->
-      http.error_message(
-        403,
-        "LEAD_REQUIRED",
-        "This action needs a recruitment lead (role containing Head/Director/Lead/Manager).",
-      )
+    False -> lead_required()
   }
+}
+
+/// The refusal of an act only a recruitment lead may take.
+pub fn lead_required() -> Response {
+  http.error_message(
+    403,
+    "LEAD_REQUIRED",
+    "This action needs a recruitment lead (role containing Head/Director/Lead/Manager).",
+  )
 }
 
 /// ScoutBox's own staff, behind `x-admin-key`.

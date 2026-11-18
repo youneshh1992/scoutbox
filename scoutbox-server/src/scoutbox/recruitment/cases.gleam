@@ -4,7 +4,7 @@
 //// A Room is a case with a status. The status is written only by `move` (and `create`/`adopt`), which derive the
 //// case's stage from it and move the Room's revision.
 ////
-//// Not ported yet: the case's approvals, decision draft, transaction handoff and budget, and the plain cases list.
+//// Not ported yet: the case's decision draft, transaction handoff and budget.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
@@ -752,6 +752,7 @@ pub type WorkspaceDecision {
     outcome: case_outcome.CaseOutcome,
     reasons: String,
     by: #(id.OrgUserId, String),
+    approved_by: Option(String),
     at: Int,
   )
 }
@@ -763,12 +764,13 @@ pub fn record_decision(
 ) -> Result(Nil, Fail(e)) {
   exactly_one(
     tx,
-    "UPDATE recruitment_cases SET decision_outcome = ?, decision_reasons = ?, decision_by_user_id = ?, decision_by_name = ?, decision_approved_by_name = NULL, decision_at = ? WHERE id = ? RETURNING id",
+    "UPDATE recruitment_cases SET decision_outcome = ?, decision_reasons = ?, decision_by_user_id = ?, decision_by_name = ?, decision_approved_by_name = ?, decision_at = ? WHERE id = ? RETURNING id",
     [
       sqlight.text(case_outcome.to_string(d.outcome)),
       sqlight.text(d.reasons),
       id.org_user_sql(d.by.0),
       sqlight.text(d.by.1),
+      sqlight.nullable(sqlight.text, d.approved_by),
       sqlight.int(d.at),
       id.recruitment_case_sql(case_id),
     ],
@@ -800,6 +802,29 @@ pub fn request_approval(
     )
   use _ <- result.map(approval_row.insert(tx, r))
   r
+}
+
+/// A pending approval's answer, by a recruitment lead.
+pub fn resolve_approval(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  approval_id: id.ApprovalId,
+  status: approval_row.Status,
+  by: #(id.OrgUserId, String),
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  exactly_one(
+    tx,
+    "UPDATE case_approvals SET status = ?, resolved_by_user_id = ?, resolved_by_name = ?, resolved_at = ? WHERE case_id = ? AND id = ? AND status = 'pending' RETURNING id",
+    [
+      sqlight.text(approval_row.status_to_string(status)),
+      id.org_user_sql(by.0),
+      sqlight.text(by.1),
+      sqlight.int(at),
+      id.recruitment_case_sql(case_id),
+      id.approval_sql(approval_id),
+    ],
+  )
 }
 
 /// Gives a plain case its Room: a Room adopts the club's open case rather than open a second one.
@@ -1145,16 +1170,20 @@ pub fn add_case_task(
   r
 }
 
-/// A task's status (with its completion instant) or assignee; `Some(None)` unassigns it.
+/// A task's status (with its completion instant), who completed it, or its assignee; `Some(None)` unassigns it.
 pub fn update_task(
   tx: Tx,
   case_id: id.RecruitmentCaseId,
   task_id: id.TaskId,
   status: Option(#(TaskState, Option(Int))),
+  completed_by: Option(String),
   assignee: Option(Option(#(id.OrgUserId, String))),
 ) -> Result(Nil, Fail(e)) {
   let sets =
     option.values([
+      option.map(completed_by, fn(name) {
+        #("completed_by_name = ?", [sqlight.text(name)])
+      }),
       option.map(status, fn(s) {
         #("status = ?, completed_at = ?", [
           sqlight.text(task_state.to_string(s.0)),

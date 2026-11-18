@@ -6,7 +6,6 @@
 //// Every route answers the case record whole, as the repository decodes it: its Room, its decision draft, its
 //// transaction handoff and its budget included.
 ////
-//// Not ported yet: `GET /org/cases/:id`, assignments, completing a task, approvals' answers and links.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -20,14 +19,18 @@ import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/identity/staff
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/paging.{IntKey, IntKind, TextKey, TextKind}
-import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
 import scoutbox/recruitment/cases
+import scoutbox/recruitment/requests
+import scoutbox/recruitment/signings
+import scoutbox/recruitment/trials
 import scoutbox/rows/case_approvals as approval_row
 import scoutbox/rows/case_assignments as assignment_row
 import scoutbox/rows/case_budget_actuals as actual_row
@@ -41,6 +44,7 @@ import scoutbox/rows/case_tasks as task_row
 import scoutbox/rows/case_transaction_handoffs as handoff_row
 import scoutbox/rows/id
 import scoutbox/rows/recruitment_cases as row
+import scoutbox/vocab/audience
 import scoutbox/vocab/case_outcome
 import scoutbox/vocab/currency
 import scoutbox/vocab/decision_evidence_kind
@@ -54,6 +58,8 @@ import wisp.{type Request, type Response}
 const reasons_max = 500
 
 const task_title_max = 200
+
+const assignment_task_max = 200
 
 const pro_stages = [
   row.Identified,
@@ -520,6 +526,42 @@ fn budget_json(
 }
 
 /// The case as the repository decodes it (recruitmentCases.ts `decodeCase`), in its key order.
+fn assignment_json(a: assignment_row.Row) -> Json {
+  json.object([
+    #("id", id.assignment_json(a.id)),
+    #("userId", id.org_user_json(a.user_id)),
+    #("name", json.nullable(a.user_name, json.string)),
+    #("task", json.string(a.task)),
+    #("dueAt", cases.due_json(a.due_day, a.due_at)),
+    #("status", task_state.to_json(a.status)),
+    #("createdAt", json.int(a.created_at)),
+  ])
+}
+
+fn task_json(t: task_row.Row) -> Json {
+  json.object([
+    #("id", id.task_json(t.id)),
+    #("title", json.string(t.title)),
+    #("description", json.nullable(t.description, json.string)),
+    #("dueAt", cases.due_json(t.due_day, t.due_at)),
+    #("assigneeUserId", json.nullable(t.assignee_user_id, id.org_user_json)),
+    #("assigneeName", json.nullable(t.assignee_name, json.string)),
+    #("status", task_state.to_json(t.status)),
+    #(
+      "linkedResourceType",
+      json.nullable(
+        t.linked_resource_type,
+        task_row.linked_resource_type_to_json,
+      ),
+    ),
+    #("linkedResourceId", json.nullable(t.linked_resource_id, json.string)),
+    #("createdBy", person(user(t.created_by_user_id), t.created_by_name)),
+    #("createdAt", json.int(t.created_at)),
+    #("completedAt", json.nullable(t.completed_at, json.int)),
+    #("completedBy", json.nullable(t.completed_by_name, json.string)),
+  ])
+}
+
 pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
   let case_id = r.id
   use assignments <- result.try(of_case(
@@ -593,52 +635,8 @@ pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
     #("priority", row.priority_to_json(r.priority)),
     #("deadline", cases.due_json(r.deadline_day, r.deadline_at)),
     #("restricted", json.bool(r.restricted)),
-    #(
-      "assignments",
-      json.array(assignments, fn(a) {
-        json.object([
-          #("id", id.assignment_json(a.id)),
-          #("userId", id.org_user_json(a.user_id)),
-          #("name", json.nullable(a.user_name, json.string)),
-          #("task", json.string(a.task)),
-          #("dueAt", cases.due_json(a.due_day, a.due_at)),
-          #("status", task_state.to_json(a.status)),
-          #("createdAt", json.int(a.created_at)),
-        ])
-      }),
-    ),
-    #(
-      "tasks",
-      json.array(tasks, fn(t) {
-        json.object([
-          #("id", id.task_json(t.id)),
-          #("title", json.string(t.title)),
-          #("description", json.nullable(t.description, json.string)),
-          #("dueAt", cases.due_json(t.due_day, t.due_at)),
-          #(
-            "assigneeUserId",
-            json.nullable(t.assignee_user_id, id.org_user_json),
-          ),
-          #("assigneeName", json.nullable(t.assignee_name, json.string)),
-          #("status", task_state.to_json(t.status)),
-          #(
-            "linkedResourceType",
-            json.nullable(
-              t.linked_resource_type,
-              task_row.linked_resource_type_to_json,
-            ),
-          ),
-          #(
-            "linkedResourceId",
-            json.nullable(t.linked_resource_id, json.string),
-          ),
-          #("createdBy", person(user(t.created_by_user_id), t.created_by_name)),
-          #("createdAt", json.int(t.created_at)),
-          #("completedAt", json.nullable(t.completed_at, json.int)),
-          #("completedBy", json.nullable(t.completed_by_name, json.string)),
-        ])
-      }),
-    ),
+    #("assignments", json.array(assignments, assignment_json)),
+    #("tasks", json.array(tasks, task_json)),
     #("approvals", json.array(approvals, approval_json)),
     #("decision", case r.decision_at {
       None -> json.null()
@@ -1189,6 +1187,7 @@ pub fn decide(
         outcome: body.outcome,
         reasons: body.reasons,
         by: #(a.user.id, a.user.name),
+        approved_by: None,
         at: now,
       )
     let by = cases.by_staff(a.user.id, a.user.name)
@@ -1249,6 +1248,387 @@ pub fn decide(
         case_body(store.reading(tx), r, 200)
       }
     }
+  })
+  |> answer
+}
+
+/// `GET /org/cases/:id`.
+pub fn get(ctx: Ctx, a: OrgAccess, case_id: String) -> Response {
+  let read =
+    store.read(ctx.store, fn(read) {
+      use c <- result.try(find(read, a, case_id))
+      case_body(read, c, 200)
+    })
+  case read {
+    Ok(resp) -> resp
+    Error(store.Refuse(resp)) -> resp
+    Error(e) -> http.internal(e)
+  }
+}
+
+/// A notice to a member of the club about a case.
+fn notify(
+  tx: Tx,
+  user_id: id.OrgUserId,
+  text: String,
+  case_id: id.RecruitmentCaseId,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  notifications.notify(
+    tx,
+    to: audience.OrgUser,
+    id: id.org_user_to_string(user_id),
+    type_: "case",
+    text:,
+    ref_id: Some(id.recruitment_case_to_string(case_id)),
+    at:,
+  )
+}
+
+/// The player's name as the TypeScript server interpolates it: a removed player's case reads "null".
+fn player_name(c: row.Row) -> String {
+  option.unwrap(c.player_name, "null")
+}
+
+type AssignBody {
+  AssignBody(
+    user_id: String,
+    task: Option(String),
+    due: Option(Option(temporal.Due)),
+  )
+}
+
+/// `POST /org/cases/:id/assign`: the case's owner or a recruitment lead assigns a current member of the club.
+pub fn assign(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  case_id: String,
+) -> Response {
+  use raw <- http.json_body(req)
+  let now = clock.now_ms()
+  let shape = {
+    use user_id <- input.field("userId", input.required(input.id()))
+    use task <- input.field(
+      "task",
+      input.nullish(input.text(assignment_task_max)),
+    )
+    use due <- input.field("dueAt", input.optional(input.due_date()))
+    input.done(AssignBody(user_id:, task:, due:))
+  }
+  store.unit(ctx.store, fn(tx) {
+    let read = store.reading(tx)
+    use c <- result.try(find(read, a, case_id))
+    use _ <- result.try(
+      case c.owner_user_id == a.user.id || access.is_lead(a.user) {
+        True -> Ok(Nil)
+        False -> store.refuse(http.error(403, "OWNER_OR_LEAD_REQUIRED"))
+      },
+    )
+    use body <- result.try(parse(raw, shape, []))
+    use found <- result.try(
+      staff.by_id(read, id.org_user(body.user_id)) |> storage,
+    )
+    use u <- result.try(case found {
+      Some(s) if s.org_id == a.org.id && s.removed_at == None -> Ok(s)
+      _ -> store.refuse(http.error(404, "STAFF_NOT_FOUND"))
+    })
+    let task = case string.trim(option.unwrap(body.task, "")) {
+      "" -> "Scout this player"
+      t -> t
+    }
+    use assignment <- result.try(
+      cases.add_assignment(
+        tx,
+        c.id,
+        #(u.id, u.name),
+        task,
+        option.flatten(body.due),
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.try(
+      cases.record(
+        tx,
+        c.id,
+        cases.by_staff(a.user.id, a.user.name),
+        [cases.text_entry("assigned", u.name <> ": " <> task)],
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.map(
+      notify(
+        tx,
+        u.id,
+        "📌 "
+          <> a.user.name
+          <> " assigned you: "
+          <> task
+          <> " ("
+          <> player_name(c)
+          <> ").",
+        c.id,
+        now,
+      )
+      |> storage,
+    )
+    http.json(201, json.object([#("assignment", assignment_json(assignment))]))
+  })
+  |> answer
+}
+
+/// `POST /org/cases/:id/tasks/:tid/complete`.
+pub fn complete_task(
+  ctx: Ctx,
+  a: OrgAccess,
+  case_id: String,
+  task_id: String,
+) -> Response {
+  let now = clock.now_ms()
+  let tid = id.task(task_id)
+  let task_of = fn(read, c: row.Row) {
+    store.query(
+      read,
+      "SELECT "
+        <> task_row.columns
+        <> " FROM case_tasks WHERE case_id = ? AND id = ?",
+      [id.recruitment_case_sql(c.id), id.task_sql(tid)],
+      task_row.decoder(),
+    )
+    |> storage
+  }
+  store.unit(ctx.store, fn(tx) {
+    use c <- result.try(find(store.reading(tx), a, case_id))
+    use found <- result.try(task_of(store.reading(tx), c))
+    use _ <- result.try(case found {
+      [] -> store.refuse(http.error(404, "TASK_NOT_FOUND"))
+      _ -> Ok(Nil)
+    })
+    use _ <- result.try(
+      cases.update_task(
+        tx,
+        c.id,
+        tid,
+        Some(#(task_state.Done, Some(now))),
+        Some(a.user.name),
+        None,
+      )
+      |> storage,
+    )
+    use fresh <- result.map(task_of(store.reading(tx), c))
+    let assert [t] = fresh as "the task just updated"
+    http.json(200, json.object([#("task", task_json(t))]))
+  })
+  |> answer
+}
+
+/// `POST /org/cases/:id/approvals/:aid`: a recruitment lead answers a pending sign decision. An approved decision
+/// is recorded as the requester's, naming the lead who approved it; on a plain case it moves the stage to
+/// `decision`.
+pub fn answer_approval(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  case_id: String,
+  approval_id: String,
+) -> Response {
+  use raw <- http.json_body(req)
+  let now = clock.now_ms()
+  let aid = id.approval(approval_id)
+  let shape = {
+    use approve <- input.field("approve", input.required(input.boolean()))
+    input.done(approve)
+  }
+  store.unit(ctx.store, fn(tx) {
+    let read = store.reading(tx)
+    use c <- result.try(find(read, a, case_id))
+    use _ <- result.try(case access.is_lead(a.user) {
+      True -> Ok(Nil)
+      False -> store.refuse(access.lead_required())
+    })
+    use found <- result.try(
+      store.query(
+        read,
+        "SELECT "
+          <> approval_row.columns
+          <> " FROM case_approvals WHERE case_id = ? AND id = ? AND status = 'pending'",
+        [id.recruitment_case_sql(c.id), id.approval_sql(aid)],
+        approval_row.decoder(),
+      )
+      |> storage,
+    )
+    use appr <- result.try(case found {
+      [appr] -> Ok(appr)
+      _ -> store.refuse(http.error(404, "APPROVAL_NOT_FOUND"))
+    })
+    use approve <- result.try(parse(raw, shape, []))
+    let #(status, action) = case approve {
+      True -> #(approval_row.Approved, "approved")
+      False -> #(approval_row.Rejected, "rejected")
+    }
+    let outcome = case_outcome.to_string(appr.decision_outcome)
+    use _ <- result.try(
+      cases.resolve_approval(
+        tx,
+        c.id,
+        appr.id,
+        status,
+        #(a.user.id, a.user.name),
+        now,
+      )
+      |> storage,
+    )
+    use _ <- result.try(
+      cases.record(
+        tx,
+        c.id,
+        cases.by_staff(a.user.id, a.user.name),
+        [cases.text_entry(action, outcome)],
+        now,
+      )
+      |> storage,
+    )
+    let assert Some(requester) = appr.requested_by_user_id
+      as "an approval names who asked for it"
+    use _ <- result.try(case approve {
+      False -> Ok(Nil)
+      True -> {
+        let assert #(Some(name), Some(reasons)) = #(
+          appr.requested_by_name,
+          appr.decision_reasons,
+        )
+          as "an approval keeps the requester's name and the decision's reasons"
+        use _ <- result.try(
+          cases.record_decision(
+            tx,
+            c.id,
+            cases.WorkspaceDecision(
+              outcome: appr.decision_outcome,
+              reasons:,
+              by: #(requester, name),
+              approved_by: Some(a.user.name),
+              at: now,
+            ),
+          )
+          |> storage,
+        )
+        case c.room_status {
+          None -> cases.set_stage(tx, c.id, row.Decision) |> storage
+          Some(_) -> Ok(Nil)
+        }
+      }
+    })
+    use _ <- result.try(
+      notify(
+        tx,
+        requester,
+        case approve {
+          True -> "✅ approved"
+          False -> "❌ rejected"
+        }
+          <> ": your "
+          <> outcome
+          <> " decision on "
+          <> player_name(c)
+          <> ".",
+        c.id,
+        now,
+      )
+      |> storage,
+    )
+    use r <- result.try(reread(store.reading(tx), c.id))
+    case_body(store.reading(tx), r, 200)
+  })
+  |> answer
+}
+
+type LinkBody {
+  LinkBody(
+    request: Option(Option(String)),
+    trial: Option(Option(String)),
+    signing: Option(Option(String)),
+  )
+}
+
+/// `POST /org/cases/:id/link`: requests, trials and signings are created by their own workflows; the case only
+/// links them, each of this club and this player. Every reference is checked before anything is written. The
+/// history names the links as sent, a null one included.
+pub fn link(ctx: Ctx, req: Request, a: OrgAccess, case_id: String) -> Response {
+  use raw <- http.json_body(req)
+  let now = clock.now_ms()
+  let shape = {
+    use request <- input.field("requestId", input.clearable(input.id()))
+    use trial <- input.field("trialId", input.clearable(input.id()))
+    use signing <- input.field("signingId", input.clearable(input.id()))
+    input.done(LinkBody(request:, trial:, signing:))
+  }
+  store.unit(ctx.store, fn(tx) {
+    let read = store.reading(tx)
+    use c <- result.try(find(read, a, case_id))
+    use body <- result.try(parse(raw, shape, []))
+    use request <- result.try(case option.flatten(body.request) {
+      None -> Ok(None)
+      Some(q) -> {
+        use found <- result.try(requests.by_id(read, id.request(q)) |> storage)
+        case found {
+          Some(r) if r.org_id == a.org.id && r.player_id == c.player_id ->
+            Ok(Some(r.id))
+          _ -> store.refuse(http.error(404, "REQUEST_NOT_FOUND"))
+        }
+      }
+    })
+    use trial <- result.try(case option.flatten(body.trial) {
+      None -> Ok(None)
+      Some(t) -> {
+        use found <- result.try(trials.by_id(read, id.trial(t)) |> storage)
+        case found {
+          Some(t)
+            if t.row.org_id == a.org.id && t.row.player_id == c.player_id
+          -> Ok(Some(t.row.id))
+          _ -> store.refuse(http.error(404, "TRIAL_NOT_FOUND"))
+        }
+      }
+    })
+    use signing <- result.try(case option.flatten(body.signing) {
+      None -> Ok(None)
+      Some(s) -> {
+        use found <- result.try(signings.by_id(read, id.signing(s)) |> storage)
+        case found {
+          Some(r) if r.org_id == a.org.id && r.player_id == c.player_id ->
+            Ok(Some(id.signing_to_string(r.id)))
+          _ -> store.refuse(http.error(404, "SIGNING_NOT_FOUND"))
+        }
+      }
+    })
+    use _ <- result.try(
+      cases.link(tx, c.id, trial, request, signing) |> storage,
+    )
+    let sent =
+      [
+        #("requestId", body.request),
+        #("trialId", body.trial),
+        #("signingId", body.signing),
+      ]
+      |> list.filter_map(fn(f) {
+        case f.1 {
+          None -> Error(Nil)
+          Some(v) -> Ok(#(f.0, json.nullable(v, json.string)))
+        }
+      })
+    use _ <- result.try(
+      cases.record(
+        tx,
+        c.id,
+        cases.by_staff(a.user.id, a.user.name),
+        [cases.text_entry("linked", json.to_string(json.object(sent)))],
+        now,
+      )
+      |> storage,
+    )
+    use r <- result.try(reread(store.reading(tx), c.id))
+    case_body(store.reading(tx), r, 200)
   })
   |> answer
 }

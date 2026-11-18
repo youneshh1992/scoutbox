@@ -2373,6 +2373,7 @@ pub fn edit_task(
                         _ -> None
                       })
                     }),
+                    None,
                     assignee,
                   )
                   |> storage,

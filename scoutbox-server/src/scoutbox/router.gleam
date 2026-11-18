@@ -353,8 +353,22 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           }
         ["vacancies"] ->
           only(req, Get, fn() { vacancies.list_for(ctx, req, org) })
+        ["cases", cid] ->
+          only(req, Get, fn() { case_workspace.get(ctx, org, cid) })
+        ["cases", cid, "assign"] ->
+          only(req, Post, fn() { case_workspace.assign(ctx, req, org, cid) })
         ["cases", cid, "tasks"] ->
           only(req, Post, fn() { case_workspace.add_task(ctx, req, org, cid) })
+        ["cases", cid, "tasks", tid, "complete"] ->
+          only(req, Post, fn() {
+            case_workspace.complete_task(ctx, org, cid, tid)
+          })
+        ["cases", cid, "approvals", aid] ->
+          only(req, Post, fn() {
+            case_workspace.answer_approval(ctx, req, org, cid, aid)
+          })
+        ["cases", cid, "link"] ->
+          only(req, Post, fn() { case_workspace.link(ctx, req, org, cid) })
         ["cases", cid, "stage"] ->
           only(req, Post, fn() { case_workspace.set_stage(ctx, req, org, cid) })
         ["cases", cid, "decision"] ->
