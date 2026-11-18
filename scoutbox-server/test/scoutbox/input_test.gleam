@@ -224,3 +224,46 @@ pub fn key_order_reads_nested_lists_and_escapes_test() {
   assert key_order.keys(order, key_order.steps("aé[0]")) == Some(["y", "x"])
   assert key_order.of("not json") == key_order.Unknown
 }
+
+fn drawing_shape() -> input.Shape(List(#(String, dynamic.Dynamic))) {
+  use d <- input.field(
+    "d",
+    input.required(
+      input.record(input.text(40), input.anything())
+      |> input.refine(fn(es) { list.length(es) <= 3 }, "has at most 3 keys"),
+    ),
+  )
+  input.done(d)
+}
+
+pub fn a_record_reads_a_list_as_an_object_of_its_indexes_test() {
+  let text = "{\"d\": [\"a\", {\"y\": 1, \"x\": 2}]}"
+  let assert Ok(entries) = parsed_text(text, drawing_shape())
+  let order = key_order.at(key_order.of(text), [key_order.Key("d")])
+  assert json.to_string(key_order.object_json(entries, order))
+    == "{\"0\":\"a\",\"1\":{\"y\":1,\"x\":2}}"
+}
+
+pub fn a_refined_value_is_refused_under_its_own_name_test() {
+  let text = "{\"d\": {\"a\": 1, \"b\": 2, \"c\": 3, \"e\": 4}}"
+  let assert Error(r) = parsed_text(text, drawing_shape())
+  assert r.field == "d"
+  assert r.problem == input.Invalid
+  assert refusal_text(Error(r)) |> string.contains("d has at most 3 keys.")
+}
+
+pub fn an_object_is_written_back_as_javascript_orders_it_test() {
+  let text =
+    "{\"d\": {\"b\": 1.5, \"a\": [1, {\"z\": 2.0, \"y\": null}], \"3\": true, \"1\": \"x\"}}"
+  let s = {
+    use d <- input.field(
+      "d",
+      input.required(input.record(input.text(40), input.anything())),
+    )
+    input.done(d)
+  }
+  let assert Ok(entries) = parsed_text(text, s)
+  let order = key_order.at(key_order.of(text), [key_order.Key("d")])
+  assert json.to_string(key_order.object_json(entries, order))
+    == "{\"1\":\"x\",\"3\":true,\"b\":1.5,\"a\":[1,{\"z\":2,\"y\":null}]}"
+}

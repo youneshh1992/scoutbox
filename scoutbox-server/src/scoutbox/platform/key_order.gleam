@@ -3,7 +3,11 @@
 //// a policy version's rules keep the order they were sent in (docs/known-issues.md). This reads the order from
 //// the body's raw text, so `input` can follow it.
 
+import gleam/dict
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/int
+import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -154,5 +158,79 @@ pub fn sort(
       let rest = list.filter(items, fn(x) { !list.contains(sent, x.0) })
       list.append(known, rest)
     }
+  }
+}
+
+/// A JSON value read from a body, written back as JavaScript's `JSON.stringify` writes it after `JSON.parse`: each
+/// object's keys in the order sent (`order`), except that keys which are array indexes (`"0"`, `"12"`) come first,
+/// in ascending order, as JavaScript orders an object's properties. For a value a route stores as sent (a
+/// drawing it never reads).
+pub fn to_json(value: Dynamic, order: KeyOrder) -> Json {
+  case
+    dynamic.classify(value),
+    decode.run(value, decode.int),
+    decode.run(value, decode.float)
+  {
+    "Nil", _, _ | "Null", _, _ -> json.null()
+    _, Ok(n), _ -> json.int(n)
+    _, _, Ok(f) -> json_text.number(f)
+    _, _, _ ->
+      case decode.run(value, decode.string), decode.run(value, decode.bool) {
+        Ok(s), _ -> json.string(s)
+        _, Ok(b) -> json.bool(b)
+        _, _ ->
+          case
+            decode.run(value, decode.list(decode.dynamic)),
+            decode.run(value, decode.dict(decode.string, decode.dynamic))
+          {
+            Ok(items), _ ->
+              json.preprocessed_array(
+                list.index_map(items, fn(item, i) {
+                  to_json(item, at(order, [Index(i)]))
+                }),
+              )
+            _, Ok(fields) -> object_json(dict.to_list(fields), order)
+            _, _ -> json.null()
+          }
+      }
+  }
+}
+
+/// An object's entries written as `to_json` writes an object. `order` may be a list's (`Items`): an object read
+/// from a list (valibot's `record` takes one) finds each value's order by its index.
+pub fn object_json(entries: List(#(String, Dynamic)), order: KeyOrder) -> Json {
+  let entries =
+    entries
+    |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+    |> sort(keys(order, []))
+  let #(indexes, named) =
+    list.partition(entries, fn(e) { array_index(e.0) != Error(Nil) })
+  let indexes =
+    list.sort(indexes, fn(a, b) {
+      int.compare(
+        result.unwrap(array_index(a.0), 0),
+        result.unwrap(array_index(b.0), 0),
+      )
+    })
+  json.object(
+    list.map(list.append(indexes, named), fn(e) {
+      let inner = case order, array_index(e.0) {
+        Items(_), Ok(i) -> at(order, [Index(i)])
+        _, _ -> at(order, [Key(e.0)])
+      }
+      #(e.0, to_json(e.1, inner))
+    }),
+  )
+}
+
+/// A key JavaScript treats as an array index: a canonical whole number below 2^32 - 1.
+fn array_index(key: String) -> Result(Int, Nil) {
+  case int.parse(key) {
+    Ok(n) if n >= 0 && n < 4_294_967_295 ->
+      case int.to_string(n) == key {
+        True -> Ok(n)
+        False -> Error(Nil)
+      }
+    _ -> Error(Nil)
   }
 }

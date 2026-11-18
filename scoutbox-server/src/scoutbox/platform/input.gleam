@@ -912,6 +912,25 @@ pub fn items_between(item: Check(a), min: Int, max: Int) -> Check(List(a)) {
   }
 }
 
+/// `check`, then `holds` over what it read: a value `holds` refuses is refused under this field's own name with
+/// `phrase` (valibot's `pipe(…, check(fn, message))`), never under one of its items or keys.
+pub fn refine(
+  check: Check(a),
+  holds: fn(a) -> Bool,
+  phrase: String,
+) -> Check(a) {
+  fn(v) {
+    case check(v) {
+      Error(e) -> Error(e)
+      Ok(a) ->
+        case holds(a) {
+          True -> Ok(a)
+          False -> Error(issue(Invalid, phrase))
+        }
+    }
+  }
+}
+
 /// `matching`, refused with the schema's own words (valibot's `regex(pattern, message)`).
 pub fn matching_said(pattern: String, phrase: String) -> Check(String) {
   let check = matching(pattern)
@@ -1112,6 +1131,43 @@ pub fn entries(
           }
         })
     }
+  }
+}
+
+/// An object whose keys are names it chooses, read as valibot's `record` reads it: a list is accepted too, as an
+/// object keyed by its indexes (`[1]` is `{ "0": 1 }`). Entries come back in key order, a list's in index order.
+pub fn record(
+  key: Check(String),
+  value: Check(a),
+) -> Check(List(#(String, a))) {
+  let as_object = entries(key, value)
+  fn(v) {
+    case decode.run(v, decode.list(decode.dynamic)) {
+      Ok(items) ->
+        case
+          list.index_map(items, fn(item, i) {
+            #(dynamic.string(int.to_string(i)), item)
+          })
+          |> dynamic.properties
+          |> as_object
+        {
+          Ok(found) ->
+            Ok(
+              list.sort(found, fn(a, b) {
+                int.compare(index_of(a.0), index_of(b.0))
+              }),
+            )
+          Error(e) -> Error(e)
+        }
+      Error(_) -> as_object(v)
+    }
+  }
+}
+
+fn index_of(key: String) -> Int {
+  case int.parse(key) {
+    Ok(n) -> n
+    Error(Nil) -> 0
   }
 }
 

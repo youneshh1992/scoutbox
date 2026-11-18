@@ -6,7 +6,7 @@
 //// Every route answers the case record whole, as the repository decodes it: its Room, its decision draft, its
 //// transaction handoff and its budget included.
 ////
-//// Not ported yet: `GET /org/cases` and `/org/cases/:id`, assignments, tasks, approvals' answers and links.
+//// Not ported yet: `GET /org/cases/:id`, assignments, completing a task, approvals' answers and links.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -14,14 +14,17 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
+import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/paging.{IntKey, IntKind, TextKey, TextKind}
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/platform/temporal
 import scoutbox/recruitment/cases
@@ -49,6 +52,8 @@ import sqlight
 import wisp.{type Request, type Response}
 
 const reasons_max = 500
+
+const task_title_max = 200
 
 const pro_stages = [
   row.Identified,
@@ -766,6 +771,184 @@ fn find(
   }
 }
 
+type ListQuery {
+  ListQuery(
+    limit: Option(String),
+    cursor: Option(String),
+    stage: Option(row.Stage),
+  )
+}
+
+/// `GET /org/cases`: the cases this member may open, optionally at one stage, newest first by cursor
+/// (`[createdAt, id]`), filtered and paged in SQL.
+pub fn list(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  let stages = stages_for(a)
+  let shape = {
+    use limit <- input.field("limit", input.optional(input.text(1000)))
+    use cursor <- input.field("cursor", input.optional(input.text(100_000)))
+    use stage <- input.field(
+      "stage",
+      input.optional(
+        input.one_of(
+          list.filter(row.stage_pairs, fn(p) { list.contains(stages, p.1) }),
+        ),
+      ),
+    )
+    input.done(ListQuery(limit:, cursor:, stage:))
+  }
+  use q <- http.query(req, shape, [#("stage", "STAGE_INVALID")])
+  case paging.read(paging.Query(q.limit, q.cursor), [IntKind, TextKind]) {
+    Error(e) -> {
+      let #(code, message) = paging.error_body(e)
+      http.error_message(400, code, message)
+    }
+    Ok(page) -> {
+      let #(access_sql, access_args) = case access.is_lead(a.user) {
+        True -> #("1", [])
+        False -> #(
+          "(c.restricted = 0 OR c.owner_user_id = ? OR EXISTS (SELECT 1 FROM case_assignments a WHERE a.case_id = c.id AND a.user_id = ?))",
+          [id.org_user_sql(a.user.id), id.org_user_sql(a.user.id)],
+        )
+      }
+      let #(stage_sql, stage_args) = case q.stage {
+        Some(st) -> #(" AND c.stage = ?", [
+          sqlight.text(row.stage_to_string(st)),
+        ])
+        None -> #("", [])
+      }
+      let #(after_sql, after_args) = case page.after {
+        Some([IntKey(at), TextKey(cid)]) -> #(
+          " AND (c.created_at < ? OR (c.created_at = ? AND c.id < ?))",
+          [sqlight.int(at), sqlight.int(at), sqlight.text(cid)],
+        )
+        _ -> #("", [])
+      }
+      let read =
+        store.read(ctx.store, fn(read) {
+          use found <- result.try(store.query(
+            read,
+            "SELECT "
+              <> row.qualified("c")
+              <> " FROM recruitment_cases c WHERE c.org_id = ? AND "
+              <> access_sql
+              <> stage_sql
+              <> after_sql
+              <> " ORDER BY c.created_at DESC, c.id DESC LIMIT ?",
+            list.flatten([
+              [id.org_sql(a.org.id)],
+              access_args,
+              stage_args,
+              after_args,
+              [sqlight.int(page.limit + 1)],
+            ]),
+            row.decoder(),
+          ))
+          let #(items, next) =
+            paging.page_of(found, page.limit, fn(r) {
+              [
+                IntKey(r.created_at),
+                TextKey(id.recruitment_case_to_string(r.id)),
+              ]
+            })
+          use bodies <- result.map(list.try_map(items, record_json(read, _)))
+          #(bodies, next)
+        })
+      case read {
+        Error(e) -> http.internal(e)
+        Ok(#(items, next)) ->
+          http.json(
+            200,
+            json.object([
+              #("items", json.preprocessed_array(items)),
+              #("nextCursor", json.nullable(next, json.string)),
+              #("stages", json.array(stages, row.stage_to_json)),
+            ]),
+          )
+      }
+    }
+  }
+}
+
+type TaskBody {
+  TaskBody(
+    title: Option(String),
+    assignee: Option(String),
+    due: Option(Option(temporal.Due)),
+  )
+}
+
+/// `POST /org/cases/:id/tasks`: a task on a case this member may open, for a current member of the club.
+pub fn add_task(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  case_id: String,
+) -> Response {
+  let shape = {
+    use title <- input.field("title", input.nullish(input.text(task_title_max)))
+    use assignee <- input.field("assigneeUserId", input.nullish(input.id()))
+    use due <- input.field("dueAt", input.optional(input.due_date()))
+    input.done(TaskBody(title:, assignee:, due:))
+  }
+  let body = http.parse_body(req, shape, [])
+  let now = clock.now_ms()
+  store.unit(ctx.store, fn(tx) {
+    let read = store.reading(tx)
+    use c <- result.try(find(read, a, case_id))
+    use b <- result.try(case body {
+      Ok(b) -> Ok(b)
+      Error(refused) -> store.refuse(refused)
+    })
+    use assignee <- result.try(case b.assignee {
+      None -> Ok(None)
+      Some(u) -> {
+        use found <- result.try(staff.by_id(read, id.org_user(u)) |> storage)
+        case found {
+          Some(s) if s.org_id == a.org.id && s.removed_at == None ->
+            Ok(Some(s.id))
+          _ -> store.refuse(http.error(404, "USER_NOT_IN_ORG"))
+        }
+      }
+    })
+    case string.trim(option.unwrap(b.title, "")) {
+      "" -> store.refuse(http.error(400, "TITLE_REQUIRED"))
+      title -> {
+        use t <- result.map(
+          cases.add_case_task(
+            tx,
+            c.id,
+            title,
+            assignee,
+            option.flatten(b.due),
+            now,
+          )
+          |> storage,
+        )
+        http.json(
+          201,
+          json.object([
+            #(
+              "task",
+              json.object([
+                #("id", id.task_json(t.id)),
+                #("title", json.string(t.title)),
+                #("dueAt", cases.due_json(t.due_day, t.due_at)),
+                #(
+                  "assigneeUserId",
+                  json.nullable(t.assignee_user_id, id.org_user_json),
+                ),
+                #("status", task_state.to_json(t.status)),
+                #("createdAt", json.int(t.created_at)),
+              ]),
+            ),
+          ]),
+        )
+      }
+    }
+  })
+  |> answer
+}
+
 type NewCaseBody {
   NewCaseBody(
     player_id: String,
@@ -815,7 +998,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           store.query(
             read,
             "SELECT 1 FROM vacancies WHERE id = ? AND org_id = ?",
-            [sqlight.text(v), id.org_sql(a.org.id)],
+            [id.vacancy_sql(id.vacancy(v)), id.org_sql(a.org.id)],
             decode.at([0], decode.int),
           )
           |> storage,

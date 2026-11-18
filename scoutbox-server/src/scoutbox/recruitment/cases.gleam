@@ -1115,6 +1115,36 @@ pub fn add_task(
   r
 }
 
+/// A plain case's task (`POST /org/cases/:id/tasks`). The workspace keeps only its assignee's id, and no author.
+pub fn add_case_task(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  title: String,
+  assignee: Option(id.OrgUserId),
+  due: Option(Due),
+  at: Int,
+) -> Result(task_row.Row, Fail(e)) {
+  use task_id <- result.try(id.next_task(tx))
+  use position <- result.try(next_position(tx, task_row.table, case_id))
+  let #(due_day, due_at) = due_fields(due)
+  let r =
+    task_row.Row(
+      ..task_row.new(
+        case_id:,
+        position:,
+        id: task_id,
+        title:,
+        status: task_state.Open,
+        created_at: at,
+      ),
+      due_day:,
+      due_at:,
+      assignee_user_id: assignee,
+    )
+  use _ <- result.map(task_row.insert(tx, r))
+  r
+}
+
 /// A task's status (with its completion instant) or assignee; `Some(None)` unassigns it.
 pub fn update_task(
   tx: Tx,

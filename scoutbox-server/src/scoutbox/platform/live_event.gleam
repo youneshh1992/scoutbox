@@ -60,6 +60,9 @@ pub type Event {
   )
   /// A scout submitted an assessment. Private to the club.
   AssessmentSubmitted(org_id: String, assessment_id: String)
+  /// A club published feedback to a player. The registry calls it private to a club but names none, so (as in
+  /// the TypeScript server) no stream receives it.
+  Feedback(player_id: String)
   /// A Dynamic Watchlist changed (each change is its own registry entry). Ids only: the club re-reads it under its
   /// own authorisation. Private to the club.
   WatchlistChanged(
@@ -272,6 +275,7 @@ pub fn name(event: Event) -> String {
         SigningSuperseded(..) -> "signing_superseded"
       }
     AssessmentSubmitted(..) -> "assessment_submitted"
+    Feedback(..) -> "feedback"
     WatchlistChanged(change:, ..) ->
       case change {
         WatchlistCreated -> "watchlist_created"
@@ -373,7 +377,7 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewResolved(org_id:, ..)
     | AgentAuthorisationStateChanged(org_id:, ..)
     | RegulatoryConsentChanged(org_id:, ..) -> Ok(org_id)
-    Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
+    Messages(..) | Typing(..) | Notify(..) | Feedback(..) -> Error(Nil)
   }
 }
 
@@ -454,6 +458,7 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("orgId", json.string(org_id)),
       #("assessmentId", json.string(assessment_id)),
     ]
+    Feedback(player_id:) -> [#("playerId", json.string(player_id))]
     WatchlistChanged(org_id:, watchlist_id:, ..) -> [
       #("orgId", json.string(org_id)),
       #("watchlistId", json.string(watchlist_id)),
@@ -581,6 +586,7 @@ pub fn replays(event: Event) -> Bool {
     | Notify(..)
     | OfferResponded(..)
     | AssessmentSubmitted(..)
+    | Feedback(..)
     | WatchlistChanged(..)
     | MatchingRoomCreated(..)
     | RecruitmentCaseMoved(..)

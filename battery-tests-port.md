@@ -189,7 +189,10 @@ are for surprising facts or points that later work depends on, not implementatio
       `clientKey` is `AGENT_INPUT_INVALID`.
 4. `scouting/clubWorkflows`. It needs the uploads check first. Opportunity creation, the club's list and the
    board's club rows are in, and match the TypeScript server response for response. Applications, closing and the
-   structured requirements are not.
+   structured requirements are not. The battery now passes as far as its cases section (assigning): the list
+   queries, template versions, published feedback, video segments and playlists are in. The `feedback` live event
+   reaches no stream on either server (the registry calls it org-private but names no org), and a list is accepted
+   as a drawing (docs/known-issues.md).
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.

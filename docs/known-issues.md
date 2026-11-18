@@ -90,6 +90,23 @@ from the request's raw text (`scoutbox-server/src/scoutbox/platform/key_order.gl
 order is part of the data. That changes the TypeScript server, the admin app, the batteries and this server
 together, so it waits until the port is done.
 
+## A list is accepted as a segment's drawing, or a template's anchors
+
+Found 2026-11-18 while porting video segments. Ported as the TypeScript server behaves.
+
+**What it is.** `POST /org/media/:id/segments` takes an optional `drawing`, documented as an object of overlay
+shapes. Its schema (`domains/scouting/scouting.mjs`) is valibot's `record`, which also accepts a list and turns it
+into an object keyed by index, so `drawing: [{…}, 3]` is stored and returned as `{ "0": {…}, "1": 3 }`. The schema's
+own `!Array.isArray` check sees the converted object, so it never refuses a list. A template's `anchors` are read
+the same way, but there a list always fails the levels check (`"0"` isn't a level), so it is only refused with
+`invalid` rather than `not_object`.
+
+**Where it is in the port.** `input.record` (`scoutbox-server/src/scoutbox/platform/input.gleam`) reads a list as
+valibot does, and both routes use it.
+
+**Fix.** Refuse a list before the record check (`v.pipe(v.custom((d) => !Array.isArray(d)), v.record(…))`), and use
+`input.entries` here. No battery sends a list.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package

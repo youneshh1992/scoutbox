@@ -2504,6 +2504,38 @@ pub fn next_player_invite(tx: Tx) -> Result(PlayerInviteId, Fail(e)) {
   ids.next(tx, "vpin") |> result.map(PlayerInviteId)
 }
 
+/// An id of `playlists`.
+pub opaque type PlaylistId {
+  PlaylistId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn playlist(text: String) -> PlaylistId {
+  PlaylistId(text)
+}
+
+pub fn playlist_to_string(id: PlaylistId) -> String {
+  let PlaylistId(text) = id
+  text
+}
+
+pub fn playlist_sql(id: PlaylistId) -> sqlight.Value {
+  sqlight.text(playlist_to_string(id))
+}
+
+pub fn playlist_json(id: PlaylistId) -> Json {
+  json.string(playlist_to_string(id))
+}
+
+pub fn playlist_decoder() -> decode.Decoder(PlaylistId) {
+  decode.map(decode.string, PlaylistId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_playlist(tx: Tx) -> Result(PlaylistId, Fail(e)) {
+  ids.next(tx, "pls") |> result.map(PlaylistId)
+}
+
 /// An id of `jurisdiction_policies`.
 pub opaque type PolicyId {
   PolicyId(String)
@@ -3232,6 +3264,38 @@ pub fn second_look_item_decoder() -> decode.Decoder(SecondLookItemId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_second_look_item(tx: Tx) -> Result(SecondLookItemId, Fail(e)) {
   ids.next(tx, "slk") |> result.map(SecondLookItemId)
+}
+
+/// An id of `video_segments`.
+pub opaque type SegmentId {
+  SegmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn segment(text: String) -> SegmentId {
+  SegmentId(text)
+}
+
+pub fn segment_to_string(id: SegmentId) -> String {
+  let SegmentId(text) = id
+  text
+}
+
+pub fn segment_sql(id: SegmentId) -> sqlight.Value {
+  sqlight.text(segment_to_string(id))
+}
+
+pub fn segment_json(id: SegmentId) -> Json {
+  json.string(segment_to_string(id))
+}
+
+pub fn segment_decoder() -> decode.Decoder(SegmentId) {
+  decode.map(decode.string, SegmentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_segment(tx: Tx) -> Result(SegmentId, Fail(e)) {
+  ids.next(tx, "seg") |> result.map(SegmentId)
 }
 
 /// An id of `signings`.
@@ -4064,6 +4128,38 @@ pub fn trial_staff_decoder() -> decode.Decoder(TrialStaffId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_trial_staff(tx: Tx) -> Result(TrialStaffId, Fail(e)) {
   ids.next(tx, "stf") |> result.map(TrialStaffId)
+}
+
+/// An id of `vacancies`.
+pub opaque type VacancyId {
+  VacancyId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn vacancy(text: String) -> VacancyId {
+  VacancyId(text)
+}
+
+pub fn vacancy_to_string(id: VacancyId) -> String {
+  let VacancyId(text) = id
+  text
+}
+
+pub fn vacancy_sql(id: VacancyId) -> sqlight.Value {
+  sqlight.text(vacancy_to_string(id))
+}
+
+pub fn vacancy_json(id: VacancyId) -> Json {
+  json.string(vacancy_to_string(id))
+}
+
+pub fn vacancy_decoder() -> decode.Decoder(VacancyId) {
+  decode.map(decode.string, VacancyId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_vacancy(tx: Tx) -> Result(VacancyId, Fail(e)) {
+  ids.next(tx, "vac") |> result.map(VacancyId)
 }
 
 /// An id of `ver_admins`.

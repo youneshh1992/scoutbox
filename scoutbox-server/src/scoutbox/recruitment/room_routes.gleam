@@ -64,7 +64,6 @@ import scoutbox/vocab/position as positions
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/source_context
 import scoutbox/vocab/task_state
-import sqlight
 import wisp.{type Request, type Response}
 
 const note_max = 2000
@@ -748,7 +747,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             storage(store.query(
               read,
               "SELECT 1 FROM vacancies WHERE id = ? AND org_id = ?",
-              [sqlight.text(v), id.org_sql(a.org.id)],
+              [id.vacancy_sql(id.vacancy(v)), id.org_sql(a.org.id)],
               decode.at([0], decode.int),
             )),
           )

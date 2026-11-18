@@ -7,8 +7,10 @@
 //// everything. An assessment may be written in the context of one of the club's trials (and one of its sessions),
 //// fixed at creation, needing a role in its Recruitment Room.
 ////
-//// Not ported yet: templates' publication (`POST /org/assessment-templates`), a lead's review, published feedback
-//// and the player's feedback routes, video segments (a rating citing one is refused), and the live `feedback` event.
+//// A lead publishes a template's next version; the author or a lead publishes feedback from a submitted assessment,
+//// once, which is the only way anything in an assessment reaches the player or their guardian.
+////
+//// Not ported yet: a lead's review (`POST /org/assessments/:id/review`).
 
 import gleam/dynamic/decode
 import gleam/float
@@ -19,8 +21,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
-import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/effect
 import scoutbox/platform/http
@@ -39,7 +43,11 @@ import scoutbox/rows/assessment_templates as template_row
 import scoutbox/rows/assessments as row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/safety/audit
 import scoutbox/safety/ledger
+import scoutbox/safety/moderate
+import scoutbox/scouting/evidence
+import scoutbox/vocab/audience
 import scoutbox/vocab/case_outcome
 import scoutbox/vocab/position
 import sqlight
@@ -171,7 +179,7 @@ fn ref_json(r: ref_row.Row) -> Json {
   json.object(
     list.flatten([
       case r.segment_id {
-        Some(s) -> [#("segmentId", json.string(s))]
+        Some(s) -> [#("segmentId", id.segment_json(s))]
         None -> []
       },
       case r.trial_session_id {
@@ -875,80 +883,88 @@ fn own(
   }
 }
 
-/// A rating's checked evidence references: a trial session or a Box Cam session linked (and not unlinked) to the
-/// assessment's trial, by reference only.
+/// A rating's checked evidence references: one of the club's segments of this player, and a trial session or a
+/// Box Cam session linked (and not unlinked) to the assessment's trial, by reference only. `segments` are the ids
+/// of the club's segments of the player (segments are never edited, so they can be read before the unit).
 fn check_refs(
   trial: Option(Trial),
+  segments: List(String),
   refs: List(RefInput),
 ) -> Result(List(RefInput), Response) {
   list.try_map(refs, fn(r) {
     case r.segment_id {
       Some(s) ->
-        Error(http.json(
-          400,
-          json.object([
-            #("error", json.string("SEGMENT_INVALID")),
-            #("segmentId", json.string(s)),
-          ]),
-        ))
-      None ->
-        case r.trial_session_id, r.box_session_id {
-          None, None -> Ok(r)
-          _, _ ->
-            case trial {
-              None ->
-                Error(http.error_message(
-                  400,
-                  "TRIAL_EVIDENCE_REF_INVALID",
-                  "Trial evidence references need an assessment written in the context of a trial.",
-                ))
-              Some(t) -> {
-                let session_ok = case r.trial_session_id {
-                  Some(sid) ->
-                    list.any(t.sessions, fn(s) {
-                      id.trial_session_to_string(s.row.id) == sid
+        case list.contains(segments, s) {
+          True -> Ok(Nil)
+          False ->
+            Error(http.json(
+              400,
+              json.object([
+                #("error", json.string("SEGMENT_INVALID")),
+                #("segmentId", json.string(s)),
+              ]),
+            ))
+        }
+      None -> Ok(Nil)
+    }
+    |> result.try(fn(_) {
+      case r.trial_session_id, r.box_session_id {
+        None, None -> Ok(r)
+        _, _ ->
+          case trial {
+            None ->
+              Error(http.error_message(
+                400,
+                "TRIAL_EVIDENCE_REF_INVALID",
+                "Trial evidence references need an assessment written in the context of a trial.",
+              ))
+            Some(t) -> {
+              let session_ok = case r.trial_session_id {
+                Some(sid) ->
+                  list.any(t.sessions, fn(s) {
+                    id.trial_session_to_string(s.row.id) == sid
+                  })
+                None -> True
+              }
+              let box_ok = case r.box_session_id {
+                Some(bid) ->
+                  list.any(t.sessions, fn(s) {
+                    list.any(s.evidence, fn(e) {
+                      id.box_session_to_string(e.box_session_id) == bid
+                      && e.removed_at == None
                     })
-                  None -> True
-                }
-                let box_ok = case r.box_session_id {
-                  Some(bid) ->
-                    list.any(t.sessions, fn(s) {
-                      list.any(s.evidence, fn(e) {
-                        id.box_session_to_string(e.box_session_id) == bid
-                        && e.removed_at == None
-                      })
-                    })
-                  None -> True
-                }
-                case session_ok, box_ok {
-                  False, _ ->
-                    Error(http.json(
-                      400,
-                      json.object([
-                        #("error", json.string("TRIAL_EVIDENCE_REF_INVALID")),
-                        #("field", json.string("trialSessionId")),
-                      ]),
-                    ))
-                  _, False ->
-                    Error(http.json(
-                      400,
-                      json.object([
-                        #("error", json.string("TRIAL_EVIDENCE_REF_INVALID")),
-                        #("field", json.string("boxSessionId")),
-                        #(
-                          "message",
-                          json.string(
-                            "Only a Box Cam session linked to this trial can be cited.",
-                          ),
+                  })
+                None -> True
+              }
+              case session_ok, box_ok {
+                False, _ ->
+                  Error(http.json(
+                    400,
+                    json.object([
+                      #("error", json.string("TRIAL_EVIDENCE_REF_INVALID")),
+                      #("field", json.string("trialSessionId")),
+                    ]),
+                  ))
+                _, False ->
+                  Error(http.json(
+                    400,
+                    json.object([
+                      #("error", json.string("TRIAL_EVIDENCE_REF_INVALID")),
+                      #("field", json.string("boxSessionId")),
+                      #(
+                        "message",
+                        json.string(
+                          "Only a Box Cam session linked to this trial can be cited.",
                         ),
-                      ]),
-                    ))
-                  True, True -> Ok(r)
-                }
+                      ),
+                    ]),
+                  ))
+                True, True -> Ok(r)
               }
             }
-        }
-    }
+          }
+      }
+    })
   })
 }
 
@@ -972,7 +988,8 @@ pub fn edit(
         ..context_codes
       ])
       use trial <- with_trial(ctx, x)
-      case checked_ratings(x, trial, b.ratings) {
+      use segments <- segments_of(ctx, x)
+      case checked_ratings(x, trial, segments, b.ratings) {
         Error(refused) -> refused
         Ok(ratings) -> {
           let immutable = case b.context {
@@ -1019,9 +1036,26 @@ fn with_trial(ctx: Ctx, x: Assessment, next: fn(Option(Trial)) -> Response) {
   }
 }
 
+fn segments_of(ctx: Ctx, x: Assessment, next: fn(List(String)) -> Response) {
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT id FROM video_segments WHERE org_id = ? AND player_id = ?",
+        [id.org_sql(x.row.org_id), id.player_sql(x.row.player_id)],
+        decode.at([0], decode.string),
+      )
+    })
+  case found {
+    Ok(ids) -> next(ids)
+    Error(e) -> http.internal(e)
+  }
+}
+
 fn checked_ratings(
   x: Assessment,
   trial: Option(Trial),
+  segments: List(String),
   ratings: Option(List(RatingInput)),
 ) -> Result(Option(List(#(RatingInput, List(RefInput)))), Response) {
   case ratings {
@@ -1063,6 +1097,7 @@ fn checked_ratings(
                   False -> {
                     use refs <- result.map(check_refs(
                       trial,
+                      segments,
                       option.unwrap(r.refs, []),
                     ))
                     [#(r, refs), ..acc]
@@ -1209,11 +1244,12 @@ fn revise(
             let #(j, ref) = q
             store.run(
               tx,
-              "INSERT INTO assessment_rating_refs (assessment_id, rating_position, position, segment_id, trial_session_id, box_session_id, t_s, label) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)",
+              "INSERT INTO assessment_rating_refs (assessment_id, rating_position, position, segment_id, trial_session_id, box_session_id, t_s, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               [
                 aid,
                 sqlight.int(i),
                 sqlight.int(j),
+                opt_text(ref.segment_id),
                 opt_text(ref.trial_session_id),
                 opt_text(ref.box_session_id),
                 case ref.t {
@@ -1515,20 +1551,7 @@ pub fn templates(ctx: Ctx) -> Response {
         json.object([
           #(
             "templates",
-            json.array(templates, fn(x) {
-              let #(t, attributes) = x
-              json.object([
-                #("id", json.string(t.id)),
-                #(
-                  "positionGroup",
-                  template_row.position_group_to_json(t.position_group),
-                ),
-                #("version", json.int(t.version)),
-                #("createdAt", json.int(t.created_at)),
-                #("createdBy", json.string(t.created_by_name)),
-                #("attributes", json.array(attributes, attribute_json)),
-              ])
-            }),
+            json.array(templates, fn(x) { template_json(x.0, x.1) }),
           ),
           #(
             "note",
@@ -1538,5 +1561,423 @@ pub fn templates(ctx: Ctx) -> Response {
           ),
         ]),
       )
+  }
+}
+
+fn template_json(
+  t: template_row.Row,
+  attributes: List(attribute_row.Row),
+) -> Json {
+  json.object([
+    #("id", json.string(t.id)),
+    #("positionGroup", template_row.position_group_to_json(t.position_group)),
+    #("version", json.int(t.version)),
+    #("createdAt", json.int(t.created_at)),
+    #("createdBy", json.string(t.created_by_name)),
+    #("attributes", json.array(attributes, attribute_json)),
+  ])
+}
+
+type NewAttribute {
+  NewAttribute(
+    attr_id: String,
+    label: String,
+    anchors: Option(List(#(String, String))),
+  )
+}
+
+const anchor_levels = ["1", "2", "3", "4", "5"]
+
+/// A whole map checked at once, so a refusal names the map rather than one of its keys.
+fn anchors_check() -> input.Check(List(#(String, String))) {
+  let check =
+    input.record(input.text(1_000_000), input.anything())
+    |> input.refine(
+      fn(entries) {
+        list.all(entries, fn(e) {
+          list.contains(anchor_levels, e.0)
+          && case decode.run(e.1, decode.string) {
+            Ok(t) -> string.trim(t) != "" && input.utf16_length(t) <= 200
+            Error(_) -> False
+          }
+        })
+      },
+      "must map the levels 1, 2, 3, 4, 5 to a descriptive sentence of at most 200 characters",
+    )
+  fn(v) {
+    check(v)
+    |> result.map(
+      list.map(_, fn(e) {
+        #(e.0, decode.run(e.1, decode.string) |> result.unwrap(""))
+      }),
+    )
+  }
+}
+
+/// `POST /org/assessment-templates`: a lead publishes the next version of a position group's template. Historical
+/// assessments keep the version they used.
+pub fn publish_template(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- access.require_lead(a)
+  let shape = {
+    use group <- input.field(
+      "positionGroup",
+      input.required(input.one_of(template_row.position_group_pairs)),
+    )
+    use attributes <- input.field(
+      "attributes",
+      input.required(input.items_between(
+        input.object({
+          use attr_id <- input.field(
+            "id",
+            input.required(input.required_text(40)),
+          )
+          use label <- input.field(
+            "label",
+            input.required(input.required_text(80)),
+          )
+          use anchors <- input.field("anchors", input.nullish(anchors_check()))
+          input.done(NewAttribute(attr_id:, label:, anchors:))
+        }),
+        2,
+        20,
+      )),
+    )
+    input.done(#(group, attributes))
+  }
+  use #(group, attributes) <- http.body(req, shape, [
+    #("positionGroup", "POSITION_GROUP_INVALID"),
+    #("attributes", "ATTRIBUTES_INVALID"),
+    #("attributes.id", "ATTRIBUTES_INVALID"),
+    #("attributes.label", "ATTRIBUTES_INVALID"),
+  ])
+  let attributes =
+    list.map(attributes, fn(x) {
+      NewAttribute(
+        ..x,
+        attr_id: string.trim(x.attr_id),
+        label: string.trim(x.label),
+      )
+    })
+  let ids = list.map(attributes, fn(x) { x.attr_id })
+  case list.length(list.unique(ids)) == list.length(ids) {
+    False ->
+      http.error_message(
+        400,
+        "ATTRIBUTES_INVALID",
+        "Each attribute id appears once.",
+      )
+    True -> {
+      let template_id =
+        "tpl-" <> string.lowercase(template_row.position_group_to_string(group))
+      let now = clock.now_ms()
+      store.unit(ctx.store, fn(tx) {
+        use previous <- result.try(
+          store.one(
+            store.reading(tx),
+            "SELECT COALESCE(MAX(version), 0) FROM assessment_templates WHERE position_group = ?",
+            [sqlight.text(template_row.position_group_to_string(group))],
+            decode.at([0], decode.int),
+          )
+          |> room_routes.storage,
+        )
+        let version = result.unwrap(previous, 0) + 1
+        let t =
+          template_row.Row(
+            id: template_id,
+            version:,
+            position_group: group,
+            created_at: now,
+            created_by_name: evidence.stored_name(a.user.name),
+          )
+        use _ <- result.try(
+          store.run(
+            tx,
+            "INSERT INTO assessment_templates (id, version, position_group, created_at, created_by_name) VALUES (?, ?, ?, ?, ?)",
+            [
+              sqlight.text(template_id),
+              sqlight.int(version),
+              sqlight.text(template_row.position_group_to_string(group)),
+              sqlight.int(now),
+              sqlight.text(t.created_by_name),
+            ],
+          )
+          |> room_routes.storage,
+        )
+        use stored <- result.try(
+          list.index_map(attributes, fn(x, i) {
+            let anchor = fn(level) {
+              option.unwrap(x.anchors, [])
+              |> list.key_find(level)
+              |> option.from_result
+            }
+            attribute_row.Row(
+              template_id:,
+              template_version: version,
+              position: i,
+              attr_id: x.attr_id,
+              label: x.label,
+              anchor_1: anchor("1"),
+              anchor_2: anchor("2"),
+              anchor_3: anchor("3"),
+              anchor_4: anchor("4"),
+              anchor_5: anchor("5"),
+            )
+          })
+          |> list.try_map(fn(r) {
+            store.run(
+              tx,
+              "INSERT INTO assessment_template_attributes (template_id, template_version, position, attr_id, label, anchor_1, anchor_2, anchor_3, anchor_4, anchor_5) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              [
+                sqlight.text(r.template_id),
+                sqlight.int(r.template_version),
+                sqlight.int(r.position),
+                sqlight.text(r.attr_id),
+                sqlight.text(r.label),
+                opt_text(r.anchor_1),
+                opt_text(r.anchor_2),
+                opt_text(r.anchor_3),
+                opt_text(r.anchor_4),
+                opt_text(r.anchor_5),
+              ],
+            )
+            |> result.replace(r)
+          })
+          |> room_routes.storage,
+        )
+        Ok(http.json(
+          201,
+          json.object([#("template", template_json(t, stored))]),
+        ))
+      })
+      |> room_routes.answer
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------- feedback
+
+/// `POST /org/assessments/:id/publish-feedback`: the only route from private recruitment records to the player
+/// and guardian side. The author or a lead publishes it, once, from a submitted assessment.
+pub fn publish_feedback(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  aid: id.AssessmentId,
+) -> Response {
+  use x <- own(ctx, a, aid)
+  let author = x.row.scout_user_id == a.user.id
+  case
+    author || access.is_lead(a.user),
+    x.row.state,
+    x.row.published_feedback_at
+  {
+    False, _, _ -> http.error(403, "NOT_AUTHORISED")
+    True, row.Draft, _ ->
+      http.error_message(
+        409,
+        "NOT_SUBMITTED",
+        "Submit the assessment before publishing feedback from it.",
+      )
+    True, _, Some(_) -> http.error(409, "ALREADY_PUBLISHED")
+    True, _, None -> {
+      let shape = {
+        use text <- input.field("text", input.nullish(input.text(800)))
+        input.done(text)
+      }
+      use text <- http.body(req, shape, [])
+      case input.filled(text) {
+        None -> http.error(400, "TEXT_REQUIRED")
+        Some(text) -> {
+          use <- moderate.or_refuse(
+            ctx,
+            text,
+            audit.Context(
+              kind: "published_feedback",
+              player_id: Some(x.row.player_id),
+              org_id: Some(a.org.id),
+              user_id: None,
+              channel_id: None,
+              request_id: None,
+            ),
+          )
+          publish(ctx, a, x, text)
+        }
+      }
+    }
+  }
+}
+
+fn publish(ctx: Ctx, a: OrgAccess, x: Assessment, text: String) -> Response {
+  let now = clock.now_ms()
+  let by_name = evidence.stored_name(a.user.name)
+  store.unit(ctx.store, fn(tx) {
+    use touched <- result.try(
+      store.write(
+        tx,
+        "UPDATE assessments SET published_feedback_text = ?, published_feedback_by_user_id = ?, published_feedback_by_name = ?, published_feedback_at = ? WHERE id = ? AND state <> 'draft' AND published_feedback_at IS NULL RETURNING id",
+        [
+          sqlight.text(text),
+          id.org_user_sql(a.user.id),
+          sqlight.text(by_name),
+          sqlight.int(now),
+          id.assessment_sql(x.row.id),
+        ],
+        decode.at([0], decode.string),
+      )
+      |> room_routes.storage,
+    )
+    use <-
+      fn(next) {
+        case touched {
+          [_] -> next()
+          _ -> store.stale("the feedback was published meanwhile")
+        }
+      }
+    use _ <- result.try(
+      history(tx, x.row.id, a, "published_feedback", now)
+      |> room_routes.storage,
+    )
+    use p <- result.try(
+      players.by_id(store.reading(tx), x.row.player_id) |> room_routes.storage,
+    )
+    let ref_id = Some(id.assessment_to_string(x.row.id))
+    let tell = fn(kind, to, text) {
+      notifications.notify(
+        tx,
+        to: kind,
+        id: to,
+        type_: "feedback",
+        text:,
+        ref_id:,
+        at: now,
+      )
+    }
+    use _ <- result.try(
+      case p {
+        None -> Ok(Nil)
+        Some(p) ->
+          case players.is_adult(p, now), p.row.guardian_id {
+            False, Some(g) -> {
+              use _ <- result.try(tell(
+                audience.Guardian,
+                id.guardian_to_string(g),
+                a.org.name
+                  <> " published development feedback for "
+                  <> p.row.name
+                  <> ".",
+              ))
+              tell(
+                audience.Player,
+                id.player_to_string(p.row.id),
+                a.org.name
+                  <> " shared development feedback with your parent/guardian.",
+              )
+            }
+            _, _ ->
+              tell(
+                audience.Player,
+                id.player_to_string(p.row.id),
+                "📋 " <> a.org.name <> " published development feedback for you.",
+              )
+          }
+      }
+      |> room_routes.storage,
+    )
+    store.emit(
+      tx,
+      effect.Live(live_event.Feedback(id.player_to_string(x.row.player_id))),
+    )
+    Ok(http.json(
+      200,
+      json.object([
+        #(
+          "published",
+          json.object([
+            #("text", json.string(text)),
+            #("byUserId", id.org_user_json(a.user.id)),
+            #("byName", json.string(by_name)),
+            #("at", json.int(now)),
+          ]),
+        ),
+      ]),
+    ))
+  })
+  |> room_routes.answer
+}
+
+/// A player's published feedback, oldest first, with each club's name.
+fn feedback_for(
+  ctx: Ctx,
+  player_id: id.PlayerId,
+  next: fn(List(Json)) -> Response,
+) -> Response {
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT a.id, a.org_id, o.name, a.published_feedback_by_name, a.published_feedback_text, a.published_feedback_at FROM assessments a LEFT JOIN orgs o ON o.id = a.org_id WHERE a.player_id = ? AND a.published_feedback_at IS NOT NULL ORDER BY a.rowid",
+        [id.player_sql(player_id)],
+        {
+          use aid <- decode.field(0, id.assessment_decoder())
+          use org_id <- decode.field(1, id.org_decoder())
+          use org_name <- decode.field(2, decode.optional(decode.string))
+          use by_name <- decode.field(3, decode.optional(decode.string))
+          use text <- decode.field(4, decode.optional(decode.string))
+          use at <- decode.field(5, decode.optional(decode.int))
+          decode.success(
+            json.object([
+              #("id", id.assessment_json(aid)),
+              #("orgId", id.org_json(org_id)),
+              #("orgName", json.string(option.unwrap(org_name, "Club"))),
+              #("byName", json.nullable(by_name, json.string)),
+              #("text", json.nullable(text, json.string)),
+              #("at", json.nullable(at, json.int)),
+            ]),
+          )
+        },
+      )
+    })
+  case found {
+    Error(e) -> http.internal(e)
+    Ok(items) -> next(items)
+  }
+}
+
+/// `GET /player/feedback`: a minor sees that feedback exists; its content lives with the guardian.
+pub fn player_feedback(ctx: Ctx, p: PlayerAccess) -> Response {
+  use items <- feedback_for(ctx, p.player.row.id)
+  case players.is_adult(p.player, clock.now_ms()) {
+    False ->
+      http.json(
+        200,
+        json.object([
+          #("guardianManaged", json.bool(True)),
+          #("count", json.int(list.length(items))),
+          #("items", json.preprocessed_array([])),
+        ]),
+      )
+    True ->
+      http.json(
+        200,
+        json.object([
+          #("guardianManaged", json.bool(False)),
+          #("items", json.preprocessed_array(items)),
+        ]),
+      )
+  }
+}
+
+/// `GET /guardian/children/:id/feedback`.
+pub fn child_feedback(
+  ctx: Ctx,
+  g: Guardian,
+  child_id: id.PlayerId,
+) -> Response {
+  case list.contains(g.child_ids, child_id) {
+    False -> http.error(403, "NOT_YOUR_CHILD")
+    True -> {
+      use items <- feedback_for(ctx, child_id)
+      http.json(200, json.object([#("items", json.preprocessed_array(items))]))
+    }
   }
 }

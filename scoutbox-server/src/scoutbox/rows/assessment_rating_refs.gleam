@@ -30,7 +30,7 @@ pub type Row {
     assessment_id: id.AssessmentId,
     rating_position: Int,
     position: Int,
-    segment_id: Option(String),
+    segment_id: Option(id.SegmentId),
     trial_session_id: Option(String),
     box_session_id: Option(id.BoxSessionId),
     t_s: Option(Float),
@@ -61,7 +61,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use assessment_id <- decode.field(0, id.assessment_decoder())
   use rating_position <- decode.field(1, decode.int)
   use position <- decode.field(2, decode.int)
-  use segment_id <- decode.field(3, decode.optional(decode.string))
+  use segment_id <- decode.field(3, decode.optional(id.segment_decoder()))
   use trial_session_id <- decode.field(4, decode.optional(decode.string))
   use box_session_id <- decode.field(
     5,
@@ -90,7 +90,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.assessment_sql(row.assessment_id),
     sqlight.int(row.rating_position),
     sqlight.int(row.position),
-    sqlight.nullable(sqlight.text, row.segment_id),
+    sqlight.nullable(id.segment_sql, row.segment_id),
     sqlight.nullable(sqlight.text, row.trial_session_id),
     sqlight.nullable(id.box_session_sql, row.box_session_id),
     sqlight.nullable(sqlight.float, row.t_s),

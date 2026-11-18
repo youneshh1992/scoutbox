@@ -100,6 +100,8 @@ import scoutbox/scouting/coaches
 import scoutbox/scouting/opportunities
 import scoutbox/scouting/passport_routes
 import scoutbox/scouting/squad_invites
+import scoutbox/scouting/vacancies
+import scoutbox/scouting/video
 import scoutbox/verification/applications
 import scoutbox/verification/club_checks
 import scoutbox/verification/console_routes as verification_console
@@ -344,7 +346,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["signings"] ->
           only(req, Get, fn() { signings.org_page(ctx, req, org.org.id) })
         ["cases"] ->
-          only(req, Post, fn() { case_workspace.create(ctx, req, org) })
+          case req.method {
+            Get -> case_workspace.list(ctx, req, org)
+            Post -> case_workspace.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["vacancies"] ->
+          only(req, Get, fn() { vacancies.list_for(ctx, req, org) })
+        ["cases", cid, "tasks"] ->
+          only(req, Post, fn() { case_workspace.add_task(ctx, req, org, cid) })
         ["cases", cid, "stage"] ->
           only(req, Post, fn() { case_workspace.set_stage(ctx, req, org, cid) })
         ["cases", cid, "decision"] ->
@@ -548,6 +558,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             assessments.submit(ctx, org, id.assessment(aid))
           })
+        ["assessments", aid, "publish-feedback"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            assessments.publish_feedback(ctx, req, org, id.assessment(aid))
+          })
+        ["media", mid, "segments"] ->
+          only(req, Post, fn() { video.create(ctx, req, org, id.media(mid)) })
+        ["segments"] -> only(req, Get, fn() { video.list_for(ctx, req, org) })
+        ["segments", sid] ->
+          only(req, Get, fn() { video.one(ctx, org, id.segment(sid)) })
+        ["playlists"] ->
+          case req.method {
+            Get -> video.playlists(ctx, org)
+            Post -> video.create_playlist(ctx, req, org)
+            _ -> not_found()
+          }
+        ["playlists", pid, "segments"] ->
+          only(req, Post, fn() {
+            video.add_segment(ctx, req, org, id.playlist(pid))
+          })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
@@ -564,7 +594,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["decision-review"] ->
           only(req, Get, fn() { exposure.decision_review(ctx, org) })
         ["assessment-templates"] ->
-          only(req, Get, fn() { assessments.templates(ctx) })
+          case req.method {
+            Get -> assessments.templates(ctx)
+            Post -> assessments.publish_template(ctx, req, org)
+            _ -> not_found()
+          }
         ["calibration"] ->
           case req.method {
             Get -> calibration.list_for(ctx, req, org)
@@ -803,6 +837,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["passport"] ->
           only(req, Get, fn() { passport_routes.player_passport(ctx, player) })
+        ["feedback"] ->
+          only(req, Get, fn() { assessments.player_feedback(ctx, player) })
         ["evidence"] ->
           only(req, Post, fn() {
             passport_routes.player_submit(ctx, req, player)
@@ -1160,6 +1196,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "feedback"] ->
+          only(req, Get, fn() {
+            assessments.child_feedback(ctx, guardian, id.player(cid))
           })
         ["children", cid, "evidence"] ->
           only(req, Post, fn() {
