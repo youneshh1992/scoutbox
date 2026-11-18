@@ -51,3 +51,12 @@ Synthetic stand-ins for outside services, development only. None of them makes a
 |---|---|
 | `SCOUTBOX_TEST_CLOCK` | `1`: a request may choose its own time with `x-scoutbox-test-clock`. Development only, and refused at boot in production. |
 | `x-scoutbox-test-clock` | Milliseconds since the epoch. With the test clock on, the request is handled as if it were that time; a missing or invalid value means the real time. |
+
+## Stored forms
+
+Fixtures write rows in the migrated schema (`support/schema.sql`), so a server must read the stored forms they plant.
+
+| Column | Form |
+|---|---|
+| `password_hash` | `scrypt$<salt>$<hash>`: the salt is 32 hex digits, used as its text, and the hash is scrypt (N = 16384, r = 8, p = 1) to 32 bytes, in hex. `support/password.mjs` writes one. |
+| `sessions.token_hash` | The bearer token's SHA-256, in hex (`support/sqlFixture.mjs`). |

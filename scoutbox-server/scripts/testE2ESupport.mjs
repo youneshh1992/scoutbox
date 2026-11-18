@@ -12,6 +12,8 @@ import { serverCommand, serverDir } from '../e2e/support/server.mjs';
 import { openFixture, writeFixture, plantCase, legacyMoves } from '../e2e/support/sqlFixture.mjs';
 import { readRows, rows, json } from '../e2e/support/sqlRows.mjs';
 import { totp as supportTotp } from '../e2e/support/totp.mjs';
+import { storedPassword } from '../e2e/support/password.mjs';
+import { hashPassword, verifyPassword } from '../adapters.mjs';
 import * as serverTotp from '../domains/identity/totp.mjs';
 import { boundaryReport } from './e2eBoundary.mjs';
 import { undocumented } from './e2eContract.mjs';
@@ -76,6 +78,19 @@ console.log('✓ support/server.mjs starts this server from its own directory');
     assert.ok(serverTotp.totpValid(secret, supportTotp(secret, at), at));
   }
   console.log("✓ support/totp.mjs shows the codes the server's TOTP accepts");
+}
+
+// ---------------------------------------------------------------- the stored password
+{
+  // A planted password must be one the server verifies, and in the server's own form.
+  for (const pw of ['right-password-1', '', 'ünïcødé pass']) {
+    const stored = storedPassword(pw);
+    assert.equal(verifyPassword(pw, stored), true, `the server verifies the planted ${JSON.stringify(pw)}`);
+    assert.equal(verifyPassword(`${pw}x`, stored), false, 'and refuses any other password');
+    assert.match(stored, /^scrypt\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
+    assert.equal(stored.length, hashPassword(pw).length, "in the server's own stored shape");
+  }
+  console.log('✓ support/password.mjs stores passwords the server verifies');
 }
 
 // ---------------------------------------------------------------- specification tables and the contract
