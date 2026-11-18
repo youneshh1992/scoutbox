@@ -105,7 +105,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 36 batteries pass unchanged]
+### Porting, domain by domain [in progress: 37 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -116,7 +116,7 @@ of the product, so they aren't one slice.
 | Verification | 2 | **ported**: the first domain with every ledger row closed |
 | Recruitment: Rooms, Offers, decisions, lifecycle, trials, contacts, signings, analytics, the journey | 19 | done |
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
-| Agents: core, core persistence, transactions persistence | 3 | the workspace is in; `transactions` waits on OL2 |
+| Agents: core, core persistence, transactions, transactions persistence | 4 | the workspace is in |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -160,16 +160,17 @@ are for surprising facts or points that later work depends on, not implementatio
       periodic sweeps; a marker that changes no row sends nothing, so a lost race is never a crash.
    2. The agent core's rule cases [**done**: 182 generated; 15 pending have no Gleam counterpart (`newFacets`,
       `normaliseScope`, `termMonthsOf`, `tiersOf`: Gleam refuses or types what TypeScript cleans)].
-   3. `agents/transactions` and `agents/transactionsPersistence` [**done** for the persistence battery, which
-      passed on first run; the main battery passes all but OL2 and stays off `BATTERIES` until `POST
-      /org/opportunities` is ported with the opportunity board (item 4)]. The workspace needed a slice of the
+   3. `agents/transactions` and `agents/transactionsPersistence` [**done**: the persistence battery passed on first
+      run; the main battery's OL2 waited on `POST /org/opportunities`, ported ahead of item 4 with the board]. The workspace needed a slice of the
       compliance ledger: reviewer sign-in and the `/ts` session, the review queue and the decision on a declared
       binding, and regulatory consents (request, both parties' answers, lists). Decisions on facets, disputes and
       conflict evaluations answer 501. A compliance context now carries its bindings, and the engine attributes a
       colleague's verified binding in the same transaction. The transaction row keeps only `rev_by_label`: the
       schema has no column for a person.
    4. `agents/compliance`, `compliancePersistence`, `adversarial`, `crossApp`, `crossAppAdversarial`: not untangled.
-4. `scouting/clubWorkflows`. It needs the uploads check first.
+4. `scouting/clubWorkflows`. It needs the uploads check first. Opportunity creation, the club's list and the
+   board's club rows are in, and match the TypeScript server response for response. Applications, closing and the
+   structured requirements are not.
 5. **Passport.** `passport/passport` first. `trustScore` waits on the Combine results handover.
 6. `operations/clubOperations`, then the Box Cam records batteries.
 7. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.

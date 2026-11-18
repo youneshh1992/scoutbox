@@ -254,7 +254,7 @@ pub type Row {
     compliance_party_revision: Option(String),
     re_evaluation_pending: Bool,
     link_trial_id: Option(id.TrialId),
-    link_opportunity_id: Option(String),
+    link_opportunity_id: Option(id.OpportunityId),
     link_recruitment_case_id: Option(id.RecruitmentCaseId),
     hold_reason_code: Option(HoldReasonCode),
     hold_reason: Option(String),
@@ -355,7 +355,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   )
   use re_evaluation_pending <- decode.field(12, sqlight.decode_bool())
   use link_trial_id <- decode.field(13, decode.optional(id.trial_decoder()))
-  use link_opportunity_id <- decode.field(14, decode.optional(decode.string))
+  use link_opportunity_id <- decode.field(
+    14,
+    decode.optional(id.opportunity_decoder()),
+  )
   use link_recruitment_case_id <- decode.field(
     15,
     decode.optional(id.recruitment_case_decoder()),
@@ -450,7 +453,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.compliance_party_revision),
     sqlight.bool(row.re_evaluation_pending),
     sqlight.nullable(id.trial_sql, row.link_trial_id),
-    sqlight.nullable(sqlight.text, row.link_opportunity_id),
+    sqlight.nullable(id.opportunity_sql, row.link_opportunity_id),
     sqlight.nullable(id.recruitment_case_sql, row.link_recruitment_case_id),
     sqlight.nullable(
       fn(v) { sqlight.text(hold_reason_code_to_string(v)) },

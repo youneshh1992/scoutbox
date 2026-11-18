@@ -37,4 +37,5 @@ export const BATTERIES = [
   'discovery/matchingAndWatchlists',
   'agents/corePersistence',
   'agents/transactionsPersistence',
+  'agents/transactions',
 ];

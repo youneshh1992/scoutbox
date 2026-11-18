@@ -82,7 +82,6 @@ import scoutbox/vocab/rule_status
 import scoutbox/vocab/staleness
 import scoutbox/vocab/subject_kind.{type SubjectKind}
 import scoutbox/vocab/transaction_status
-import sqlight
 import wisp.{type Request, type Response}
 
 // ------------------------------------------------------------------------------------------------- refusals
@@ -1128,7 +1127,10 @@ pub fn project(
       "links",
       json.object([
         #("trialId", json.nullable(r.link_trial_id, id.trial_json)),
-        #("opportunityId", json.nullable(r.link_opportunity_id, json.string)),
+        #(
+          "opportunityId",
+          json.nullable(r.link_opportunity_id, id.opportunity_json),
+        ),
         ..case r.link_recruitment_case_id, is_agent || own_case {
           Some(case_id), True -> [
             #("recruitmentCaseId", id.recruitment_case_json(case_id)),
@@ -2521,12 +2523,12 @@ pub fn link_opportunity(
     input.done(opportunity_id)
   }
   use opportunity_id, raw <- body(req, shape, "TRANSACTION_INPUT_INVALID")
-  let opportunity_id = string.trim(opportunity_id)
+  let opportunity_id = id.opportunity(string.trim(opportunity_id))
   use owner <- reading(ctx, fn(r) {
     store.one(
       r,
       "SELECT org_id FROM opportunities WHERE id = ?",
-      [sqlight.text(opportunity_id)],
+      [id.opportunity_sql(opportunity_id)],
       decode.at([0], decode.string),
     )
   })

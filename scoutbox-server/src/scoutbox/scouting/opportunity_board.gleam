@@ -2,13 +2,15 @@
 //// Agent workspace: what is open to them, read through mutual visibility, with distance as a band and never a
 //// location.
 ////
-//// Not ported yet: club opportunities (`opportunities`, their eligibility and applications) — no route here creates
-//// one and the seed has none, so the board holds the grassroots open days only.
+//// Club opportunities come first, by deadline, filtered by the player's eligibility; the grassroots open days follow
+//// with their own registration flow. The whole board is then ordered by deadline, stably, as the TypeScript server
+//// sorts it.
 
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
-import gleam/option.{type Option, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/identity/orgs
@@ -17,12 +19,19 @@ import scoutbox/platform/clock
 import scoutbox/platform/distance
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/rows/applications as application_row
 import scoutbox/rows/id
 import scoutbox/rows/open_trials as trial_row
+import scoutbox/scouting/opportunities.{type Opportunity}
 import sqlight
 
 /// One row of the board.
 pub type Item {
+  ClubOpportunity(
+    opportunity: Opportunity,
+    distance: Option(String),
+    applied: Option(#(id.ApplicationId, application_row.Status)),
+  )
   OpenDay(
     trial: trial_row.Row,
     org_name: String,
@@ -33,12 +42,15 @@ pub type Item {
 
 pub fn deadline(item: Item) -> String {
   case item {
+    ClubOpportunity(opportunity:, ..) -> opportunity.row.deadline
     OpenDay(trial:, ..) -> trial.trial_date
   }
 }
 
 pub fn item_id(item: Item) -> String {
   case item {
+    ClubOpportunity(opportunity:, ..) ->
+      id.opportunity_to_string(opportunity.row.id)
     OpenDay(trial:, ..) -> id.open_trial_to_string(trial.id)
   }
 }
@@ -90,6 +102,7 @@ pub fn for_player(
       decode.success(#(t, km, registered == 1))
     }),
   )
+  use clubs <- result.try(club_opportunities(read, p, today, now))
   use items <- result.map(
     list.try_map(rows, fn(row) {
       let #(t, km, registered) = row
@@ -108,13 +121,85 @@ pub fn for_player(
       }
     }),
   )
-  list.flatten(items)
+  list.append(clubs, list.flatten(items))
   |> list.sort(fn(a, b) { string.compare(deadline(a), deadline(b)) })
+}
+
+/// The open club opportunities `p` may see and is eligible for, soonest first, each with the player's live
+/// application when there is one. Visibility is mutual: a club that can't see the player can't receive their
+/// application.
+fn club_opportunities(
+  read: Read,
+  p: Player,
+  today: String,
+  now: Int,
+) -> Result(List(Item), Fail(e)) {
+  let from = case p.row.lat, p.row.lng {
+    Some(lat), Some(lng) -> Some(#(lat, lng))
+    _, _ -> None
+  }
+  use open <- result.try(opportunities.open_on(read, today, from))
+  use mine <- result.try(
+    store.query(
+      read,
+      "SELECT opportunity_id, id, status FROM applications WHERE player_id = ? AND status <> 'withdrawn'",
+      [id.player_sql(p.row.id)],
+      {
+        use oid <- decode.field(0, id.opportunity_decoder())
+        use aid <- decode.field(1, id.application_decoder())
+        use status <- decode.field(2, application_row.status_decoder())
+        decode.success(#(oid, #(aid, status)))
+      },
+    ),
+  )
+  let mine = dict.from_list(mine)
+  use found <- result.map(
+    list.try_map(open, fn(pair) {
+      let #(o, km) = pair
+      use org <- result.try(orgs.by_id(read, o.row.org_id))
+      case org {
+        Some(org) if !org.suspended -> {
+          use seen <- result.map(players.for_org(read, p.row.id, org, now))
+          let eligibility = opportunities.eligibility(o.row)
+          case seen {
+            Some(#(_, access)) if access.visible && !access.blocked ->
+              case opportunities.reasons(eligibility, p, km, now) {
+                [] -> [
+                  ClubOpportunity(
+                    o,
+                    band(km),
+                    dict.get(mine, o.row.id) |> option.from_result,
+                  ),
+                ]
+                _ -> []
+              }
+            _ -> []
+          }
+        }
+        _ -> Ok([])
+      }
+    }),
+  )
+  list.flatten(found)
 }
 
 /// The player's own view of a row.
 pub fn fields(item: Item) -> List(#(String, Json)) {
   case item {
+    ClubOpportunity(opportunity:, distance:, applied:) ->
+      list.append(opportunities.fields(opportunity), [
+        #("via", json.string("opportunity")),
+        #("distance", json.nullable(distance, json.string)),
+        #(
+          "applied",
+          json.nullable(applied, fn(a) {
+            json.object([
+              #("id", id.application_json(a.0)),
+              #("status", application_row.status_to_json(a.1)),
+            ])
+          }),
+        ),
+      ])
     OpenDay(trial:, org_name:, distance:, registered:) -> [
       #("id", id.open_trial_json(trial.id)),
       #("via", json.string("open_trial")),

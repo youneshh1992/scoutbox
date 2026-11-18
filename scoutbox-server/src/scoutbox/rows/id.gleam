@@ -170,6 +170,38 @@ pub fn next_agreement_event(tx: Tx) -> Result(AgreementEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(AgreementEventId)
 }
 
+/// An id of `applications`.
+pub opaque type ApplicationId {
+  ApplicationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn application(text: String) -> ApplicationId {
+  ApplicationId(text)
+}
+
+pub fn application_to_string(id: ApplicationId) -> String {
+  let ApplicationId(text) = id
+  text
+}
+
+pub fn application_sql(id: ApplicationId) -> sqlight.Value {
+  sqlight.text(application_to_string(id))
+}
+
+pub fn application_json(id: ApplicationId) -> Json {
+  json.string(application_to_string(id))
+}
+
+pub fn application_decoder() -> decode.Decoder(ApplicationId) {
+  decode.map(decode.string, ApplicationId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_application(tx: Tx) -> Result(ApplicationId, Fail(e)) {
+  ids.next(tx, "apl") |> result.map(ApplicationId)
+}
+
 /// An id of `case_approvals`.
 pub opaque type ApprovalId {
   ApprovalId(String)
@@ -2078,6 +2110,38 @@ pub fn open_trial_decoder() -> decode.Decoder(OpenTrialId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_open_trial(tx: Tx) -> Result(OpenTrialId, Fail(e)) {
   ids.next(tx, "open") |> result.map(OpenTrialId)
+}
+
+/// An id of `opportunities`.
+pub opaque type OpportunityId {
+  OpportunityId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn opportunity(text: String) -> OpportunityId {
+  OpportunityId(text)
+}
+
+pub fn opportunity_to_string(id: OpportunityId) -> String {
+  let OpportunityId(text) = id
+  text
+}
+
+pub fn opportunity_sql(id: OpportunityId) -> sqlight.Value {
+  sqlight.text(opportunity_to_string(id))
+}
+
+pub fn opportunity_json(id: OpportunityId) -> Json {
+  json.string(opportunity_to_string(id))
+}
+
+pub fn opportunity_decoder() -> decode.Decoder(OpportunityId) {
+  decode.map(decode.string, OpportunityId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_opportunity(tx: Tx) -> Result(OpportunityId, Fail(e)) {
+  ids.next(tx, "opp") |> result.map(OpportunityId)
 }
 
 /// An id of `agreement_opportunity_shares`.

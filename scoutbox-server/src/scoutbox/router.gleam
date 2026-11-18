@@ -90,6 +90,7 @@ import scoutbox/safety/report_routes
 import scoutbox/scouting/assessments
 import scoutbox/scouting/board_routes
 import scoutbox/scouting/evidence
+import scoutbox/scouting/opportunities
 import scoutbox/verification/applications
 import scoutbox/verification/club_checks
 import scoutbox/verification/console_routes as verification_console
@@ -644,6 +645,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             grassroots_club.post_open_trial(ctx, req, org)
           })
+        ["opportunities"] ->
+          case req.method {
+            Get -> opportunities.list_for_org(ctx, req, org)
+            Post -> opportunities.create(ctx, req, org)
+            _ -> not_found()
+          }
         ["friendlies"] ->
           only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
         ["searches"] ->

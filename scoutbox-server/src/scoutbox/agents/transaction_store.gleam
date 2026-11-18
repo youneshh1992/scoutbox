@@ -722,13 +722,13 @@ fn live_guard(
 pub fn link_opportunity(
   tx: Tx,
   transaction_id: id.TransactionId,
-  opportunity_id: String,
+  opportunity_id: id.OpportunityId,
 ) -> Result(Nil, Fail(e)) {
   use _ <- result.try(live_guard(tx, transaction_id, "a link"))
   store.run(
     tx,
     "UPDATE agent_transactions SET link_opportunity_id = ? WHERE id = ?",
-    [sqlight.text(opportunity_id), id.transaction_sql(transaction_id)],
+    [id.opportunity_sql(opportunity_id), id.transaction_sql(transaction_id)],
   )
 }
 
