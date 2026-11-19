@@ -95,6 +95,45 @@ pub fn parse_dob(s: String, now_ms: Int) -> Result(String, Nil) {
   }
 }
 
+/// Why `s` is not a date of birth a profile may hold, in temporal.ts `parseDobStrict`'s words (`why`), or `Ok`.
+pub fn dob_problem(s: String, now_ms: Int) -> Result(Nil, String) {
+  let shaped = case string.to_graphemes(s) {
+    [y1, y2, y3, y4, "-", m1, m2, "-", d1, d2] ->
+      list.all([y1, y2, y3, y4, m1, m2, d1, d2], is_digit)
+    _ -> False
+  }
+  let number = fn(from, n) {
+    string.slice(s, from, n) |> int.parse |> result.unwrap(0)
+  }
+  let year = number(0, 4)
+  let month = number(5, 2)
+  let day = number(8, 2)
+  case shaped {
+    False -> Error("wrong shape")
+    True if year < year_min || year > year_max ->
+      Error(
+        "year outside "
+        <> int.to_string(year_min)
+        <> "–"
+        <> int.to_string(year_max),
+      )
+    True if month < 1 || month > 12 -> Error("no such month")
+    True if day < 1 || day > 31 -> Error("no such day")
+    True ->
+      case parse_day(s) {
+        Error(Nil) -> Error("no such day in that month")
+        Ok(date) -> {
+          let today = day_of(now_ms)
+          case calendar.naive_date_compare(date, today), age(s, today) {
+            order.Gt, _ -> Error("in the future")
+            _, Some(a) if a > max_age_years -> Error("implausibly old")
+            _, _ -> Ok(Nil)
+          }
+        }
+      }
+  }
+}
+
 /// The latest birth date of someone who has turned `years` by `today`, as text.
 pub fn born_by(today: Date, years: Int) -> String {
   text_of(today.year - years, calendar.month_to_int(today.month), today.day)

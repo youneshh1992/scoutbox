@@ -1192,6 +1192,35 @@ pub fn prefs(p: Player) -> Prefs {
   )
 }
 
+/// Links an external identity to the player: external ids accumulate, each with where it came from.
+pub fn add_external_id(
+  tx: Tx,
+  player_id: id.PlayerId,
+  provider provider: String,
+  external_id external_id: String,
+  source source: String,
+  by_name by_name: String,
+  at at: Int,
+  review_id review_id: String,
+) -> Result(Nil, Fail(e)) {
+  use position <- result.try(next_position(tx, external_row.table, player_id))
+  external_row.insert(
+    tx,
+    external_row.Row(
+      ..external_row.new(
+        player_id:,
+        position:,
+        provider:,
+        external_id:,
+        source:,
+        linked_at: at,
+      ),
+      linked_by_name: Some(by_name),
+      review_id: Some(review_id),
+    ),
+  )
+}
+
 /// The position after a player's last item in a list table.
 fn next_position(
   tx: Tx,

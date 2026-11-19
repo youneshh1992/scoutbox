@@ -52,6 +52,9 @@ pub type Config {
     /// BOX_CAM_TEST_PROVIDER=1: Box Cam's scripted observation provider (`local_test`), whose results are always
     /// labelled simulated.
     box_cam_test_provider: Bool,
+    /// The provider connectors' settings that are set (CONNECTOR_STATS_KEY, CONNECTOR_FED_KEY,
+    /// CONNECTOR_VIDEO_KEY). No build integrates a provider, so a connector only reports that it was configured.
+    configured_connectors: List(String),
   )
 }
 
@@ -164,6 +167,15 @@ pub fn load() -> Result(Config, String) {
       && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
     dev_faults: !production,
     box_cam_test_provider: envoy.get("BOX_CAM_TEST_PROVIDER") == Ok("1"),
+    configured_connectors: list.filter(
+      ["CONNECTOR_STATS_KEY", "CONNECTOR_FED_KEY", "CONNECTOR_VIDEO_KEY"],
+      fn(name) {
+        case envoy.get(name) {
+          Ok(value) -> value != ""
+          Error(Nil) -> False
+        }
+      },
+    ),
   ))
 }
 

@@ -55,6 +55,19 @@ pub fn prelude_named_vocabulary_test() {
   assert !string.contains(source, "pub type List {")
 }
 
+/// A value named like a prelude constructor (`Error`, `None`) would shadow it in its row module, so it takes the
+/// type's name as a prefix.
+pub fn prelude_named_value_test() {
+  let schema =
+    "CREATE TABLE codes (outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'error', 'none', 'late'))) STRICT;"
+  let assert [_, Generated(_, source)] =
+    codegen.generate(schema, [], tables: ["codes"], ided: [], id_columns: [])
+  assert string.contains(source, "#(\"error\", OutcomeError)")
+  assert string.contains(source, "#(\"ok\", OutcomeOk)")
+  assert string.contains(source, "#(\"none\", OutcomeNone)")
+  assert string.contains(source, "#(\"late\", Late)")
+}
+
 /// A CHECK allowing a different list in each case has all of them as its vocabulary, and upper-case codes of
 /// several words read as words.
 pub fn several_lists_in_one_check_test() {

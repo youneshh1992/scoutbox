@@ -10,6 +10,7 @@ import scoutbox/identity/invites.{type Invite}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/sessions
 import scoutbox/identity/staff.{type Staff}
+import scoutbox/integrations/imports
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
@@ -307,7 +308,8 @@ fn onboarding(
   org: Org,
   user: Staff,
 ) -> Result(Json, store.Fail(e)) {
-  use members <- result.map(staff.for_org(read, org.id, active_only: True))
+  use members <- result.try(staff.for_org(read, org.id, active_only: True))
+  use imported <- result.map(imports.has_imported(read, org.id))
   let leads = list.filter(members, access.is_lead)
   let task = fn(id, label, done, help) {
     #(
@@ -350,14 +352,13 @@ fn onboarding(
       }),
       "Leads approve signings and manage staff — protect those accounts first.",
     ),
-    // Not ported yet: imports (integrations) and coverage plans (insight) belong to domains this server does not
-    // run, so neither can have been done.
     task(
       "first_import",
       "Import or add your player records",
-      False,
+      imported,
       "CSV import with dry-run preview, or add prospects by hand.",
     ),
+    // Not ported yet: coverage plans (insight) are not kept here, so none can have been set up.
     task(
       "coverage_plan",
       "Set up a coverage plan",

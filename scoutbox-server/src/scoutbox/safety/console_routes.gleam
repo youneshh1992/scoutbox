@@ -14,6 +14,7 @@ import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/passwords
 import scoutbox/identity/players
+import scoutbox/integrations/webhooks
 import scoutbox/messaging/channels
 import scoutbox/messaging/dispatches
 import scoutbox/messaging/notifications
@@ -371,7 +372,8 @@ pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
 
 /// `GET /admin/metrics`.
 ///
-/// Not ported yet: the process's request counters (platform metrics) and the webhook backlog (integrations). An operations event's detail fields arrive with the events that write them.
+/// Not ported yet: the process's request counters (platform metrics). An operations event's detail fields arrive
+/// with the events that write them.
 pub fn metrics(ctx: Ctx) -> Response {
   // On the writer: it holds the verification counters (verification/core `count`).
   let found =
@@ -389,6 +391,7 @@ pub fn metrics(ctx: Ctx) -> Response {
       ))
       use webhook <- result.try(audit.ops_count(read, ops_events.WebhookFailed))
       use backlog <- result.try(dispatches.backlog_count(read))
+      use webhook_backlog <- result.try(webhooks.backlog_count(read))
       use newest <- result.map(audit.ops_newest(read, 50))
       json.object([
         #("deliveryFailures", json.int(delivery)),
@@ -402,7 +405,7 @@ pub fn metrics(ctx: Ctx) -> Response {
         #("secondLook", second_look_metrics),
         #("webhookFailures", json.int(webhook)),
         #("dispatchBacklog", json.int(backlog)),
-        #("webhookBacklog", json.int(0)),
+        #("webhookBacklog", json.int(webhook_backlog)),
         #(
           "opsEvents",
           json.array(newest, fn(e) {

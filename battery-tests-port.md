@@ -289,7 +289,11 @@ are for surprising facts or points that later work depends on, not implementatio
       1. Imports and integrations: CSV imports and their commit and reversal, identity reviews, prospects, API keys
          and `/api/v1/export/*`, and the webhooks' list, rotation and deliveries, plus `/org/connectors`
          (`integrations/imports.mjs`, `repositories/integrations.mjs`). Creating a webhook and its signed sending
-         and retries are in already.
+         and retries are in already. [**done**: the battery's first 58 checks pass, up to onboarding, and 87
+         requests answer as TypeScript's do, ids included.] A mapping to null doesn't leave its column out: a column
+         named like a field falls back to that field, as JavaScript's `??` reads it. The onboarding task, the audit
+         export's import histories and the metrics' webhook backlog are real now. A vocabulary value named like a
+         prelude constructor (`error`) gets its type's name as a prefix (`DispositionError`).
       2. Enterprise: onboarding, `/org/sessions` and its revoke, `/org/security`, SSO against the local test IdP
          (`/testidp/authorize`), paged invites, support tickets with time-limited access grants and their access
          log, and the metrics' scope note (`enterprise/enterprise.mjs`, `repositories/enterprise.mjs`). MFA,

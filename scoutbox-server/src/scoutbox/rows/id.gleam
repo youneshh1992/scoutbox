@@ -202,6 +202,38 @@ pub fn next_agreement_event(tx: Tx) -> Result(AgreementEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(AgreementEventId)
 }
 
+/// An id of `api_keys`.
+pub opaque type ApiKeyId {
+  ApiKeyId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn api_key(text: String) -> ApiKeyId {
+  ApiKeyId(text)
+}
+
+pub fn api_key_to_string(id: ApiKeyId) -> String {
+  let ApiKeyId(text) = id
+  text
+}
+
+pub fn api_key_sql(id: ApiKeyId) -> sqlight.Value {
+  sqlight.text(api_key_to_string(id))
+}
+
+pub fn api_key_json(id: ApiKeyId) -> Json {
+  json.string(api_key_to_string(id))
+}
+
+pub fn api_key_decoder() -> decode.Decoder(ApiKeyId) {
+  decode.map(decode.string, ApiKeyId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_api_key(tx: Tx) -> Result(ApiKeyId, Fail(e)) {
+  ids.next(tx, "key") |> result.map(ApiKeyId)
+}
+
 /// An id of `applications`.
 pub opaque type ApplicationId {
   ApplicationId(String)
@@ -2179,6 +2211,38 @@ pub fn next_handoff(tx: Tx) -> Result(HandoffId, Fail(e)) {
   ids.next(tx, "hof") |> result.map(HandoffId)
 }
 
+/// An id of `identity_reviews`.
+pub opaque type IdentityReviewId {
+  IdentityReviewId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn identity_review(text: String) -> IdentityReviewId {
+  IdentityReviewId(text)
+}
+
+pub fn identity_review_to_string(id: IdentityReviewId) -> String {
+  let IdentityReviewId(text) = id
+  text
+}
+
+pub fn identity_review_sql(id: IdentityReviewId) -> sqlight.Value {
+  sqlight.text(identity_review_to_string(id))
+}
+
+pub fn identity_review_json(id: IdentityReviewId) -> Json {
+  json.string(identity_review_to_string(id))
+}
+
+pub fn identity_review_decoder() -> decode.Decoder(IdentityReviewId) {
+  decode.map(decode.string, IdentityReviewId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_identity_review(tx: Tx) -> Result(IdentityReviewId, Fail(e)) {
+  ids.next(tx, "idr") |> result.map(IdentityReviewId)
+}
+
 /// An id of `idv_queue`.
 pub opaque type IdvCaseId {
   IdvCaseId(String)
@@ -2204,6 +2268,70 @@ pub fn idv_case_json(id: IdvCaseId) -> Json {
 
 pub fn idv_case_decoder() -> decode.Decoder(IdvCaseId) {
   decode.map(decode.string, IdvCaseId)
+}
+
+/// An id of `import_batches`.
+pub opaque type ImportBatchId {
+  ImportBatchId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn import_batch(text: String) -> ImportBatchId {
+  ImportBatchId(text)
+}
+
+pub fn import_batch_to_string(id: ImportBatchId) -> String {
+  let ImportBatchId(text) = id
+  text
+}
+
+pub fn import_batch_sql(id: ImportBatchId) -> sqlight.Value {
+  sqlight.text(import_batch_to_string(id))
+}
+
+pub fn import_batch_json(id: ImportBatchId) -> Json {
+  json.string(import_batch_to_string(id))
+}
+
+pub fn import_batch_decoder() -> decode.Decoder(ImportBatchId) {
+  decode.map(decode.string, ImportBatchId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_import_batch(tx: Tx) -> Result(ImportBatchId, Fail(e)) {
+  ids.next(tx, "imp") |> result.map(ImportBatchId)
+}
+
+/// An id of `import_batch_history`.
+pub opaque type ImportEventId {
+  ImportEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn import_event(text: String) -> ImportEventId {
+  ImportEventId(text)
+}
+
+pub fn import_event_to_string(id: ImportEventId) -> String {
+  let ImportEventId(text) = id
+  text
+}
+
+pub fn import_event_sql(id: ImportEventId) -> sqlight.Value {
+  sqlight.text(import_event_to_string(id))
+}
+
+pub fn import_event_json(id: ImportEventId) -> Json {
+  json.string(import_event_to_string(id))
+}
+
+pub fn import_event_decoder() -> decode.Decoder(ImportEventId) {
+  decode.map(decode.string, ImportEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_import_event(tx: Tx) -> Result(ImportEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ImportEventId)
 }
 
 /// An id of `invoices`.
@@ -3387,6 +3515,38 @@ pub fn profile_event_decoder() -> decode.Decoder(ProfileEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_profile_event(tx: Tx) -> Result(ProfileEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(ProfileEventId)
+}
+
+/// An id of `prospects`.
+pub opaque type ProspectId {
+  ProspectId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn prospect(text: String) -> ProspectId {
+  ProspectId(text)
+}
+
+pub fn prospect_to_string(id: ProspectId) -> String {
+  let ProspectId(text) = id
+  text
+}
+
+pub fn prospect_sql(id: ProspectId) -> sqlight.Value {
+  sqlight.text(prospect_to_string(id))
+}
+
+pub fn prospect_json(id: ProspectId) -> Json {
+  json.string(prospect_to_string(id))
+}
+
+pub fn prospect_decoder() -> decode.Decoder(ProspectId) {
+  decode.map(decode.string, ProspectId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_prospect(tx: Tx) -> Result(ProspectId, Fail(e)) {
+  ids.next(tx, "prs") |> result.map(ProspectId)
 }
 
 /// An id of `push_log`.

@@ -1,14 +1,15 @@
 //// The tenant audit export (domains/enterprise/enterprise.mjs `/audit/export`): an organisation's own records for
 //// its auditors, for a lead only. The export is itself recorded.
 ////
-//// Not ported yet: the case histories (recruitment), import histories (integrations), access grants (groups) and
-//// support access (enterprise). Those domains keep no records on this server, so each is empty.
+//// Not ported yet: the case histories (recruitment), access grants (groups) and support access (enterprise). Those
+//// domains keep no records on this server, so each is empty.
 
 import gleam/json
 import gleam/option.{Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/integrations/imports
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store
@@ -24,6 +25,10 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
   let exported =
     store.unit(ctx.store, fn(tx) {
       use entries <- result.try(ledger.all_for_org(
+        store.reading(tx),
+        org.org.id,
+      ))
+      use import_histories <- result.try(imports.histories_json(
         store.reading(tx),
         org.org.id,
       ))
@@ -43,7 +48,7 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         #("exportedBy", json.string(org.user.name)),
         #("ledger", json.array(entries, ledger.view)),
         #("caseHistories", json.array([], json.string)),
-        #("importHistories", json.array([], json.string)),
+        #("importHistories", import_histories),
         #("grantsGiven", json.array([], json.string)),
         #("grantsReceived", json.array([], json.string)),
         #("supportAccess", json.array([], json.string)),

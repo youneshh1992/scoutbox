@@ -799,12 +799,13 @@ fn quote(s: String) -> String {
 // --------------------------------------------------------------------------------------------- names
 
 /// Values in two enums of one table: their constructors get the type's name as a prefix, because Gleam
-/// constructors share the module's namespace. `Row` and `New` are taken too.
+/// constructors share the module's namespace. `Row` and `New` are taken too, and so are the prelude's `Ok`,
+/// `Error` and option's `Some` and `None`, which the module uses.
 fn clashing_values(enums: List(#(String, List(String)))) -> Set(String) {
   let #(_, twice) =
     enums
     |> list.flat_map(fn(e) { list.map(e.1, constructor(_, "")) })
-    |> list.append(["Row", "New", "Row", "New"])
+    |> list.append(list.flatten(list.repeat(taken, 2)))
     |> list.fold(#(set.new(), set.new()), fn(acc, name) {
       case set.contains(acc.0, name) {
         True -> #(acc.0, set.insert(acc.1, name))
@@ -813,6 +814,8 @@ fn clashing_values(enums: List(#(String, List(String)))) -> Set(String) {
     })
   twice
 }
+
+const taken = ["Row", "New", "Ok", "Error", "Some", "None"]
 
 fn local_constructor(
   type_name: String,

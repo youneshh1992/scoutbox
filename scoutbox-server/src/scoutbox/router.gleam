@@ -61,6 +61,8 @@ import scoutbox/insight/coverage
 import scoutbox/insight/evidence_gaps
 import scoutbox/insight/exposure
 import scoutbox/insight/review_queue
+import scoutbox/integrations/api_keys
+import scoutbox/integrations/imports
 import scoutbox/integrations/webhooks
 import scoutbox/media/links
 import scoutbox/messaging/channel_routes as threads
@@ -161,6 +163,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       only(req, Post, fn() { feed_routes.register_device(ctx, req) })
     ["callbacks", "delivery"] ->
       only(req, Post, fn() { delivery.callback(ctx, req) })
+    ["api", "v1", "export", "prospects"] ->
+      only(req, Get, fn() { api_keys.export_prospects(ctx, req) })
+    ["api", "v1", "export", "shortlist"] ->
+      only(req, Get, fn() { api_keys.export_shortlist(ctx, req) })
     // Before the /auth limiter, so a sign-out is never limited.
     ["auth", "logout"] -> only(req, Post, fn() { logout(ctx, req) })
     ["auth", ..rest] -> {
@@ -849,7 +855,54 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           }
         ["delivery"] ->
           only(req, Get, fn() { delivery.org_list(ctx, req, org) })
-        ["webhooks"] -> only(req, Post, fn() { webhooks.create(ctx, req, org) })
+        ["webhooks"] ->
+          case req.method {
+            Get -> webhooks.list_endpoints(ctx, org)
+            Post -> webhooks.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["webhooks", wid, "rotate"] ->
+          only(req, Post, fn() { webhooks.rotate(ctx, req, org, wid) })
+        ["webhooks", wid, "deactivate"] ->
+          only(req, Post, fn() { webhooks.deactivate(ctx, req, org, wid) })
+        ["webhooks", wid, "deliveries"] ->
+          only(req, Get, fn() { webhooks.deliveries(ctx, org, wid) })
+        ["imports"] ->
+          case req.method {
+            Get -> imports.page(ctx, req, org)
+            Post -> imports.validate_upload(ctx, req, org)
+            _ -> not_found()
+          }
+        ["imports", "template"] -> only(req, Get, imports.template)
+        ["imports", bid] -> only(req, Get, fn() { imports.show(ctx, org, bid) })
+        ["imports", bid, "commit"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            imports.commit(ctx, req, org, bid)
+          })
+        ["imports", bid, "reverse"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            imports.reverse(ctx, req, org, bid)
+          })
+        ["prospects"] ->
+          only(req, Get, fn() { imports.prospects(ctx, req, org) })
+        ["identity-reviews"] ->
+          only(req, Get, fn() { imports.open_reviews(ctx, org) })
+        ["identity-reviews", rid, "resolve"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            imports.resolve(ctx, req, org, rid)
+          })
+        ["api-keys"] ->
+          case req.method {
+            Get -> api_keys.list_keys(ctx, org)
+            Post -> api_keys.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["api-keys", kid, "revoke"] ->
+          only(req, Post, fn() { api_keys.revoke(ctx, req, org, kid) })
+        ["connectors"] -> only(req, Get, fn() { api_keys.connector_list(ctx) })
         ["support"] -> only(req, Post, fn() { support.create(ctx, req, org) })
         ["squad"] ->
           case req.method {
@@ -2081,6 +2134,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["agent", "profiles"] ->
           only(req, Get, fn() { agent.admin_profiles(ctx, req) })
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
+        ["imports"] -> only(req, Get, fn() { imports.admin_recent(ctx) })
         ["signings", sid, "void"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)
