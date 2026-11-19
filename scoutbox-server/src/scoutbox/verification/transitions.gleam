@@ -2,16 +2,16 @@
 //// grants and history). Nothing is visible to a club without an explicit, revocable, expiring grant; nothing about
 //// a player is labelled "released"; agencies never receive transition packs.
 ////
-//// Not ported yet: the case lists, withdrawing and placing a case, the club's side (its list and the pack view),
-//// the expiry and follow-up sweep, and the admin's level review.
 
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
-import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs
 import scoutbox/identity/players.{type Player}
@@ -20,15 +20,18 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/store.{type Fail, type Read, type Store, type Tx}
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/transition_case_history as history_row
 import scoutbox/rows/transition_case_pack_items as item_row
 import scoutbox/rows/transition_case_recipients as recipient_row
 import scoutbox/rows/transition_cases as row
+import scoutbox/safety/ledger
 import scoutbox/vocab/audience
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party.{type Party}
+import scoutbox/vocab/playing_level
 import scoutbox/vocab/webhook_event
 import sqlight
 import wisp.{type Request, type Response}
@@ -38,6 +41,8 @@ const day = 86_400_000
 const name_max = 200
 
 const pack_max = 100
+
+const follow_up_days = 60
 
 pub type Case {
   Case(
@@ -108,6 +113,34 @@ fn record(
   org_id: Option(id.OrgId),
   at: Int,
 ) -> Result(Nil, Fail(e)) {
+  let by_kind = case actor.kind {
+    party.Player -> history_row.Player
+    party.Guardian -> history_row.Guardian
+  }
+  record_by(
+    tx,
+    case_id,
+    by_kind,
+    actor.id,
+    actor.name,
+    action,
+    items,
+    org_id,
+    at,
+  )
+}
+
+fn record_by(
+  tx: Tx,
+  case_id: id.TransitionCaseId,
+  by_kind: history_row.ByKind,
+  by_id: String,
+  by_name: String,
+  action: history_row.Action,
+  items: Option(Int),
+  org_id: Option(id.OrgId),
+  at: Int,
+) -> Result(Nil, Fail(e)) {
   use id <- result.try(id.next_transition_event(tx))
   history_row.insert(
     tx,
@@ -116,18 +149,63 @@ fn record(
         id:,
         transition_case_id: case_id,
         at:,
-        by_kind: case actor.kind {
-          party.Player -> history_row.Player
-          party.Guardian -> history_row.Guardian
-        },
-        by_id: actor.id,
+        by_kind:,
+        by_id:,
         action:,
       ),
-      by_name: Some(clip(actor.name)),
+      by_name: Some(clip(by_name)),
       detail_items: items,
       detail_org_id: org_id,
     ),
   )
+}
+
+/// The cases a query's first column names, each whole, in the query's order.
+fn cases_where(
+  read: Read,
+  sql: String,
+  args: List(sqlight.Value),
+) -> Result(List(Case), Fail(e)) {
+  use ids <- result.try(store.query(
+    read,
+    sql,
+    args,
+    decode.at([0], id.transition_case_decoder()),
+  ))
+  list.try_map(ids, fn(case_id) {
+    use found <- result.map(by_id(read, case_id))
+    let assert Some(c) = found as "a listed transition case reads back"
+    c
+  })
+}
+
+/// Reads the case back inside its unit, after an act.
+fn reloaded(tx: Tx, case_id: id.TransitionCaseId) -> Result(Case, Fail(e)) {
+  use found <- result.map(by_id(store.reading(tx), case_id))
+  let assert Some(c) = found as "a transition case reads back in its unit"
+  c
+}
+
+/// Moves an open case to `status` with the extra assignments, or answers stale when another request closed it
+/// first.
+fn close(
+  tx: Tx,
+  case_id: id.TransitionCaseId,
+  set: String,
+  args: List(sqlight.Value),
+) -> Result(Nil, Fail(e)) {
+  use moved <- result.try(store.write(
+    tx,
+    "UPDATE transition_cases SET "
+      <> set
+      <> " WHERE id = ? AND status = 'open' RETURNING id",
+    list.append(args, [id.transition_case_sql(case_id)]),
+    decode.at([0], decode.string),
+  ))
+  case moved {
+    [] -> store.stale("the transition case's status")
+    _ -> Ok(Nil)
+  }
 }
 
 /// The first current staff member of an organisation: who hears about its grants.
@@ -510,15 +588,6 @@ pub fn add_recipient(
 ) -> Response {
   use c <- owned_case(ctx, owner, id)
   let now = clock.now_ms()
-  let closed = fn(status) {
-    http.json(
-      409,
-      json.object([
-        #("error", json.string("CASE_CLOSED")),
-        #("status", json.string(status)),
-      ]),
-    )
-  }
   case c.row.status, c.row.period_ends_at <= now {
     row.Open, False -> {
       let shape = {
@@ -536,6 +605,16 @@ pub fn add_recipient(
     row.Open, True -> closed("expired")
     status, _ -> closed(row.status_to_string(status))
   }
+}
+
+fn closed(status: String) -> Response {
+  http.json(
+    409,
+    json.object([
+      #("error", json.string("CASE_CLOSED")),
+      #("status", json.string(status)),
+    ]),
+  )
 }
 
 type GrantRefusal {
@@ -808,5 +887,518 @@ pub fn org_list(ctx: Ctx, org_id: id.OrgId) -> Response {
         ]),
       )
     Error(e) -> http.internal(e)
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- the owner's acts
+
+/// `GET /player/transitions` and `GET /guardian/children-transitions`: newest first. A short per-player list, not
+/// paged.
+pub fn owner_list(ctx: Ctx, owner: Owner) -> Response {
+  let found =
+    store.read(ctx.store, fn(read) {
+      case owner {
+        PlayerOwner(p) ->
+          cases_where(
+            read,
+            "SELECT id FROM transition_cases WHERE player_id = ? ORDER BY rowid DESC",
+            [id.player_sql(p.player.row.id)],
+          )
+        GuardianOwner(g) ->
+          cases_where(
+            read,
+            "SELECT id FROM transition_cases WHERE player_id IN (SELECT value FROM json_each(?)) ORDER BY rowid DESC",
+            [
+              json.array(g.child_ids, id.player_json)
+              |> json.to_string
+              |> sqlight.text,
+            ],
+          )
+      }
+    })
+  case found {
+    Ok(cases) ->
+      http.json(200, json.object([#("items", json.array(cases, case_view))]))
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `POST /…/:id/withdraw`: the owner closes the case, and every grant ends.
+pub fn withdraw(
+  ctx: Ctx,
+  req: Request,
+  owner: Owner,
+  id: id.TransitionCaseId,
+) -> Response {
+  use _ <- http.rerun_on_stale(req)
+  use c <- owned_case(ctx, owner, id)
+  case c.row.status {
+    row.Open -> {
+      let now = clock.now_ms()
+      let withdrawn =
+        store.unit(ctx.store, fn(tx) {
+          use _ <- result.try(close(tx, c.row.id, "status = 'withdrawn'", []))
+          use _ <- result.try(
+            store.run(
+              tx,
+              "UPDATE transition_case_recipients SET revoked_at = ? WHERE transition_case_id = ? AND revoked_at IS NULL",
+              [sqlight.int(now), id.transition_case_sql(c.row.id)],
+            ),
+          )
+          use _ <- result.try(record(
+            tx,
+            c.row.id,
+            actor_of(owner),
+            history_row.Withdrawn,
+            None,
+            None,
+            now,
+          ))
+          reloaded(tx, c.row.id)
+        })
+      case withdrawn {
+        Ok(c) -> http.json(200, json.object([#("transition", case_view(c))]))
+        Error(store.Lost(what)) -> http.stale(what)
+        Error(failure) -> http.internal(failure)
+      }
+    }
+    status -> closed(row.status_to_string(status))
+  }
+}
+
+type Placement {
+  Placement(org_id: id.OrgId, note: Option(String))
+}
+
+/// `POST /…/:id/place`: the player was placed. The case closes with its history, the placing club's grant stays,
+/// every other ends, and a check-in falls due. The player's level is untouched.
+pub fn place(
+  ctx: Ctx,
+  req: Request,
+  owner: Owner,
+  id: id.TransitionCaseId,
+) -> Response {
+  use req <- http.rerun_on_stale(req)
+  use c <- owned_case(ctx, owner, id)
+  case c.row.status {
+    row.Open -> {
+      let shape = {
+        use org_id <- input.field("orgId", input.required(input.id()))
+        use note <- input.field("note", input.nullish(input.text(300)))
+        input.done(Placement(org_id: id.org(org_id), note:))
+      }
+      use body <- http.body(req, shape, [])
+      let note = case body.note {
+        Some("") -> None
+        other -> other
+      }
+      case store.read(ctx.store, orgs.by_id(_, body.org_id)) {
+        Error(failure) -> http.internal(failure)
+        Ok(None) -> http.error(404, "ORG_NOT_FOUND")
+        Ok(Some(org)) -> {
+          let now = clock.now_ms()
+          let placed =
+            store.unit(ctx.store, fn(tx) {
+              use _ <- result.try(
+                close(
+                  tx,
+                  c.row.id,
+                  "status = 'placed', placement_org_id = ?, placement_org_name = ?, placement_at = ?, placement_note = ?, follow_up_due_at = ?",
+                  [
+                    id.org_sql(org.id),
+                    sqlight.text(clip(org.name)),
+                    sqlight.int(now),
+                    sqlight.nullable(sqlight.text, note),
+                    sqlight.int(now + follow_up_days * day),
+                  ],
+                ),
+              )
+              use _ <- result.try(
+                store.run(
+                  tx,
+                  "UPDATE transition_case_recipients SET revoked_at = ? WHERE transition_case_id = ? AND revoked_at IS NULL AND org_id <> ?",
+                  [
+                    sqlight.int(now),
+                    id.transition_case_sql(c.row.id),
+                    id.org_sql(org.id),
+                  ],
+                ),
+              )
+              use _ <- result.try(record(
+                tx,
+                c.row.id,
+                actor_of(owner),
+                history_row.Placed,
+                None,
+                Some(org.id),
+                now,
+              ))
+              reloaded(tx, c.row.id)
+            })
+          case placed {
+            Ok(c) ->
+              http.json(
+                200,
+                json.object([
+                  #("transition", case_view(c)),
+                  #(
+                    "note",
+                    json.string(
+                      "Case closed by placement — its history stays. Your registered level changes only through a signing or an audited level review, never automatically.",
+                    ),
+                  ),
+                ]),
+              )
+            Error(store.Lost(what)) -> http.stale(what)
+            Error(failure) -> http.internal(failure)
+          }
+        }
+      }
+    }
+    status -> closed(row.status_to_string(status))
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- the club's side
+
+/// `GET /org/transitions/:id/pack`: the selected evidence, under a live grant to a club that may still see the
+/// player. Each opening is recorded on the grant and in the ledger.
+pub fn org_pack(
+  ctx: Ctx,
+  req: Request,
+  org: OrgAccess,
+  id: id.TransitionCaseId,
+) -> Response {
+  use _ <- http.rerun_on_stale(req)
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      use found <- result.try(by_id(read, id))
+      case found {
+        None -> Ok(None)
+        Some(c) -> {
+          use seen <- result.map(players.for_org(
+            read,
+            c.row.player_id,
+            org.org,
+            now,
+          ))
+          Some(#(c, seen))
+        }
+      }
+    })
+  let refused =
+    http.error_message(
+      403,
+      "TRANSITION_ACCESS_REVOKED",
+      "This pack is not (or no longer) shared with your club.",
+    )
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "TRANSITION_NOT_FOUND")
+    Ok(Some(#(c, seen))) -> {
+      let live =
+        list.find(c.recipients, fn(r) {
+          r.org_id == org.org.id && r.revoked_at == None && r.expires_at > now
+        })
+      case c.row.status, live, seen {
+        row.Open, Ok(grant), Some(#(player, a)) if a.visible && !a.blocked -> {
+          let viewed =
+            store.unit(ctx.store, fn(tx) {
+              use moved <- result.try(store.write(
+                tx,
+                "UPDATE transition_case_recipients SET viewed_at = ? WHERE transition_case_id = ? AND ord = ? AND revoked_at IS NULL RETURNING ord",
+                [
+                  sqlight.int(now),
+                  id.transition_case_sql(c.row.id),
+                  sqlight.int(grant.ord),
+                ],
+                decode.at([0], decode.int),
+              ))
+              use <- bool.guard(
+                moved == [],
+                store.stale("the transition grant"),
+              )
+              use _ <- result.try(ledger.append(
+                tx,
+                ledger.Entry(
+                  entry_type: ledger_row.TransitionPackView,
+                  player_id: Some(player.row.id),
+                  org_id: Some(org.org.id),
+                  org_name: Some(org.org.name),
+                  user_id: Some(org.user.id),
+                  actor_name: Some(org.user.name),
+                ),
+                now,
+              ))
+              pack_view(store.reading(tx), player, c)
+            })
+          case viewed {
+            Ok(pack) ->
+              http.json(
+                200,
+                json.object([
+                  #("transitionId", id.transition_case_json(c.row.id)),
+                  #("playerName", json.nullable(c.row.player_name, json.string)),
+                  #("note", json.nullable(c.row.note, json.string)),
+                  #("pack", pack),
+                ]),
+              )
+            Error(store.Lost(what)) -> http.stale(what)
+            Error(failure) -> http.internal(failure)
+          }
+        }
+        _, _, _ -> refused
+      }
+    }
+  }
+}
+
+/// An evidence record is shown with its id and recording time only: the TypeScript view names `kind`, `tier` and
+/// `summary`, which the record doesn't have, so they are never sent (docs/known-issues.md).
+fn pack_view(read: Read, player: Player, c: Case) -> Result(Json, Fail(e)) {
+  let ids_of = fn(kind) {
+    list.filter(c.items, fn(i) { i.item_kind == kind })
+    |> list.map(fn(i) { i.item_id })
+  }
+  let media_ids = ids_of(item_row.Media)
+  let media =
+    list.filter(player.media, fn(m) {
+      list.contains(media_ids, id.media_to_string(m.clip.id))
+    })
+    |> list.map(fn(m) {
+      json.object([
+        #("id", id.media_json(m.clip.id)),
+        #("title", json.string(m.clip.title)),
+        #("url", json.nullable(m.clip.url, json.string)),
+      ])
+    })
+  let as_list = fn(ids) {
+    json.array(ids, json.string) |> json.to_string |> sqlight.text
+  }
+  use evidence <- result.try(
+    store.query(
+      read,
+      "SELECT id, recorded_at FROM evidence WHERE player_id = ? AND id IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+      [id.player_sql(player.row.id), as_list(ids_of(item_row.Evidence))],
+      {
+        use evidence_id <- decode.field(0, decode.string)
+        use recorded_at <- decode.field(1, decode.int)
+        decode.success(
+          json.object([
+            #("id", json.string(evidence_id)),
+            #("recordedAt", json.int(recorded_at)),
+          ]),
+        )
+      },
+    ),
+  )
+  use feedback <- result.map(
+    list.try_map(ids_of(item_row.Feedback), fn(assessment_id) {
+      store.one(
+        read,
+        "SELECT a.id, COALESCE(o.name, 'club'), a.published_feedback_text, a.published_feedback_at FROM assessments a LEFT JOIN orgs o ON o.id = a.org_id WHERE a.id = ? AND a.published_feedback_text IS NOT NULL",
+        [sqlight.text(assessment_id)],
+        {
+          use feedback_id <- decode.field(0, decode.string)
+          use org_name <- decode.field(1, decode.string)
+          use text <- decode.field(2, decode.string)
+          use at <- decode.field(3, decode.optional(decode.int))
+          decode.success(
+            json.object([
+              #("id", json.string(feedback_id)),
+              #("orgName", json.string(org_name)),
+              #("text", json.string(text)),
+              #("at", json.nullable(at, json.int)),
+            ]),
+          )
+        },
+      )
+      |> result.map(option.from_result)
+    }),
+  )
+  json.object([
+    #("media", json.preprocessed_array(media)),
+    #("evidence", json.preprocessed_array(evidence)),
+    #("publishedFeedback", json.preprocessed_array(option.values(feedback))),
+  ])
+}
+
+// ------------------------------------------------------------------------------------------------- level review
+
+type LevelReview {
+  LevelReview(level: playing_level.PlayingLevel, reason: String)
+}
+
+/// `POST /admin/players/:id/level-review`: the only path that changes a player's level outside a signing, and it
+/// is reasoned and recorded in the ledger.
+pub fn admin_level_review(
+  ctx: Ctx,
+  req: Request,
+  player_id: id.PlayerId,
+) -> Response {
+  case store.read(ctx.store, players.by_id(_, player_id)) {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
+    Ok(Some(p)) -> {
+      let shape = {
+        use level <- input.field(
+          "level",
+          input.required(input.one_of(playing_level.pairs)),
+        )
+        use reason <- input.field(
+          "reason",
+          input.required(input.required_text(300)),
+        )
+        input.done(LevelReview(level:, reason:))
+      }
+      use body <- http.body(req, shape, [
+        #("level", "BAD_LEVEL"),
+        #("reason", "REASON_REQUIRED"),
+      ])
+      let from = p.row.level
+      let now = clock.now_ms()
+      let reviewed =
+        store.unit(ctx.store, fn(tx) {
+          use _ <- result.try(
+            store.run(tx, "UPDATE players SET level = ? WHERE id = ?", [
+              sqlight.text(playing_level.to_string(body.level)),
+              id.player_sql(p.row.id),
+            ]),
+          )
+          use entry_id <- result.try(id.next_ledger_entry(tx))
+          ledger_row.insert(
+            tx,
+            ledger_row.New(
+              ..ledger_row.new(
+                id: entry_id,
+                occurred_at: now,
+                type_: ledger_row.LevelReview,
+              ),
+              player_id: Some(p.row.id),
+              org_name: Some("Trust & Safety"),
+              actor_name: Some("T&S level review"),
+              detail_from_value: Some(playing_level.to_string(from)),
+              detail_to_value: Some(playing_level.to_string(body.level)),
+              detail_reason: Some(body.reason),
+            ),
+          )
+        })
+      case reviewed {
+        Ok(_) ->
+          http.json(
+            200,
+            json.object([
+              #("playerId", id.player_json(p.row.id)),
+              #("from", playing_level.to_json(from)),
+              #("to", playing_level.to_json(body.level)),
+              #(
+                "note",
+                json.string(
+                  "Recorded in the append-only ledger. An academy departure never changes level automatically — this review is the deliberate, audited path.",
+                ),
+              ),
+            ]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- the sweep
+
+/// At boot and with the periodic sweeps: open cases whose period ended expire, and a placed case's check-in is
+/// sent once it falls due, to the guardian of a child or else the player. Each case commits in its own unit, which
+/// re-checks it, so overlapping sweeps do nothing twice and one failure holds back no other.
+pub fn sweep(db: Store, now: Int) -> Nil {
+  let expired =
+    store.read(db, fn(read) {
+      store.query(
+        read,
+        "SELECT id FROM transition_cases WHERE status = 'open' AND period_ends_at < ? ORDER BY rowid",
+        [sqlight.int(now)],
+        decode.at([0], id.transition_case_decoder()),
+      )
+    })
+    |> result.unwrap([])
+  list.each(expired, fn(case_id) {
+    store.unit(db, fn(tx) {
+      use moved <- result.try(store.write(
+        tx,
+        "UPDATE transition_cases SET status = 'expired' WHERE id = ? AND status = 'open' RETURNING id",
+        [id.transition_case_sql(case_id)],
+        decode.at([0], decode.string),
+      ))
+      use <- bool.guard(moved == [], Ok(Nil))
+      record_by(
+        tx,
+        case_id,
+        history_row.System,
+        "sweep",
+        "system",
+        history_row.Expired,
+        None,
+        None,
+        now,
+      )
+    })
+    |> log_failure("transition sweep " <> id.transition_case_to_string(case_id))
+  })
+  let due =
+    store.read(db, fn(read) {
+      store.query(
+        read,
+        "SELECT id, player_id, placement_org_name FROM transition_cases WHERE follow_up_due_at IS NOT NULL AND follow_up_notified_at IS NULL AND follow_up_due_at < ? ORDER BY rowid",
+        [sqlight.int(now)],
+        {
+          use case_id <- decode.field(0, id.transition_case_decoder())
+          use player_id <- decode.field(1, id.player_decoder())
+          use org_name <- decode.field(2, decode.optional(decode.string))
+          decode.success(#(case_id, player_id, org_name))
+        },
+      )
+    })
+    |> result.unwrap([])
+  list.each(due, fn(d) {
+    let #(case_id, player_id, org_name) = d
+    store.unit(db, fn(tx) {
+      let read = store.reading(tx)
+      use moved <- result.try(store.write(
+        tx,
+        "UPDATE transition_cases SET follow_up_notified_at = ? WHERE id = ? AND follow_up_due_at IS NOT NULL AND follow_up_notified_at IS NULL RETURNING id",
+        [sqlight.int(now), id.transition_case_sql(case_id)],
+        decode.at([0], decode.string),
+      ))
+      use <- bool.guard(moved == [], Ok(Nil))
+      use player <- result.try(players.by_id(read, player_id))
+      let #(kind, to) = case player {
+        Some(p) ->
+          case players.is_adult(p, now), p.row.guardian_id {
+            False, Some(g) -> #(audience.Guardian, id.guardian_to_string(g))
+            _, _ -> #(audience.Player, id.player_to_string(player_id))
+          }
+        None -> #(audience.Player, id.player_to_string(player_id))
+      }
+      notifications.notify(
+        tx,
+        to: kind,
+        id: to,
+        type_: "transition",
+        text: "How is the placement at "
+          <> option.unwrap(org_name, "undefined")
+          <> " going? A quick check-in is due on the transition case.",
+        ref_id: Some(id.transition_case_to_string(case_id)),
+        at: now,
+      )
+    })
+    |> log_failure("transition sweep " <> id.transition_case_to_string(case_id))
+  })
+}
+
+fn log_failure(r: Result(a, store.UnitError(e)), what: String) -> Nil {
+  case r {
+    Ok(_) -> Nil
+    Error(failure) -> wisp.log_error(what <> ": " <> string.inspect(failure))
   }
 }

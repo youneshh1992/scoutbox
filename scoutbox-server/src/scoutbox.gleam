@@ -32,6 +32,7 @@ import scoutbox/recruitment/trial_routes
 import scoutbox/router
 import scoutbox/seed
 import scoutbox/verification/review_routes as verification_review
+import scoutbox/verification/transitions
 import simplifile
 import wisp
 
@@ -125,6 +126,7 @@ fn boot() -> Result(Nil, String) {
   let _ = follow_ups.sweep(ctx, clock.now_ms())
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
+  transitions.sweep(ctx.store, clock.now_ms())
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
@@ -148,7 +150,7 @@ fn boot() -> Result(Nil, String) {
 
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
 /// warnings, the signing follow-ups, the trial reminders, the match facts whose time-only change is due, and the agent core's expiry and
-/// stale-verification notices.
+/// stale-verification notices, and the transition cases' expiries and check-ins.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
@@ -158,6 +160,7 @@ fn sweeping(ctx: Ctx) -> Nil {
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = match_facts.sweep(ctx.store)
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
+  transitions.sweep(ctx.store, clock.now_ms())
   sweeping(ctx)
 }
 

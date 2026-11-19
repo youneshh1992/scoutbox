@@ -157,3 +157,16 @@ can't check what was stored. `scoutbox-server/src/scoutbox/agents/policy_routes.
 together and check the admin app's rules table first. If they were left out on purpose, say why in the view.
 `agents/compliancePersistence` compares the seeded rules with the snapshot through the stored rows, because the view
 doesn't carry them whole.
+
+### A transition pack shows evidence without what it is
+
+Found 2026-11-19 while porting `operations/clubOperations`. Ported as the TypeScript server behaves.
+
+**What it is.** When a club opens a transition pack (`GET /org/transitions/:id/pack`), each evidence record is meant
+to show its `kind`, `tier` and `summary` (`packView` in `domains/verification/transitions.mjs`). An evidence record
+has none of those fields: it has `claimType`, `label`, `value` and a verification tier under `verification`. So the
+club sees only each record's `id` and `recordedAt`, and can't tell what the player chose to share.
+`scoutbox-server/src/scoutbox/verification/transitions.gleam` sends the same two fields.
+
+**The question.** Which of the record's fields should a receiving club see? Probably the claim type, label, value
+and verification status, since those are what the player's own Passport shows. Change both servers together.

@@ -312,7 +312,12 @@ are for surprising facts or points that later work depends on, not implementatio
          takes it, so summer time is ignored on both servers. A training slot counts as within the player's
          availability when it only overlaps it (docs/known-issues.md).
       5. Transitions: the club's list and pack view, the admin level review, and the legacy representation routes
-         answering 404 (`verification/transitions.mjs`). The player's side is in already.
+         answering 404 (`verification/transitions.mjs`). The player's side is in already. [**done**: the
+         battery's first 198 checks pass, through the legacy lane, and 42 of 46 requests answer as TypeScript's do,
+         ids included; the other four differ only in the seed's own dates and random ids.] The case lists,
+         withdrawing and placing are in too, and so is the transition sweep (expiry and the placement check-in), at
+         boot and with the periodic sweeps, as in TypeScript; not on `/admin/sweep`. A pack's evidence shows only its
+         id and recording time on both servers (docs/known-issues.md).
       6. Group workspaces: groups, membership, programmes, grants and `/org/shared/:id`, the group report
          (`groups/`, `repositories/groups.mjs`).
       7. Budget scenarios: lines, exchange-rate assumptions, approval, actuals (`recruitment/budgets.mjs`).

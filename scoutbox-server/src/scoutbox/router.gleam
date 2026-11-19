@@ -479,6 +479,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { invoices.org_page(ctx, req, org.org.id) })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
+        ["transitions", tid, "pack"] ->
+          only(req, Get, fn() {
+            transitions.org_pack(ctx, req, org, id.transition_case(tid))
+          })
         ["audit"] -> only(req, Get, fn() { org_audit.feed(ctx, req, org) })
         ["audit", "export"] ->
           only(req, Get, fn() { audit_export.export(ctx, org) })
@@ -1572,7 +1576,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             _ -> not_found()
           }
         ["transitions"] ->
-          only(req, Post, fn() { transitions.player_open(ctx, req, player) })
+          case req.method {
+            Get -> transitions.owner_list(ctx, transitions.PlayerOwner(player))
+            Post -> transitions.player_open(ctx, req, player)
+            _ -> not_found()
+          }
+        ["transitions", id, "withdraw"] ->
+          only(req, Post, fn() {
+            transitions.withdraw(
+              ctx,
+              req,
+              transitions.PlayerOwner(player),
+              id.transition_case(id),
+            )
+          })
+        ["transitions", id, "place"] ->
+          only(req, Post, fn() {
+            transitions.place(
+              ctx,
+              req,
+              transitions.PlayerOwner(player),
+              id.transition_case(id),
+            )
+          })
         ["transitions", id, "recipients"] ->
           only(req, Post, fn() {
             transitions.add_recipient(
@@ -2025,6 +2051,28 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             transitions.guardian_open(ctx, req, guardian, id.player(id))
           })
+        ["children-transitions"] ->
+          only(req, Get, fn() {
+            transitions.owner_list(ctx, transitions.GuardianOwner(guardian))
+          })
+        ["children-transitions", id, "withdraw"] ->
+          only(req, Post, fn() {
+            transitions.withdraw(
+              ctx,
+              req,
+              transitions.GuardianOwner(guardian),
+              id.transition_case(id),
+            )
+          })
+        ["children-transitions", id, "place"] ->
+          only(req, Post, fn() {
+            transitions.place(
+              ctx,
+              req,
+              transitions.GuardianOwner(guardian),
+              id.transition_case(id),
+            )
+          })
         ["children-transitions", id, "recipients"] ->
           only(req, Post, fn() {
             transitions.add_recipient(
@@ -2140,6 +2188,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["admin", ..rest] -> {
       use <- access.admin(ctx, req)
       case rest {
+        ["players", pid, "level-review"] ->
+          only(req, Post, fn() {
+            transitions.admin_level_review(ctx, req, id.player(pid))
+          })
         ["evidence", "disputes"] ->
           only(req, Get, fn() { passport_routes.admin_disputes(ctx, req) })
         ["box-cam", "disputes"] ->
