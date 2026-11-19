@@ -282,7 +282,30 @@ are for surprising facts or points that later work depends on, not implementatio
    1. Untangle it [**done**: its unit fixtures are a rules suite (32 checks; 26 rule cases and 7 hand-port calls
       pending), and its MFA codes come from `support/totp.mjs`]. `NOT_YET_NEUTRAL` is now empty. The battery still
       starts its own servers through the launcher: a restore into a second data directory, and a SIGKILL restart.
-   2. Port it.
+   2. Port it, one commit per slice, in the battery's order. Each section builds on the state the earlier ones
+      leave, and a missing route crashes the battery rather than failing a check, so progress is how far it gets
+      before its first failure. Every table is already migrated. The battery goes on `BATTERIES` only when all 241
+      checks pass.
+      1. Imports and integrations: CSV imports and their commit and reversal, identity reviews, prospects, API keys
+         and `/api/v1/export/*`, and the webhooks' list, rotation and deliveries, plus `/org/connectors`
+         (`integrations/imports.mjs`, `repositories/integrations.mjs`). Creating a webhook and its signed sending
+         and retries are in already.
+      2. Enterprise: onboarding, `/org/sessions` and its revoke, `/org/security`, SSO against the local test IdP
+         (`/testidp/authorize`), paged invites, support tickets with time-limited access grants and their access
+         log, and the metrics' scope note (`enterprise/enterprise.mjs`, `repositories/enterprise.mjs`). MFA,
+         invites, the audit export and support's create and reply are in already.
+      3. The delivery centre's flows over support replies, callbacks and injected failures (`messaging/delivery.mjs`).
+         Mostly there: `platform/delivery` passes.
+      4. Suitability: a player's preferences, an opportunity's requirements, the suitability view and sharing it
+         with a club (`scouting/suitability.mjs`).
+      5. Transitions: the club's list and pack view, the admin level review, and the legacy representation routes
+         answering 404 (`verification/transitions.mjs`). The player's side is in already.
+      6. Group workspaces: groups, membership, programmes, grants and `/org/shared/:id`, the group report
+         (`groups/`, `repositories/groups.mjs`).
+      7. Budget scenarios: lines, exchange-rate assumptions, approval, actuals (`recruitment/budgets.mjs`).
+      8. Backup, verify and restore into an empty directory, `/readyz`, and delivery work surviving a SIGKILL
+         restart (`store.copyTo` in `wiring.mjs`). If this needs a new mechanism, propose it before building it.
+      9. The rule cases (26, mostly `ageOn`, `isAdult` and `b32encode`) and the 7 hand-port calls.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
