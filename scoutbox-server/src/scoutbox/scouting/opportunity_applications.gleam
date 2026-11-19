@@ -2,8 +2,9 @@
 //// guardian for their child, either withdraws an unanswered one, and the club answers each before it may close the
 //// opportunity (no ghosting).
 ////
-//// Not ported yet: the week-old reminder sweep (`remindersDue`, `markReminded`) and the suitability summary's
-//// share and unshare (it is read here when present).
+//// The suitability summary's share and unshare are `scouting/suitability`.
+////
+//// Not ported yet: the week-old reminder sweep (`remindersDue`, `markReminded`).
 
 import gleam/dict
 import gleam/dynamic/decode
@@ -111,7 +112,7 @@ fn query(
   with_children(read, rows)
 }
 
-fn by_id(
+pub fn by_id(
   read: Read,
   aid: id.ApplicationId,
 ) -> Result(Option(Application), Fail(e)) {
@@ -121,7 +122,7 @@ fn by_id(
   list.first(found) |> option.from_result
 }
 
-fn opportunity_by_id(
+pub fn opportunity_by_id(
   read: Read,
   oid: id.OpportunityId,
 ) -> Result(Option(opportunities.Opportunity), Fail(e)) {

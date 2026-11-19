@@ -2669,7 +2669,16 @@ const HUB_MAP = {
   },
 };
 
+const SU = 'scoutbox/scouting/suitability';
+const weeklySlot = record({
+  module: SU,
+  constructor: 'Slot',
+  fields: { day: ['day', string], start: ['start', string], end: ['end', string], tz: ['tz', string], label: ['label', option(string)] },
+  defaults: { label: 'None' },
+});
+
 export const MAP = {
+  ['domains/scouting/slots.mjs#slotsOverlap']: plainIn(SU)('slots_overlap', [weeklySlot, weeklySlot], option(bool)),
   ...BOX_CAM_MAP,
   ...COMBINE_MAP,
   ...HUB_MAP,

@@ -2,8 +2,9 @@
 //// list, and the eligibility the board applies (routeHelpers.mjs `checkEligibility`). The board itself is
 //// `scouting/opportunity_board`; applications and closing are `scouting/opportunity_applications`.
 ////
-//// Not ported yet: the structured requirements' route (`PUT /org/opportunities/:id/structured-requirements`) and
-//// the `opportunities` live event.
+//// The structured requirements' route is `scouting/suitability`.
+////
+//// Not ported yet: the `opportunities` live event.
 
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
@@ -576,7 +577,7 @@ pub fn eligibility_view(e: Eligibility, with_category: Bool) -> Json {
   )
 }
 
-fn structured_json(o: Opportunity) -> Json {
+pub fn structured_json(o: Opportunity) -> Json {
   case o.row.structured_declared {
     False -> json.null()
     True ->

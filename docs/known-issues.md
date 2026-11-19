@@ -107,6 +107,23 @@ valibot does, and both routes use it.
 **Fix.** Refuse a list before the record check (`v.pipe(v.custom((d) => !Array.isArray(d)), v.record(…))`), and use
 `input.entries` here. No battery sends a list.
 
+## A training slot "falls inside" the player's available times when it only overlaps them
+
+Found 2026-11-19 while porting suitability. Ported as the TypeScript server behaves.
+
+**What it is.** `GET /player/suitability/:oppId` (and the guardian's view of it) answers `compatible` for the
+schedule, with the reason "every published training slot falls inside your available times", when every training slot
+*overlaps* one of the player's available slots (`domains/scouting/suitability.mjs`, through `slotsOverlap`). A
+player free on Tuesday 17:00–17:30 is told that Tuesday training from 17:00 to 20:00 fits. The same verdict goes into
+the summary a club sees once the player shares it.
+
+**Where it is in the port.** `scoutbox-server/src/scoutbox/scouting/suitability.gleam`, `schedule`, uses the same
+overlap test.
+
+**Fix.** Test containment for availability (each training slot within one available slot), keeping overlap for
+commitments, on both servers. The `clubOperations` battery's check uses a slot that is contained, so it would still
+pass.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package

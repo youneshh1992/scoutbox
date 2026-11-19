@@ -306,7 +306,11 @@ are for surprising facts or points that later work depends on, not implementatio
       3. The delivery centre's flows over support replies, callbacks and injected failures (`messaging/delivery.mjs`).
          [Its checks already pass after slice 2.]
       4. Suitability: a player's preferences, an opportunity's requirements, the suitability view and sharing it
-         with a club (`scouting/suitability.mjs`).
+         with a club (`scouting/suitability.mjs`). [**done**: `scouting/suitability`; the battery's first 164 checks
+         pass, through suitability, and 87 requests answer as TypeScript's do, ids included. `slotsOverlap`'s 4 rule
+         cases are generated.] A slot's zone offset is taken at one fixed instant (15 January 2026), as TypeScript
+         takes it, so summer time is ignored on both servers. A training slot counts as within the player's
+         availability when it only overlaps it (docs/known-issues.md).
       5. Transitions: the club's list and pack view, the admin level review, and the legacy representation routes
          answering 404 (`verification/transitions.mjs`). The player's side is in already.
       6. Group workspaces: groups, membership, programmes, grants and `/org/shared/:id`, the group report

@@ -117,6 +117,7 @@ import scoutbox/scouting/opportunity_applications as applies
 import scoutbox/scouting/passport_routes
 import scoutbox/scouting/shadow
 import scoutbox/scouting/squad_invites
+import scoutbox/scouting/suitability
 import scoutbox/scouting/tactical
 import scoutbox/scouting/vacancies
 import scoutbox/scouting/video
@@ -986,6 +987,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             applies.outcome(ctx, req, org, id.application(aid))
           })
+        ["applications", aid, "suitability"] ->
+          only(req, Get, fn() {
+            suitability.for_club(ctx, org, id.application(aid))
+          })
+        ["opportunities", oid, "structured-requirements"] ->
+          only(req, Put, fn() {
+            suitability.set_structured(ctx, req, org, id.opportunity(oid))
+          })
         ["friendlies"] ->
           only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
         ["searches"] ->
@@ -1339,6 +1348,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             applies.player_apply(ctx, req, player, id.opportunity(oid))
           })
+        ["preferences"] ->
+          case req.method {
+            Get -> suitability.show(ctx, player)
+            Put -> suitability.update(ctx, req, player)
+            _ -> not_found()
+          }
+        ["suitability", "share"] ->
+          only(req, Post, fn() { suitability.player_share(ctx, req, player) })
+        ["suitability", oid] ->
+          only(req, Get, fn() {
+            suitability.player_verdicts(ctx, player, id.opportunity(oid))
+          })
         ["campaigns"] ->
           only(req, Get, fn() { campaigns.player_list(ctx, player) })
         ["campaigns", cid, "submit"] ->
@@ -1608,6 +1629,25 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               guardian,
               id.player(cid),
               id.campaign(camp),
+            )
+          })
+        ["children", cid, "preferences"] ->
+          case req.method {
+            Get -> suitability.child_show(ctx, guardian, id.player(cid))
+            Put -> suitability.child_update(ctx, req, guardian, id.player(cid))
+            _ -> not_found()
+          }
+        ["children", cid, "suitability", "share"] ->
+          only(req, Post, fn() {
+            suitability.child_share(ctx, req, guardian, id.player(cid))
+          })
+        ["children", cid, "suitability", oid] ->
+          only(req, Get, fn() {
+            suitability.child_verdicts(
+              ctx,
+              guardian,
+              id.player(cid),
+              id.opportunity(oid),
             )
           })
         ["children", cid, "opportunities", oid, "apply"] ->
