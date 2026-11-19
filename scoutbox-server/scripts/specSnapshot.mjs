@@ -48,6 +48,13 @@ export const SPEC = {
   ],
   'domains/development/record.mjs': ['DRILLS'],
   'domains/development/boxcam/drills.mjs': ['CAPABILITIES', 'DRILLS', 'PROVIDERS', 'LIVENESS_CHALLENGES'],
+  'domains/development/boxcam/combineShared.mjs': [
+    'COMBINE_STATES',
+    'METRIC_TYPES',
+    'COMBINE_STATE_COPY',
+    'FUTURE_CAPABILITIES',
+    'COMBINE_PROTOCOLS',
+  ],
   'domains/development/boxcam/shared.mjs': [
     'SESSION_STATES',
     'QUALITY',
