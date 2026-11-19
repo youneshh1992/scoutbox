@@ -134,7 +134,7 @@ of the product, so they aren't one slice.
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
-| Development: Box Cam, the Combine, the hub | 2 | `development/boxCam` and `combine` pass; the `production_cv` stub, then the hub |
+| Development: Box Cam, the Combine, the hub | 2 | `development/boxCam` and `combine` pass, with the `production_cv` stub; the hub next |
 | Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -237,6 +237,12 @@ are for surprising facts or points that later work depends on, not implementatio
       request in every view while its stored state stays `completed`. `production_cv` certifies nothing for the
       Combine (no protocol has passed real-world validation). The Passport, a Room and a Room's snapshots now carry
       the player's real results, and the Passport's revision their `cmb=` entries.
+   4. The `production_cv` stub [**done**: `development/cv_stub`]. Each provider-session route runs the TypeScript
+      route's own checks first (budget, refused client fields, body, session, nonce; `begin` also its state checks),
+      and 25 of those answers match TypeScript's exactly; then it answers `503 provider_unavailable`. The policy it
+      checks against (frame limits, candidate protocols, refused fields, versions, the Combine-disabled reason) is
+      the new `spec/development/boxcam/cv/` snapshot. Finalizing a session whose result is already stored answers
+      503 too, rather than that result: no result can be stored here.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared

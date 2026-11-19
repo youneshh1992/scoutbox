@@ -14,6 +14,7 @@ import scoutbox/agents/transaction_routes
 import scoutbox/development/benchmarks.{Drill}
 import scoutbox/development/box_cam_rules
 import scoutbox/development/combine_rules
+import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
@@ -614,4 +615,79 @@ pub fn combine_state_copy_test() {
   assert list.all(attempt_row.combine_state_pairs, fn(p) {
     list.contains(states, p.0)
   })
+}
+
+/// The production CV policy the stub reports and checks against, as the TypeScript server declares it.
+fn cv_spec(file: String, key: String, decoder: decode.Decoder(a)) -> a {
+  snapshot("development/boxcam/cv/" <> file, decode.at([key], decoder))
+}
+
+pub fn cv_policy_test() {
+  assert cv_spec("policy.json", "BOX_CAM_CV_POLICY_VERSION", decode.int)
+    == cv_stub.policy_version
+  assert cv_spec("policy.json", "CV_ENGINE_VERSION", decode.int)
+    == cv_stub.engine_version
+  assert cv_spec("policy.json", "CV_PROVIDER_ID", decode.string)
+    == box_provider.to_string(box_provider.ProductionCv)
+  assert cv_spec("policy.json", "FRAME_ENCODING", decode.string)
+    == cv_stub.frame_encoding
+  let limits =
+    cv_spec("policy.json", "FRAME_LIMITS", {
+      use min_width <- decode.field("minWidth", decode.int)
+      use min_height <- decode.field("minHeight", decode.int)
+      use max_width <- decode.field("maxWidth", decode.int)
+      use max_height <- decode.field("maxHeight", decode.int)
+      use max_bytes <- decode.field("maxBytes", decode.int)
+      use max_frames_per_batch <- decode.field("maxFramesPerBatch", decode.int)
+      use max_batches_per_session <- decode.field(
+        "maxBatchesPerSession",
+        decode.int,
+      )
+      use max_queued_frames <- decode.field("maxQueuedFrames", decode.int)
+      decode.success(cv_stub.FrameLimits(
+        min_width:,
+        min_height:,
+        max_width:,
+        max_height:,
+        max_bytes:,
+        max_frames_per_batch:,
+        max_batches_per_session:,
+        max_queued_frames:,
+      ))
+    })
+  assert limits == cv_stub.frame_limits
+  assert cv_spec(
+      "policy.json",
+      "FORBIDDEN_CLIENT_FIELDS",
+      decode.list(decode.string),
+    )
+    == cv_stub.forbidden_client_fields
+  let candidates =
+    cv_spec(
+      "policy.json",
+      "CANDIDATE_PROTOCOLS",
+      decode.dict(decode.string, decode.dynamic),
+    )
+  assert list.sort(dict.keys(candidates), string.compare)
+    == list.sort(cv_stub.candidate_protocols, string.compare)
+  let reason =
+    snapshot(
+      "development/boxcam/cv/eligibility.json",
+      decode.at(["COMBINE_DISABLED_REASON"], decode.dynamic),
+    )
+  let assert Ok(ported) =
+    json.parse(
+      json.to_string(cv_stub.combine_disabled_reason()),
+      decode.dynamic,
+    )
+  assert reason == ported
+  assert cv_spec("provider.json", "MAX_CONCURRENT_SESSIONS", decode.int)
+    == cv_stub.max_concurrent_sessions
+  let errors =
+    cv_spec(
+      "provider.json",
+      "PROVIDER_ERRORS",
+      decode.dict(decode.string, decode.string),
+    )
+  assert dict.get(errors, "PROVIDER_UNAVAILABLE") == Ok("provider_unavailable")
 }

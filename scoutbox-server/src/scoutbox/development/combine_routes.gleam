@@ -1117,7 +1117,7 @@ pub fn create_requests(ctx: Ctx, req: HttpRequest, a: OrgAccess) -> Response {
     )
     use player_ids <- input.field(
       "playerIds",
-      input.optional(input.list_of(input.text(80), 1_000_000)),
+      input.optional(input.items(input.text(80), 1_000_000)),
     )
     use player_id <- input.field("playerId", input.nullish(input.text(80)))
     input.done(RequestBody(

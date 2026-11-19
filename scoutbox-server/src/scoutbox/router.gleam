@@ -24,6 +24,7 @@ import scoutbox/development/box_prefs
 import scoutbox/development/box_session_routes
 import scoutbox/development/box_training
 import scoutbox/development/combine_routes
+import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
 import scoutbox/development/objectives
@@ -1079,10 +1080,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               id.signing_package(sid),
             )
           })
-        ["box-cam", "sessions", sid, "cv", "finalize"] ->
+        ["box-cam", "sessions", sid, "cv", action] -> {
+          let sid = id.box_session(sid)
           only(req, Post, fn() {
-            box_prefs.cv_finalize(ctx, player, id.box_session(sid))
+            case action {
+              "begin" -> cv_stub.begin(ctx, req, player, sid)
+              "frames" -> cv_stub.frames(ctx, req, player, sid)
+              "finalize" -> cv_stub.finalize(ctx, req, player, sid)
+              "cancel" -> cv_stub.cancel(ctx, req, player, sid)
+              _ -> not_found()
+            }
           })
+        }
+        ["box-cam", "cv", "ready-check"] ->
+          only(req, Post, fn() { cv_stub.ready_check(ctx, req, player) })
         ["box-cam", "prefs"] ->
           case req.method {
             Get -> box_prefs.show(ctx, player)
@@ -2001,6 +2012,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             combine_routes.admin_attempt(ctx, id.combine_attempt(aid))
           })
+        ["box-cam", "cv", "results", psid] ->
+          only(req, Get, fn() { cv_stub.admin_result(ctx, psid) })
         ["box-cam", "sessions", sid, "restore"] ->
           only(req, Post, fn() {
             box_training.restore(ctx, req, id.box_session(sid))

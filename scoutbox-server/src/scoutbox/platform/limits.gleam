@@ -86,6 +86,10 @@ pub const policy = [
   #("nobody_missed_action", nobody_missed_action_policy),
   #("passport_share_read", passport_share_read_policy),
   #("box_session_create", box_session_create_policy),
+  #("box_cv_session_create", box_cv_session_create_policy),
+  #("box_cv_frames", box_cv_frames_policy),
+  #("box_cv_finalize", box_cv_finalize_policy),
+  #("box_cv_ready_check", box_cv_ready_check_policy),
   #("combine_attempt", combine_attempt_policy),
 ]
 
@@ -130,6 +134,12 @@ pub type Action {
   ContactExternalRecord
   /// Production CV finalizations, per player: only bounds a retry loop.
   BoxCvFinalize
+  /// Production CV provider sessions begun, per player.
+  BoxCvSessionCreate
+  /// Production CV frame batches, per player.
+  BoxCvFrames
+  /// Box Cam CV Ready Check runs, per player.
+  BoxCvReadyCheck
   /// Box Cam capture sessions minted, per player.
   BoxSessionCreate
   /// At-Home Combine attempts started, per player.
@@ -233,6 +243,12 @@ const contact_external_record_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
+const box_cv_session_create_policy = Policy(max: 40, window_ms: 3_600_000)
+
+const box_cv_frames_policy = Policy(max: 600, window_ms: 3_600_000)
+
+const box_cv_ready_check_policy = Policy(max: 120, window_ms: 3_600_000)
+
 const box_session_create_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const combine_attempt_policy = Policy(max: 40, window_ms: 3_600_000)
@@ -317,6 +333,9 @@ fn action_name(action: Action) -> String {
     ContactSend -> "contact_send"
     ContactExternalRecord -> "contact_external_record"
     BoxCvFinalize -> "box_cv_finalize"
+    BoxCvSessionCreate -> "box_cv_session_create"
+    BoxCvFrames -> "box_cv_frames"
+    BoxCvReadyCheck -> "box_cv_ready_check"
     BoxSessionCreate -> "box_session_create"
     CombineAttempt -> "combine_attempt"
     BoxDispute -> "box_dispute"
@@ -372,6 +391,9 @@ fn action_policy(action: Action) -> Policy {
     ContactSend -> contact_send_policy
     ContactExternalRecord -> contact_external_record_policy
     BoxCvFinalize -> box_cv_finalize_policy
+    BoxCvSessionCreate -> box_cv_session_create_policy
+    BoxCvFrames -> box_cv_frames_policy
+    BoxCvReadyCheck -> box_cv_ready_check_policy
     BoxSessionCreate -> box_session_create_policy
     CombineAttempt -> combine_attempt_policy
     BoxDispute -> box_dispute_policy
