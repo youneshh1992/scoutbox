@@ -1399,6 +1399,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["me"] -> only(req, Get, fn() { record.me(player) })
         ["trust-profile"] ->
           only(req, Get, fn() { trust.player_view(ctx, player) })
+        ["trust-profile", "explain"] ->
+          only(req, Get, fn() { trust.player_explain(ctx, player) })
         ["availability"] ->
           only(req, Post, fn() { record.availability(ctx, req, player) })
         ["first-team-seeker"] ->
@@ -1568,6 +1570,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "box-cam", "challenges", chid, "join"] ->
           only(req, Post, fn() {
             box_training.child_join(ctx, req, guardian, id.player(cid), chid)
+          })
+        ["children", cid, "trust-profile"] ->
+          only(req, Get, fn() {
+            trust.guardian_view(ctx, guardian, id.player(cid))
           })
         ["children", cid, "combine"] ->
           only(req, Get, fn() {
@@ -2092,6 +2098,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
         ["trust", pid] ->
           only(req, Get, fn() { trust.admin_view(ctx, id.player(pid)) })
+        ["trust-policy"] -> only(req, Get, fn() { trust.admin_policy() })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
         ["rooms", "overview"] ->
           only(req, Get, fn() { room_routes.admin_overview(ctx) })

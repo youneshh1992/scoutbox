@@ -1798,7 +1798,14 @@ fn write_formal(
       decisions.visible(counted, a.user.id, access.is_lead(a.user))
     let summary = decisions.summarise(shown, withheld)
     use snapshot <- result.try(
-      room_view.capture_snapshot(tx, a.org, room, "decision:finalize", now)
+      room_view.capture_snapshot(
+        tx,
+        a.org,
+        room,
+        "decision:finalize",
+        now,
+        ctx.config.box_cam_test_provider,
+      )
       |> storage,
     )
     use decision_id <- result.try(

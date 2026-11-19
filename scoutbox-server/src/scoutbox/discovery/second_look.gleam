@@ -461,6 +461,7 @@ fn project(
   org: Org,
   player_id: Option(id.PlayerId),
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(List(Projected), Fail(e)) {
   use rooms <- result.try(cases.ended_rooms(read, org.id, player_id))
   use with_decisions <- result.try(
@@ -511,7 +512,12 @@ fn project(
         case changes {
           [] -> Ok(None)
           _ -> {
-            use profile <- result.map(trust.profile(read, p, now))
+            use profile <- result.map(trust.profile(
+              read,
+              p,
+              now,
+              allow_simulated,
+            ))
             rules.candidate(
               room.row.id,
               pid,
@@ -578,9 +584,16 @@ fn reconcile(
   org: Org,
   player_id: Option(id.PlayerId),
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(List(Live), Fail(e)) {
   let read = store.reading(tx)
-  use projected <- result.try(project(read, org, player_id, now))
+  use projected <- result.try(project(
+    read,
+    org,
+    player_id,
+    now,
+    allow_simulated,
+  ))
   list.try_map(projected, fn(p) {
     let c = p.candidate
     use existing <- result.try(items.by_key(
@@ -781,7 +794,13 @@ pub fn list(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   use q <- http.query(req, shape, [#("limit", "PAGE_LIMIT_INVALID")])
   let now = clock.now_ms()
   store.unit(ctx.store, fn(tx) {
-    use live <- result.map(reconcile(tx, a.org, None, now))
+    use live <- result.map(reconcile(
+      tx,
+      a.org,
+      None,
+      now,
+      ctx.config.box_cam_test_provider,
+    ))
     let status = option.unwrap(q.status, "open")
     let shown = case status {
       "all" -> live
@@ -886,7 +905,13 @@ pub fn get(ctx: Ctx, a: OrgAccess, item_id: String) -> Response {
     let read = store.reading(tx)
     use item <- result.try(find_item(read, a, item_id))
     use live <- result.try(
-      reconcile(tx, a.org, Some(item.row.player_id), now)
+      reconcile(
+        tx,
+        a.org,
+        Some(item.row.player_id),
+        now,
+        ctx.config.box_cam_test_provider,
+      )
       |> room_routes.storage,
     )
     let live = list.find(live, fn(l) { l.item.row.id == item.row.id })
@@ -1053,7 +1078,8 @@ pub fn changes(ctx: Ctx, a: OrgAccess, item_id: String) -> Response {
           latest_decision(read, item.row.room_id) |> room_routes.storage,
         )
         use profile <- result.try(
-          trust.profile(read, p, now) |> room_routes.storage,
+          trust.profile(read, p, now, ctx.config.box_cam_test_provider)
+          |> room_routes.storage,
         )
         use current <- result.try(
           current_counts(read, a.org.id, p.row.id, profile)
@@ -1364,6 +1390,7 @@ pub fn reopen_room(
       source_context.SecondLook,
       Some(#(id.second_look_item_to_string(item.row.id), None)),
       now,
+      ctx.config.box_cam_test_provider,
     ))
     use stored <- result.try(
       items.mark_room_reopened(tx, item, by(a), now) |> room_routes.storage,

@@ -56,6 +56,14 @@ const levels = [
   #("very_strong", "Very strong", 9000),
 ]
 
+/// Coverage for each identity assurance. A ScoutBox document review is worth less than an authoritative source.
+const identity_assurance = [
+  #("authoritative", 10_000),
+  #("organisation_attested", 8500),
+  #("scoutbox_document_review", 7000),
+  #("none", 0),
+]
+
 const history_provenance = [
   #("authoritative_registry", 10_000),
   #("verified_club_confirmed", 10_000),
@@ -90,6 +98,9 @@ const records_sub_cap = 6000
 const box_cam_curve = [0, 4500, 6500, 8000, 8800, 9400, 10_000]
 
 const box_cam_sub_cap = 6000
+
+/// In the policy, but read by nothing (as in TypeScript).
+const recency_days = 365
 
 const protocol_curve = [0, 5500, 8000, 9200, 10_000]
 
@@ -192,6 +203,11 @@ fn clamp_bp(bp: Int) -> Int {
   int.max(0, int.min(10_000, bp))
 }
 
+/// applyDiminishingReturns: a curve's value at `count` distinct items; the last entry is the cap.
+pub fn diminishing_returns(count: Int, curve: List(Int)) -> Int {
+  at(curve, count)
+}
+
 fn at(curve: List(Int), count: Int) -> Int {
   let n = int.min(int.max(0, count), list.length(curve) - 1)
   case list.drop(curve, n) {
@@ -207,6 +223,15 @@ fn lookup(table: List(#(String, Int)), key: String) -> Int {
   }
 }
 
+fn weight(component: String) -> Int {
+  lookup(weights, component)
+}
+
+/// policyWeightsTotal: the policy's weights must total 100.
+pub fn weights_total() -> Int {
+  list.fold(weights, 0, fn(t, w) { t + w.1 })
+}
+
 pub fn band_for_score(score: Int) -> Band {
   let s = int.max(0, int.min(100, score))
   let assert [first, ..] = bands
@@ -215,9 +240,9 @@ pub fn band_for_score(score: Int) -> Band {
   |> option.unwrap(first)
 }
 
-/// The same fact arrives through several projections; each key is scored once, at its strongest, in the order the
-/// keys first appeared.
-fn canonical(items: List(#(String, Int, a))) -> List(#(String, Int, a)) {
+/// canonicalTrustSources: the same fact arrives through several projections; each key is scored once, at its
+/// strongest, in the order the keys first appeared.
+pub fn canonical(items: List(#(String, Int, a))) -> List(#(String, Int, a)) {
   list.fold(items, [], fn(seen, it) {
     let #(key, bp, _) = it
     case key, list.find(seen, fn(s: #(String, Int, a)) { s.0 == key }) {
@@ -286,7 +311,7 @@ fn plural(n: Int, one: String, many: String) -> String {
 // --------------------------------------------------------------------------------------------- component scorers
 
 fn identity(assurance: Option(Assurance)) -> Component {
-  let w = 15
+  let w = weight("identity")
   case assurance {
     None ->
       component(
@@ -303,19 +328,12 @@ fn identity(assurance: Option(Assurance)) -> Component {
         [],
       )
     Some(a) -> {
-      let #(bp, label) = case a {
-        Authoritative -> #(
-          10_000,
-          "Identity confirmed by an authoritative source.",
-        )
-        OrganisationAttested -> #(
-          8500,
-          "Identity confirmed by an authorised organisation administrator.",
-        )
-        ScoutboxDocumentReview -> #(
-          7000,
-          "Identity confirmed by ScoutBox review.",
-        )
+      let bp = lookup(identity_assurance, assurance_code(a))
+      let label = case a {
+        Authoritative -> "Identity confirmed by an authoritative source."
+        OrganisationAttested ->
+          "Identity confirmed by an authorised organisation administrator."
+        ScoutboxDocumentReview -> "Identity confirmed by ScoutBox review."
       }
       component(
         w,
@@ -340,7 +358,7 @@ fn identity(assurance: Option(Assurance)) -> Component {
 /// Historical facts never decay. A sum, not a mean, keeps the score monotonic: a self-submitted entry cannot
 /// dilute a confirmed one.
 fn football_history(rows: List(HistoryRow)) -> Component {
-  let w = 20
+  let w = weight("footballHistory")
   let rows =
     canonical(
       list.map(rows, fn(r) {
@@ -431,7 +449,7 @@ fn football_history(rows: List(HistoryRow)) -> Component {
 }
 
 fn relationships(rels: List(Relationship), is_adult: Bool) -> Component {
-  let w = 20
+  let w = weight("relationships")
   let usable =
     list.filter(rels, fn(r) {
       r.verified && { r.kind != AgencyRelationship || is_adult }
@@ -494,7 +512,7 @@ fn evidence(
   sessions: List(BoxSession),
   allow_simulated: Bool,
 ) -> Component {
-  let w = 20
+  let w = weight("evidence")
   let recs =
     canonical(
       list.map(items, fn(e) {
@@ -572,7 +590,7 @@ fn evidence(
 
 /// The measured value is never read: a personal best adds no trust.
 fn combine(attempts: List(CombineAttempt), allow_simulated: Bool) -> Component {
-  let w = 15
+  let w = weight("combine")
   let valid =
     list.filter(attempts, fn(a) {
       a.combine_state == "combine_verified"
@@ -634,7 +652,7 @@ fn references(
   refs: List(Reference),
   assessments: List(AssessmentSource),
 ) -> Component {
-  let w = 10
+  let w = weight("references")
   let items =
     canonical(list.append(
       refs
@@ -826,6 +844,40 @@ fn viewer_code(v: Viewer) -> String {
 
 pub const club_note = "Evidence confidence — not football ability."
 
+fn context_json(p: Profile) -> Json {
+  json.object([
+    #("isAdult", json.bool(p.is_adult)),
+    #("excludedComponents", json.array([], json.string)),
+    #(
+      "adultOnlyFacetsExcluded",
+      json.array(
+        case p.is_adult {
+          True -> []
+          False -> ["agency_representation"]
+        },
+        json.string,
+      ),
+    ),
+  ])
+}
+
+/// The whole profile, as calculateTrustScore returns it. Only T&S and the player's own views carry most of it.
+pub fn profile_json(p: Profile) -> Json {
+  json.object([
+    #("score", json.int(p.score)),
+    #("band", json.string(p.band.id)),
+    #("bandLabel", json.string(p.band.label)),
+    #("policyVersion", json.int(policy_version)),
+    #("disclaimer", json.string(disclaimer)),
+    #("components", components_json(p)),
+    #("strengths", json.array(strengths(p), signal_json)),
+    #("gaps", json.array(gaps(p), signal_json)),
+    #("explanations", explanations_json(p, True)),
+    #("context", context_json(p)),
+    #("simulatedEvidenceIncluded", json.bool(p.simulated_included)),
+  ])
+}
+
 /// safeTrustProjection: a club sees component levels and the public wording of each signal, never the records.
 pub fn projection(p: Profile, viewer: Viewer) -> Json {
   let base = [
@@ -853,23 +905,7 @@ pub fn projection(p: Profile, viewer: Viewer) -> Json {
           #("strengths", json.array(strengths(p), signal_json)),
           #("gaps", json.array(gaps(p), signal_json)),
           #("explanations", explanations_json(p, True)),
-          #(
-            "context",
-            json.object([
-              #("isAdult", json.bool(p.is_adult)),
-              #("excludedComponents", json.array([], json.string)),
-              #(
-                "adultOnlyFacetsExcluded",
-                json.array(
-                  case p.is_adult {
-                    True -> []
-                    False -> ["agency_representation"]
-                  },
-                  json.string,
-                ),
-              ),
-            ]),
-          ),
+          #("context", context_json(p)),
         ]),
       )
   }
@@ -885,6 +921,49 @@ pub type Snapshot {
     component_levels: List(#(String, Json)),
     hash: String,
   )
+}
+
+/// trustSummary: the score and band, with the top three strengths by code.
+pub fn summary_fields(p: Profile) -> List(#(String, Json)) {
+  [
+    #("score", json.int(p.score)),
+    #("band", json.string(p.band.id)),
+    #("bandLabel", json.string(p.band.label)),
+    #("policyVersion", json.int(policy_version)),
+    #(
+      "topEvidenceSignals",
+      json.array(list.take(strengths(p), 3), fn(s) { json.string(s.code) }),
+    ),
+  ]
+}
+
+/// trustSnapshot, with each component's weight, coverage in whole percent (rounded half up, as `Math.round`) and
+/// level.
+pub fn snapshot_json(p: Profile, at: Int) -> Json {
+  let s = snapshot(p)
+  json.object([
+    #("at", json.int(at)),
+    #("score", json.int(s.score)),
+    #("band", json.string(s.band)),
+    #("policyVersion", json.int(s.policy_version)),
+    #(
+      "components",
+      json.object(
+        list.map(p.components, fn(c) {
+          let #(key, comp) = c
+          #(
+            key,
+            json.object([
+              #("weight", json.int(comp.weight)),
+              #("coverage", json.int({ comp.coverage_bp + 50 } / 100)),
+              #("level", json.string(comp.level.0)),
+            ]),
+          )
+        }),
+      ),
+    ),
+    #("hash", json.string(s.hash)),
+  ])
 }
 
 pub fn snapshot(p: Profile) -> Snapshot {
@@ -914,4 +993,88 @@ pub fn snapshot(p: Profile) -> Snapshot {
     }),
     hash:,
   )
+}
+
+// ------------------------------------------------------------------------------------------------------- policy
+
+fn ints(table: List(#(String, Int))) -> Json {
+  json.object(list.map(table, fn(e) { #(e.0, json.int(e.1)) }))
+}
+
+fn curve(points: List(Int)) -> Json {
+  json.array(points, json.int)
+}
+
+pub fn weights_json() -> Json {
+  ints(weights)
+}
+
+pub fn bands_json() -> Json {
+  json.array(bands, fn(b) {
+    json.object([
+      #("id", json.string(b.id)),
+      #("label", json.string(b.label)),
+      #("min", json.int(b.min)),
+      #("max", json.int(b.max)),
+    ])
+  })
+}
+
+/// The policy's curves, as `/admin/trust-policy` names them.
+pub fn curves_json() -> Json {
+  json.object([
+    #("relationships", curve(relationships_curve)),
+    #("combineProtocols", curve(protocol_curve)),
+    #("boxCam", curve(box_cam_curve)),
+    #("evidenceRecords", curve(records_curve)),
+    #("references", curve(references_curve)),
+  ])
+}
+
+pub fn sub_caps_json() -> Json {
+  json.object([
+    #("evidenceRecords", json.int(records_sub_cap)),
+    #("boxCam", json.int(box_cam_sub_cap)),
+  ])
+}
+
+/// The whole `POLICY`, from the tables the engine reads; a test proves it equals the snapshot.
+pub fn policy_json() -> Json {
+  json.object([
+    #("version", json.int(policy_version)),
+    #("weights", weights_json()),
+    #("bands", bands_json()),
+    #("identity", ints(identity_assurance)),
+    #("historyProvenance", ints(history_provenance)),
+    #(
+      "history",
+      json.object([
+        #("targetConfirmedMass", json.int(float.round(target_confirmed_mass))),
+      ]),
+    ),
+    #("relationships", json.object([#("curve", curve(relationships_curve))])),
+    #(
+      "evidence",
+      json.object([
+        #("recordsCurve", curve(records_curve)),
+        #("recordsSubCap", json.int(records_sub_cap)),
+        #("boxCamCurve", curve(box_cam_curve)),
+        #("boxCamSubCap", json.int(box_cam_sub_cap)),
+        #("recencyDays", json.int(recency_days)),
+        #("provenance", ints(evidence_provenance)),
+      ]),
+    ),
+    #("combine", json.object([#("protocolCurve", curve(protocol_curve))])),
+    #("references", json.object([#("curve", curve(references_curve))])),
+    #(
+      "levels",
+      json.array(levels, fn(l) {
+        json.object([
+          #("id", json.string(l.0)),
+          #("label", json.string(l.1)),
+          #("min", json.int(l.2)),
+        ])
+      }),
+    ),
+  ])
 }

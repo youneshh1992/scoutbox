@@ -2,18 +2,17 @@
 //// of the domain that owns it, so the same fact is counted once and a UI projection is never what gets scored.
 ////
 //// Box Cam's sessions and Combine attempts are read as stored records only: their analysis is moving to a service
-//// of its own, and how its results reach this server is not designed yet. No provider here can produce simulated
-//// evidence, so a profile never includes any (`simulatedEvidenceIncluded` is false).
-////
-//// Not ported yet: `/player/trust-profile/explain`, the guardian's view, the policy route and the band metrics.
+//// of its own, and how its results reach this server is not designed yet. The `local_test` provider's results are
+//// simulated, and count only while that provider is enabled (`allow_simulated`, from `BOX_CAM_TEST_PROVIDER`).
 
 import gleam/dynamic/decode
-import gleam/json
+import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players.{type Player}
 import scoutbox/passport/passport_rules
 import scoutbox/passport/sources
@@ -21,7 +20,8 @@ import scoutbox/passport/trust_rules.{type Profile}
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/metrics
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/combine_attempts as attempt_row
@@ -373,7 +373,12 @@ fn assessments(
 }
 
 /// The player's Trust Score, derived at read time from canonical records. It cannot be set.
-pub fn profile(read: Read, p: Player, now: Int) -> Result(Profile, Fail(e)) {
+pub fn profile(
+  read: Read,
+  p: Player,
+  now: Int,
+  allow_simulated: Bool,
+) -> Result(Profile, Fail(e)) {
   use assurance <- result.try(identity(read, p, now))
   use hist <- result.try(sources.history(read, p.row.id))
   use refs <- result.try(rows_for(
@@ -416,24 +421,100 @@ pub fn profile(read: Read, p: Player, now: Int) -> Result(Profile, Fail(e)) {
       )
     }),
     assessments: asmts,
-    allow_simulated: False,
+    allow_simulated:,
   ))
+}
+
+// --------------------------------------------------------------------------------------------------------- metrics
+
+const metric_group = "trust"
+
+const metric_names = [
+  "trust_profile_viewed", "trust_explanation_viewed",
+  "trust_band_limited_evidence", "trust_band_developing_evidence",
+  "trust_band_established_evidence", "trust_band_strong_evidence",
+  "trust_band_very_strong_evidence", "trust_recalculation_reason",
+]
+
+/// The `trust` group of `/admin/metrics`: aggregate counters only, never a player id or name, then the policy
+/// version.
+pub fn metrics_json(tx: Tx) -> Result(Json, Fail(e)) {
+  use fields <- result.map(metrics.fields(tx, metric_group, metric_names))
+  json.object(
+    list.append(fields, [
+      #("policyVersion", json.int(trust_rules.policy_version)),
+    ]),
+  )
+}
+
+fn counted(ctx: Ctx, names: List(String), next: fn() -> Response) -> Response {
+  case
+    store.unit(ctx.store, fn(tx) {
+      list.try_each(names, metrics.count(tx, metric_group, _))
+    })
+  {
+    Ok(Nil) -> next()
+    Error(e) -> http.internal(e)
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------- routes
 
+fn allow_simulated(ctx: Ctx) -> Bool {
+  ctx.config.box_cam_test_provider
+}
+
+fn own_profile(ctx: Ctx, p: Player, next: fn(Profile) -> Response) -> Response {
+  let now = clock.now_ms()
+  case store.read(ctx.store, profile(_, p, now, allow_simulated(ctx))) {
+    Ok(t) -> next(t)
+    Error(e) -> http.internal(e)
+  }
+}
+
 /// `GET /player/trust-profile`.
 pub fn player_view(ctx: Ctx, a: PlayerAccess) -> Response {
-  let now = clock.now_ms()
-  case store.read(ctx.store, profile(_, a.player, now)) {
-    Ok(p) ->
-      http.json(
-        200,
-        json.object([
-          #("trust", trust_rules.projection(p, trust_rules.SelfViewer)),
-        ]),
-      )
-    Error(e) -> http.internal(e)
+  use t <- own_profile(ctx, a.player)
+  use <- counted(ctx, ["trust_profile_viewed", "trust_band_" <> t.band.id])
+  http.json(
+    200,
+    json.object([#("trust", trust_rules.projection(t, trust_rules.SelfViewer))]),
+  )
+}
+
+/// `GET /player/trust-profile/explain`: the same derivation as the profile, counted as a drill-down.
+pub fn player_explain(ctx: Ctx, a: PlayerAccess) -> Response {
+  use t <- own_profile(ctx, a.player)
+  use <- counted(ctx, ["trust_explanation_viewed"])
+  http.json(
+    200,
+    json.object([
+      #("trust", trust_rules.projection(t, trust_rules.SelfViewer)),
+      #("policy", policy_json()),
+      #("disclaimer", json.string(trust_rules.disclaimer)),
+    ]),
+  )
+}
+
+/// `GET /guardian/children/:id/trust-profile`.
+pub fn guardian_view(ctx: Ctx, g: Guardian, child_id: id.PlayerId) -> Response {
+  case list.contains(g.child_ids, child_id) {
+    False -> http.error(404, "CHILD_NOT_FOUND")
+    True ->
+      case store.read(ctx.store, players.by_id(_, child_id)) {
+        Error(e) -> http.internal(e)
+        Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
+        Ok(Some(child)) -> {
+          use t <- own_profile(ctx, child)
+          use <- counted(ctx, ["trust_profile_viewed"])
+          http.json(
+            200,
+            json.object([
+              #("trust", trust_rules.projection(t, trust_rules.GuardianViewer)),
+            ]),
+          )
+        }
+      }
   }
 }
 
@@ -445,13 +526,15 @@ pub fn org_view(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
       use found <- result.try(players.for_org(read, player_id, a.org, now))
       case found {
         Some(#(p, access)) if access.visible && !access.blocked ->
-          profile(read, p, now) |> result.map(fn(t) { Ok(#(p, t)) })
+          profile(read, p, now, allow_simulated(ctx))
+          |> result.map(fn(t) { Ok(#(p, t)) })
         Some(_) -> Ok(Error(403))
         None -> Ok(Error(404))
       }
     })
   case found {
-    Ok(Ok(#(p, t))) ->
+    Ok(Ok(#(p, t))) -> {
+      use <- counted(ctx, ["trust_profile_viewed"])
       http.json(
         200,
         json.object([
@@ -460,26 +543,11 @@ pub fn org_view(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
           #("trust", trust_rules.projection(t, trust_rules.ProClubViewer)),
         ]),
       )
+    }
     Ok(Error(403)) -> http.error(403, "NOT_VISIBLE")
     Ok(Error(_)) -> http.error(404, "PLAYER_NOT_FOUND")
     Error(e) -> http.internal(e)
   }
-}
-
-/// `trustSummary`: the score and band, with the top three strengths by code.
-fn summary_fields(p: Profile) -> List(#(String, json.Json)) {
-  [
-    #("score", json.int(p.score)),
-    #("band", json.string(p.band.id)),
-    #("bandLabel", json.string(p.band.label)),
-    #("policyVersion", json.int(trust_rules.policy_version)),
-    #(
-      "topEvidenceSignals",
-      json.array(list.take(trust_rules.strengths(p), 3), fn(s) {
-        json.string(s.code)
-      }),
-    ),
-  ]
 }
 
 /// `GET /org/trust-summaries?playerIds=a,b`: in the order requested, never ranked. A player this club cannot see
@@ -503,7 +571,8 @@ pub fn org_summaries(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         ))
         case found {
           Some(#(p, access)) if access.visible && !access.blocked ->
-            profile(read, p, now) |> result.map(fn(t) { [#(p, t)] })
+            profile(read, p, now, allow_simulated(ctx))
+            |> result.map(fn(t) { [#(p, t)] })
           _ -> Ok([])
         }
       })
@@ -519,7 +588,7 @@ pub fn org_summaries(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             json.array(items, fn(item) {
               json.object([
                 #("playerId", id.player_json({ item.0 }.row.id)),
-                ..summary_fields(item.1)
+                ..trust_rules.summary_fields(item.1)
               ])
             }),
           ),
@@ -538,52 +607,8 @@ pub fn org_summaries(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
 fn policy_json() -> json.Json {
   json.object([
     #("version", json.int(trust_rules.policy_version)),
-    #(
-      "weights",
-      json.object(
-        list.map(trust_rules.weights, fn(w) { #(w.0, json.int(w.1)) }),
-      ),
-    ),
-    #(
-      "bands",
-      json.array(trust_rules.bands, fn(b) {
-        json.object([
-          #("id", json.string(b.id)),
-          #("label", json.string(b.label)),
-          #("min", json.int(b.min)),
-          #("max", json.int(b.max)),
-        ])
-      }),
-    ),
-  ])
-}
-
-/// `trustSnapshot`, with each component's weight, coverage in whole percent (rounded half up, as `Math.round`) and
-/// level.
-fn snapshot_json(p: Profile, at: Int) -> json.Json {
-  let s = trust_rules.snapshot(p)
-  json.object([
-    #("at", json.int(at)),
-    #("score", json.int(s.score)),
-    #("band", json.string(s.band)),
-    #("policyVersion", json.int(s.policy_version)),
-    #(
-      "components",
-      json.object(
-        list.map(p.components, fn(c) {
-          let #(key, comp) = c
-          #(
-            key,
-            json.object([
-              #("weight", json.int(comp.weight)),
-              #("coverage", json.int({ comp.coverage_bp + 50 } / 100)),
-              #("level", json.string(comp.level.0)),
-            ]),
-          )
-        }),
-      ),
-    ),
-    #("hash", json.string(s.hash)),
+    #("weights", trust_rules.weights_json()),
+    #("bands", trust_rules.bands_json()),
   ])
 }
 
@@ -595,7 +620,9 @@ pub fn admin_view(ctx: Ctx, player_id: id.PlayerId) -> Response {
     store.read(ctx.store, fn(read) {
       use found <- result.try(players.by_id(read, player_id))
       case found {
-        Some(p) -> profile(read, p, now) |> result.map(fn(t) { Some(#(p, t)) })
+        Some(p) ->
+          profile(read, p, now, allow_simulated(ctx))
+          |> result.map(fn(t) { Some(#(p, t)) })
         None -> Ok(None)
       }
     })
@@ -607,7 +634,7 @@ pub fn admin_view(ctx: Ctx, player_id: id.PlayerId) -> Response {
           #("playerId", id.player_json(p.row.id)),
           #("trust", trust_rules.projection(t, trust_rules.TrustSafetyViewer)),
           #("policy", policy_json()),
-          #("snapshot", snapshot_json(t, now)),
+          #("snapshot", trust_rules.snapshot_json(t, now)),
           #(
             "note",
             json.string(
@@ -619,4 +646,19 @@ pub fn admin_view(ctx: Ctx, player_id: id.PlayerId) -> Response {
     Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
     Error(e) -> http.internal(e)
   }
+}
+
+/// `GET /admin/trust-policy`.
+pub fn admin_policy() -> Response {
+  http.json(
+    200,
+    json.object([
+      #("policyVersion", json.int(trust_rules.policy_version)),
+      #("weights", trust_rules.weights_json()),
+      #("bands", trust_rules.bands_json()),
+      #("curves", trust_rules.curves_json()),
+      #("subCaps", trust_rules.sub_caps_json()),
+      #("disclaimer", json.string(trust_rules.disclaimer)),
+    ]),
+  )
 }

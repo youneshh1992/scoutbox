@@ -1477,6 +1477,7 @@ pub fn add_to_room(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
     source_context.NobodyMissed,
     Some(#(id.brief_to_string(b.row.id), Some(b.row.version))),
     now,
+    ctx.config.box_cam_test_provider,
   ))
   use r <- result.try(
     set_review(tx, a, b, pid, AddedToRoom(created.room_id), now)

@@ -86,10 +86,15 @@ fn boot() -> Result(Nil, String) {
   )
   // The match facts are re-derived inside every unit from here on, just before its COMMIT. Not before: until the
   // migrations have run there is no table to derive them into. The dispatcher's own units see the same store.
-  let store = store.with_before_commit(store, match_facts.drain)
+  let store =
+    store.with_before_commit(store, match_facts.drain(
+      _,
+      config.box_cam_test_provider,
+    ))
   let store = store.with_dispatch(store, dispatch(store, hub, _))
   use _ <- result.try(
-    match_facts.start(store) |> result.map_error(string.inspect),
+    match_facts.start(store, config.box_cam_test_provider)
+    |> result.map_error(string.inspect),
   )
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))

@@ -9,6 +9,7 @@
 //                    depends on the clock, and the test passes the instant the recording stood at (ctx.now)
 //
 // A function with no entry gets no test; the report lists it as pending.
+import { readFileSync } from 'node:fs';
 import {
   bool,
   bytes,
@@ -1971,6 +1972,188 @@ const PASSPORT_MAP = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------- Trust Score
+
+const TRUST = 'domains/passport/trust/shared.mjs';
+const TR = 'scoutbox/passport/trust_rules';
+const TRUST_SPEC = JSON.parse(readFileSync(new URL('../../e2e/support/spec/passport/trust/shared.json', import.meta.url)));
+
+const assurance = (v, ctx) => {
+  const c = { authoritative: 'Authoritative', organisation_attested: 'OrganisationAttested', scoutbox_document_review: 'ScoutboxDocumentReview' }[v];
+  if (!c) throw new Error(`cannot print ${JSON.stringify(v)} as an identity assurance`);
+  return `${ctx.use(TR)}.${c}`;
+};
+const relationshipKind = (v, ctx) => {
+  const c = { club: 'ClubRelationship', coach: 'CoachRelationship', agency: 'AgencyRelationship' }[v];
+  if (!c) throw new Error(`cannot print ${JSON.stringify(v)} as a relationship kind`);
+  return `${ctx.use(TR)}.${c}`;
+};
+const historyRowT = record({
+  module: TR,
+  constructor: 'HistoryRow',
+  fields: { key: ['key', string], provenance: ['provenance', string], current: ['current', bool] },
+  defaults: { current: 'False' },
+});
+const relationshipT = record({
+  module: TR,
+  constructor: 'Relationship',
+  fields: { key: ['key', string], kind: ['kind', relationshipKind], verified: ['verified', bool] },
+  defaults: { verified: 'False' },
+});
+const evidenceItemT = record({
+  module: TR,
+  constructor: 'EvidenceItem',
+  fields: { key: ['key', string], provenance: ['provenance', string], recordedAt: ['recorded_at', int] },
+});
+const boxSessionT = record({
+  module: TR,
+  constructor: 'BoxSession',
+  fields: {
+    key: ['key', string],
+    verificationState: ['verification_state', option(string)],
+    simulated: ['simulated', bool],
+    endedAt: ['ended_at', int],
+  },
+  defaults: { verification_state: 'None', simulated: 'False' },
+});
+const combineAttemptT = record({
+  module: TR,
+  constructor: 'CombineAttempt',
+  fields: {
+    key: ['key', string],
+    protocolId: ['protocol_id', string],
+    protocolVersion: ['protocol_version', int],
+    combineState: ['combine_state', string],
+    simulated: ['simulated', bool],
+  },
+  defaults: { simulated: 'False' },
+});
+const referenceT = record({
+  module: TR,
+  constructor: 'Reference',
+  fields: { key: ['key', string], verified: ['verified', bool] },
+  defaults: { verified: 'False' },
+});
+/** An assessment counts by attribution: its content (rating, verdict) is never read, so the type has no place for it. */
+const assessmentT = record({
+  module: TR,
+  constructor: 'AssessmentSource',
+  fields: { key: ['key', string], verifiedSource: ['verified_source', bool] },
+  ignore: ['rating', 'verdict'],
+  defaults: { verified_source: 'False' },
+});
+/** What the engine is never given, though a caller may pass it: prestige, popularity, recruitment outcomes and
+ *  payment (U9). The Gleam input has no place for any of them. */
+const NOT_INPUTS = ['followers', 'profileViews', 'watchlists', 'trialsOffered', 'scoutsInterested', 'subscription', 'paidVerification', 'signedForBigClub'];
+const trustInput = (v, ctx) => {
+  const {
+    playerContext = { isAdult: true },
+    identity: id_ = null,
+    historyRows = [],
+    relationships = [],
+    evidenceItems = [],
+    boxCamSessions = [],
+    combineAttempts = [],
+    references = [],
+    assessments = [],
+    allowSimulatedEvidence = false,
+    ...rest
+  } = v ?? {};
+  const unknown = Object.keys(rest).filter((k) => !NOT_INPUTS.includes(k));
+  if (unknown.length) throw new Error(`Input has no field for the JavaScript key ${unknown[0]}`);
+  const { isAdult, ...pc } = playerContext;
+  if (Object.keys(pc).length) throw new Error(`cannot print the player context ${JSON.stringify(playerContext)}`);
+  if (id_ !== null && Object.keys(id_).some((k) => k !== 'assurance'))
+    throw new Error(`cannot print the identity ${JSON.stringify(id_)}`);
+  return `${ctx.use(TR)}.Input(is_adult: ${bool(isAdult !== false)}, identity: ${option(assurance)(id_?.assurance ?? null, ctx)}, history: ${list(historyRowT)(historyRows, ctx)}, relationships: ${list(relationshipT)(relationships, ctx)}, evidence: ${list(evidenceItemT)(evidenceItems, ctx)}, box_sessions: ${list(boxSessionT)(boxCamSessions, ctx)}, combine: ${list(combineAttemptT)(combineAttempts, ctx)}, references: ${list(referenceT)(references, ctx)}, assessments: ${list(assessmentT)(assessments, ctx)}, allow_simulated: ${bool(!!allowSimulatedEvidence)})`;
+};
+const signalT = record({ module: TR, constructor: 'Signal', fields: { code: ['code', string], text: ['text', string] } });
+/** A component as the engine built it. Its available and earned weight are derived from its weight and coverage. */
+const componentT = (c, ctx) => {
+  const { weight, availableWeight, coverageBp, earnedWeightBp, level, reasons, strengths, gaps, detail, ...rest } = c;
+  if (Object.keys(rest).length || availableWeight !== weight || earnedWeightBp !== weight * coverageBp)
+    throw new Error(`cannot print the component ${JSON.stringify(c)}`);
+  const det = Object.entries(detail).map(([k, x]) => `#(${string(k)}, ${jsonValue(x, ctx)})`);
+  return `${ctx.use(TR)}.Component(weight: ${int(weight)}, coverage_bp: ${int(coverageBp)}, level: #(${string(level.id)}, ${string(level.label)}), reasons: ${list(string)(reasons, ctx)}, strengths: ${list(signalT)(strengths, ctx)}, gaps: ${list(signalT)(gaps, ctx)}, detail: [${det.join(', ')}])`;
+};
+/** A profile as calculateTrustScore returned it. Its strengths, gaps and explanations are derived from its
+ *  components, its band from its score. */
+const profileT = (p, ctx) => {
+  const band = TRUST_SPEC.POLICY.bands.find((b) => p.score >= b.min && p.score <= b.max);
+  if (!band || band.id !== p.band || p.policyVersion !== TRUST_SPEC.TRUST_SCORE_POLICY_VERSION)
+    throw new Error(`cannot print the profile ${JSON.stringify(p).slice(0, 200)}`);
+  const components = Object.entries(p.components).map(([k, c]) => `#(${string(k)}, ${componentT(c, ctx)})`);
+  return `${ctx.use(TR)}.Profile(score: ${int(p.score)}, band: ${ctx.use(TR)}.band_for_score(${int(p.score)}), components: [${components.join(', ')}], is_adult: ${bool(p.context.isAdult)}, simulated_included: ${bool(p.simulatedEvidenceIncluded)})`;
+};
+/** The viewers the projection has. No route asks for a public projection, so the type has none; nor for a viewer
+ *  outside these. */
+const trustViewer = (v, ctx) => {
+  const c = { self: 'SelfViewer', guardian: 'GuardianViewer', trust_safety: 'TrustSafetyViewer', pro_club: 'ProClubViewer', grassroots_club: 'GrassrootsClubViewer' }[v];
+  if (!c) throw new Error(`the projection has no viewer ${JSON.stringify(v)}`);
+  return `${ctx.use(TR)}.${c}`;
+};
+const bandT = record({
+  module: TR,
+  constructor: 'Band',
+  fields: { id: ['id', string], label: ['label', string], min: ['min', int], max: ['max', int] },
+});
+
+const TRUST_MAP = {
+  [`${TRUST}#calculateTrustScore`]: {
+    module: TR,
+    test: (c, ctx) => eqJson(`${ctx.use(TR)}.profile_json(${ctx.use(TR)}.calculate(${trustInput(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${TRUST}#trustBandForScore`]: plainIn(TR)('band_for_score', [int], bandT),
+  [`${TRUST}#applyDiminishingReturns`]: plainIn(TR)('diminishing_returns', [int, list(int)], int),
+  [`${TRUST}#canonicalTrustSources`]: {
+    module: TR,
+    test: (c, ctx) => {
+      const item = (it) => {
+        const { key, strengthBp, ...rest } = it;
+        if (Object.keys(rest).length) throw new Error(`cannot print the source ${JSON.stringify(it)}`);
+        return `#(${string(key)}, ${int(strengthBp)}, Nil)`;
+      };
+      return eq(`${ctx.use(TR)}.canonical([${c.args[0].map(item).join(', ')}])`, `[${c.result.map(item).join(', ')}]`);
+    },
+  },
+  [`${TRUST}#policyWeightsTotal`]: {
+    module: TR,
+    test: (c, ctx) => {
+      if (c.args.length && JSON.stringify(c.args[0]) !== JSON.stringify(TRUST_SPEC.POLICY))
+        throw new Error('the policy here is the snapshot POLICY only');
+      return eq(`${ctx.use(TR)}.weights_total()`, int(c.result));
+    },
+  },
+  [`${TRUST}#safeTrustProjection`]: {
+    module: TR,
+    test: (c, ctx) => {
+      const [p, v, opts = {}] = c.args;
+      if (Object.keys(opts).length) throw new Error(`the projection takes no options ${JSON.stringify(opts)}`);
+      return eqJson(`${ctx.use(TR)}.projection(${profileT(p, ctx)}, ${trustViewer(v, ctx)})`, c.result, ctx);
+    },
+  },
+  [`${TRUST}#trustSummary`]: {
+    module: TR,
+    test: (c, ctx) => eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(TR)}.summary_fields(${profileT(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${TRUST}#trustSnapshot`]: {
+    module: TR,
+    now: true,
+    test: (c, ctx) => {
+      const [p, { at = ctx.now } = {}] = c.args;
+      return eqJson(`${ctx.use(TR)}.snapshot_json(${profileT(p, ctx)}, ${int(at)})`, c.result, ctx);
+    },
+  },
+  ['domains/agents/core/shared.mjs#agreementInForce']: {
+    module: 'scoutbox/passport/trust',
+    now: true,
+    test: (c, ctx) => {
+      const [a, now = ctx.now] = c.args;
+      return eq(`${ctx.use('scoutbox/passport/trust')}.agreement_in_force(${agreementRow(a, ctx)}, ${int(now)})`, bool(c.result));
+    },
+  },
+};
+
 // ---------------------------------------------------------------------------------------------------- Box Cam
 
 const BOX = 'domains/development/boxcam';
@@ -2492,6 +2675,7 @@ export const MAP = {
   ...HUB_MAP,
   ...ROOM_MAP,
   ...PASSPORT_MAP,
+  ...TRUST_MAP,
   ...AGENT_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
@@ -2573,6 +2757,10 @@ export const NO_COUNTERPART = {
     "A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP.",
   [`${AGENT}/shared.mjs#termMonthsOf`]:
     'No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one.',
+  [`${TRUST}#eligibleTrustComponents`]:
+    "No whole component is adult-only, so every weight is eligible (the policy's, proved equal to the snapshot); the agency facet a minor's relationships drop is each profile's context.adultOnlyFacetsExcluded, which calculateTrustScore's cases compare.",
+  [`${TRUST}#trustChangeReasons`]:
+    'No route reports change reasons on either server: they appear in no response, and the trust_recalculation_reason counter is never counted.',
   [`${AGENT}/shared.mjs#tiersOf`]:
     "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
 };
@@ -2603,6 +2791,12 @@ export const HAND_PORTED = {
       'normaliseTiers',
       'verificationGap',
     ].map((f) => [`domains/agents/core/shared.mjs#${f}`, 'test/scoutbox/agents/agent_rules_test.gleam']),
+  ),
+  ...Object.fromEntries(
+    [`${TRUST}#safeTrustProjection`, 'domains/agents/core/shared.mjs#agreementInForce'].map((f) => [
+      f,
+      'test/scoutbox/passport/trust_rules_test.gleam',
+    ]),
   ),
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',

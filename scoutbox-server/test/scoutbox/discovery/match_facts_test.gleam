@@ -9,8 +9,8 @@ import sqlight
 fn hooked() -> Store {
   let s =
     support.fresh_store(fn(_) { Nil })
-    |> store.with_before_commit(match_facts.drain)
-  let assert Ok(Nil) = match_facts.start(s)
+    |> store.with_before_commit(match_facts.drain(_, False))
+  let assert Ok(Nil) = match_facts.start(s, False)
   s
 }
 

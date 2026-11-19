@@ -20,6 +20,7 @@ import scoutbox/development/drill_guidance
 import scoutbox/development/hub_rules
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
+import scoutbox/passport/trust_rules
 import scoutbox/platform/json_text
 import scoutbox/platform/limits.{Policy}
 import scoutbox/recruitment/analytics
@@ -716,4 +717,18 @@ pub fn hub_vocabulary_test() {
       decode.at(["FORBIDDEN_FIELD_NAMES"], decode.list(decode.string)),
     )
     == hub_rules.forbidden_field_names
+}
+
+/// The Trust Score's whole POLICY, from the tables the engine reads, with its version and disclaimer.
+fn trust_spec(key: String, decoder: decode.Decoder(a)) -> a {
+  snapshot("passport/trust/shared.json", decode.at([key], decoder))
+}
+
+pub fn trust_policy_test() {
+  let assert Ok(served) =
+    json.parse(json.to_string(trust_rules.policy_json()), decode.dynamic)
+  assert trust_spec("POLICY", decode.dynamic) == served
+  assert trust_spec("TRUST_SCORE_POLICY_VERSION", decode.int)
+    == trust_rules.policy_version
+  assert trust_spec("TRUST_DISCLAIMER", decode.string) == trust_rules.disclaimer
 }

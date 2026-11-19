@@ -305,8 +305,14 @@ pub fn still_at(
   }
 }
 
-fn room_body(tx: Tx, a: OrgAccess, room: Room, now: Int) {
-  room_view.build(tx, a, room, now) |> storage
+fn room_body(
+  tx: Tx,
+  a: OrgAccess,
+  room: Room,
+  now: Int,
+  allow_simulated: Bool,
+) {
+  room_view.build(tx, a, room, now, allow_simulated) |> storage
 }
 
 fn body_of(
@@ -443,7 +449,13 @@ pub fn list_rooms(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       use decided <- result.try(room_records.decided_rooms(read, a.org.id))
       use items <- result.try(
         list.try_map(rooms, fn(room) {
-          use srcs <- result.map(room_view.sources(read, a.org, room, now))
+          use srcs <- result.map(room_view.sources(
+            read,
+            a.org,
+            room,
+            now,
+            ctx.config.box_cam_test_provider,
+          ))
           let health =
             room_rules.room_health(
               None,
@@ -809,7 +821,13 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       )
       use _ <- result.try(count(tx, "recruitment_room_created") |> storage)
       use room <- result.try(reread(tx, a, room_id))
-      use view <- result.map(room_body(tx, a, room, now))
+      use view <- result.map(room_body(
+        tx,
+        a,
+        room,
+        now,
+        ctx.config.box_cam_test_provider,
+      ))
       http.json(
         201,
         json.object([
@@ -913,6 +931,7 @@ pub fn create_for_player(
   source: source_context.SourceContext,
   source_ref: Option(#(String, Option(Int))),
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(Created, Fail(Response)) {
   let read = store.reading(tx)
   use found <- result.try(storage(players.for_org(read, player_id, a.org, now)))
@@ -925,7 +944,7 @@ pub fn create_for_player(
   )
   case existing {
     Some(r) -> {
-      use view <- result.map(room_body(tx, a, r, now))
+      use view <- result.map(room_body(tx, a, r, now, allow_simulated))
       Created(r.row.id, True, view)
     }
     None -> {
@@ -950,7 +969,7 @@ pub fn create_for_player(
       )
       use _ <- result.try(count(tx, "recruitment_room_created") |> storage)
       use room <- result.try(reread(tx, a, room_id))
-      use view <- result.map(room_body(tx, a, room, now))
+      use view <- result.map(room_body(tx, a, room, now, allow_simulated))
       Created(room_id, False, view)
     }
   }
@@ -999,6 +1018,7 @@ pub fn reopen(
   source: source_context.SourceContext,
   source_ref: Option(#(String, Option(Int))),
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(Json, Fail(Response)) {
   let from = room.status
   use _ <- result.try(
@@ -1082,6 +1102,7 @@ pub fn reopen(
         room,
         "status:" <> room_status.to_string(to),
         now,
+        allow_simulated,
       )
       |> storage
       |> result.replace(Nil)
@@ -1136,7 +1157,7 @@ pub fn reopen(
     case_lifecycle.moved_event(room.row.org_id, room.row.id, from, to),
   )
   use moved <- result.try(reread(tx, a, room.row.id))
-  room_body(tx, a, moved, now)
+  room_body(tx, a, moved, now, allow_simulated)
 }
 
 // ------------------------------------------------------------------------------------------------------- read
@@ -1146,7 +1167,13 @@ pub fn get(ctx: Ctx, a: OrgAccess, room_id: id.RecruitmentCaseId) -> Response {
   let now = clock.now_ms()
   store.unit(ctx.store, fn(tx) {
     use room <- result.try(reread(tx, a, room_id))
-    use view <- result.map(room_body(tx, a, room, now))
+    use view <- result.map(room_body(
+      tx,
+      a,
+      room,
+      now,
+      ctx.config.box_cam_test_provider,
+    ))
     http.json(200, json.object([#("room", view)]))
   })
   |> answer
@@ -1325,7 +1352,13 @@ pub fn edit(
       False -> Ok(Nil)
     })
     use fresh <- result.try(reread(tx, a, room.row.id))
-    use view <- result.map(room_body(tx, a, fresh, now))
+    use view <- result.map(room_body(
+      tx,
+      a,
+      fresh,
+      now,
+      ctx.config.box_cam_test_provider,
+    ))
     http.json(200, json.object([#("room", view)]))
   })
   |> answer
@@ -1560,6 +1593,7 @@ fn apply_move(
           room,
           "status:" <> room_status.to_string(to),
           now,
+          ctx.config.box_cam_test_provider,
         )
         |> storage
       False -> Ok(None)
@@ -1722,7 +1756,13 @@ fn apply_move(
       case_lifecycle.moved_event(room.row.org_id, room.row.id, from, to),
     )
     use moved <- result.try(reread(tx, a, room.row.id))
-    use view <- result.map(room_body(tx, a, moved, now))
+    use view <- result.map(room_body(
+      tx,
+      a,
+      moved,
+      now,
+      ctx.config.box_cam_test_provider,
+    ))
     http.json(
       200,
       json.object([
@@ -2537,7 +2577,14 @@ pub fn add_decision(
               let now = clock.now_ms()
               store.unit(ctx.store, fn(tx) {
                 use snapshot <- result.try(
-                  room_view.capture_snapshot(tx, a.org, room, "decision", now)
+                  room_view.capture_snapshot(
+                    tx,
+                    a.org,
+                    room,
+                    "decision",
+                    now,
+                    ctx.config.box_cam_test_provider,
+                  )
                   |> storage,
                 )
                 use d <- result.try(record_decision(

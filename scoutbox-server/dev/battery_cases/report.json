@@ -574,9 +574,11 @@
       {
         "function": "domains/agents/core/shared.mjs#agreementInForce",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#can",
@@ -711,9 +713,11 @@
       {
         "function": "domains/agents/core/shared.mjs#agreementInForce",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
@@ -1705,6 +1709,94 @@
         "function": "domains/passport/shared.mjs#whenDisplay",
         "calls": 3,
         "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "passport/trustScore",
+    "functions": [
+      {
+        "function": "domains/agents/core/shared.mjs#agreementInForce",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#applyDiminishingReturns",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#calculateTrustScore",
+        "calls": 64,
+        "cases": 45,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#canonicalTrustSources",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#eligibleTrustComponents",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "closed"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#policyWeightsTotal",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#safeTrustProjection",
+        "calls": 5,
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the projection has no viewer \"other_player\"": 1,
+          "Gleam's types can't hold its arguments: the projection takes no options {\"publicAllowed\":false}": 1,
+          "Gleam's types can't hold its arguments: the projection takes no options {\"publicAllowed\":true}": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#trustBandForScore",
+        "calls": 12,
+        "cases": 12,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#trustChangeReasons",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "closed"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#trustSnapshot",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/passport/trust/shared.mjs#trustSummary",
+        "calls": 2,
+        "cases": 1,
         "handPort": {},
         "status": "generated"
       }

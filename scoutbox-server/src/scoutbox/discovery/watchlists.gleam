@@ -1512,6 +1512,7 @@ pub fn room(ctx: Ctx, req: Request, a: OrgAccess, wid: String) -> Response {
           source_context.DynamicWatchlist,
           Some(#(id.watchlist_to_string(w.row.id), None)),
           now,
+          ctx.config.box_cam_test_provider,
         ))
         // Re-adding a player who already has a Room is idempotent and is not an event.
         use _ <- result.map(case created.existed {

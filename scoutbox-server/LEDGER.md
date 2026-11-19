@@ -17,11 +17,11 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 231 / 433 | 51 / 83 | 7 to go |
+| agents | 9 | 9 | 9 | 237 / 425 | 53 / 85 | 7 to go |
 | development | 3 | 3 | 3 | 125 / 4 | 22 / 45 | 1 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
-| passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
+| passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 14 | 14 | 9 | 59 / 2239 | 67 / 249 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
@@ -39,8 +39,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
-| `agents/crossApp` | neutral | 13 → 0 | 380 | 239 | 141 |  | yes | 7 / 96 | 3 / 11 | 96 cases pending; 8 hand-port calls |
-| `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
+| `agents/crossApp` | neutral | 13 → 0 | 380 | 239 | 141 |  | yes | 13 / 89 | 4 / 12 | 89 cases pending; 8 hand-port calls |
+| `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 1 | 1 / 1 | 1 cases pending |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
 | `development/boxCam` | neutral | 3 → 0 | 150 | 110 | 40 |  | yes | 40 / 0 |  | **done** |
@@ -54,7 +54,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
-| `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
+| `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 13 / 37 | 0 / 25 | not answered; 37 cases pending; 25 hand-port calls |
@@ -157,9 +157,11 @@ ported by hand to a gleeunit test.
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#effectiveFacetState` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#verificationGap` | 1 | Gleam's types can't hold its arguments: cannot print "approved" as a value of scoutbox/vocab/facet_state.pairs | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/crossApp` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 2 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
+| `agents/crossApp` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `agents/crossApp` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#duplicateTransactionOf` | 7 | args[].partiesOf is a function | to do |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
+| `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
 | `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | to do |
 | `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | to do |
@@ -171,6 +173,8 @@ ported by hand to a gleeunit test.
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
 | `passport/passport` | `domains/passport/shared.mjs#mintShareSecret` | 2 | its result is random | `test/scoutbox/passport/passport_rules_test.gleam` |
 | `passport/passport` | `domains/passport/shared.mjs#normWhen` | 1 | Gleam's types can't hold its arguments: cannot print null as a date | `test/scoutbox/passport/passport_rules_test.gleam` |
+| `passport/trustScore` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
+| `passport/trustScore` | `domains/passport/trust/shared.mjs#safeTrustProjection` | 3 | Gleam's types can't hold its arguments: the projection has no viewer "other_player"; Gleam's types can't hold its arguments: the projection takes no options {"publicAllowed":false}; Gleam's types can't hold its arguments: the projection takes no options {"publicAllowed":true} | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `platform/contracts` | `domain.ts#ageOn` | 8 | args[] is a ; result is NaN | to do |
 | `platform/contracts` | `domain.ts#isAdult` | 3 | args[] is a  | to do |
 | `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 | Gleam's types can't hold its arguments: cannot print "established" as a value of scoutbox/vocab/trust_band.pairs | to do |
@@ -294,7 +298,6 @@ mapped, then `npm run cases`.
 | `agents/compliance` | `domains/agents/compliance/provider.mjs#facetFromProviderAnswer` | 3 |
 | `agents/compliancePersistence` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
 | `agents/compliancePersistence` | `domains/agents/compliance/policy.mjs#applicablePolicySet` | 1 |
-| `agents/crossApp` | `domains/agents/core/shared.mjs#agreementInForce` | 7 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#agentClientBasis` | 9 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#agentSurfaceDecision` | 29 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#clubAgentPresence` | 2 |
@@ -309,7 +312,6 @@ mapped, then `npm run cases`.
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 1 |
-| `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 |
 | `agents/crossAppAdversarial` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
@@ -558,4 +560,6 @@ their role, so their recorded calls get no test.
 | `development/hub` | `domains/development/hub/plan.mjs#buildTimeline` | 2 | Its cases feed it a history action the Hub never writes (plan_read) to show it is dropped; a history row's action is typed here, so no such row can exist. The internal-entry filter is checked over HTTP. |
 | `development/hub` | `domains/development/hub/shared.mjs#parseDate` | 1 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |
 | `development/hub` | `domains/development/hub/shared.mjs#scanPayloadForForbiddenFields` | 1 | A helper for tests over responses: the hub battery scans every payload for the forbidden field names itself. |
+| `passport/trustScore` | `domains/passport/trust/shared.mjs#eligibleTrustComponents` | 1 | No whole component is adult-only, so every weight is eligible (the policy's, proved equal to the snapshot); the agency facet a minor's relationships drop is each profile's context.adultOnlyFacetsExcluded, which calculateTrustScore's cases compare. |
+| `passport/trustScore` | `domains/passport/trust/shared.mjs#trustChangeReasons` | 1 | No route reports change reasons on either server: they appear in no response, and the trust_recalculation_reason counter is never counted. |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |

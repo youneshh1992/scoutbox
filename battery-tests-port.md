@@ -107,7 +107,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 51 of 53 neutral]
+### Untangling [in progress: 52 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 46 batteries pass unchanged]
+### Porting, domain by domain [in progress: 48 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -135,7 +135,7 @@ of the product, so they aren't one slice.
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
-| Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
+| Passport: the Passport, the Trust Score | 2 | **ported** |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -270,6 +270,14 @@ are for surprising facts or points that later work depends on, not implementatio
       position writes the `position_changed` source change Second Look reads; nothing here wrote one before.
    4. A Room's Passport is the club's whole projection, and a snapshot records its revision [**done**]. Box Cam's
       sections (development activity, Combine results) are a player's with none until Box Cam is ported.
+   5. `passport/trustScore` [**done**: untangled (U1–U13 and the stray `agreementInForce` check are a rules suite of
+      80 checks; the policy is snapshotted to `spec/passport/trust`), and it passes with its 65 rule cases]. Simulated
+      evidence counts while `BOX_CAM_TEST_PROVIDER` is on, as in TypeScript; here it never did, so every Trust Score
+      read (the routes, a Room, Second Look, Nobody Missed, the watchlists and the match facts' drain) now takes
+      `allow_simulated`, and the match facts' policy key ends `|sim1` then. A profile's `simulatedEvidenceIncluded`
+      says whether simulated evidence was allowed, not whether any was counted, on both servers. The engine reads its
+      weights and identity values from the declared policy tables, which one test proves equal to the snapshot.
+      `trustChangeReasons` and the public projection are used by no route on either server.
 7. `operations/clubOperations`.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
@@ -337,7 +345,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 2 batteries is about **1 session** in all, and can run ahead of the port. The real
+Untangling the last battery (`operations/clubOperations`) is under **1 session**, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 

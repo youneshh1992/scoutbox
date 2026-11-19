@@ -77,11 +77,12 @@ pub fn sources(
   org: orgs.Row,
   room: Room,
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(Option(Sources), Fail(e)) {
   use found <- result.try(players.for_org(read, room.row.player_id, org, now))
   case found {
     Some(#(p, access)) if access.visible && !access.blocked -> {
-      use profile <- result.map(trust.profile(read, p, now))
+      use profile <- result.map(trust.profile(read, p, now, allow_simulated))
       Some(Sources(p, access, profile))
     }
     _ -> Ok(None)
@@ -394,11 +395,12 @@ pub fn build(
   a: OrgAccess,
   room: Room,
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(Json, Fail(e)) {
   let read = store.reading(tx)
   let org = a.org
   let r = room.row
-  use srcs <- result.try(sources(read, org, room, now))
+  use srcs <- result.try(sources(read, org, room, now, allow_simulated))
   use lead <- result.try(case r.room_lead_scout_user_id {
     Some(u) -> {
       use name <- result.map(colleague_name(read, org.id, u))
@@ -784,9 +786,10 @@ pub fn capture_snapshot(
   room: Room,
   trigger: String,
   now: Int,
+  allow_simulated: Bool,
 ) -> Result(Option(room_records.Snapshot), Fail(e)) {
   let read = store.reading(tx)
-  use srcs <- result.try(sources(read, org, room, now))
+  use srcs <- result.try(sources(read, org, room, now, allow_simulated))
   case srcs {
     None -> Ok(None)
     Some(s) -> {

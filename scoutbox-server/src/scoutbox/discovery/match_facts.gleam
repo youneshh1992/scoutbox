@@ -38,11 +38,16 @@ const day_ms = 86_400_000
 
 const batch = 500
 
-/// The Trust Score policy the stored bands were derived under, and whether simulated evidence counts (it never
-/// does here): a change re-derives every row. The same key the TypeScript server writes, so either server reads the
-/// other's facts as current.
-pub fn policy_key() -> String {
-  "facts1|trust" <> int.to_string(trust_rules.policy_version) <> "|sim0"
+/// The Trust Score policy the stored bands were derived under, and whether simulated evidence counts (only while
+/// the test provider is enabled): a change re-derives every row. The same key the TypeScript server writes, so
+/// either server reads the other's facts as current.
+pub fn policy_key(allow_simulated: Bool) -> String {
+  "facts1|trust"
+  <> int.to_string(trust_rules.policy_version)
+  <> case allow_simulated {
+    True -> "|sim1"
+    False -> "|sim0"
+  }
 }
 
 const policy_meta = "matchFactsPolicy"
@@ -143,7 +148,12 @@ fn newest(times: List(Int)) -> Option(Int) {
 }
 
 /// A player's facts as of `now` (matchFacts.mjs `build`).
-pub fn build(read: Read, p: Player, now: Int) -> Result(Facts, Fail(e)) {
+pub fn build(
+  read: Read,
+  p: Player,
+  now: Int,
+  allow_simulated: Bool,
+) -> Result(Facts, Fail(e)) {
   let pid = p.row.id
   use prefs <- result.try(
     store.query(
@@ -198,7 +208,7 @@ pub fn build(read: Read, p: Player, now: Int) -> Result(Facts, Fail(e)) {
     "SELECT 1 FROM signings WHERE player_id = ? LIMIT 1",
     pid,
   ))
-  use profile <- result.map(trust.profile(read, p, now))
+  use profile <- result.map(trust.profile(read, p, now, allow_simulated))
 
   // A missing measurement is no measurement: it never meets a threshold, so it is kept as None beside any real one.
   let combine =
@@ -293,9 +303,10 @@ fn write(
 }
 
 /// Re-derives every player the triggers marked, in batches, until none is left. The store runs it inside every
-/// unit, just before COMMIT; its writes to the facts mark no one, so it ends.
-pub fn drain(tx: Tx) -> Result(Nil, sqlight.Error) {
-  drain_batches(tx, clock.now_ms())
+/// unit, just before COMMIT; its writes to the facts mark no one, so it ends. `allow_simulated` is fixed for the
+/// process: install it as `drain(_, allow_simulated)`.
+pub fn drain(tx: Tx, allow_simulated: Bool) -> Result(Nil, sqlight.Error) {
+  drain_batches(tx, clock.now_ms(), allow_simulated)
   |> result.map_error(fn(failure) {
     case failure {
       store.Storage(e) -> e
@@ -309,7 +320,11 @@ pub fn drain(tx: Tx) -> Result(Nil, sqlight.Error) {
   })
 }
 
-fn drain_batches(tx: Tx, now: Int) -> Result(Nil, Fail(Nil)) {
+fn drain_batches(
+  tx: Tx,
+  now: Int,
+  allow_simulated: Bool,
+) -> Result(Nil, Fail(Nil)) {
   let read = store.reading(tx)
   use ids <- result.try(store.query(
     read,
@@ -325,7 +340,7 @@ fn drain_batches(tx: Tx, now: Int) -> Result(Nil, Fail(Nil)) {
         list.try_each(ids, fn(pid) {
           case list.find(found, fn(p) { p.row.id == pid }) {
             Ok(p) -> {
-              use facts <- result.try(build(read, p, now))
+              use facts <- result.try(build(read, p, now, allow_simulated))
               write(tx, pid, Some(facts))
             }
             Error(Nil) -> write(tx, pid, None)
@@ -339,7 +354,7 @@ fn drain_batches(tx: Tx, now: Int) -> Result(Nil, Fail(Nil)) {
           [ids_json(ids)],
         ),
       )
-      drain_batches(tx, now)
+      drain_batches(tx, now, allow_simulated)
     }
   }
 }
@@ -364,7 +379,10 @@ pub fn sweep(store: Store) -> Result(Nil, store.UnitError(Nil)) {
 
 /// At boot, once the hook is installed: every row is re-derived when the policy key changed (or on the first
 /// boot), and the due ones always.
-pub fn start(store: Store) -> Result(Nil, store.UnitError(Nil)) {
+pub fn start(
+  store: Store,
+  allow_simulated: Bool,
+) -> Result(Nil, store.UnitError(Nil)) {
   store.unit(store, fn(tx) {
     use stored <- result.try(store.query(
       store.reading(tx),
@@ -372,7 +390,7 @@ pub fn start(store: Store) -> Result(Nil, store.UnitError(Nil)) {
       [sqlight.text(policy_meta)],
       decode.at([0], decode.string),
     ))
-    use _ <- result.try(case stored == [policy_key()] {
+    use _ <- result.try(case stored == [policy_key(allow_simulated)] {
       True -> Ok(Nil)
       False -> {
         use _ <- result.try(
@@ -385,7 +403,7 @@ pub fn start(store: Store) -> Result(Nil, store.UnitError(Nil)) {
         store.run(
           tx,
           "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-          [sqlight.text(policy_meta), sqlight.text(policy_key())],
+          [sqlight.text(policy_meta), sqlight.text(policy_key(allow_simulated))],
         )
       }
     })

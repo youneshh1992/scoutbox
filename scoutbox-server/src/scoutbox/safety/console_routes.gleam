@@ -19,6 +19,7 @@ import scoutbox/messaging/dispatches
 import scoutbox/messaging/notifications
 import scoutbox/messaging/push
 import scoutbox/passport/football_passport
+import scoutbox/passport/trust
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -378,6 +379,7 @@ pub fn metrics(ctx: Ctx) -> Response {
       let read = store.reading(tx)
       use verification <- result.try(verification_core.metrics(tx))
       use passport <- result.try(football_passport.metrics_json(tx))
+      use trust_metrics <- result.try(trust.metrics_json(tx))
       use rooms <- result.try(room_routes.metrics_json(tx))
       use second_look_metrics <- result.try(second_look.metrics_json(tx))
       use box_cam <- result.try(box_training.metrics_json(tx))
@@ -391,10 +393,11 @@ pub fn metrics(ctx: Ctx) -> Response {
       json.object([
         #("deliveryFailures", json.int(delivery)),
         // Not ported yet: the process's request counters, job runs, stream connects and the other domains'
-        // groups (development, Trust, analytics), which come between these.
+        // groups (development, analytics), which come between these.
         #("verification", verification),
         #("boxCam", box_cam),
         #("passport", passport),
+        #("trust", trust_metrics),
         #("rooms", rooms),
         #("secondLook", second_look_metrics),
         #("webhookFailures", json.int(webhook)),
