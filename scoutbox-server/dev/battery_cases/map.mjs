@@ -1866,6 +1866,7 @@ const full = record({
     temporal_conflicts: '[]',
     revision_evidence: '[]',
     revision_careers: '[]',
+    revision_combine: '[]',
   },
 });
 
@@ -2137,8 +2138,153 @@ const BOX_CAM_MAP = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------- the Combine
+
+const CS = `${BOX}/combineShared.mjs`;
+const CR = 'scoutbox/development/combine_rules';
+const combineState = vocab('scoutbox/rows/combine_attempts', 'combine_state_pairs');
+const measurementState = vocab('scoutbox/rows/combine_attempts', 'measurement_state_pairs');
+const metricType = vocab('scoutbox/rows/combine_attempts', 'metric_type_pairs');
+const direction = vocab('scoutbox/rows/combine_attempts', 'direction_pairs');
+/** A protocol is the registry's own (spec_test proves it equals the snapshot): looked up by id and version. */
+const protocolOf = (v, ctx) => {
+  if (typeof v?.id !== 'string' || !Number.isInteger(v?.version)) throw new Error(`not a protocol: ${JSON.stringify(v)}`);
+  return `${ctx.use(CR)}.protocol(${string(v.id)}, ${int(v.version)})`;
+};
+const protocolDef = (v, ctx) => `{ let assert ${ctx.use('gleam/option')}.Some(p) = ${protocolOf(v, ctx)}\n p }`;
+const found = (c) => (c === null ? 'None' : `Some(#(${string(c.id)}, ${int(c.version)}))`);
+const idVersion = (ctx) => `fn(p: ${ctx.use(CR)}.Protocol) { #(p.id, p.version) }`;
+const finishedSession = record({
+  module: CR,
+  constructor: 'Finished',
+  fields: {
+    verificationState: ['state', option(boxState)],
+    sessionDurationMs: ['session_duration_ms', option(float)],
+    verifiedActiveMs: ['verified_active_ms', option(float)],
+    verifiedReps: ['verified_reps', option(int)],
+    setsCompleted: ['sets_completed', option(int)],
+    quality: ['quality', option(boxQuality)],
+  },
+  defaults: {
+    state: 'None',
+    session_duration_ms: 'None',
+    verified_active_ms: 'None',
+    verified_reps: 'None',
+    sets_completed: 'None',
+    quality: 'None',
+  },
+});
+/** An attempt as `personalBest` reads it; the Gleam one carries its item, here nothing. */
+const scored = record({
+  module: CR,
+  constructor: 'Scored',
+  fields: {
+    measuredValue: ['measured_value', option(float)],
+    direction: ['direction', direction],
+    effectiveState: ['live_state', combineState],
+  },
+  defaults: { item: 'Nil', measured_value: 'None', direction: (ctx) => `${ctx.use('scoutbox/rows/combine_attempts')}.Higher` },
+});
+/** A capability a protocol needs: an observed one, or one only future athletic protocols name. */
+const required = (v, ctx) =>
+  ['spatial_scale', 'timing_gate', 'target_zone'].includes(v)
+    ? code(CR, 'required_to_string')(v, ctx)
+    : `${ctx.use(CR)}.Observes(${capability(v, ctx)})`;
+
+const COMBINE_MAP = {
+  [`${CS}#combineProtocol`]: {
+    module: CR,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(CR)}.protocol(${string(c.args[0])}, ${int(Number(c.args[1]))}), ${idVersion(ctx)})`,
+        found(c.result),
+      ),
+  },
+  [`${CS}#latestCombineProtocol`]: {
+    module: CR,
+    test: (c, ctx) =>
+      eq(`${ctx.use('gleam/option')}.map(${ctx.use(CR)}.latest_protocol(${string(c.args[0])}), ${idVersion(ctx)})`, found(c.result)),
+  },
+  [`${CS}#measurementSupported`]: {
+    module: CR,
+    test: (c, ctx) =>
+      eq(`${ctx.use(CR)}.measurement_supported(${protocolDef(c.args[0], ctx)}, ${list(capability)(c.args[1] ?? [], ctx)})`, bool(c.result)),
+  },
+  [`${CS}#measurementCapability`]: {
+    module: CR,
+    test: (c, ctx) =>
+      eq(`${ctx.use(CR)}.measurement_capability(${protocolDef(c.args[0], ctx)}, ${list(capability)(c.args[1] ?? [], ctx)})`, string(c.result)),
+  },
+  [`${CS}#measureAttempt`]: {
+    module: CR,
+    test: (c, ctx) => {
+      const { protocolDef: p, session, calibrationPassed, providerCapabilities = [], mode = 'verified', ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`measureAttempt has no argument ${Object.keys(rest)[0]}`);
+      const { combineState: cs, measurementState: ms, measuredValue, reasons, observedMs, windowMs, missingCapabilities = [], practice, ...more } =
+        c.result;
+      if (Object.keys(more).length) throw new Error(`a measurement has no field ${Object.keys(more)[0]}`);
+      if ((practice === true) !== (ms === 'practice')) throw new Error('practice is read from the measurement state');
+      return eq(
+        `${ctx.use(CR)}.measure(protocol: ${p ? `${protocolOf(p, ctx)}` : 'None'}, session: ${option(finishedSession)(session, ctx)}, calibration_passed: ${bool(!!calibrationPassed)}, capabilities: ${list(capability)(providerCapabilities, ctx)}, practice: ${bool(mode === 'practice')})`,
+        `${ctx.use(CR)}.Measurement(combine_state: ${combineState(cs, ctx)}, measurement_state: ${measurementState(ms, ctx)}, measured_value: ${option(float)(measuredValue, ctx)}, reasons: ${list(code(CR, 'reason_to_string'))(reasons, ctx)}, observed_ms: ${option(float)(observedMs, ctx)}, window_ms: ${option(int)(windowMs, ctx)}, missing: ${list(required)(missingCapabilities, ctx)})`,
+      );
+    },
+  },
+  [`${CS}#formatCombineValue`]: {
+    module: CR,
+    test: (c, ctx) => eq(`${ctx.use(CR)}.format(${protocolDef(c.args[0], ctx)}, ${option(float)(c.args[1], ctx)})`, string(c.result)),
+  },
+  [`${CS}#personalBest`]: {
+    module: CR,
+    test: (c, ctx) => eq(`${ctx.use(CR)}.personal_best(${list(scored)(c.args[0] ?? [], ctx)})`, option(scored)(c.result, ctx)),
+  },
+  [`${CS}#comparisonMatrix`]: {
+    module: CR,
+    test: (c, ctx) => {
+      const { players, protocols, bestByPlayerProtocol } = c.args[0];
+      const cell = record({
+        module: CR,
+        constructor: 'Cell',
+        fields: { measuredValue: ['value', float], completedAt: ['at', option(int)] },
+        defaults: { at: 'None' },
+      });
+      const pl = (v) => `#(${string(v.id)}, ${string(v.name)})`;
+      return eqJson(
+        `${ctx.use(CR)}.comparison(${list(pl)(players, ctx)}, ${list(protocolDef)(protocols, ctx)}, ${dict(string, cell)(bestByPlayerProtocol, ctx)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${CS}#combineResultHash`]: {
+    module: CR,
+    test: (c, ctx) => {
+      const hashed = record({
+        module: CR,
+        constructor: 'Hashed',
+        fields: {
+          id: ['attempt_id', string],
+          playerId: ['player_id', string],
+          protocolId: ['protocol_id', string],
+          protocolVersion: ['protocol_version', int],
+          boxSessionId: ['box_session_id', string],
+          metricType: ['metric_type', metricType],
+          measuredValue: ['measured_value', option(float)],
+          provider: ['provider', boxProvider],
+          providerVersion: ['provider_version', int],
+          measurementAlgorithmVersion: ['measurement_algorithm_version', int],
+          completedAt: ['completed_at', option(int)],
+          combineState: ['combine_state', combineState],
+        },
+      });
+      return eq(`${ctx.use(CR)}.result_hash(${hashed(c.args[0], ctx)})`, string(c.result));
+    },
+  },
+};
+
 export const MAP = {
   ...BOX_CAM_MAP,
+  ...COMBINE_MAP,
   ...ROOM_MAP,
   ...PASSPORT_MAP,
   ...AGENT_MAP,

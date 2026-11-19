@@ -501,19 +501,6 @@ fn box_milestones(b: BoxCam) -> List(rules.BoxSessionSource) {
   })
 }
 
-fn combine_projection() -> Json {
-  json.object([
-    #("results", json.preprocessed_array([])),
-    #("hasCombineVerifiedResults", json.bool(False)),
-    #(
-      "note",
-      json.string(
-        "Combine Verified — standardized ScoutBox protocol, live Box Cam capture. Powered by Box Cam. Real numbers, not a talent score.",
-      ),
-    ),
-  ])
-}
-
 /// The whole Passport of `p` (assemble). A `light` one, for batch summaries, has no timeline and so no temporal
 /// conflicts.
 pub fn assemble(
@@ -688,6 +675,7 @@ pub fn assemble(
   ))
   use representation <- result.try(representation(read, pid, now))
   use box_share <- result.try(combine.shares_development(read, pid))
+  use combine_results <- result.try(combine.projection_results(read, pid))
   use box <- result.try(box_cam(read, pid))
   use challenges <- result.try(box_sessions.completions(read, pid))
   use sharing_active <- result.map(store.one(
@@ -821,7 +809,9 @@ pub fn assemble(
       box_activity(box, now),
       box_rules.dev_activity_note,
     )),
-    combine: Some(combine_projection()),
+    combine: Some(
+      json.object(combine.projection_of(combine_results, combine.passport_note)),
+    ),
     box_share_recruitment: box_share,
     sharing_active:,
     assessments:,
@@ -840,6 +830,13 @@ pub fn assemble(
     revision_evidence: evidence,
     revision_careers: list.map(h.career_entries, fn(c) {
       rules.CareerMark(c.id, c.withdrawn_at != None)
+    }),
+    revision_combine: list.map(combine_results, fn(a) {
+      rules.CombineMark(
+        a.row.protocol_id,
+        a.row.protocol_version,
+        option.unwrap(a.row.measured_value, 0.0),
+      )
     }),
   )
 }

@@ -23,7 +23,7 @@ import scoutbox/development/benchmarks
 import scoutbox/development/box_prefs
 import scoutbox/development/box_session_routes
 import scoutbox/development/box_training
-import scoutbox/development/combine
+import scoutbox/development/combine_routes
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
 import scoutbox/development/objectives
@@ -592,11 +592,28 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             _ -> not_found()
           }
         ["combine", "protocols"] ->
-          only(req, Get, fn() { combine.protocols(ctx) })
+          only(req, Get, fn() { combine_routes.org_protocols(ctx) })
         ["combine", "players", id] ->
           only(req, Get, fn() {
-            combine.player_results(ctx, org, id.player(id))
+            combine_routes.player_results(ctx, org, id.player(id))
           })
+        ["combine", "requests"] ->
+          case req.method {
+            Get -> combine_routes.org_requests(ctx, req, org)
+            Post -> combine_routes.create_requests(ctx, req, org)
+            _ -> not_found()
+          }
+        ["combine", "requests", rid, "cancel"] ->
+          only(req, Post, fn() {
+            combine_routes.cancel_request(
+              ctx,
+              req,
+              org,
+              id.combine_request(rid),
+            )
+          })
+        ["combine", "compare"] ->
+          only(req, Get, fn() { combine_routes.compare(ctx, req, org) })
         ["players", pid, "objectives"] ->
           only(req, Get, fn() { objectives.org_list(ctx, org, id.player(pid)) })
         ["followups"] ->
@@ -1102,6 +1119,34 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         }
         ["box-cam", "assignments"] ->
           only(req, Get, fn() { box_training.player_assignments(ctx, player) })
+        ["combine"] -> only(req, Get, fn() { combine_routes.mine(ctx, player) })
+        ["combine", "protocols"] ->
+          only(req, Get, fn() { combine_routes.player_protocols(ctx) })
+        ["combine", "card"] ->
+          only(req, Get, fn() { combine_routes.card(ctx, player) })
+        ["combine", "requests"] ->
+          only(req, Get, fn() { combine_routes.player_requests(ctx, player) })
+        ["combine", "attempts"] ->
+          case req.method {
+            Get -> combine_routes.attempts(ctx, player)
+            Post -> combine_routes.create_attempt(ctx, req, player)
+            _ -> not_found()
+          }
+        ["combine", "attempts", aid] ->
+          only(req, Get, fn() {
+            combine_routes.attempt(ctx, player, id.combine_attempt(aid))
+          })
+        ["combine", "attempts", aid, action] -> {
+          let aid = id.combine_attempt(aid)
+          only(req, Post, fn() {
+            case action {
+              "calibrate" -> combine_routes.calibrate(ctx, req, player, aid)
+              "complete" -> combine_routes.complete(ctx, req, player, aid)
+              "cancel" -> combine_routes.cancel(ctx, req, player, aid)
+              _ -> not_found()
+            }
+          })
+        }
         ["box-cam", "assignments", aid, "accept"] ->
           only(req, Post, fn() {
             box_training.player_accept(ctx, req, player, id.box_assignment(aid))
@@ -1505,6 +1550,14 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "box-cam", "challenges", chid, "join"] ->
           only(req, Post, fn() {
             box_training.child_join(ctx, req, guardian, id.player(cid), chid)
+          })
+        ["children", cid, "combine"] ->
+          only(req, Get, fn() {
+            combine_routes.child_combine(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "combine", "requests"] ->
+          only(req, Get, fn() {
+            combine_routes.child_requests(ctx, guardian, id.player(cid))
           })
         ["children", cid, "box-cam", "prefs"] ->
           only(req, Patch, fn() {
@@ -1943,6 +1996,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["box-cam", "sessions", sid] ->
           only(req, Get, fn() {
             box_session_routes.admin_show(ctx, id.box_session(sid))
+          })
+        ["combine", "attempts", aid] ->
+          only(req, Get, fn() {
+            combine_routes.admin_attempt(ctx, id.combine_attempt(aid))
           })
         ["box-cam", "sessions", sid, "restore"] ->
           only(req, Post, fn() {

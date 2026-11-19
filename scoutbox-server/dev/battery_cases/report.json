@@ -987,63 +987,63 @@
         "calls": 8,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#combineResultHash",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#comparisonMatrix",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#formatCombineValue",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#latestCombineProtocol",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#measureAttempt",
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#measurementCapability",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#measurementSupported",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#personalBest",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },

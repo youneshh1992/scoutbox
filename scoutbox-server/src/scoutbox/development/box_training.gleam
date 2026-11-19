@@ -523,13 +523,13 @@ type OrgListQuery {
   OrgListQuery(page: paging.Query, player_id: Option(String))
 }
 
-fn page_refusal(e: paging.PageError) -> Response {
+pub fn page_refusal(e: paging.PageError) -> Response {
   let #(code, message) = paging.error_body(e)
   http.error_message(400, code, message)
 }
 
 /// A list the route has already filtered, newest first, paged by `[createdAt, id]`.
-fn page_newest_first(
+pub fn page_newest_first(
   page: paging.Page,
   items: List(a),
   key: fn(a) -> #(Int, String),

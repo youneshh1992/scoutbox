@@ -86,6 +86,7 @@ pub const policy = [
   #("nobody_missed_action", nobody_missed_action_policy),
   #("passport_share_read", passport_share_read_policy),
   #("box_session_create", box_session_create_policy),
+  #("combine_attempt", combine_attempt_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -131,6 +132,8 @@ pub type Action {
   BoxCvFinalize
   /// Box Cam capture sessions minted, per player.
   BoxSessionCreate
+  /// At-Home Combine attempts started, per player.
+  CombineAttempt
   /// Box Cam disputes filed, per player. The TypeScript server keeps this window in training.mjs (five a day), not
   /// as its RATE_LIMIT_POLICY entry.
   BoxDispute
@@ -232,6 +235,8 @@ const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
 const box_session_create_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const combine_attempt_policy = Policy(max: 40, window_ms: 3_600_000)
+
 const box_dispute_policy = Policy(max: 5, window_ms: 86_400_000)
 
 const passport_share_read_policy = Policy(max: 30, window_ms: 60_000)
@@ -313,6 +318,7 @@ fn action_name(action: Action) -> String {
     ContactExternalRecord -> "contact_external_record"
     BoxCvFinalize -> "box_cv_finalize"
     BoxSessionCreate -> "box_session_create"
+    CombineAttempt -> "combine_attempt"
     BoxDispute -> "box_dispute"
     PassportShareRead -> "passport_share_read"
     TrialInvite -> "trial_invite"
@@ -367,6 +373,7 @@ fn action_policy(action: Action) -> Policy {
     ContactExternalRecord -> contact_external_record_policy
     BoxCvFinalize -> box_cv_finalize_policy
     BoxSessionCreate -> box_session_create_policy
+    CombineAttempt -> combine_attempt_policy
     BoxDispute -> box_dispute_policy
     PassportShareRead -> passport_share_read_policy
     TrialInvite -> trial_invite_policy

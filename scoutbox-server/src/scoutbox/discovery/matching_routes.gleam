@@ -10,7 +10,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
-import scoutbox/development/combine_protocols
+import scoutbox/development/combine_rules
 import scoutbox/discovery/briefs
 import scoutbox/discovery/matching/criteria.{type Criteria}
 import scoutbox/discovery/matching/engine.{type Facts}
@@ -41,7 +41,7 @@ pub fn sort_pairs() -> List(#(String, String)) {
 }
 
 pub fn protocol_ids() -> List(String) {
-  list.map(combine_protocols.protocols, fn(p) { p.id })
+  list.map(combine_rules.protocols, fn(p) { p.id })
 }
 
 /// Over the shared limit: the 429 naming the action.

@@ -46,4 +46,5 @@ export const BATTERIES = [
   'scouting/clubWorkflows',
   'passport/passport',
   'development/boxCam',
+  'development/combine',
 ];

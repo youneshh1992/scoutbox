@@ -14,7 +14,7 @@ import gleam/order
 import gleam/regexp
 import gleam/result
 import gleam/string
-import scoutbox/development/combine_protocols
+import scoutbox/development/combine_rules
 import scoutbox/platform/json_text
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -371,7 +371,7 @@ pub fn validate(f: Fields, grassroots: Bool) -> Result(Valid, List(Detail)) {
       list.key_find(evidence_requirements, e) |> result.is_error
     })
   let protocols = distinct(f.combine_protocols)
-  let protocol_ids = list.map(combine_protocols.protocols, fn(p) { p.id })
+  let protocol_ids = list.map(combine_rules.protocols, fn(p) { p.id })
   let unknown_protocols =
     list.filter(protocols, fn(p) { !list.contains(protocol_ids, p) })
   let level = option.map(f.max_level, playing_level.from_string)

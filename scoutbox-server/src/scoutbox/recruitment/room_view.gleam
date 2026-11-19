@@ -2,9 +2,6 @@
 //// Every branch goes through the gate that owns it, and the player's visibility is decided again on every read:
 //// when the club may no longer see the player (a block, a suspension, a visibility change), the Room keeps the
 //// club's own record and shows nothing of the player, with no cached name, stale Passport or last-known score.
-////
-//// Not ported yet, inside a Room: the Combine results (from verified attempts), which the Room's Passport shows as
-//// a player's with none.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -32,7 +29,6 @@ import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/recruitment/trials
 import scoutbox/rows/case_tasks as task_row
-import scoutbox/rows/combine_requests
 import scoutbox/rows/evidence as evidence_row
 import scoutbox/rows/evidence_suggestions as suggestion_row
 import scoutbox/rows/id
@@ -553,6 +549,11 @@ pub fn build(
       ))
       use requests <- result.try(combine.for_org_player(read, org.id, p.row.id))
       let requests = list.reverse(requests)
+      use combine_results <- result.try(case may_see_combine {
+        True -> combine.projection_results(read, p.row.id)
+        False -> Ok([])
+      })
+      let combine_verified = list.length(combine_results)
       use shares_development <- result.try(combine.shares_development(
         read,
         p.row.id,
@@ -586,10 +587,9 @@ pub fn build(
             e.row.verification_status == evidence_row.CoachConfirmed
           })
             || full.references != [],
-          // Not ported yet: verified Combine results.
-          combine_verified: 0,
+          combine_verified:,
           combine_requested: list.count(requests, fn(q) {
-            q.row.state == combine_requests.Requested
+            combine.request_state(q) == "requested"
           }),
           trial_state: trial_state(room_trials),
           open_tasks: open_tasks(room),
@@ -691,10 +691,16 @@ pub fn build(
             #("combine", case may_see_combine {
               True ->
                 json.object(
-                  list.append(combine.projection_fields(), [
-                    #("requests", json.array(requests, combine.request_view)),
-                    #("shared", json.bool(True)),
-                  ]),
+                  list.append(
+                    combine.projection_of(
+                      combine_results,
+                      combine.projection_note,
+                    ),
+                    [
+                      #("requests", json.array(requests, combine.request_view)),
+                      #("shared", json.bool(True)),
+                    ],
+                  ),
                 )
               False ->
                 json.object([
@@ -786,6 +792,11 @@ pub fn capture_snapshot(
     Some(s) -> {
       let t = trust_rules.snapshot(s.profile)
       use full <- result.try(passport_full(read, s, now))
+      // Which tests had a verified result, never the measured values.
+      use combine_results <- result.try(combine.result_keys(
+        read,
+        room.row.player_id,
+      ))
       use records <- result.try(evidence.current_for_player(
         read,
         s.player.row.id,
@@ -818,8 +829,7 @@ pub fn capture_snapshot(
             id.scouting_evidence_to_string(e.row.id)
           }),
           assessment_ids: submitted,
-          // Not ported yet: verified Combine results.
-          combine_results: [],
+          combine_results:,
           trial_ids: list.map(room.trial_ids, id.trial_to_string),
           at: now,
         ),

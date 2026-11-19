@@ -15,6 +15,7 @@ import gleam/order
 import gleam/set
 import gleam/string
 import scoutbox/platform/clock
+import scoutbox/platform/json_text
 import scoutbox/platform/temporal
 import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/assessments as assessment_row
@@ -1537,6 +1538,12 @@ pub type CareerMark {
   CareerMark(id: id.CareerEntryId, withdrawn: Bool)
 }
 
+/// A Combine Verified personal best, as the revision reads it. An invalidated result is absent, so the revision
+/// moves on invalidation and back on restoration.
+pub type CombineMark {
+  CombineMark(protocol_id: String, protocol_version: Int, measured_value: Float)
+}
+
 /// Everything a projection is cut from (assemble's `full`).
 pub type Full {
   Full(
@@ -1555,8 +1562,6 @@ pub type Full {
     completeness: Completeness,
     /// Box Cam's development activity over the last 30 days.
     development_activity: Option(Json),
-    /// Not ported yet: Combine results from verified attempts; the sources pass what TypeScript writes for a player
-    /// with none.
     combine: Option(Json),
     box_share_recruitment: Bool,
     sharing_active: Int,
@@ -1567,14 +1572,13 @@ pub type Full {
     /// Separate from the projected fields, so the revision depends on source data, not on a viewer or the clock.
     revision_evidence: List(EvidenceSource),
     revision_careers: List(CareerMark),
+    revision_combine: List(CombineMark),
   )
 }
 
 /// A fingerprint of the Passport's content, so a decision snapshot can say which Passport a club saw. Everything
 /// derived from "now" is excluded, or the revision would change overnight while nothing about the player had.
 /// Comparable for equality only, not order.
-///
-/// Not ported yet: Combine results (`cmb=`), which are part of it.
 pub fn passport_revision(full: Full) -> String {
   let bit = fn(b) {
     case b {
@@ -1673,6 +1677,18 @@ pub fn passport_revision(full: Full) -> String {
             Some(_) -> "withdrawn"
             None -> "live"
           },
+        )
+      }),
+    sorted_by(full.revision_combine, fn(c: CombineMark) { c.protocol_id })
+      |> list.map(fn(c) {
+        part(
+          "cmb",
+          c.protocol_id
+            <> "@"
+            <> int.to_string(c.protocol_version)
+            <> ":"
+            <> json.to_string(json_text.number(c.measured_value))
+            <> ":1",
         )
       }),
     sorted_by(full.revision_careers, fn(c: CareerMark) {

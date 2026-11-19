@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 45 batteries pass unchanged]
+### Porting, domain by domain [in progress: 46 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -134,7 +134,7 @@ of the product, so they aren't one slice.
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
-| Development: Box Cam, the Combine, the hub | 1 | `development/boxCam` passes; the Combine next |
+| Development: Box Cam, the Combine, the hub | 2 | `development/boxCam` and `combine` pass; the `production_cv` stub, then the hub |
 | Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -229,6 +229,14 @@ are for surprising facts or points that later work depends on, not implementatio
       is five a day per player, from training.mjs's own window, not the `box_dispute` entry of `RATE_LIMIT_POLICY`
       (five an hour), which nothing uses. Cancelling a session reads the nonce but never compares it, on both
       servers. The clip, the development plan and the club's drill list are `Not ported yet:`.
+   3. The Combine [**done**: `development/combine` passes, with its 22 rule cases, and the 57 responses of one probe
+      flow match TypeScript's, notifications included]. The protocol registry is declared in Gleam and checked against
+      the new `spec/development/boxcam/combineShared` snapshot; the copy recorded from a running server is gone. An
+      attempt is measured inside its bound session's completion, through either complete route. A request's state and
+      its completed protocols are worked out at read time, as in TypeScript: an invalidated session reopens a completed
+      request in every view while its stored state stays `completed`. `production_cv` certifies nothing for the
+      Combine (no protocol has passed real-world validation). The Passport, a Room and a Room's snapshots now carry
+      the player's real results, and the Passport's revision their `cmb=` entries.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared

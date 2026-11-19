@@ -13,6 +13,7 @@ import scoutbox/agents/policy_routes
 import scoutbox/agents/transaction_routes
 import scoutbox/development/benchmarks.{Drill}
 import scoutbox/development/box_cam_rules
+import scoutbox/development/combine_rules
 import scoutbox/development/drill_guidance
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
@@ -24,8 +25,10 @@ import scoutbox/recruitment/analytics/funnels
 import scoutbox/recruitment/analytics/metrics
 import scoutbox/recruitment/domain_errors
 import scoutbox/rows/box_sessions as session_row
+import scoutbox/rows/combine_attempts as attempt_row
 import scoutbox/vocab/box_provider
 import scoutbox/vocab/box_target_type
+import scoutbox/vocab/capture_context
 import scoutbox/vocab/notification_category
 import scoutbox/vocab/position
 import simplifile
@@ -485,4 +488,130 @@ pub fn box_cam_state_copy_test() {
       decode.at(["DEV_ACTIVITY_NOTE"], decode.string),
     )
   assert note == box_cam_rules.dev_activity_note
+}
+
+/// The Combine's protocol registry, whole, and its vocabularies: each written as the TypeScript registry holds it.
+pub fn combine_registry_test() {
+  let num = json_text.number
+  let strings = fn(xs) { json.array(xs, json.string) }
+  let optional = fn(key, value: option.Option(a), to_json: fn(a) -> json.Json) {
+    case value {
+      Some(v) -> [#(key, to_json(v))]
+      None -> []
+    }
+  }
+  let protocol = fn(p: combine_rules.Protocol) {
+    json.object(
+      list.flatten([
+        [
+          #("status", json.string("active")),
+          #(
+            "captureContexts",
+            json.array(p.capture_contexts, capture_context.to_json),
+          ),
+          #("maxVerifiedPerWindow", json.int(p.max_verified_per_window)),
+          #("windowMs", json.int(p.window_ms)),
+          #("practiceAllowed", json.bool(p.practice_allowed)),
+          #("calibrationRequirements", strings(p.calibration_requirements)),
+          #(
+            "measurementAlgorithmVersion",
+            json.int(p.measurement_algorithm_version),
+          ),
+          #("ageRestrictions", case p.adult_only {
+            True -> json.string("adult")
+            False -> json.null()
+          }),
+          #("id", json.string(p.id)),
+          #("version", json.int(p.version)),
+          #("title", json.string(p.title)),
+          #("category", json.string(p.category)),
+          #("description", json.string(p.description)),
+          #("drillId", json.nullable(p.drill_id, json.string)),
+        ],
+        optional("drillTarget", p.drill_target, fn(t: box_cam_rules.Target) {
+          json.object([
+            #("type", box_target_type.to_json(t.type_)),
+            #("value", num(t.value)),
+          ])
+        }),
+        [
+          #("metricType", attempt_row.metric_type_to_json(p.metric_type)),
+          #("metricUnit", json.string(p.metric_unit)),
+          #("direction", attempt_row.direction_to_json(p.direction)),
+          #(
+            "precision",
+            json.string(combine_rules.precision_to_string(p.precision)),
+          ),
+          #("protocolWindowMs", json.int(p.protocol_window_ms)),
+          #(
+            "requiredCapabilities",
+            json.array(p.required_capabilities, fn(r) {
+              json.string(combine_rules.required_to_string(r))
+            }),
+          ),
+          #("setupRequirements", json.string(p.setup_requirements)),
+        ],
+        optional("cameraRequirements", p.camera_requirements, json.string),
+        optional("spaceRequirements", p.space_requirements, json.string),
+        optional("equipmentRequirements", p.equipment_requirements, strings),
+        optional("startRule", p.start_rule, json.string),
+        optional("finishRule", p.finish_rule, json.string),
+        optional("validAttemptRules", p.valid_attempt_rules, json.string),
+        [
+          #("scoringMethod", json.string(p.scoring_method)),
+          #("safetyNotes", json.string(p.safety_notes)),
+        ],
+      ]),
+    )
+  }
+  let dynamic = fn(j) {
+    let assert Ok(d) = json.parse(json.to_string(j), decode.dynamic)
+    d
+  }
+  let spec = fn(key) {
+    snapshot(
+      "development/boxcam/combineShared.json",
+      decode.at([key], decode.dynamic),
+    )
+  }
+  assert spec("COMBINE_PROTOCOLS")
+    == dynamic(json.array(combine_rules.protocols, protocol))
+  assert spec("FUTURE_CAPABILITIES")
+    == dynamic(
+      json.array(combine_rules.future_capabilities, fn(r) {
+        json.string(combine_rules.required_to_string(r))
+      }),
+    )
+  assert spec("METRIC_TYPES")
+    == dynamic(
+      json.array(attempt_row.metric_type_pairs, fn(p) { json.string(p.0) }),
+    )
+}
+
+/// The Combine states' player copy. The snapshot also has copy for `integrity_review`, a state no attempt can be
+/// stored in; every stored state but `ready` has its copy, and `ready` has none.
+pub fn combine_state_copy_test() {
+  let copy =
+    snapshot(
+      "development/boxcam/combineShared.json",
+      decode.at(
+        ["COMBINE_STATE_COPY"],
+        decode.dict(decode.string, decode.string),
+      ),
+    )
+  let ported =
+    list.filter_map(attempt_row.combine_state_pairs, fn(p) {
+      combine_rules.state_copy(p.1)
+      |> option.map(fn(c) { #(p.0, c) })
+      |> option.to_result(Nil)
+    })
+  assert dict.from_list(ported) == dict.delete(copy, "integrity_review")
+  let states =
+    snapshot(
+      "development/boxcam/combineShared.json",
+      decode.at(["COMBINE_STATES"], decode.list(decode.string)),
+    )
+  assert list.all(attempt_row.combine_state_pairs, fn(p) {
+    list.contains(states, p.0)
+  })
 }

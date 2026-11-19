@@ -5,8 +5,8 @@
 //// naming a result, a state or a provenance is refused as an unknown field. An uploaded video can never become
 //// `box_cam_observed`.
 ////
-//// Not ported yet: keeping a clip (`/box-cam/sessions/:id/clip`), the player_development_evidence_changed live
-//// event, and Combine measurement on completion.
+//// Not ported yet: keeping a clip (`/box-cam/sessions/:id/clip`) and the player_development_evidence_changed live
+//// event.
 
 import gleam/float
 import gleam/int
@@ -19,6 +19,7 @@ import scoutbox/app.{type Ctx}
 import scoutbox/development/box_cam_rules as rules
 import scoutbox/development/box_sessions.{type Session}
 import scoutbox/development/box_training
+import scoutbox/development/combine
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players.{type Player}
@@ -930,8 +931,8 @@ fn nonce_shape() -> input.Shape(NonceBody) {
   input.done(NonceBody(nonce:))
 }
 
-/// Finishes a recording and moves on what it counts towards: its assignment and the player's challenges. Shared
-/// with the Combine's complete route, inside the caller's unit.
+/// Finishes a recording and moves on what it counts towards: its assignment, the player's challenges and the
+/// Combine attempt bound to it. Shared with the Combine's complete route, inside the caller's unit.
 pub fn complete_session(
   tx: store.Tx,
   s: Session,
@@ -992,6 +993,7 @@ pub fn complete_session(
   let assert Some(done) = done
   use _ <- result.try(box_training.apply_assignment_progress(tx, done.row, now))
   use _ <- result.try(box_training.apply_challenge_progress(tx, done.row, now))
+  use _ <- result.try(combine.apply_progress(tx, done.row, player, now))
   use _ <- result.try(box_training.count(tx, "box_sessions_completed"))
   use _ <- result.try(case f.state {
     row.VerificationStateVerified ->
