@@ -19,6 +19,7 @@ export const SPEC_DIR = path.join(SERVER_DIR, 'e2e', 'support', 'spec');
 /** Module (relative to the server directory) → the exports written from it, in this order. */
 export const SPEC = {
   'domains/platform/rateLimit.mjs': ['RATE_LIMIT_POLICY'],
+  'domains/platform/paging.mjs': ['PAGE_LIMITS'],
   'domains/platform/eventRegistry.mjs': ['EVENT_REGISTRY', 'EVENT_NAMES'],
   'domains/platform/eventAudience.mjs': ['EVENT_AUDIENCE'],
   'domains/platform/notificationPrefs.mjs': ['CATEGORIES', 'TYPE_CATEGORY'],
@@ -74,6 +75,12 @@ export const SPEC = {
     'DEV_ACTIVITY_NOTE',
   ],
   'domains/development/objectives.mjs': ['DRILL_RECORDING'],
+  'domains/development/hub/shared.mjs': [
+    'DEVELOPMENT_HUB_LIMITS',
+    'GOAL_LIBRARY',
+    'PLAN_TEMPLATES',
+    'FORBIDDEN_FIELD_NAMES',
+  ],
   'grassrootsJourney.mjs': ['PROGRAMME_TRACKS'],
   'domains/discovery/shared.mjs': [
     'POSITIONS',

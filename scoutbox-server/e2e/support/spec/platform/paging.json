@@ -1,0 +1,7 @@
+{
+  "$source": "domains/platform/paging.mjs",
+  "PAGE_LIMITS": {
+    "default": 50,
+    "max": 100
+  }
+}

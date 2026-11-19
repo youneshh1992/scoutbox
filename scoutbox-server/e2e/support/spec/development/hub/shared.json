@@ -1,0 +1,120 @@
+{
+  "$source": "domains/development/hub/shared.mjs",
+  "DEVELOPMENT_HUB_LIMITS": {
+    "activePlansPerOwner": 5,
+    "goalsPerPlan": 20,
+    "actionsPerGoal": 20,
+    "evidenceLinksPerTarget": 30,
+    "reviewsPageMax": 50,
+    "historyPageMax": 100,
+    "listPageMax": 50,
+    "titleMax": 120,
+    "descriptionMax": 1000,
+    "noteMax": 2000,
+    "summaryMax": 2000,
+    "blockNoteMax": 300
+  },
+  "GOAL_LIBRARY": [
+    {
+      "id": "first_touch",
+      "category": "technical",
+      "title": "First touch under pressure"
+    },
+    {
+      "id": "scanning",
+      "category": "match_understanding",
+      "title": "Scanning before receiving possession"
+    },
+    {
+      "id": "weak_foot_passing",
+      "category": "technical",
+      "title": "Weak-foot passing consistency"
+    },
+    {
+      "id": "defending_1v1",
+      "category": "tactical",
+      "title": "1v1 defending"
+    },
+    {
+      "id": "finishing",
+      "category": "technical",
+      "title": "Finishing from inside the box"
+    },
+    {
+      "id": "aerial_timing",
+      "category": "physical",
+      "title": "Aerial timing"
+    },
+    {
+      "id": "acceleration",
+      "category": "physical",
+      "title": "Acceleration mechanics"
+    }
+  ],
+  "PLAN_TEMPLATES": [
+    {
+      "id": "technical_development",
+      "title": "Technical Development",
+      "goals": [
+        {
+          "category": "technical"
+        },
+        {
+          "category": "technical"
+        }
+      ]
+    },
+    {
+      "id": "positional_development",
+      "title": "Positional Development",
+      "goals": [
+        {
+          "category": "position_specific"
+        },
+        {
+          "category": "tactical"
+        }
+      ]
+    },
+    {
+      "id": "trial_follow_up",
+      "title": "Trial Follow-up",
+      "goals": [
+        {
+          "category": "match_understanding"
+        },
+        {
+          "category": "technical"
+        }
+      ]
+    }
+  ],
+  "FORBIDDEN_FIELD_NAMES": [
+    "developmentScore",
+    "development_score",
+    "potentialScore",
+    "potential_score",
+    "improvementScore",
+    "improvement_score",
+    "readinessScore",
+    "readiness_score",
+    "growthScore",
+    "growth_score",
+    "academyScore",
+    "academy_score",
+    "playerProgressRating",
+    "player_progress_rating",
+    "playerRating",
+    "player_rating",
+    "developmentRating",
+    "developmentRanking",
+    "coachRanking",
+    "progressPercent",
+    "progress_percent",
+    "developmentPercent",
+    "percentDeveloped",
+    "ceiling",
+    "projectedCeiling",
+    "talentScore"
+  ]
+}
