@@ -18,7 +18,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
 | agents | 9 | 9 | 9 | 231 / 433 | 51 / 83 | 7 to go |
-| development | 3 | 2 | 2 | 62 / 0 | 0 / 0 | 1 to go |
+| development | 3 | 3 | 2 | 63 / 71 | 0 / 44 | 1 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
@@ -48,7 +48,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
 | `development/combine` | neutral | 2 → 0 | 92 | 72 | 20 |  | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
-| `development/hub` | not yet neutral | 17 → 17 | 180 | 180 |  |  |  |  |  | not untangled; not answered |
+| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added |  | 1 / 71 | 0 / 44 | not answered; 71 cases pending; 44 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
@@ -112,6 +112,8 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 
 | Battery | Checks | Why |
 |---|---|---|
+| `development/hub` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all seventy-six) |
+| `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
@@ -159,6 +161,10 @@ ported by hand to a gleeunit test.
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#duplicateTransactionOf` | 7 | args[].partiesOf is a function | to do |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
+| `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | to do |
+| `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | to do |
+| `development/hub` | `domains/development/hub/permissions.mjs#canAssign` | 5 | args[].staffById is a function | to do |
+| `development/hub` | `domains/development/hub/permissions.mjs#planAccess` | 22 | args[].orgCanSee is a function | to do |
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
@@ -325,6 +331,32 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
+| `development/hub` | `domains/development/boxcam/combineShared.mjs#isProductionValidCombine` | 2 |
+| `development/hub` | `domains/development/boxcam/combineShared.mjs#liveCombineState` | 1 |
+| `development/hub` | `domains/development/hub/evidence.mjs#summariseEvidence` | 1 |
+| `development/hub` | `domains/development/hub/permissions.mjs#reviewView` | 3 |
+| `development/hub` | `domains/development/hub/plan.mjs#buildTimeline` | 2 |
+| `development/hub` | `domains/development/hub/plan.mjs#planSummary` | 1 |
+| `development/hub` | `domains/development/hub/reviews.mjs#buildGoalSnapshots` | 1 |
+| `development/hub` | `domains/development/hub/reviews.mjs#pageReviews` | 3 |
+| `development/hub` | `domains/development/hub/shared.mjs#actionCounts` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#assertDevelopmentVocabulary` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#boundedText` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#completionPhrase` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#daysBetween` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#dueState` | 3 |
+| `development/hub` | `domains/development/hub/shared.mjs#parseDate` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#refusedClientFields` | 8 |
+| `development/hub` | `domains/development/hub/shared.mjs#reviewDueState` | 2 |
+| `development/hub` | `domains/development/hub/shared.mjs#scanCopyForForbiddenNames` | 3 |
+| `development/hub` | `domains/development/hub/shared.mjs#scanPayloadForForbiddenFields` | 1 |
+| `development/hub` | `domains/development/hub/shared.mjs#transitionAllowed` | 6 |
+| `development/hub` | `domains/development/hub/shared.mjs#utcDay` | 2 |
+| `development/hub` | `domains/development/hub/targets.mjs#bestValidAttempt` | 1 |
+| `development/hub` | `domains/development/hub/targets.mjs#compare` | 3 |
+| `development/hub` | `domains/development/hub/targets.mjs#evaluateTarget` | 7 |
+| `development/hub` | `domains/development/hub/targets.mjs#validateTarget` | 13 |
+| `development/hub` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |

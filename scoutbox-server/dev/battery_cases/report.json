@@ -1048,6 +1048,236 @@
     ]
   },
   {
+    "battery": "development/hub",
+    "functions": [
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#isProductionValidCombine",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/boxcam/combineShared.mjs#liveCombineState",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/evidence.mjs#recordBelongsToPlayer",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.trials.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/evidence.mjs#resolveEvidenceLink",
+        "calls": 16,
+        "cases": 0,
+        "handPort": {
+          "args[].reads.trials.byId is a function": 16
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/evidence.mjs#summariseEvidence",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/permissions.mjs#canAssign",
+        "calls": 5,
+        "cases": 0,
+        "handPort": {
+          "args[].staffById is a function": 5
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/permissions.mjs#planAccess",
+        "calls": 22,
+        "cases": 0,
+        "handPort": {
+          "args[].orgCanSee is a function": 22
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/permissions.mjs#reviewView",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/plan.mjs#buildTimeline",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/plan.mjs#planSummary",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/reviews.mjs#buildGoalSnapshots",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/reviews.mjs#pageReviews",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#actionCounts",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#assertDevelopmentVocabulary",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#boundedText",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#completionPhrase",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#daysBetween",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#dueState",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#parseDate",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#refusedClientFields",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#reviewDueState",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#scanCopyForForbiddenNames",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#scanPayloadForForbiddenFields",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#transitionAllowed",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#utcDay",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/targets.mjs#bestValidAttempt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/targets.mjs#compare",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/targets.mjs#evaluateTarget",
+        "calls": 9,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/targets.mjs#validateTarget",
+        "calls": 13,
+        "cases": 13,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#categoryOf",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "discovery/matchingAndWatchlists",
     "functions": [
       {

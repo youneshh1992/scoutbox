@@ -107,7 +107,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 50 of 53 neutral]
+### Untangling [in progress: 51 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -243,6 +243,12 @@ are for surprising facts or points that later work depends on, not implementatio
       checks against (frame limits, candidate protocols, refused fields, versions, the Combine-disabled reason) is
       the new `spec/development/boxcam/cv/` snapshot. Finalizing a session whose result is already stored answers
       503 too, rather than that result: no result can be stored here.
+   5. Untangle `development/hub` [**done**: its §1–§8 and one stray engine check are a rules suite (91 checks, with
+      their numbered cases), 71 rule cases and 44 hand-port calls pending]. The battery scans payloads for forbidden
+      field names itself, over the snapshotted `FORBIDDEN_FIELD_NAMES` (`spec/development/hub/shared`). Its §17 also
+      asks for a `production_cv` Combine attempt and expects the 422 `REAL_WORLD_VALIDATION_NOT_COMPLETED`, which the
+      Combine already answers.
+   6. Port the hub.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared
@@ -322,7 +328,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the remaining 3 batteries is about **1–2 sessions** in all, and can run ahead of the port. The real
+Untangling the remaining 2 batteries is about **1 session** in all, and can run ahead of the port. The real
 cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 
