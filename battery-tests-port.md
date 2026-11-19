@@ -319,7 +319,10 @@ are for surprising facts or points that later work depends on, not implementatio
          boot and with the periodic sweeps, as in TypeScript; not on `/admin/sweep`. A pack's evidence shows only its
          id and recording time on both servers (docs/known-issues.md).
       6. Group workspaces: groups, membership, programmes, grants and `/org/shared/:id`, the group report
-         (`groups/`, `repositories/groups.mjs`).
+         (`groups/`, `repositories/groups.mjs`). [**done**: `groups/groups` and `group_routes`; the battery's first
+         247 checks pass, through both group sections, and 57 requests answer as TypeScript's do, ids and
+         notifications included.] Each act re-checks the group inside its unit and refuses from the state it finds
+         there, so a lost race needs no rerun. The audit export's grants are real now.
       7. Budget scenarios: lines, exchange-rate assumptions, approval, actuals (`recruitment/budgets.mjs`).
       8. Backup, verify and restore into an empty directory, `/readyz`, and delivery work surviving a SIGKILL
          restart (`store.copyTo` in `wiring.mjs`). If this needs a new mechanism, propose it before building it.

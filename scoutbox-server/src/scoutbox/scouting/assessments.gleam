@@ -234,7 +234,7 @@ pub fn attribute_json(x: attribute_row.Row) -> Json {
   ])
 }
 
-fn rating_json(r: Rating) -> Json {
+pub fn rating_json(r: Rating) -> Json {
   let x = r.row
   json.object([
     #("attrId", json.string(x.attr_id)),

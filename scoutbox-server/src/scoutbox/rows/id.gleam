@@ -2147,6 +2147,70 @@ pub fn next_friendly(tx: Tx) -> Result(FriendlyId, Fail(e)) {
   ids.next(tx, "fr") |> result.map(FriendlyId)
 }
 
+/// An id of `groups`.
+pub opaque type GroupId {
+  GroupId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn group(text: String) -> GroupId {
+  GroupId(text)
+}
+
+pub fn group_to_string(id: GroupId) -> String {
+  let GroupId(text) = id
+  text
+}
+
+pub fn group_sql(id: GroupId) -> sqlight.Value {
+  sqlight.text(group_to_string(id))
+}
+
+pub fn group_json(id: GroupId) -> Json {
+  json.string(group_to_string(id))
+}
+
+pub fn group_decoder() -> decode.Decoder(GroupId) {
+  decode.map(decode.string, GroupId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_group(tx: Tx) -> Result(GroupId, Fail(e)) {
+  ids.next(tx, "grp") |> result.map(GroupId)
+}
+
+/// An id of `group_grants`.
+pub opaque type GroupGrantId {
+  GroupGrantId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn group_grant(text: String) -> GroupGrantId {
+  GroupGrantId(text)
+}
+
+pub fn group_grant_to_string(id: GroupGrantId) -> String {
+  let GroupGrantId(text) = id
+  text
+}
+
+pub fn group_grant_sql(id: GroupGrantId) -> sqlight.Value {
+  sqlight.text(group_grant_to_string(id))
+}
+
+pub fn group_grant_json(id: GroupGrantId) -> Json {
+  json.string(group_grant_to_string(id))
+}
+
+pub fn group_grant_decoder() -> decode.Decoder(GroupGrantId) {
+  decode.map(decode.string, GroupGrantId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_group_grant(tx: Tx) -> Result(GroupGrantId, Fail(e)) {
+  ids.next(tx, "gnt") |> result.map(GroupGrantId)
+}
+
 /// An id of `guardians`.
 pub opaque type GuardianId {
   GuardianId(String)
@@ -3515,6 +3579,38 @@ pub fn profile_event_decoder() -> decode.Decoder(ProfileEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_profile_event(tx: Tx) -> Result(ProfileEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(ProfileEventId)
+}
+
+/// An id of `group_programmes`.
+pub opaque type ProgrammeId {
+  ProgrammeId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn programme(text: String) -> ProgrammeId {
+  ProgrammeId(text)
+}
+
+pub fn programme_to_string(id: ProgrammeId) -> String {
+  let ProgrammeId(text) = id
+  text
+}
+
+pub fn programme_sql(id: ProgrammeId) -> sqlight.Value {
+  sqlight.text(programme_to_string(id))
+}
+
+pub fn programme_json(id: ProgrammeId) -> Json {
+  json.string(programme_to_string(id))
+}
+
+pub fn programme_decoder() -> decode.Decoder(ProgrammeId) {
+  decode.map(decode.string, ProgrammeId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_programme(tx: Tx) -> Result(ProgrammeId, Fail(e)) {
+  ids.next(tx, "pgm") |> result.map(ProgrammeId)
 }
 
 /// An id of `prospects`.

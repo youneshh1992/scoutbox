@@ -638,21 +638,7 @@ pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
     #("assignments", json.array(assignments, assignment_json)),
     #("tasks", json.array(tasks, task_json)),
     #("approvals", json.array(approvals, approval_json)),
-    #("decision", case r.decision_at {
-      None -> json.null()
-      Some(at) ->
-        json.object([
-          #("outcome", json.nullable(r.decision_outcome, case_outcome.to_json)),
-          #("reasons", json.nullable(r.decision_reasons, json.string)),
-          #("byUserId", json.nullable(r.decision_by_user_id, id.org_user_json)),
-          #("byName", json.nullable(r.decision_by_name, json.string)),
-          #(
-            "approvedBy",
-            json.nullable(r.decision_approved_by_name, json.string),
-          ),
-          #("at", json.int(at)),
-        ])
-    }),
+    #("decision", decision_json(r)),
     #(
       "links",
       json.object([
@@ -669,6 +655,22 @@ pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
     #("budget", budget),
     #("subjectRemovedAt", json.nullable(r.subject_removed_at, json.int)),
   ])
+}
+
+/// The case's decision as its record shows it, or null before one is made.
+pub fn decision_json(r: row.Row) -> Json {
+  case r.decision_at {
+    None -> json.null()
+    Some(at) ->
+      json.object([
+        #("outcome", json.nullable(r.decision_outcome, case_outcome.to_json)),
+        #("reasons", json.nullable(r.decision_reasons, json.string)),
+        #("byUserId", json.nullable(r.decision_by_user_id, id.org_user_json)),
+        #("byName", json.nullable(r.decision_by_name, json.string)),
+        #("approvedBy", json.nullable(r.decision_approved_by_name, json.string)),
+        #("at", json.int(at)),
+      ])
+  }
 }
 
 // ------------------------------------------------------------------------------------------------------ routes

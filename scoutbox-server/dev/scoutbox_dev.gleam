@@ -476,6 +476,13 @@ pub const tables = [
   "fixtures",
   "follow_ups",
   "friendlies",
+  "group_grant_recipients",
+  "group_grants",
+  "group_members",
+  "group_pending_invites",
+  "group_programmes",
+  "group_shared_templates",
+  "groups",
   "guardian_children",
   "guardians",
   "identity_reviews",
@@ -868,6 +875,9 @@ pub const ided = [
   Ided("dynamic_watchlists", "Watchlist", Some("wl")),
   Ided("watchlist_membership_events", "WatchlistEvent", Some("wlh")),
   Ided("watchlist_history", "WatchlistLifecycleEvent", Some("aud")),
+  Ided("groups", "Group", Some("grp")),
+  Ided("group_programmes", "Programme", Some("pgm")),
+  Ided("group_grants", "GroupGrant", Some("gnt")),
 ]
 
 /// Id columns no foreign key types. See `codegen.IdColumn`.
@@ -1383,6 +1393,14 @@ pub const id_columns = [
   Untyped(
     "assessment_template_attributes.template_id",
     "a template's id, shared by its versions",
+  ),
+  Untyped(
+    "group_shared_templates.template_id",
+    "a template's id, shared by its versions",
+  ),
+  Untyped(
+    "group_grants.resource_id",
+    "a case, an assessment or '*' (the whole shortlist), as resource_kind says",
   ),
   RefersTo("assessment_rating_refs.assessment_id", "assessments"),
   Untyped("attr_id", "an attribute's id within its template version"),

@@ -1,13 +1,12 @@
 //// The tenant audit export (domains/enterprise/enterprise.mjs `/audit/export`): an organisation's own records for
 //// its auditors, for a lead only. The export is itself recorded.
-////
-//// Not ported yet: the access grants (groups), which keep no records on this server, so both lists are empty.
 
 import gleam/json
 import gleam/option.{Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/enterprise/support
+import scoutbox/groups/groups
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/integrations/imports
 import scoutbox/platform/clock
@@ -37,6 +36,11 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         store.reading(tx),
         org.org.id,
       ))
+      use given <- result.try(groups.all_given_by(store.reading(tx), org.org.id))
+      use received <- result.try(groups.all_received_by(
+        store.reading(tx),
+        org.org.id,
+      ))
       use support_access <- result.try(support.grants_for_org_json(
         store.reading(tx),
         org.org.id,
@@ -58,8 +62,8 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         #("ledger", json.array(entries, ledger.view)),
         #("caseHistories", case_histories),
         #("importHistories", import_histories),
-        #("grantsGiven", json.array([], json.string)),
-        #("grantsReceived", json.array([], json.string)),
+        #("grantsGiven", json.array(given, groups.grant_json)),
+        #("grantsReceived", json.array(received, groups.grant_json)),
         #("supportAccess", support_access),
       ])
     })

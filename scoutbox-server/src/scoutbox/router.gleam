@@ -45,6 +45,7 @@ import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/security_routes
 import scoutbox/enterprise/sso
 import scoutbox/enterprise/support
+import scoutbox/groups/group_routes
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/club_directory
 import scoutbox/identity/erasure
@@ -946,6 +947,45 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["support", tid, "approve-access"] ->
           only(req, Post, fn() {
             support.approve_access(ctx, req, org, id.ticket(tid))
+          })
+        ["groups"] -> only(req, Get, fn() { group_routes.org_list(ctx, org) })
+        ["groups", gid, "invite"] ->
+          only(req, Post, fn() {
+            group_routes.invite(ctx, req, org, id.group(gid))
+          })
+        ["groups", gid, "accept"] ->
+          only(req, Post, fn() { group_routes.accept(ctx, org, id.group(gid)) })
+        ["groups", gid, "leave"] ->
+          only(req, Post, fn() { group_routes.leave(ctx, org, id.group(gid)) })
+        ["groups", gid, "templates"] ->
+          only(req, Post, fn() {
+            group_routes.share_template(ctx, req, org, id.group(gid))
+          })
+        ["groups", gid, "programmes"] ->
+          only(req, Post, fn() {
+            group_routes.add_programme(ctx, req, org, id.group(gid))
+          })
+        ["groups", gid, "grants", "preview"] ->
+          only(req, Post, fn() {
+            group_routes.preview(ctx, req, org, id.group(gid))
+          })
+        ["groups", gid, "grants"] ->
+          only(req, Post, fn() {
+            group_routes.create_grant(ctx, req, org, id.group(gid))
+          })
+        ["groups", gid, "report"] ->
+          only(req, Get, fn() { group_routes.report(ctx, org, id.group(gid)) })
+        ["grants"] ->
+          only(req, Get, fn() { group_routes.grants(ctx, req, org) })
+        ["grants", "counts"] ->
+          only(req, Get, fn() { group_routes.grant_counts(ctx, org) })
+        ["grants", gid, "revoke"] ->
+          only(req, Post, fn() {
+            group_routes.revoke(ctx, org, id.group_grant(gid))
+          })
+        ["shared", gid] ->
+          only(req, Get, fn() {
+            group_routes.shared(ctx, org, id.group_grant(gid))
           })
         ["squad"] ->
           case req.method {
@@ -2272,6 +2312,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
+        ["groups"] ->
+          case req.method {
+            Get -> group_routes.admin_page(ctx, req)
+            Post -> group_routes.admin_create(ctx, req)
+            _ -> not_found()
+          }
         ["support"] -> only(req, Get, fn() { support.admin_page(ctx, req) })
         ["support", tid, "reply"] ->
           only(req, Post, fn() { support.reply(ctx, req, id.ticket(tid)) })
