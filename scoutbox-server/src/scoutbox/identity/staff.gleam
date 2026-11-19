@@ -65,6 +65,8 @@ pub type StaffError {
   NotFound
   NameTaken
   EmailTaken
+  /// Another account of the organisation is linked to this sign-in subject.
+  SsoTaken
   AlreadyRemoved
   NotRemoved
   MfaAlreadyEnabled
@@ -153,6 +155,22 @@ pub fn active_by_email(
     "WHERE org_id = ? AND lower(email) = lower(?) AND removed_at IS NULL",
     [id.org_sql(org_id), sqlight.text(email)],
   )
+}
+
+/// The account linked to this identity-provider subject in the organisation (removed accounts included).
+pub fn by_sso_subject(
+  read: Read,
+  org_id: id.OrgId,
+  subject: String,
+) -> Result(Option(Staff), Fail(e)) {
+  case subject {
+    "" -> Ok(None)
+    _ ->
+      first(read, "WHERE org_id = ? AND sso_subject = ?", [
+        id.org_sql(org_id),
+        sqlight.text(subject),
+      ])
+  }
 }
 
 /// The TOTP secret, for the code checks only.
@@ -321,6 +339,29 @@ pub fn restore(
         id.org_user_sql(id),
       ],
     ),
+  )
+  stored(tx, id)
+}
+
+/// Links the account to an identity-provider subject. Refuses one another account of the organisation holds.
+pub fn link_sso(
+  tx: Tx,
+  id: id.OrgUserId,
+  subject: String,
+) -> Result(Staff, Fail(StaffError)) {
+  use before <- result.try(stored(tx, id))
+  use clash <- result.try(store.one(
+    store.reading(tx),
+    "SELECT 1 FROM org_users WHERE org_id = ? AND sso_subject = ? AND id <> ?",
+    [id.org_sql(before.org_id), sqlight.text(subject), id.org_user_sql(id)],
+    decode.success(Nil),
+  ))
+  use <- refuse_when(clash == Ok(Nil), SsoTaken)
+  use _ <- result.try(
+    store.run(tx, "UPDATE org_users SET sso_subject = ? WHERE id = ?", [
+      sqlight.text(subject),
+      id.org_user_sql(id),
+    ]),
   )
   stored(tx, id)
 }

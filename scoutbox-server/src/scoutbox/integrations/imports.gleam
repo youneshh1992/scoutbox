@@ -1013,6 +1013,23 @@ pub fn page(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   }
 }
 
+/// The organisation's batches with these ids, oldest first, without their rows: what a support ticket references.
+pub fn for_org_by_ids_json(
+  read: Read,
+  org_id: id.OrgId,
+  batch_ids: List(String),
+) -> Result(Json, Fail(e)) {
+  listed(
+    read,
+    "WHERE b.org_id = ? AND b.id IN (SELECT value FROM json_each(?)) ORDER BY b.rowid",
+    [
+      id.org_sql(org_id),
+      sqlight.text(json.to_string(json.array(batch_ids, json.string))),
+    ],
+  )
+  |> result.map(json.array(_, listed_json))
+}
+
 /// `GET /admin/imports`: the newest batches of every organisation.
 pub fn admin_recent(ctx: Ctx) -> Response {
   case

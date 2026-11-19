@@ -1,18 +1,19 @@
 //// The tenant audit export (domains/enterprise/enterprise.mjs `/audit/export`): an organisation's own records for
 //// its auditors, for a lead only. The export is itself recorded.
 ////
-//// Not ported yet: the case histories (recruitment), access grants (groups) and support access (enterprise). Those
-//// domains keep no records on this server, so each is empty.
+//// Not ported yet: the access grants (groups), which keep no records on this server, so both lists are empty.
 
 import gleam/json
 import gleam/option.{Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/enterprise/support
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/integrations/imports
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store
+import scoutbox/recruitment/case_workspace
 import scoutbox/rows/id
 import scoutbox/rows/ops_events as ops_row
 import scoutbox/safety/ledger
@@ -32,6 +33,14 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         store.reading(tx),
         org.org.id,
       ))
+      use case_histories <- result.try(case_workspace.histories_json(
+        store.reading(tx),
+        org.org.id,
+      ))
+      use support_access <- result.try(support.grants_for_org_json(
+        store.reading(tx),
+        org.org.id,
+      ))
       use id <- result.try(id.next_ops_event(tx))
       use _ <- result.map(ops_row.insert(
         tx,
@@ -47,11 +56,11 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
         #("exportedAt", json.int(now)),
         #("exportedBy", json.string(org.user.name)),
         #("ledger", json.array(entries, ledger.view)),
-        #("caseHistories", json.array([], json.string)),
+        #("caseHistories", case_histories),
         #("importHistories", import_histories),
         #("grantsGiven", json.array([], json.string)),
         #("grantsReceived", json.array([], json.string)),
-        #("supportAccess", json.array([], json.string)),
+        #("supportAccess", support_access),
       ])
     })
   case exported {

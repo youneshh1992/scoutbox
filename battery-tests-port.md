@@ -297,9 +297,13 @@ are for surprising facts or points that later work depends on, not implementatio
       2. Enterprise: onboarding, `/org/sessions` and its revoke, `/org/security`, SSO against the local test IdP
          (`/testidp/authorize`), paged invites, support tickets with time-limited access grants and their access
          log, and the metrics' scope note (`enterprise/enterprise.mjs`, `repositories/enterprise.mjs`). MFA,
-         invites, the audit export and support's create and reply are in already.
+         invites, the audit export and support's create and reply are in already. [**done**, except one check: the
+         battery's first 130 checks pass, through the delivery centre, and 113 requests answer as TypeScript's do,
+         ids included. Left: `metrics carry counters`, which needs the process's request counters
+         (`met.requests > 0`), a new mechanism to agree first.] The audit export's case histories and support
+         access are real now, and so is onboarding's coverage-plan task.
       3. The delivery centre's flows over support replies, callbacks and injected failures (`messaging/delivery.mjs`).
-         Mostly there: `platform/delivery` passes.
+         [Its checks already pass after slice 2.]
       4. Suitability: a player's preferences, an opportunity's requirements, the suitability view and sharing it
          with a club (`scouting/suitability.mjs`).
       5. Transitions: the club's list and pack view, the admin level review, and the legacy representation routes

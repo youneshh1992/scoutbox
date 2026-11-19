@@ -1,5 +1,6 @@
 //// Staff invitations: a lead invites by e-mail, and the emailed code is the proof of invitation.
 
+import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -15,6 +16,8 @@ import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/pages
+import scoutbox/platform/paging
 import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/rows/id
@@ -115,6 +118,49 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         Error(failure) -> http.internal(failure)
       }
     }
+  }
+}
+
+/// `GET /org/invites`: the organisation's invites, newest first by cursor.
+pub fn page(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
+  use page <- pages.strict(req, [paging.IntKind])
+  case store.read(ctx.store, invites.page(_, access.org.id, page)) {
+    Ok(#(items, next)) -> pages.respond(items, next, invites.view)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `POST /org/invites/:id/revoke`: a pending invite's code stops working; any other invite is answered as it is.
+pub fn revoke(
+  ctx: Ctx,
+  req: Request,
+  access: OrgAccess,
+  invite_id: id.OrgInviteId,
+) -> Response {
+  use <- access.require_lead(access)
+  use _ <- http.body(req, input.nothing(), [])
+  let outcome =
+    store.unit(ctx.store, fn(tx) {
+      use found <- result.try(invites.by_id(store.reading(tx), invite_id))
+      case found {
+        Some(invite) if invite.org_id == access.org.id ->
+          invites.revoke(tx, invite.id, clock.now_ms())
+        _ -> store.refuse(http.error(404, "INVITE_NOT_FOUND"))
+      }
+    })
+  case outcome {
+    Ok(invite) ->
+      http.json(200, json.object([#("invite", invites.view(invite))]))
+    Error(store.Refused(response)) -> response
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /org/onboarding`: the checklist with each task's live state, and help for the member's role.
+pub fn onboarding_view(ctx: Ctx, access: OrgAccess) -> Response {
+  case store.read(ctx.store, onboarding(_, access.org, access.user)) {
+    Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
   }
 }
 
@@ -309,7 +355,13 @@ fn onboarding(
   user: Staff,
 ) -> Result(Json, store.Fail(e)) {
   use members <- result.try(staff.for_org(read, org.id, active_only: True))
-  use imported <- result.map(imports.has_imported(read, org.id))
+  use imported <- result.try(imports.has_imported(read, org.id))
+  use plans <- result.map(store.one(
+    read,
+    "SELECT COUNT(*) FROM coverage_plans WHERE org_id = ?",
+    [id.org_sql(org.id)],
+    decode.at([0], decode.int),
+  ))
   let leads = list.filter(members, access.is_lead)
   let task = fn(id, label, done, help) {
     #(
@@ -358,11 +410,10 @@ fn onboarding(
       imported,
       "CSV import with dry-run preview, or add prospects by hand.",
     ),
-    // Not ported yet: coverage plans (insight) are not kept here, so none can have been set up.
     task(
       "coverage_plan",
       "Set up a coverage plan",
-      False,
+      plans != Ok(0),
       "Fixtures, assignments and observation tracking live under Coverage.",
     ),
   ]

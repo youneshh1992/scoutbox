@@ -4562,6 +4562,102 @@ pub fn next_squad_invite(tx: Tx) -> Result(SquadInviteId, Fail(e)) {
   ids.next(tx, "sqi") |> result.map(SquadInviteId)
 }
 
+/// An id of `sso_configs`.
+pub opaque type SsoConfigId {
+  SsoConfigId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn sso_config(text: String) -> SsoConfigId {
+  SsoConfigId(text)
+}
+
+pub fn sso_config_to_string(id: SsoConfigId) -> String {
+  let SsoConfigId(text) = id
+  text
+}
+
+pub fn sso_config_sql(id: SsoConfigId) -> sqlight.Value {
+  sqlight.text(sso_config_to_string(id))
+}
+
+pub fn sso_config_json(id: SsoConfigId) -> Json {
+  json.string(sso_config_to_string(id))
+}
+
+pub fn sso_config_decoder() -> decode.Decoder(SsoConfigId) {
+  decode.map(decode.string, SsoConfigId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_sso_config(tx: Tx) -> Result(SsoConfigId, Fail(e)) {
+  ids.next(tx, "sso") |> result.map(SsoConfigId)
+}
+
+/// An id of `sso_states`.
+pub opaque type SsoStateId {
+  SsoStateId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn sso_state(text: String) -> SsoStateId {
+  SsoStateId(text)
+}
+
+pub fn sso_state_to_string(id: SsoStateId) -> String {
+  let SsoStateId(text) = id
+  text
+}
+
+pub fn sso_state_sql(id: SsoStateId) -> sqlight.Value {
+  sqlight.text(sso_state_to_string(id))
+}
+
+pub fn sso_state_json(id: SsoStateId) -> Json {
+  json.string(sso_state_to_string(id))
+}
+
+pub fn sso_state_decoder() -> decode.Decoder(SsoStateId) {
+  decode.map(decode.string, SsoStateId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_sso_state(tx: Tx) -> Result(SsoStateId, Fail(e)) {
+  ids.next(tx, "sst") |> result.map(SsoStateId)
+}
+
+/// An id of `support_access_grants`.
+pub opaque type SupportGrantId {
+  SupportGrantId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn support_grant(text: String) -> SupportGrantId {
+  SupportGrantId(text)
+}
+
+pub fn support_grant_to_string(id: SupportGrantId) -> String {
+  let SupportGrantId(text) = id
+  text
+}
+
+pub fn support_grant_sql(id: SupportGrantId) -> sqlight.Value {
+  sqlight.text(support_grant_to_string(id))
+}
+
+pub fn support_grant_json(id: SupportGrantId) -> Json {
+  json.string(support_grant_to_string(id))
+}
+
+pub fn support_grant_decoder() -> decode.Decoder(SupportGrantId) {
+  decode.map(decode.string, SupportGrantId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_support_grant(tx: Tx) -> Result(SupportGrantId, Fail(e)) {
+  ids.next(tx, "sag") |> result.map(SupportGrantId)
+}
+
 /// An id of `case_tasks`.
 pub opaque type TaskId {
   TaskId(String)

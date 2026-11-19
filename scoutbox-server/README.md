@@ -89,8 +89,8 @@ Every route below is exercised by a battery, except where marked.
 | Area | Routes |
 |---|---|
 | Health | `GET /health` |
-| Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login` (a password-protected guardian by id or e-mail, checked before the unit); `/auth/sso/start` and `/callback` refuse in production (development: not ported) |
-| Staff | `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
+| Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login` (a password-protected guardian by id or e-mail, checked before the unit); `/auth/sso/start` and `/callback` against the local test identity provider (`GET /testidp/authorize`, development only; both refuse in production) |
+| Staff | `GET /org/staff`, `POST /org/staff/:id/remove`, `GET`/`POST /org/invites`, `POST /org/invites/:id/revoke`, `GET /org/onboarding`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `GET /org/sessions`, `POST /org/sessions/revoke`, `PUT /org/security`, `GET`/`PUT /org/sso`, `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Case workspace | `GET /org/cases` (newest first, by cursor, with the pipeline's stages), `POST /org/cases` (a plain case), `GET /org/cases/:id` (a restricted case only to its owner, assignees and leads), `/org/cases/:id/assign` (by the owner or a lead), `/org/cases/:id/tasks` and `…/tasks/:tid/complete`, `/org/cases/:id/stage` (refused on a case with a Room), `/org/cases/:id/decision` (a non-lead's sign waits for a lead's approval), `…/approvals/:aid` (a lead's answer), `/org/cases/:id/link` (a request, trial or signing of this club and player); each answers the whole case record |
 | Matching | `GET /org/matching/vocabulary`, `POST /org/matching` (by cursor; a brief's criteria or the club's own) |
@@ -123,16 +123,16 @@ Every route below is exercised by a battery, except where marked.
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `DELETE /guardian/children/:id`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications` (each row with its `target`: the Room tab, the agent's client, or the recipient's request, Trial, Offer or current signing package it leads to); `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
-| Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |
+| Integrations | `GET`/`POST /org/webhooks` (and their delivery, signed, by the minute sweep), `POST …/:id/rotate`, `…/:id/deactivate`, `GET …/:id/deliveries`; `GET`/`POST /org/imports`, `GET …/template`, `…/:id`, `POST …/:id/commit`, `…/:id/reverse`, `GET /admin/imports`; `GET /org/prospects`, `/org/identity-reviews`, `POST …/:id/resolve`; `GET`/`POST /org/api-keys`, `POST …/:id/revoke`, `GET /api/v1/export/prospects`, `/shortlist`; `GET /org/connectors` |
 | Media | `GET /media/:id`: every `/media/<id>` value in a response leaves signed for the requesting session (`media/links`), and a fetch checks that session's standing each time |
-| Support | `POST /org/support`, `/admin/support/:id/reply` |
+| Support | `GET`/`POST /org/support`, `POST /org/support/:id/approve-access`; `GET /admin/support`, `POST /admin/support/:id/reply`, `…/:id/request-access`, `GET …/:id/org-records` |
 | Transitions | `GET /org/transitions`; `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
 | Verification | `/org/verification/email` (requesting a code; not confirming it), `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
 The largest: the similarity engine ("more like this"),
-the insight sweep, club setup, staff SSO, the Expo push transport, process metrics, and password sign-in
+the insight sweep, club setup, the Expo push transport, process metrics, and password sign-in
 for players (a new player account stores a hash no password matches). `dev/shape_diff.mjs` lists where responses differ because of them.
 
 ## Known differences from the TypeScript server

@@ -673,6 +673,57 @@ pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
 
 // ------------------------------------------------------------------------------------------------------ routes
 
+/// The organisation's case with this id, as `GET /org/cases/:id` serves it: what support reads under an access
+/// grant, so no restriction applies.
+pub fn record_of_org(
+  read: Read,
+  org_id: id.OrgId,
+  case_id: String,
+) -> Result(Option(Json), Fail(e)) {
+  use found <- result.try(store.one(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM recruitment_cases WHERE id = ? AND org_id = ?",
+    [id.recruitment_case_sql(id.recruitment_case(case_id)), id.org_sql(org_id)],
+    row.decoder(),
+  ))
+  case found {
+    Error(Nil) -> Ok(None)
+    Ok(r) -> record_json(read, r) |> result.map(Some)
+  }
+}
+
+/// Every case of the organisation, Rooms included, oldest first, each with its history: the audit export's.
+pub fn histories_json(read: Read, org_id: id.OrgId) -> Result(Json, Fail(e)) {
+  use rows <- result.try(store.query(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM recruitment_cases WHERE org_id = ? ORDER BY rowid",
+    [id.org_sql(org_id)],
+    row.decoder(),
+  ))
+  use items <- result.map(
+    list.try_map(rows, fn(r) {
+      use history <- result.map(of_case(
+        read,
+        history_row.columns,
+        history_row.table,
+        r.id,
+        "position",
+        history_row.decoder(),
+      ))
+      json.object([
+        #("id", id.recruitment_case_json(r.id)),
+        #("playerId", id.player_json(r.player_id)),
+        #("history", json.array(history, history_json)),
+      ])
+    }),
+  )
+  json.preprocessed_array(items)
+}
+
 fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   case r {
     Ok(a) -> Ok(a)

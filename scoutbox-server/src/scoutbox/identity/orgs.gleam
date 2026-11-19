@@ -180,6 +180,18 @@ pub fn suspend(tx: Tx, org_id: id.OrgId) -> Result(Nil, Fail(e)) {
   ])
 }
 
+/// Whether leads must have MFA to sign in, as stored.
+pub fn require_mfa_for_leads(
+  tx: Tx,
+  org_id: id.OrgId,
+  required: Bool,
+) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE orgs SET mfa_required_for_leads = ? WHERE id = ?", [
+    sqlight.bool(required),
+    id.org_sql(org_id),
+  ])
+}
+
 /// `hash` is `passwords.hash`'s stored form.
 pub fn set_password_hash(
   tx: Tx,

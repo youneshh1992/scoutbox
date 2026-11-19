@@ -42,6 +42,8 @@ import scoutbox/discovery/second_look
 import scoutbox/discovery/watchlists
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/org_audit
+import scoutbox/enterprise/security_routes
+import scoutbox/enterprise/sso
 import scoutbox/enterprise/support
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/club_directory
@@ -163,6 +165,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       only(req, Post, fn() { feed_routes.register_device(ctx, req) })
     ["callbacks", "delivery"] ->
       only(req, Post, fn() { delivery.callback(ctx, req) })
+    // The test identity provider exists only where dev logins do.
+    ["testidp", "authorize"] if ctx.config.dev_logins ->
+      only(req, Get, fn() { sso.authorize(ctx, req) })
     ["api", "v1", "export", "prospects"] ->
       only(req, Get, fn() { api_keys.export_prospects(ctx, req) })
     ["api", "v1", "export", "shortlist"] ->
@@ -205,8 +210,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { guardian_routes.signup(ctx, req) })
         ["guardian", "login"] ->
           only(req, Post, fn() { guardian_routes.login(ctx, req) })
-        ["sso", "start"] -> only(req, Post, fn() { sso(ctx) })
-        ["sso", "callback"] -> only(req, Post, fn() { sso(ctx) })
+        ["sso", "start"] -> only(req, Post, fn() { sso.start(ctx, req) })
+        ["sso", "callback"] -> only(req, Post, fn() { sso.callback(ctx, req) })
         _ -> not_found()
       }
     }
@@ -486,7 +491,29 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             staff_routes.remove(ctx, org, id.org_user(user_id))
           })
         ["invites"] ->
-          only(req, Post, fn() { invite_routes.create(ctx, req, org) })
+          case req.method {
+            Get -> invite_routes.page(ctx, req, org)
+            Post -> invite_routes.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["invites", iid, "revoke"] ->
+          only(req, Post, fn() {
+            invite_routes.revoke(ctx, req, org, id.org_invite(iid))
+          })
+        ["onboarding"] ->
+          only(req, Get, fn() { invite_routes.onboarding_view(ctx, org) })
+        ["sessions"] ->
+          only(req, Get, fn() { security_routes.list(ctx, req, org) })
+        ["sessions", "revoke"] ->
+          only(req, Post, fn() { security_routes.revoke(ctx, req, org) })
+        ["security"] ->
+          only(req, Put, fn() { security_routes.put(ctx, req, org) })
+        ["sso"] ->
+          case req.method {
+            Get -> sso.view(ctx, org)
+            Put -> sso.configure(ctx, req, org)
+            _ -> not_found()
+          }
         ["mfa", "setup"] ->
           only(req, Post, fn() { mfa_routes.setup(ctx, req, org) })
         ["mfa", "verify"] ->
@@ -903,7 +930,16 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["api-keys", kid, "revoke"] ->
           only(req, Post, fn() { api_keys.revoke(ctx, req, org, kid) })
         ["connectors"] -> only(req, Get, fn() { api_keys.connector_list(ctx) })
-        ["support"] -> only(req, Post, fn() { support.create(ctx, req, org) })
+        ["support"] ->
+          case req.method {
+            Get -> support.org_page(ctx, req, org)
+            Post -> support.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["support", tid, "approve-access"] ->
+          only(req, Post, fn() {
+            support.approve_access(ctx, req, org, id.ticket(tid))
+          })
         ["squad"] ->
           case req.method {
             Get -> grassroots_club.squad(ctx, org)
@@ -2142,8 +2178,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
-        ["support", id, "reply"] ->
-          only(req, Post, fn() { support.reply(ctx, req, id.ticket(id)) })
+        ["support"] -> only(req, Get, fn() { support.admin_page(ctx, req) })
+        ["support", tid, "reply"] ->
+          only(req, Post, fn() { support.reply(ctx, req, id.ticket(tid)) })
+        ["support", tid, "request-access"] ->
+          only(req, Post, fn() {
+            support.request_access(ctx, req, id.ticket(tid))
+          })
+        ["support", tid, "org-records"] ->
+          only(req, Get, fn() { support.org_records(ctx, id.ticket(tid)) })
         ["delivery"] -> only(req, Get, fn() { delivery.admin_view(ctx) })
         ["delivery", "sweep"] ->
           only(req, Post, fn() { delivery.admin_sweep(ctx, req) })
@@ -2672,31 +2715,6 @@ fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
         ]),
       )
   }
-}
-
-/// `POST /auth/sso/start` and `/callback`. The only identity provider is the local test one, so outside
-/// development both refuse before reading anything. Not ported yet: the test provider and the relying party behind
-/// it (enterprise SSO).
-fn sso(ctx: Ctx) -> Response {
-  case ctx.config.dev_logins {
-    False ->
-      contract.error_message(
-        403,
-        "SSO_PROVIDER_UNAVAILABLE",
-        "Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.",
-      )
-    True -> not_ported("Staff SSO is")
-  }
-}
-
-/// `POST /org/tactical`: a lead's tactical setup. Not ported yet: the setup itself (club setup, scouting), and
-/// `GET /org/tactical`. Only the lead gate is here.
-fn not_ported(subject: String) -> Response {
-  contract.error_message(
-    501,
-    "NOT_PORTED",
-    subject <> " not supported by this server yet.",
-  )
 }
 
 /// `POST /auth/logout`: ends the presented session, if there is one.

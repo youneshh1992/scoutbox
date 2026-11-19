@@ -5,6 +5,8 @@
 //// (`config.session_ttl_ms`), so a shorter lifetime also expires sessions minted under a longer one. Expired rows
 //// stay until the next mint prunes them: a read never writes.
 
+import gleam/dynamic/decode
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/platform/secrets
@@ -54,6 +56,17 @@ pub fn create(
   now: Int,
   ttl_ms: Int,
 ) -> Result(String, Fail(e)) {
+  create_via(tx, holder, now, ttl_ms, None)
+}
+
+/// Mints a session signed in another way than a password (`Some(row.Sso)`), and returns its token.
+pub fn create_via(
+  tx: Tx,
+  holder: Holder,
+  now: Int,
+  ttl_ms: Int,
+  via: Option(row.Via),
+) -> Result(String, Fail(e)) {
   let token = secrets.random_hex(24)
   let #(kind, ref_id, user_id) = case holder {
     Player(p) -> #(row.Player, id.player_to_string(p), None)
@@ -80,7 +93,7 @@ pub fn create(
       kind:,
       ref_id:,
       org_user_id: user_id,
-      via: None,
+      via:,
       created_at: now,
       expires_at: now + ttl_ms,
     ),
@@ -125,6 +138,41 @@ fn live(found: Result(row.Row, Nil), now: Int, ttl_ms: Int) -> Option(Session) {
     Ok(s) if s.created_at > 0 && now - s.created_at < ttl_ms -> Some(s)
     _ -> None
   }
+}
+
+/// A staff member's sessions, oldest first, expired ones not yet pruned included (`GET /org/sessions`).
+pub fn of_org_user(
+  read: Read,
+  user_id: id.OrgUserId,
+) -> Result(List(row.Row), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM sessions WHERE kind = 'org' AND org_user_id = ? ORDER BY created_at, sid",
+    [id.org_user_sql(user_id)],
+    row.decoder(),
+  )
+}
+
+/// Whether `token` is the session's own.
+pub fn is_token_of(session: row.Row, token: String) -> Bool {
+  token != "" && session.token_hash == secrets.sha256_hex(token)
+}
+
+/// Ends one of a staff member's own sessions by sid, and says how many ended (0 or 1).
+pub fn revoke_own(
+  tx: Tx,
+  user_id: id.OrgUserId,
+  sid: String,
+) -> Result(Int, Fail(e)) {
+  store.write(
+    tx,
+    "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ? AND sid = ? RETURNING sid",
+    [id.org_user_sql(user_id), sqlight.text(sid)],
+    decode.at([0], decode.string),
+  )
+  |> result.map(list.length)
 }
 
 /// Ends one session: a sign-out. Its event-stream tickets and media links stop working with it.
