@@ -1547,6 +1547,198 @@ pub fn next_deferral(tx: Tx) -> Result(DeferralId, Fail(e)) {
   ids.next(tx, "rvl") |> result.map(DeferralId)
 }
 
+/// An id of `development_actions`.
+pub opaque type DevActionId {
+  DevActionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_action(text: String) -> DevActionId {
+  DevActionId(text)
+}
+
+pub fn dev_action_to_string(id: DevActionId) -> String {
+  let DevActionId(text) = id
+  text
+}
+
+pub fn dev_action_sql(id: DevActionId) -> sqlight.Value {
+  sqlight.text(dev_action_to_string(id))
+}
+
+pub fn dev_action_json(id: DevActionId) -> Json {
+  json.string(dev_action_to_string(id))
+}
+
+pub fn dev_action_decoder() -> decode.Decoder(DevActionId) {
+  decode.map(decode.string, DevActionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_action(tx: Tx) -> Result(DevActionId, Fail(e)) {
+  ids.next(tx, "devact") |> result.map(DevActionId)
+}
+
+/// An id of `development_history`.
+pub opaque type DevEventId {
+  DevEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_event(text: String) -> DevEventId {
+  DevEventId(text)
+}
+
+pub fn dev_event_to_string(id: DevEventId) -> String {
+  let DevEventId(text) = id
+  text
+}
+
+pub fn dev_event_sql(id: DevEventId) -> sqlight.Value {
+  sqlight.text(dev_event_to_string(id))
+}
+
+pub fn dev_event_json(id: DevEventId) -> Json {
+  json.string(dev_event_to_string(id))
+}
+
+pub fn dev_event_decoder() -> decode.Decoder(DevEventId) {
+  decode.map(decode.string, DevEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_event(tx: Tx) -> Result(DevEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(DevEventId)
+}
+
+/// An id of `development_goals`.
+pub opaque type DevGoalId {
+  DevGoalId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_goal(text: String) -> DevGoalId {
+  DevGoalId(text)
+}
+
+pub fn dev_goal_to_string(id: DevGoalId) -> String {
+  let DevGoalId(text) = id
+  text
+}
+
+pub fn dev_goal_sql(id: DevGoalId) -> sqlight.Value {
+  sqlight.text(dev_goal_to_string(id))
+}
+
+pub fn dev_goal_json(id: DevGoalId) -> Json {
+  json.string(dev_goal_to_string(id))
+}
+
+pub fn dev_goal_decoder() -> decode.Decoder(DevGoalId) {
+  decode.map(decode.string, DevGoalId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_goal(tx: Tx) -> Result(DevGoalId, Fail(e)) {
+  ids.next(tx, "devgoal") |> result.map(DevGoalId)
+}
+
+/// An id of `development_evidence_links`.
+pub opaque type DevLinkId {
+  DevLinkId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_link(text: String) -> DevLinkId {
+  DevLinkId(text)
+}
+
+pub fn dev_link_to_string(id: DevLinkId) -> String {
+  let DevLinkId(text) = id
+  text
+}
+
+pub fn dev_link_sql(id: DevLinkId) -> sqlight.Value {
+  sqlight.text(dev_link_to_string(id))
+}
+
+pub fn dev_link_json(id: DevLinkId) -> Json {
+  json.string(dev_link_to_string(id))
+}
+
+pub fn dev_link_decoder() -> decode.Decoder(DevLinkId) {
+  decode.map(decode.string, DevLinkId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_link(tx: Tx) -> Result(DevLinkId, Fail(e)) {
+  ids.next(tx, "devlink") |> result.map(DevLinkId)
+}
+
+/// An id of `development_plans`.
+pub opaque type DevPlanId {
+  DevPlanId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_plan(text: String) -> DevPlanId {
+  DevPlanId(text)
+}
+
+pub fn dev_plan_to_string(id: DevPlanId) -> String {
+  let DevPlanId(text) = id
+  text
+}
+
+pub fn dev_plan_sql(id: DevPlanId) -> sqlight.Value {
+  sqlight.text(dev_plan_to_string(id))
+}
+
+pub fn dev_plan_json(id: DevPlanId) -> Json {
+  json.string(dev_plan_to_string(id))
+}
+
+pub fn dev_plan_decoder() -> decode.Decoder(DevPlanId) {
+  decode.map(decode.string, DevPlanId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_plan(tx: Tx) -> Result(DevPlanId, Fail(e)) {
+  ids.next(tx, "devplan") |> result.map(DevPlanId)
+}
+
+/// An id of `development_reviews`.
+pub opaque type DevReviewId {
+  DevReviewId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn dev_review(text: String) -> DevReviewId {
+  DevReviewId(text)
+}
+
+pub fn dev_review_to_string(id: DevReviewId) -> String {
+  let DevReviewId(text) = id
+  text
+}
+
+pub fn dev_review_sql(id: DevReviewId) -> sqlight.Value {
+  sqlight.text(dev_review_to_string(id))
+}
+
+pub fn dev_review_json(id: DevReviewId) -> Json {
+  json.string(dev_review_to_string(id))
+}
+
+pub fn dev_review_decoder() -> decode.Decoder(DevReviewId) {
+  decode.map(decode.string, DevReviewId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_dev_review(tx: Tx) -> Result(DevReviewId, Fail(e)) {
+  ids.next(tx, "devrev") |> result.map(DevReviewId)
+}
+
 /// An id of `dispatches`.
 pub opaque type DispatchId {
   DispatchId(String)

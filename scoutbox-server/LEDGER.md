@@ -18,11 +18,11 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
 | agents | 9 | 9 | 9 | 231 / 433 | 51 / 83 | 7 to go |
-| development | 3 | 3 | 2 | 63 / 71 | 0 / 44 | 1 to go |
+| development | 3 | 3 | 3 | 125 / 4 | 22 / 45 | 1 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 1 | 1 | 68 / 0 | 3 / 3 | 1 to go |
-| platform | 14 | 14 | 9 | 59 / 2246 | 67 / 249 | 6 to go |
+| platform | 14 | 14 | 9 | 59 / 2239 | 67 / 249 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -48,7 +48,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
 | `development/combine` | neutral | 2 → 0 | 92 | 72 | 20 |  | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
-| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added |  | 1 / 71 | 0 / 44 | not answered; 71 cases pending; 44 hand-port calls |
+| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 4 | 22 / 45 | 4 cases pending; 23 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
@@ -58,7 +58,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 13 / 37 | 0 / 25 | not answered; 37 cases pending; 25 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 24 / 2182 | 67 / 183 | not answered; 2182 cases pending; 116 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 24 / 2175 | 67 / 183 | not answered; 2175 cases pending; 116 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -164,7 +164,8 @@ ported by hand to a gleeunit test.
 | `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | to do |
 | `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | to do |
 | `development/hub` | `domains/development/hub/permissions.mjs#canAssign` | 5 | args[].staffById is a function | to do |
-| `development/hub` | `domains/development/hub/permissions.mjs#planAccess` | 22 | args[].orgCanSee is a function | to do |
+| `development/hub` | `domains/development/hub/permissions.mjs#planAccess` | 22 | args[].orgCanSee is a function | `test/scoutbox/development/hub_access_test.gleam` |
+| `development/hub` | `domains/development/hub/targets.mjs#validateTarget` | 1 | Gleam's types can't hold its arguments: cannot print "160+" as a TargetInput | to do |
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
@@ -331,31 +332,8 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
-| `development/hub` | `domains/development/boxcam/combineShared.mjs#isProductionValidCombine` | 2 |
-| `development/hub` | `domains/development/boxcam/combineShared.mjs#liveCombineState` | 1 |
-| `development/hub` | `domains/development/hub/evidence.mjs#summariseEvidence` | 1 |
-| `development/hub` | `domains/development/hub/permissions.mjs#reviewView` | 3 |
-| `development/hub` | `domains/development/hub/plan.mjs#buildTimeline` | 2 |
 | `development/hub` | `domains/development/hub/plan.mjs#planSummary` | 1 |
 | `development/hub` | `domains/development/hub/reviews.mjs#buildGoalSnapshots` | 1 |
-| `development/hub` | `domains/development/hub/reviews.mjs#pageReviews` | 3 |
-| `development/hub` | `domains/development/hub/shared.mjs#actionCounts` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#assertDevelopmentVocabulary` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#boundedText` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#completionPhrase` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#daysBetween` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#dueState` | 3 |
-| `development/hub` | `domains/development/hub/shared.mjs#parseDate` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#refusedClientFields` | 8 |
-| `development/hub` | `domains/development/hub/shared.mjs#reviewDueState` | 2 |
-| `development/hub` | `domains/development/hub/shared.mjs#scanCopyForForbiddenNames` | 3 |
-| `development/hub` | `domains/development/hub/shared.mjs#scanPayloadForForbiddenFields` | 1 |
-| `development/hub` | `domains/development/hub/shared.mjs#transitionAllowed` | 6 |
-| `development/hub` | `domains/development/hub/shared.mjs#utcDay` | 2 |
-| `development/hub` | `domains/development/hub/targets.mjs#bestValidAttempt` | 1 |
-| `development/hub` | `domains/development/hub/targets.mjs#compare` | 3 |
-| `development/hub` | `domains/development/hub/targets.mjs#evaluateTarget` | 7 |
-| `development/hub` | `domains/development/hub/targets.mjs#validateTarget` | 13 |
 | `development/hub` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
@@ -382,7 +360,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 |
 | `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
@@ -578,3 +555,7 @@ their role, so their recorded calls get no test.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 | A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used. |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 | A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP. |
+| `development/hub` | `domains/development/hub/plan.mjs#buildTimeline` | 2 | Its cases feed it a history action the Hub never writes (plan_read) to show it is dropped; a history row's action is typed here, so no such row can exist. The internal-entry filter is checked over HTTP. |
+| `development/hub` | `domains/development/hub/shared.mjs#parseDate` | 1 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |
+| `development/hub` | `domains/development/hub/shared.mjs#scanPayloadForForbiddenFields` | 1 | A helper for tests over responses: the hub battery scans every payload for the forbidden field names itself. |
+| `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |

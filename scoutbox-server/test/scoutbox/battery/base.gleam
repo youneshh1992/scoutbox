@@ -6,6 +6,7 @@ import gleam/option.{None}
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
 import scoutbox/rows/agent_profiles
+import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/representation_agreements
@@ -180,5 +181,22 @@ pub fn agreement() -> representation_agreements.Row {
     disclosure_trial_visibility: False,
     created_at: 0,
     rev: 1,
+  )
+}
+
+/// A Development Review: a coach review of no plan, written by nobody, never shared.
+pub fn dev_review() -> development_reviews.Row {
+  development_reviews.new(
+    id: id.dev_review(""),
+    plan_id: id.dev_plan(""),
+    player_id: id.player(""),
+    reviewer_kind: development_reviews.CoachReview,
+    reviewed_by_kind: development_reviews.Org,
+    reviewed_by_id: "",
+    reviewed_at: 0,
+    created_at: 0,
+    share_summary: False,
+    share_goals: False,
+    share_actions: False,
   )
 }

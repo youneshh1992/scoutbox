@@ -119,19 +119,21 @@ pub fn capabilities(ctx: Ctx) -> Response {
           #(
             "capabilities",
             json.object([
-              // Box Cam's analysis is not part of this server: it will be a service of its own.
+              // The provider registry is served as the spec snapshot has it, so `production_cv` is configured, as in
+              // TypeScript; its analysis is a service of its own, and this server's stub reports the provider's
+              // health as unavailable (`cv_stub`).
               #(
                 "production_cv",
                 json.object([
-                  #("state", json.string("not_configured")),
+                  #("state", json.string("configured")),
                   #(
                     "note",
                     json.string(
-                      "No production computer-vision provider is configured. Combine metrics that need a real detector are reported as unsupported, never estimated.",
+                      "Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.",
                     ),
                   ),
-                  #("serverSideObservation", json.bool(False)),
-                  #("syntheticEvaluation", json.string("not_run")),
+                  #("serverSideObservation", json.bool(True)),
+                  #("syntheticEvaluation", json.string("passed")),
                   #("realWorldValidation", json.string("not_completed")),
                   #("combineVerifiedProtocols", json.preprocessed_array([])),
                   #("combineVerificationAvailable", json.bool(False)),

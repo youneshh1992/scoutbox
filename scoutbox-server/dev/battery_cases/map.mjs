@@ -2282,9 +2282,214 @@ const COMBINE_MAP = {
   },
 };
 
+// ------------------------------------------------------------------------------------------- the Development Hub
+
+const HUB = 'domains/development/hub';
+const HR = 'scoutbox/development/hub_rules';
+const goalStatus = vocab('scoutbox/vocab/goal_status');
+const planStatus = vocab('scoutbox/rows/development_plans', 'status_pairs');
+const actionStatus = vocab('scoutbox/rows/development_actions', 'status_pairs');
+const operator = vocab('scoutbox/rows/development_goals', 'target_operator_pairs');
+const provider = vocab('scoutbox/vocab/box_provider');
+const hubJson = (fnName, args) => ({
+  module: HR,
+  test: (c, ctx) => eqJson(`${ctx.use(HR)}.${fnName}(${args.map((p, i) => p(c.args[i], ctx)).join(', ')})`, c.result, ctx),
+});
+const target = record({
+  module: HR,
+  constructor: 'Target',
+  fields: {
+    protocolId: ['protocol_id', string],
+    protocolVersion: ['protocol_version', int],
+    metricType: ['metric_type', vocab('scoutbox/rows/development_goals', 'target_metric_type_pairs')],
+    metricUnit: ['metric_unit', string],
+    operator: ['operator', operator],
+    value: ['value', float],
+    protocolTitle: ['protocol_title', string],
+    direction: ['direction', vocab('scoutbox/rows/development_goals', 'target_direction_pairs')],
+    precision: ['precision', vocab('scoutbox/rows/development_goals', 'target_precision_pairs')],
+  },
+  ignore: ['sourceType'],
+});
+const targetInput = record({
+  module: HR,
+  constructor: 'TargetInput',
+  fields: {
+    sourceType: ['source_type', option(string)],
+    protocolId: ['protocol_id', option(string)],
+    protocolVersion: ['protocol_version', option(int)],
+    metricType: ['metric_type', option(string)],
+    operator: ['operator', option(string)],
+    value: ['value', option(float)],
+  },
+  defaults: { source_type: 'None', protocol_id: 'None', protocol_version: 'None', metric_type: 'None', operator: 'None', value: 'None' },
+});
+/** A stored attempt as a target reads it, with its bound session's state (the rule is handed the sessions). */
+const measured = (sessions) => (a, ctx) => {
+  const { id, protocolId, protocolVersion, provider: p, combineState: cs, measuredValue, boxSessionId, completedAt, playerId: _p, ...rest } = a;
+  if (Object.keys(rest).length) throw new Error(`a measured attempt has no field ${Object.keys(rest)[0]}`);
+  const session = (sessions ?? []).find((s) => s.id === boxSessionId) ?? null;
+  return `${ctx.use(HR)}.measured_of(${ident('combine_attempt')(id, ctx)}, ${string(protocolId)}, ${int(protocolVersion)}, ${option(float)(measuredValue, ctx)}, ${option(int)(completedAt, ctx)}, ${combineState(cs, ctx)}, ${option(boxState)(session?.verificationState, ctx)}, ${provider(p, ctx)})`;
+};
+/** A transition table is one of the three the Hub has, told apart by its first status. */
+const transitionTable = (table) =>
+  'not_started' in table
+    ? ['goal_transitions', goalStatus]
+    : 'draft' in table
+      ? ['plan_transitions', planStatus]
+      : 'todo' in table
+        ? ['action_transitions', actionStatus]
+        : (() => {
+            throw new Error(`not a Development Hub transition table: ${JSON.stringify(table)}`);
+          })();
+const caps = (v, ctx) => {
+  const { readInternal, ...rest } = v;
+  if (Object.keys(rest).length) throw new Error(`reviewView reads readInternal only, not ${Object.keys(rest)[0]}`);
+  return `${ctx.use(HR)}.Caps(..${ctx.use(HR)}.no_caps, read_internal: ${bool(!!readInternal)})`;
+};
+const devReview = (v, ctx) => {
+  const { goalSnapshots = [], reviewedBy = null, ...rest } = v;
+  if (goalSnapshots.length) throw new Error('a review with goal snapshots is ported by hand');
+  const row = record({
+    module: 'scoutbox/rows/development_reviews',
+    constructor: 'Row',
+    base: call(BASE, 'dev_review'),
+    fields: {
+      id: ['id', ident('dev_review')],
+      planId: ['plan_id', ident('dev_plan')],
+      reviewerKind: ['reviewer_kind', vocab('scoutbox/rows/development_reviews', 'reviewer_kind_pairs')],
+      reviewedAt: ['reviewed_at', int],
+      sharedSummary: ['shared_summary', option(string)],
+      internalNote: ['internal_note', option(string)],
+      sharedWithPlayerAt: ['shared_with_player_at', option(int)],
+    },
+  })({ ...rest, ...(reviewedBy ? {} : {}) }, ctx);
+  const named = reviewedBy?.name
+    ? `${ctx.use('scoutbox/rows/development_reviews')}.Row(..${row}, reviewed_by_name: ${option(string)(reviewedBy.name, ctx)})`
+    : row;
+  return `${ctx.use('scoutbox/development/hub')}.Review(row: ${named}, snapshots: [], superseded_by: ${ctx.use('gleam/option')}.None, history: [])`;
+};
+
+const HUB_MAP = {
+  [`${HUB}/shared.mjs#dueState`]: {
+    module: HR,
+    test: (c, ctx) => eqJson(`${ctx.use(HR)}.due_json(${ctx.use(HR)}.due_state(${option(int)(c.args[0], ctx)}, ${int(c.args[1])}))`, c.result, ctx),
+  },
+  [`${HUB}/shared.mjs#reviewDueState`]: {
+    module: HR,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(HR)}.due_json(${ctx.use(HR)}.review_due_state(${option(int)(c.args[0], ctx)}, ${int(c.args[1])}))`, c.result, ctx),
+  },
+  [`${HUB}/shared.mjs#utcDay`]: plainIn(HR)('utc_day', [int], int),
+  [`${HUB}/shared.mjs#daysBetween`]: plainIn(HR)('days_between', [int, int], int),
+  [`${HUB}/shared.mjs#boundedText`]: {
+    module: HR,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(HR)}.bounded_text_json(${option(string)(c.args[0], ctx)}, ${int(c.args[1])}, ${string(c.args[2].field)})`, c.result, ctx),
+  },
+  [`${HUB}/shared.mjs#transitionAllowed`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const [table, from, to] = c.args;
+      const [fnName, status] = transitionTable(table);
+      return eq(`${ctx.use(HR)}.allowed(${ctx.use(HR)}.${fnName}, ${status(from, ctx)}, ${status(to, ctx)})`, bool(c.result));
+    },
+  },
+  [`${HUB}/shared.mjs#actionCounts`]: {
+    module: HR,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(HR)}.counts_json(${ctx.use(HR)}.action_counts(${list((a, x) => actionStatus(a.status, x))(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${HUB}/shared.mjs#completionPhrase`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const { total, done, cancelled } = c.args[0];
+      return eqJson(`${ctx.use(HR)}.completion_json(${int(done)}, ${int(total)}, ${int(cancelled)})`, c.result, ctx);
+    },
+  },
+  [`${HUB}/shared.mjs#refusedClientFields`]: {
+    module: HR,
+    test: (c, ctx) => eq(`${ctx.use(HR)}.refused_client_fields(${list(string)(Object.keys(c.args[0]), ctx)})`, list(string)(c.result, ctx)),
+  },
+  [`${HUB}/shared.mjs#scanCopyForForbiddenNames`]: {
+    module: HR,
+    test: (c, ctx) =>
+      eq(`${ctx.use(HR)}.scan_copy(${list((p) => `#(${string(p[0])}, ${string(p[1])})`)(c.args[0], ctx)})`, list(string)(c.result, ctx)),
+  },
+  [`${HUB}/shared.mjs#assertDevelopmentVocabulary`]: {
+    module: HR,
+    test: (c, ctx) => {
+      if (c.args.length) throw new Error('the vocabulary check takes no options here');
+      return eqJson(`${ctx.use(HR)}.vocabulary_check()`, c.result, ctx);
+    },
+  },
+  [`${HUB}/targets.mjs#compare`]: plainIn(HR)('compare', [float, operator, float], bool),
+  [`${HUB}/targets.mjs#validateTarget`]: hubJson('validate_target_json', [targetInput]),
+  [`${HUB}/targets.mjs#evaluateTarget`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const { target: t, attempts, sessions, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`evaluateTarget has no argument ${Object.keys(rest)[0]}`);
+      if (t === null) throw new Error('a goal without a target is never evaluated here');
+      return eqJson(
+        `${ctx.use(HR)}.evaluation_json(${target(t, ctx)}, ${ctx.use(HR)}.evaluate_target(${target(t, ctx)}, ${list(measured(sessions))(attempts ?? [], ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${HUB}/targets.mjs#bestValidAttempt`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const { target: t, attempts, sessions } = c.args[0];
+      return eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(HR)}.best_valid(${list(measured(sessions))(attempts ?? [], ctx)}, ${target(t, ctx)}), fn(m: ${ctx.use(HR)}.Measured) { m.id })`,
+        option(ident('combine_attempt'))(c.result?.id, ctx),
+      );
+    },
+  },
+  [`${CS}#isProductionValidCombine`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const [attempt, session, prov] = c.args;
+      if (attempt.provider !== prov?.id) throw new Error('the provider is the attempt’s own');
+      return eq(`${ctx.use(HR)}.production_valid(${measured(session ? [session] : [])(attempt, ctx)})`, bool(c.result));
+    },
+  },
+  [`${CS}#liveCombineState`]: {
+    module: CR,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(CR)}.live_state(${combineState(c.args[0].combineState, ctx)}, ${option(boxState)(c.args[1]?.verificationState, ctx)})`,
+        combineState(c.result, ctx),
+      ),
+  },
+  [`${HUB}/evidence.mjs#summariseEvidence`]: {
+    module: HR,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(HR)}.summarise_evidence(${list((e) => `#(${bool(e.available)}, ${bool(e.simulated)})`)(c.args[0], ctx)})`, c.result, ctx),
+  },
+  [`${HUB}/permissions.mjs#reviewView`]: {
+    module: HR,
+    test: (c, ctx) => eqJson(`${ctx.use(HR)}.review_json(${devReview(c.args[0], ctx)}, ${caps(c.args[1], ctx)})`, c.result, ctx),
+  },
+  [`${HUB}/reviews.mjs#pageReviews`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const [reviews, { limit = null, cursor = null }] = c.args;
+      const pair = (r) => `#(${string(r.id)}, ${int(r.reviewedAt)})`;
+      const call = `${ctx.use(HR)}.page_reviews(${list(pair)(reviews, ctx)}, ${option(int)(limit, ctx)}, ${option(string)(cursor, ctx)})`;
+      if (c.result.error) return eq(call, 'Error(Nil)');
+      const { items, total, nextCursor } = c.result.value;
+      return eq(call, `Ok(#(${list(pair)(items, ctx)}, ${int(total)}, ${option(string)(nextCursor, ctx)}))`);
+    },
+  },
+};
+
 export const MAP = {
   ...BOX_CAM_MAP,
   ...COMBINE_MAP,
+  ...HUB_MAP,
   ...ROOM_MAP,
   ...PASSPORT_MAP,
   ...AGENT_MAP,
@@ -2358,6 +2563,12 @@ export const MAP = {
  * has no entry in MAP, and its recorded calls get no test.
  */
 export const NO_COUNTERPART = {
+  ['domains/development/hub/shared.mjs#parseDate']:
+    "Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes.",
+  ['domains/development/hub/shared.mjs#scanPayloadForForbiddenFields']:
+    'A helper for tests over responses: the hub battery scans every payload for the forbidden field names itself.',
+  ['domains/development/hub/plan.mjs#buildTimeline']:
+    "Its cases feed it a history action the Hub never writes (plan_read) to show it is dropped; a history row's action is typed here, so no such row can exist. The internal-entry filter is checked over HTTP.",
   [`${AGENT}/shared.mjs#newFacets`]:
     "A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP.",
   [`${AGENT}/shared.mjs#termMonthsOf`]:
@@ -2373,6 +2584,7 @@ export const NO_COUNTERPART = {
 export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
+  ['domains/development/hub/permissions.mjs#planAccess']: 'test/scoutbox/development/hub_access_test.gleam',
   ...Object.fromEntries(
     ['mintShareSecret', 'normWhen'].map((f) => [`${PASSPORT}#${f}`, 'test/scoutbox/passport/passport_rules_test.gleam']),
   ),

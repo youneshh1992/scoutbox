@@ -2,7 +2,7 @@
 //// other domains' histories. Entries say what happened and who did it, never content. Reason codes are the
 //// organisation's own structured vocabulary, so they are shown; the free text beside them is not.
 ////
-//// Not ported yet: the development plan source. Every source here is read whole, not paged in SQL.
+//// Every source here is read whole, not paged in SQL.
 
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -15,6 +15,7 @@ import gleam/result
 import gleam/string
 import scoutbox/agents/agent_audit
 import scoutbox/app.{type Ctx}
+import scoutbox/development/hub
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/players
@@ -26,6 +27,7 @@ import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/contact_history as contact_history_row
+import scoutbox/rows/development_history as development_history_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/recruitment_brief_history as brief_history_row
@@ -402,6 +404,78 @@ fn watchlist_rows(
   })
 }
 
+/// Lifecycle only: goal and action edits stay in the plan's own history. Only plans the organisation owns: a plan
+/// a player shared is the player's record.
+const development_actions = [
+  "plan_created", "plan_archived", "plan_visibility_changed", "review_submitted",
+]
+
+fn development_rows(
+  read: Read,
+  org: Org,
+  now: Int,
+) -> Result(List(agent_audit.Row), Fail(e)) {
+  use feed <- result.try(hub.org_feed(read, org.id, development_actions))
+  list.try_map(feed, fn(f) {
+    let h = f.entry
+    use target <- result.map(case f {
+      hub.PlanEntry(plan_id:, title:, player_id:, ..) -> {
+        use found <- result.map(players.for_org(read, player_id, org, now))
+        let subject = case found {
+          Some(#(p, access)) if access.visible && !access.blocked -> [
+            #("playerId", id.player_json(p.row.id)),
+            #("playerName", json.string(p.row.name)),
+          ]
+          _ -> [#("playerId", json.null()), #("playerName", json.null())]
+        }
+        json.object([
+          #("type", json.string("development_plan")),
+          #("id", id.dev_plan_json(plan_id)),
+          #("title", json.string(title)),
+          ..subject
+        ])
+      }
+      hub.ReviewEntry(review_id:, ..) ->
+        Ok(
+          json.object([
+            #("type", json.string("development_review")),
+            #("id", id.dev_review_json(review_id)),
+          ]),
+        )
+    })
+    let kept =
+      list.flatten([
+        option.map(h.detail_from, fn(v) { [#("from", json.string(v))] })
+          |> option.unwrap([]),
+        option.map(h.detail_to, fn(v) { [#("to", json.string(v))] })
+          |> option.unwrap([]),
+        option.map(h.detail_kind, fn(v) { [#("kind", json.string(v))] })
+          |> option.unwrap([]),
+        option.map(h.detail_note, fn(v) { [#("hadNote", json.bool(v))] })
+          |> option.unwrap([]),
+      ])
+    agent_audit.Row(id.dev_event_to_string(h.id), h.at, [
+      #("id", id.dev_event_json(h.id)),
+      #("at", json.int(h.at)),
+      #("action", development_history_row.action_to_json(h.action)),
+      #("domain", json.string("development")),
+      #("actor", case h.by_kind {
+        development_history_row.ByKindOrg ->
+          json.object([
+            #("userId", json.string(h.by_id)),
+            #("name", json.nullable(h.by_name, json.string)),
+          ])
+        _ -> json.null()
+      }),
+      #("target", target),
+      #("detail", case kept {
+        [] -> json.null()
+        _ -> json.object(kept)
+      }),
+    ])
+  })
+}
+
 fn ledger_rows(read: Read, org: Org) -> Result(List(agent_audit.Row), Fail(e)) {
   use rows <- result.map(store.query(
     read,
@@ -508,13 +582,15 @@ pub fn feed(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           use contacts <- result.try(contact_rows(r, a.org, now))
           use ledger <- result.try(ledger_rows(r, a.org))
           use watchlists <- result.try(watchlist_rows(r, a.org))
+          use development <- result.try(development_rows(r, a.org, now))
           use briefs <- result.try(brief_rows(r, a.org))
           use agency <- result.map(case a.org.type_ {
             org_type.Agency -> agent_audit.rows(r, a.org, now)
             _ -> Ok([])
           })
           list.flatten([
-            rooms, contacts, trials, briefs, watchlists, agency, ledger,
+            rooms, contacts, trials, briefs, watchlists, development, agency,
+            ledger,
           ])
         })
       {

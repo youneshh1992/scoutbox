@@ -1055,14 +1055,14 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/boxcam/combineShared.mjs#liveCombineState",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/evidence.mjs#recordBelongsToPlayer",
@@ -1087,7 +1087,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/permissions.mjs#canAssign",
@@ -1112,14 +1112,14 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/plan.mjs#buildTimeline",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/development/hub/plan.mjs#planSummary",
@@ -1140,126 +1140,128 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#actionCounts",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#assertDevelopmentVocabulary",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#boundedText",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#completionPhrase",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#daysBetween",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#dueState",
         "calls": 4,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#parseDate",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/development/hub/shared.mjs#refusedClientFields",
         "calls": 8,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#reviewDueState",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#scanCopyForForbiddenNames",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#scanPayloadForForbiddenFields",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/development/hub/shared.mjs#transitionAllowed",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#utcDay",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/targets.mjs#bestValidAttempt",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/targets.mjs#compare",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/targets.mjs#evaluateTarget",
         "calls": 9,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/targets.mjs#validateTarget",
         "calls": 13,
-        "cases": 13,
-        "handPort": {},
-        "status": "pending"
+        "cases": 12,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"160+\" as a TargetInput": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
@@ -2061,7 +2063,7 @@
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/discovery/shared.mjs#briefIsLiveOn",

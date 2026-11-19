@@ -134,7 +134,7 @@ of the product, so they aren't one slice.
 | Discovery: Second Look and Nobody Missed, exposure, calibration and coverage, matching and watchlists | 3 | done |
 | Agents: core, core persistence, transactions, transactions persistence, compliance, compliance persistence, adversarial, cross-app, cross-app adversarial | 9 | done |
 | Scouting: club workflows | 1 | **ported** |
-| Development: Box Cam, the Combine, the hub | 2 | `development/boxCam` and `combine` pass, with the `production_cv` stub; the hub next |
+| Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 1 | `passport/passport` passes; `trustScore` waits on Box Cam |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
@@ -248,7 +248,16 @@ are for surprising facts or points that later work depends on, not implementatio
       field names itself, over the snapshotted `FORBIDDEN_FIELD_NAMES` (`spec/development/hub/shared`). Its §17 also
       asks for a `production_cv` Combine attempt and expects the 422 `REAL_WORLD_VALIDATION_NOT_COMPLETED`, which the
       Combine already answers.
-   6. Port the hub.
+   6. Port the hub [**done**: `development/hub_rules`, `hub` (its tables) and `hub_routes`, mounted on the player,
+      guardian and organisation routers; the organisation audit feed gains the plans' lifecycle]. All 233 checks pass,
+      and a probe of 90 requests compares whole responses: 89 match TypeScript, the one left a tie between a Box Cam
+      session's end and its Combine attempt's completion, which this server stamps with one clock reading. 63 rule
+      cases are generated; `planAccess` is hand-ported (`test/scoutbox/development/hub_access_test.gleam`);
+      `parseDate`, `scanPayloadForForbiddenFields` and `buildTimeline` are closed. Left: `planSummary`,
+      `buildGoalSnapshots` and `assertEventRegistry` (live events, not ported) as cases, and 23 hand-port calls
+      (`resolveEvidenceLink`, `recordBelongsToPlayer` and `canAssign` read the database here; the battery checks them
+      over HTTP). `/capabilities` now reports `production_cv` as `configured`, as decided above; it said
+      `not_configured` before, which the hub battery's G6 caught.
 6. **Passport.** `passport/passport`, then `trustScore`. `passport/passport` needs no Box Cam, so it goes first.
    1. Untangle `passport/passport` [**done**]. A table whose entries hold functions is snapshotted from a data-only
       export beside it (`GAP_RULE_TABLE` beside `GAP_RULES`). The public share link's limiter is now the shared

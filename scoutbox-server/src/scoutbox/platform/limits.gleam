@@ -91,6 +91,9 @@ pub const policy = [
   #("box_cv_finalize", box_cv_finalize_policy),
   #("box_cv_ready_check", box_cv_ready_check_policy),
   #("combine_attempt", combine_attempt_policy),
+  #("development_plan_write", development_plan_write_policy),
+  #("development_item_write", development_item_write_policy),
+  #("development_review_write", development_review_write_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -144,6 +147,9 @@ pub type Action {
   BoxSessionCreate
   /// At-Home Combine attempts started, per player.
   CombineAttempt
+  DevelopmentPlanWrite
+  DevelopmentItemWrite
+  DevelopmentReviewWrite
   /// Box Cam disputes filed, per player. The TypeScript server keeps this window in training.mjs (five a day), not
   /// as its RATE_LIMIT_POLICY entry.
   BoxDispute
@@ -253,6 +259,12 @@ const box_session_create_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const combine_attempt_policy = Policy(max: 40, window_ms: 3_600_000)
 
+const development_plan_write_policy = Policy(max: 120, window_ms: 3_600_000)
+
+const development_item_write_policy = Policy(max: 600, window_ms: 3_600_000)
+
+const development_review_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
 const box_dispute_policy = Policy(max: 5, window_ms: 86_400_000)
 
 const passport_share_read_policy = Policy(max: 30, window_ms: 60_000)
@@ -338,6 +350,9 @@ fn action_name(action: Action) -> String {
     BoxCvReadyCheck -> "box_cv_ready_check"
     BoxSessionCreate -> "box_session_create"
     CombineAttempt -> "combine_attempt"
+    DevelopmentPlanWrite -> "development_plan_write"
+    DevelopmentItemWrite -> "development_item_write"
+    DevelopmentReviewWrite -> "development_review_write"
     BoxDispute -> "box_dispute"
     PassportShareRead -> "passport_share_read"
     TrialInvite -> "trial_invite"
@@ -396,6 +411,9 @@ fn action_policy(action: Action) -> Policy {
     BoxCvReadyCheck -> box_cv_ready_check_policy
     BoxSessionCreate -> box_session_create_policy
     CombineAttempt -> combine_attempt_policy
+    DevelopmentPlanWrite -> development_plan_write_policy
+    DevelopmentItemWrite -> development_item_write_policy
+    DevelopmentReviewWrite -> development_review_write_policy
     BoxDispute -> box_dispute_policy
     PassportShareRead -> passport_share_read_policy
     TrialInvite -> trial_invite_policy

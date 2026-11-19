@@ -53,6 +53,28 @@ pub const shared = [
     ["NO_SNAPSHOT", "INPUTS_CHANGED", "POLICY_CHANGED", "EXPIRED"],
   ),
   Shared("Audience", ["player", "guardian", "org_user"]),
+  Shared(
+    "GoalCategory",
+    [
+      "technical", "tactical", "physical", "psychological",
+      "match_understanding", "position_specific", "other",
+    ],
+  ),
+  Shared(
+    "GoalStatus",
+    ["not_started", "in_progress", "blocked", "achieved", "stopped"],
+  ),
+  Shared(
+    "EvidenceSource",
+    [
+      "passport_evidence", "assessment", "box_cam_session", "combine_attempt",
+      "trial_report",
+    ],
+  ),
+  Shared(
+    "PlanVisibility",
+    ["private", "player_guardian", "shared_with_org", "org_private"],
+  ),
   Shared("OrgType", ["club", "agency"]),
   Shared(
     "WebhookEvent",
@@ -432,6 +454,15 @@ pub const tables = [
   "dispatch_attempts",
   "dispatches",
   "drill_guidance",
+  "development_actions",
+  "development_evidence_links",
+  "development_goals",
+  "development_history",
+  "development_plan_shares",
+  "development_plans",
+  "development_review_snapshot_refs",
+  "development_review_snapshots",
+  "development_reviews",
   "dynamic_watchlists",
   "email_challenges",
   "evidence",
@@ -669,6 +700,12 @@ pub const ided = [
   Ided("dev_objective_items", "ObjectiveItem", Some("objx")),
   Ided("dev_objective_progress", "ObjectiveProgress", Some("prg")),
   Ided("dev_objective_reassessments", "Reassessment", Some("ras")),
+  Ided("development_plans", "DevPlan", Some("devplan")),
+  Ided("development_goals", "DevGoal", Some("devgoal")),
+  Ided("development_actions", "DevAction", Some("devact")),
+  Ided("development_evidence_links", "DevLink", Some("devlink")),
+  Ided("development_reviews", "DevReview", Some("devrev")),
+  Ided("development_history", "DevEvent", Some("aud")),
   Ided("org_squad_members", "SquadEntry", Some("sq")),
   Ided("orgs", "Org", Some("org")),
   Ided("outbox", "Mail", Some("mail")),
@@ -1384,6 +1421,58 @@ pub const id_columns = [
   Untyped(
     "dev_objectives.created_by_id",
     "the player or the guardian, as created_by_kind says",
+  ),
+  Untyped(
+    "target_protocol_id",
+    "a Combine protocol, which is code, not a table",
+  ),
+  Untyped(
+    "detail_protocol_id",
+    "a Combine protocol, which is code, not a table",
+  ),
+  Untyped(
+    "development_plans.rev_by_user_id",
+    "the player, a guardian or a staff member who last changed it",
+  ),
+  Untyped(
+    "development_goals.rev_by_user_id",
+    "the player, a guardian or a staff member who last changed it",
+  ),
+  RefersTo("development_review_snapshot_refs.goal_id", "development_goals"),
+  RefersTo("development_history.review_id", "development_reviews"),
+  RefersTo("development_review_snapshots.review_id", "development_reviews"),
+  RefersTo("development_review_snapshot_refs.review_id", "development_reviews"),
+  Untyped(
+    "development_actions.assignee_id",
+    "the player, a guardian or a staff member, as assignee_kind says",
+  ),
+  Untyped(
+    "development_plans.created_by_id",
+    "the player, a guardian or a staff member, as created_by_kind says",
+  ),
+  Untyped(
+    "development_goals.created_by_id",
+    "the player, a guardian or a staff member, as created_by_kind says",
+  ),
+  Untyped(
+    "development_actions.created_by_id",
+    "the player, a guardian or a staff member, as created_by_kind says",
+  ),
+  Untyped(
+    "development_evidence_links.linked_by_id",
+    "the player, a guardian or a staff member, as linked_by_kind says",
+  ),
+  Untyped(
+    "development_reviews.reviewed_by_id",
+    "the player, a guardian or a staff member, as reviewed_by_kind says",
+  ),
+  Untyped(
+    "development_evidence_links.source_id",
+    "a Passport evidence record, an assessment, a session, an attempt or a trial, as source_type says",
+  ),
+  Untyped(
+    "development_review_snapshot_refs.source_id",
+    "a Passport evidence record, an assessment, a session, an attempt or a trial, as source_type says",
   ),
   RefersTo("dev_objective_item_evidence.evidence_id", "evidence"),
   RefersTo("dev_objective_progress.evidence_id", "evidence"),

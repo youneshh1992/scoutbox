@@ -27,6 +27,7 @@ import scoutbox/development/combine_routes
 import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
+import scoutbox/development/hub_routes
 import scoutbox/development/objectives
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
@@ -207,6 +208,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["org", ..rest] -> {
       use org <- access.org_session(ctx, req)
       case rest {
+        ["development", ..path] ->
+          hub_routes.handle(ctx, req, hub_routes.AsOrg(org), path)
         ["verification", ..path] -> verification_org(ctx, req, org, path)
         ["rooms", ..path] -> rooms(ctx, req, org, path)
         ["agent", ..path] -> agent_org(ctx, req, org, path)
@@ -974,6 +977,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["player", ..rest] -> {
       use player <- access.player_session(ctx, req)
       case rest {
+        ["development", ..path] ->
+          hub_routes.handle(ctx, req, hub_routes.AsPlayer(player), path)
         ["passport"] ->
           only(req, Get, fn() { passport_routes.player_passport(ctx, player) })
         ["feedback"] ->
@@ -1496,6 +1501,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["guardian", ..rest] -> {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
+        ["development", ..path] ->
+          hub_routes.handle(ctx, req, hub_routes.AsGuardian(guardian), path)
         ["children", cid, "campaigns"] ->
           only(req, Get, fn() {
             campaigns.guardian_list(ctx, guardian, id.player(cid))

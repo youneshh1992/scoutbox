@@ -3,6 +3,7 @@
 //// in part is checked entry by entry, so a ported entry can't drift.
 
 import gleam/dict
+import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -16,6 +17,7 @@ import scoutbox/development/box_cam_rules
 import scoutbox/development/combine_rules
 import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
+import scoutbox/development/hub_rules
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
 import scoutbox/platform/json_text
@@ -690,4 +692,28 @@ pub fn cv_policy_test() {
       decode.dict(decode.string, decode.string),
     )
   assert dict.get(errors, "PROVIDER_UNAVAILABLE") == Ok("provider_unavailable")
+}
+
+fn hub_spec(key: String) -> dynamic.Dynamic {
+  snapshot("development/hub/shared.json", decode.at([key], decode.dynamic))
+}
+
+fn served(path: List(String)) -> dynamic.Dynamic {
+  let assert Ok(value) =
+    json.parse(
+      json.to_string(hub_rules.catalogue()),
+      decode.at(path, decode.dynamic),
+    )
+  value
+}
+
+pub fn hub_vocabulary_test() {
+  assert hub_spec("DEVELOPMENT_HUB_LIMITS") == served(["limits"])
+  assert hub_spec("GOAL_LIBRARY") == served(["goalLibrary", "items"])
+  assert hub_spec("PLAN_TEMPLATES") == served(["templates", "items"])
+  assert snapshot(
+      "development/hub/shared.json",
+      decode.at(["FORBIDDEN_FIELD_NAMES"], decode.list(decode.string)),
+    )
+    == hub_rules.forbidden_field_names
 }
