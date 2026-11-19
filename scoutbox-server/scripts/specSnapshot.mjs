@@ -55,6 +55,17 @@ export const SPEC = {
     'FUTURE_CAPABILITIES',
     'COMBINE_PROTOCOLS',
   ],
+  'domains/development/boxcam/cv/policy.mjs': [
+    'BOX_CAM_CV_POLICY_VERSION',
+    'CV_ENGINE_VERSION',
+    'CV_PROVIDER_ID',
+    'FRAME_ENCODING',
+    'FRAME_LIMITS',
+    'FORBIDDEN_CLIENT_FIELDS',
+    'CANDIDATE_PROTOCOLS',
+  ],
+  'domains/development/boxcam/cv/eligibility.mjs': ['COMBINE_DISABLED_REASON'],
+  'domains/development/boxcam/cv/provider.mjs': ['PROVIDER_ERRORS', 'MAX_CONCURRENT_SESSIONS'],
   'domains/development/boxcam/shared.mjs': [
     'SESSION_STATES',
     'QUALITY',
