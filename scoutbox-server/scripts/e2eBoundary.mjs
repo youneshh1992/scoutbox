@@ -21,7 +21,7 @@ export const TYPESCRIPT_ONLY = [
 ];
 
 /** Batteries that still import the server or start it themselves. */
-export const NOT_YET_NEUTRAL = ['operations/clubOperations'];
+export const NOT_YET_NEUTRAL = [];
 
 /** Every boundary problem under e2e/, as messages. Empty when the boundary holds. */
 export function boundaryReport() {
