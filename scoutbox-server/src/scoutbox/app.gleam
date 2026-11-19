@@ -5,6 +5,7 @@ import scoutbox/platform/config.{type Config}
 import scoutbox/platform/faults.{type Faults}
 import scoutbox/platform/limits.{type Limits}
 import scoutbox/platform/live.{type Hub}
+import scoutbox/platform/request_metrics.{type RequestMetrics}
 import scoutbox/platform/store.{type Store}
 
 pub type Ctx {
@@ -23,5 +24,7 @@ pub type Ctx {
     faults: Faults,
     /// The live-sync hub every event stream subscribes to.
     live: Hub,
+    /// The process's request counters, for `/admin/metrics`.
+    request_metrics: RequestMetrics,
   )
 }

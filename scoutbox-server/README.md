@@ -132,7 +132,7 @@ Every route below is exercised by a battery, except where marked.
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
 The largest: the similarity engine ("more like this"),
-the insight sweep, club setup, the Expo push transport, process metrics, and password sign-in
+the insight sweep, club setup, the Expo push transport, and password sign-in
 for players (a new player account stores a hash no password matches). `dev/shape_diff.mjs` lists where responses differ because of them.
 
 ## Known differences from the TypeScript server

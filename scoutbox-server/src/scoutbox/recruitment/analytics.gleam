@@ -1,9 +1,7 @@
 //// Recruitment analytics routes (domains/recruitment/analytics/index.mjs): the Director Dashboard, its
 //// catalogue and the drill-down rows. Leads only. Figures carry no note, comment, assessment or free text and
 //// are never broken down by colleague. Drill-down is cursor-paged in a stable order. Nothing is stored: every
-//// figure is projected from other modules' records.
-////
-//// Not ported yet: the process's read counters (`metrics.analytics`), which nothing here reports.
+//// figure is projected from other modules' records, and its reads are counted in `platform/request_metrics`.
 
 import gleam/float
 import gleam/int
@@ -18,6 +16,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/request_metrics.{type Snapshot}
 import scoutbox/platform/store
 import scoutbox/recruitment/analytics/cohorts
 import scoutbox/recruitment/analytics/context.{type Filters, Filters}
@@ -406,6 +405,37 @@ type DashboardQuery {
 }
 
 /// `GET /org/recruitment-analytics`.
+/// Two counters only, neither of which could be read as a measure of anybody. A read writes nothing, so they are
+/// kept outside any unit.
+const metric_group = "analytics"
+
+fn read_counted(ctx: Ctx, name: String) -> Nil {
+  request_metrics.count(ctx.request_metrics, metric_group, name)
+}
+
+/// The `analytics` group of `/admin/metrics`.
+pub fn metrics_json(s: Snapshot) -> Json {
+  json.object([
+    #(
+      "recruitment_analytics_read",
+      json.int(request_metrics.counter(
+        s,
+        metric_group,
+        "recruitment_analytics_read",
+      )),
+    ),
+    #(
+      "recruitment_analytics_rows_read",
+      json.int(request_metrics.counter(
+        s,
+        metric_group,
+        "recruitment_analytics_rows_read",
+      )),
+    ),
+    #("policyVersion", json.int(metrics.policy_version)),
+  ])
+}
+
 pub fn dashboard(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   use <- access.require_lead(a)
   use <- limited(ctx, a)
@@ -425,11 +455,10 @@ pub fn dashboard(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         False -> None
       }
       use c <- with_context(ctx, a, parsed, now)
+      let body = dashboard.build(c, parsed.families, parsed.stall_days, fault)
+      read_counted(ctx, "recruitment_analytics_read")
       // Declared on the wire, as Discover and Matching do: nothing here is ordered by merit.
-      http.json(
-        200,
-        dashboard.build(c, parsed.families, parsed.stall_days, fault),
-      )
+      http.json(200, body)
       |> wisp.set_header(
         "x-scoutbox-ordering",
         "fixed_vocabulary_then_stable_id",
@@ -496,6 +525,7 @@ pub fn rows(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             _ -> time_series.overdue_rows(c)
           }
           let total = list.length(all)
+          read_counted(ctx, "recruitment_analytics_rows_read")
           let limit = option.unwrap(q.limit, page_default)
           let cursor = option.unwrap(q.cursor, 0)
           http.json(

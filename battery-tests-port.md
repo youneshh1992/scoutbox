@@ -297,10 +297,11 @@ are for surprising facts or points that later work depends on, not implementatio
       2. Enterprise: onboarding, `/org/sessions` and its revoke, `/org/security`, SSO against the local test IdP
          (`/testidp/authorize`), paged invites, support tickets with time-limited access grants and their access
          log, and the metrics' scope note (`enterprise/enterprise.mjs`, `repositories/enterprise.mjs`). MFA,
-         invites, the audit export and support's create and reply are in already. [**done**, except one check: the
-         battery's first 130 checks pass, through the delivery centre, and 113 requests answer as TypeScript's do,
-         ids included. Left: `metrics carry counters`, which needs the process's request counters
-         (`met.requests > 0`), a new mechanism to agree first.] The audit export's case histories and support
+         invites, the audit export and support's create and reply are in already. [**done**: the battery's first 131
+         checks pass, through the delivery centre, and 113 requests answer as TypeScript's do, ids included.] The
+         process's request counters live in one process (`platform/request_metrics`): a response is counted once
+         it is built, without waiting, and `/admin/metrics` answers in TypeScript's key order, with its
+         `development` and `analytics` groups. The audit export's case histories and support
          access are real now, and so is onboarding's coverage-plan task.
       3. The delivery centre's flows over support replies, callbacks and injected failures (`messaging/delivery.mjs`).
          [Its checks already pass after slice 2.]

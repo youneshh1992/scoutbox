@@ -83,6 +83,7 @@ import scoutbox/platform/faults
 import scoutbox/platform/http as contract
 import scoutbox/platform/limits
 import scoutbox/platform/operator
+import scoutbox/platform/request_metrics
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
@@ -132,6 +133,7 @@ import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
 pub fn handle(ctx: Ctx, req: Request) -> Response {
+  use <- counted(ctx, req)
   use <- baseline(ctx)
   use <- signed_media(ctx, req)
   use <- rescue
@@ -2635,6 +2637,19 @@ fn not_found() -> Response {
 /// The headers on every response, as the TypeScript server's HTTP baseline sets them: the schema version, the
 /// browser hardening headers, and on an error whether a retry could succeed. A response that already says
 /// whether it is retryable (a simulated fault) keeps its own answer.
+/// Every response is counted once it is built, without waiting for the count.
+fn counted(ctx: Ctx, req: Request, handler: fn() -> Response) -> Response {
+  let started = clock.now_ms()
+  let response = handler()
+  request_metrics.finished_request(
+    ctx.request_metrics,
+    path: req.path,
+    status: response.status,
+    ms: clock.now_ms() - started,
+  )
+  response
+}
+
 fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
   let response =
     handler()

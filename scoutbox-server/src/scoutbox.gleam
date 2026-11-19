@@ -24,6 +24,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/live.{type Hub}
 import scoutbox/platform/migrations
 import scoutbox/platform/operator
+import scoutbox/platform/request_metrics
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
 import scoutbox/platform/wisp_ewe
@@ -99,6 +100,7 @@ fn boot() -> Result(Nil, String) {
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))
   use limits <- result.try(limits.start())
+  use request_metrics <- result.try(request_metrics.start())
   use known <- result.try(migrations.known())
   use _ <- result.try(migrations.counter_present(store))
   use integrity <- result.try(
@@ -115,6 +117,7 @@ fn boot() -> Result(Nil, String) {
       integrity:,
       faults:,
       live: hub,
+      request_metrics:,
     )
   // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped. A trial's
   // reminder markers are rows too, so the boot pass re-sends nothing.

@@ -87,6 +87,23 @@ fn count(tx: Tx, name: String) -> Result(Nil, Fail(e)) {
   metrics.count(tx, metric_group, name)
 }
 
+/// The `development` group of `/admin/metrics`.
+pub fn metrics_json(tx: Tx) -> Result(Json, Fail(e)) {
+  use fields <- result.map(
+    metrics.fields(tx, metric_group, [
+      "development_plan_created",
+      "development_goal_created",
+      "development_action_completed",
+      "development_review_submitted",
+      "development_evidence_linked",
+      "development_idempotent_retries",
+    ]),
+  )
+  json.object(
+    list.append(fields, [#("policyVersion", json.int(hub_rules.policy_version))]),
+  )
+}
+
 fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   room_routes.storage(r)
 }

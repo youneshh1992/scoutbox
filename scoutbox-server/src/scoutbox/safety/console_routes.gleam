@@ -9,6 +9,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/development/box_training
+import scoutbox/development/hub_routes
 import scoutbox/discovery/second_look
 import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
@@ -26,7 +27,9 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
+import scoutbox/platform/request_metrics
 import scoutbox/platform/store.{type Read}
+import scoutbox/recruitment/analytics
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/id
 import scoutbox/rows/moderation_log
@@ -372,10 +375,10 @@ pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
 
 /// `GET /admin/metrics`.
 ///
-/// Not ported yet: the process's request counters (platform metrics). An operations event's detail fields arrive
-/// with the events that write them.
+/// Not ported yet: an operations event's detail fields, which arrive with the events that write them.
 pub fn metrics(ctx: Ctx) -> Response {
-  // On the writer: it holds the verification counters (verification/core `count`).
+  let requests = request_metrics.snapshot(ctx.request_metrics)
+  // On the writer: it holds the counters units keep (`platform/metrics`).
   let found =
     store.unit(ctx.store, fn(tx) {
       let read = store.reading(tx)
@@ -385,6 +388,7 @@ pub fn metrics(ctx: Ctx) -> Response {
       use rooms <- result.try(room_routes.metrics_json(tx))
       use second_look_metrics <- result.try(second_look.metrics_json(tx))
       use box_cam <- result.try(box_training.metrics_json(tx))
+      use development <- result.try(hub_routes.metrics_json(tx))
       use delivery <- result.try(audit.ops_count(
         read,
         ops_events.DeliveryFailed,
@@ -394,14 +398,30 @@ pub fn metrics(ctx: Ctx) -> Response {
       use webhook_backlog <- result.try(webhooks.backlog_count(read))
       use newest <- result.map(audit.ops_newest(read, 50))
       json.object([
+        #("startedAt", json.int(ctx.booted_at)),
+        #("requests", json.int(requests.requests)),
+        #("status2xx", json.int(requests.status_2xx)),
+        #("status4xx", json.int(requests.status_4xx)),
+        #("status5xx", json.int(requests.status_5xx)),
+        #("slowRequests", json.int(requests.slow_requests)),
+        #(
+          "byRoute",
+          json.object(
+            list.map(requests.by_route, fn(r) { #(r.0, json.int(r.1)) }),
+          ),
+        ),
+        #("failedUploads", json.int(requests.failed_uploads)),
         #("deliveryFailures", json.int(delivery)),
-        // Not ported yet: the process's request counters, job runs, stream connects and the other domains'
-        // groups (development, analytics), which come between these.
-        #("verification", verification),
+        // No job is counted as a run by the TypeScript server either.
+        #("jobRuns", json.int(0)),
+        #("sseConnects", json.int(requests.sse_connects)),
         #("boxCam", box_cam),
+        #("development", development),
+        #("verification", verification),
         #("passport", passport),
         #("trust", trust_metrics),
         #("rooms", rooms),
+        #("analytics", analytics.metrics_json(requests)),
         #("secondLook", second_look_metrics),
         #("webhookFailures", json.int(webhook)),
         #("dispatchBacklog", json.int(backlog)),
