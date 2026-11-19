@@ -324,6 +324,10 @@ are for surprising facts or points that later work depends on, not implementatio
          notifications included.] Each act re-checks the group inside its unit and refuses from the state it finds
          there, so a lost race needs no rerun. The audit export's grants are real now.
       7. Budget scenarios: lines, exchange-rate assumptions, approval, actuals (`recruitment/budgets.mjs`).
+         [**done**: `recruitment/budgets` and `budget_routes`; the battery's first 271 checks pass, through the
+         budget section, and 48 requests answer as TypeScript's do, ids and case history included.] The totals and
+         `convertMinor` are generated rule cases now (8 of the 26). Each act reads the case and its scenario inside
+         its unit. Finance access is `roles.is_finance_role`, the lead tier plus `/finance|treasurer/i`.
       8. Backup, verify and restore into an empty directory, `/readyz`, and delivery work surviving a SIGKILL
          restart (`store.copyTo` in `wiring.mjs`). If this needs a new mechanism, propose it before building it.
       9. The rule cases (26, mostly `ageOn`, `isAdult` and `b32encode`) and the 7 hand-port calls.

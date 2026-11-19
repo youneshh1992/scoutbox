@@ -27,16 +27,13 @@ import scoutbox/platform/json_text
 import scoutbox/platform/paging.{IntKey, IntKind, TextKey, TextKind}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
+import scoutbox/recruitment/budgets
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/requests
 import scoutbox/recruitment/signings
 import scoutbox/recruitment/trials
 import scoutbox/rows/case_approvals as approval_row
 import scoutbox/rows/case_assignments as assignment_row
-import scoutbox/rows/case_budget_actuals as actual_row
-import scoutbox/rows/case_budget_fx_assumptions as fx_row
-import scoutbox/rows/case_budget_lines as line_row
-import scoutbox/rows/case_budget_scenarios as scenario_row
 import scoutbox/rows/case_decision_draft_evidence_refs as ref_row
 import scoutbox/rows/case_decision_drafts as draft_row
 import scoutbox/rows/case_history as history_row
@@ -46,7 +43,6 @@ import scoutbox/rows/id
 import scoutbox/rows/recruitment_cases as row
 import scoutbox/vocab/audience
 import scoutbox/vocab/case_outcome
-import scoutbox/vocab/currency
 import scoutbox/vocab/decision_evidence_kind
 import scoutbox/vocab/decision_outcome
 import scoutbox/vocab/room_status
@@ -104,26 +100,6 @@ fn of_case(
       <> " WHERE case_id = ? ORDER BY "
       <> order,
     [id.recruitment_case_sql(case_id)],
-    decoder,
-  )
-}
-
-fn of_scenario(
-  read: Read,
-  columns: String,
-  table: String,
-  case_id: id.RecruitmentCaseId,
-  scenario_id: id.BudgetScenarioId,
-  decoder: decode.Decoder(a),
-) -> Result(List(a), Fail(e)) {
-  store.query(
-    read,
-    "SELECT "
-      <> columns
-      <> " FROM "
-      <> table
-      <> " WHERE case_id = ? AND scenario_id = ? ORDER BY position",
-    [id.recruitment_case_sql(case_id), id.budget_scenario_sql(scenario_id)],
     decoder,
   )
 }
@@ -409,122 +385,6 @@ fn handoff_json(
   }
 }
 
-fn budget_json(
-  read: Read,
-  case_id: id.RecruitmentCaseId,
-) -> Result(Json, Fail(e)) {
-  use scenarios <- result.try(of_case(
-    read,
-    scenario_row.columns,
-    scenario_row.table,
-    case_id,
-    "position",
-    scenario_row.decoder(),
-  ))
-  use rendered <- result.map(
-    list.try_map(scenarios, fn(s) {
-      use lines <- result.try(of_scenario(
-        read,
-        line_row.columns,
-        line_row.table,
-        case_id,
-        s.id,
-        line_row.decoder(),
-      ))
-      use fx <- result.try(of_scenario(
-        read,
-        fx_row.columns,
-        fx_row.table,
-        case_id,
-        s.id,
-        fx_row.decoder(),
-      ))
-      use actuals <- result.map(of_scenario(
-        read,
-        actual_row.columns,
-        actual_row.table,
-        case_id,
-        s.id,
-        actual_row.decoder(),
-      ))
-      json.object([
-        #("id", id.budget_scenario_json(s.id)),
-        #("version", json.int(s.version)),
-        #("label", json.string(s.label)),
-        #("currency", currency.to_json(s.currency)),
-        #("termMonths", json.int(s.term_months)),
-        #(
-          "lines",
-          json.array(lines, fn(l) {
-            json.object([
-              #("id", id.budget_line_json(l.id)),
-              #("kind", line_row.kind_to_json(l.kind)),
-              #("label", json.string(l.label)),
-              #("amountMinor", json.int(l.amount_minor)),
-              #("currency", currency.to_json(l.currency)),
-              #("schedule", line_row.schedule_to_json(l.schedule)),
-              #("confirmed", json.bool(l.confirmed)),
-              #("conditional", case l.conditional_assumption {
-                Some(a) -> json.object([#("assumption", json.string(a))])
-                None -> json.null()
-              }),
-            ])
-          }),
-        ),
-        #(
-          "fxAssumptions",
-          json.array(fx, fn(a) {
-            json.object([
-              #("from", currency.to_json(a.from_currency)),
-              #("to", currency.to_json(a.to_currency)),
-              #("rate", json.string(a.rate)),
-              #("source", json.nullable(a.source, json.string)),
-              #("date", json.string(a.date)),
-              #("manual", json.bool(a.manual)),
-            ])
-          }),
-        ),
-        #("approval", case s.approval_at {
-          None -> json.null()
-          Some(at) ->
-            json.object([
-              #("by", json.nullable(s.approval_by_name, json.string)),
-              #(
-                "byUserId",
-                json.nullable(s.approval_by_user_id, id.org_user_json),
-              ),
-              #("at", json.int(at)),
-              #("version", json.nullable(s.approval_version, json.int)),
-              #(
-                "superseded",
-                json.bool(option.unwrap(s.approval_superseded, False)),
-              ),
-            ])
-        }),
-        #(
-          "actuals",
-          json.array(actuals, fn(a) {
-            json.object([
-              #("id", id.budget_actual_json(a.id)),
-              #("lineId", id.budget_line_json(a.line_id)),
-              #("amountMinor", json.int(a.amount_minor)),
-              #("at", json.int(a.at)),
-              #("recordedBy", json.nullable(a.recorded_by_name, json.string)),
-            ])
-          }),
-        ),
-        #("createdBy", json.nullable(s.created_by_name, json.string)),
-        #("createdAt", json.int(s.created_at)),
-        #("updatedAt", json.int(s.updated_at)),
-      ])
-    }),
-  )
-  case rendered {
-    [] -> json.null()
-    _ -> json.object([#("scenarios", json.preprocessed_array(rendered))])
-  }
-}
-
 /// The case as the repository decodes it (recruitmentCases.ts `decodeCase`), in its key order.
 fn assignment_json(a: assignment_row.Row) -> Json {
   json.object([
@@ -622,7 +482,7 @@ pub fn record_json(read: Read, r: row.Row) -> Result(Json, Fail(e)) {
   ))
   use draft <- result.try(draft_json(read, case_id))
   use handoff <- result.try(handoff_json(read, case_id))
-  use budget <- result.map(budget_json(read, case_id))
+  use budget <- result.map(budgets.budget_json(read, case_id))
   json.object([
     #("id", id.recruitment_case_json(r.id)),
     #("orgId", id.org_json(r.org_id)),
@@ -774,7 +634,7 @@ fn reread(
 
 /// The organisation's case, if this member may open it: a restricted case is its owner's, its assignees' and the
 /// recruitment leads'.
-fn find(
+pub fn find(
   read: Read,
   a: OrgAccess,
   case_id: String,

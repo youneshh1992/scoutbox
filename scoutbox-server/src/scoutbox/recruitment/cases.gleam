@@ -4,7 +4,9 @@
 //// A Room is a case with a status. The status is written only by `move` (and `create`/`adopt`), which derive the
 //// case's stage from it and move the Room's revision.
 ////
-//// Not ported yet: the case's decision draft, transaction handoff and budget.
+//// A case's budget scenarios are `recruitment/budgets`.
+////
+//// Not ported yet: the case's decision draft and transaction handoff.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

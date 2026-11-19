@@ -6,6 +6,8 @@ import gleam/option.{None}
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
 import scoutbox/rows/agent_profiles
+import scoutbox/rows/case_budget_fx_assumptions
+import scoutbox/rows/case_budget_lines
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
@@ -14,6 +16,7 @@ import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
 import scoutbox/vocab/claim_type
+import scoutbox/vocab/currency
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/org_type
@@ -198,5 +201,35 @@ pub fn dev_review() -> development_reviews.Row {
     share_summary: False,
     share_goals: False,
     share_actions: False,
+  )
+}
+
+/// A budget line of no scenario: an unconfirmed one-off wage of nothing, in GBP.
+pub fn budget_line() -> case_budget_lines.Row {
+  case_budget_lines.new(
+    case_id: id.recruitment_case(""),
+    scenario_id: id.budget_scenario(""),
+    position: 0,
+    id: id.budget_line(""),
+    kind: case_budget_lines.Wage,
+    label: "",
+    amount_minor: 0,
+    currency: currency.GBP,
+    schedule: case_budget_lines.OneOff,
+    confirmed: False,
+  )
+}
+
+/// A stated rate of no scenario: GBP to GBP at 1, undated.
+pub fn budget_fx() -> case_budget_fx_assumptions.Row {
+  case_budget_fx_assumptions.new(
+    case_id: id.recruitment_case(""),
+    scenario_id: id.budget_scenario(""),
+    position: 0,
+    from_currency: currency.GBP,
+    to_currency: currency.GBP,
+    rate: "1",
+    date: "",
+    manual: True,
   )
 }

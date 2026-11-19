@@ -743,6 +743,11 @@ pub fn budget_actual_decoder() -> decode.Decoder(BudgetActualId) {
   decode.map(decode.string, BudgetActualId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_budget_actual(tx: Tx) -> Result(BudgetActualId, Fail(e)) {
+  ids.next(tx, "act") |> result.map(BudgetActualId)
+}
+
 /// An id of `case_budget_lines`.
 pub opaque type BudgetLineId {
   BudgetLineId(String)
@@ -795,6 +800,11 @@ pub fn budget_scenario_json(id: BudgetScenarioId) -> Json {
 
 pub fn budget_scenario_decoder() -> decode.Decoder(BudgetScenarioId) {
   decode.map(decode.string, BudgetScenarioId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_budget_scenario(tx: Tx) -> Result(BudgetScenarioId, Fail(e)) {
+  ids.next(tx, "scn") |> result.map(BudgetScenarioId)
 }
 
 /// An id of `calibration_sessions`.

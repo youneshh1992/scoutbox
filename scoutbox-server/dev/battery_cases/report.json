@@ -1647,14 +1647,14 @@
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/money.mjs#convertMinor",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/scouting/slots.mjs#slotsOverlap",

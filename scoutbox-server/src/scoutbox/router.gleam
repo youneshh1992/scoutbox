@@ -88,6 +88,7 @@ import scoutbox/platform/request_metrics
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
+import scoutbox/recruitment/budget_routes
 import scoutbox/recruitment/case_routes
 import scoutbox/recruitment/case_workspace
 import scoutbox/recruitment/contact_routes
@@ -416,6 +417,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { case_workspace.set_stage(ctx, req, org, cid) })
         ["cases", cid, "decision"] ->
           only(req, Post, fn() { case_workspace.decide(ctx, req, org, cid) })
+        ["cases", cid, "budget"] ->
+          only(req, Get, fn() { budget_routes.get(ctx, org, cid) })
+        ["cases", cid, "budget", "scenarios"] ->
+          only(req, Post, fn() { budget_routes.create(ctx, req, org, cid) })
+        ["cases", cid, "budget", "scenarios", sid] ->
+          only(req, Put, fn() { budget_routes.edit(ctx, req, org, cid, sid) })
+        ["cases", cid, "budget", "scenarios", sid, "approve"] ->
+          only(req, Post, fn() {
+            budget_routes.approve(ctx, req, org, cid, sid)
+          })
+        ["cases", cid, "budget", "scenarios", sid, "actuals"] ->
+          only(req, Post, fn() {
+            budget_routes.record_actual(ctx, req, org, cid, sid)
+          })
         ["matching", "vocabulary"] ->
           only(req, Get, fn() { matching_routes.vocabulary(org) })
         ["matching"] ->

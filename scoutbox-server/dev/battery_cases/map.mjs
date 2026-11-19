@@ -2677,7 +2677,49 @@ const weeklySlot = record({
   defaults: { label: 'None' },
 });
 
+const BUDGETS = 'scoutbox/recruitment/budgets';
+const currency = vocab('scoutbox/vocab/currency');
+const budgetLine = record({
+  module: 'scoutbox/rows/case_budget_lines',
+  constructor: 'Row',
+  base: call(BASE, 'budget_line'),
+  fields: {
+    id: ['id', ident('budget_line')],
+    kind: ['kind', vocab('scoutbox/rows/case_budget_lines', 'kind_pairs')],
+    label: ['label', string],
+    amountMinor: ['amount_minor', int],
+    currency: ['currency', currency],
+    schedule: ['schedule', vocab('scoutbox/rows/case_budget_lines', 'schedule_pairs')],
+    confirmed: ['confirmed', bool],
+    conditional: (v, ctx) => [['conditional_assumption', option(string)(v?.assumption, ctx)]],
+  },
+});
+const budgetFx = record({
+  module: 'scoutbox/rows/case_budget_fx_assumptions',
+  constructor: 'Row',
+  base: call(BASE, 'budget_fx'),
+  fields: {
+    from: ['from_currency', currency],
+    to: ['to_currency', currency],
+    rate: ['rate', string],
+    source: ['source', option(string)],
+    date: ['date', string],
+    manual: ['manual', bool],
+  },
+});
+
 export const MAP = {
+  ['domains/recruitment/money.mjs#convertMinor']: plainIn(BUDGETS)('convert_minor', [int, string], (v) =>
+    v === null ? 'Error(Nil)' : `Ok(${int(v)})`,
+  ),
+  ['domains/recruitment/budgets.mjs#computeScenarioTotals']: {
+    module: BUDGETS,
+    test: (c, ctx) => {
+      const { termMonths, currency: cur, lines, fxAssumptions = [] } = c.args[0];
+      const call = `${ctx.use(BUDGETS)}.totals(term_months: ${int(termMonths)}, currency: ${currency(cur, ctx)}, lines: ${list(budgetLine)(lines, ctx)}, fx: ${list(budgetFx)(fxAssumptions, ctx)})`;
+      return eqJson(`${ctx.use(BUDGETS)}.totals_json(${call})`, c.result, ctx);
+    },
+  },
   ['domains/scouting/slots.mjs#slotsOverlap']: plainIn(SU)('slots_overlap', [weeklySlot, weeklySlot], option(bool)),
   ...BOX_CAM_MAP,
   ...COMBINE_MAP,
