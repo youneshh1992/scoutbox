@@ -1594,6 +1594,78 @@
     ]
   },
   {
+    "battery": "operations/clubOperations",
+    "functions": [
+      {
+        "function": "domain.ts#ageOn",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 5,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 5
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/identity/totp.mjs#b32encode",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/identity/totp.mjs#totp",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/identity/totp.mjs#totpValid",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/integrations/webhooks.mjs#webhookUrlProblem",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/budgets.mjs#computeScenarioTotals",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/money.mjs#convertMinor",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/scouting/slots.mjs#slotsOverlap",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "passport/passport",
     "functions": [
       {

@@ -20,7 +20,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | agents | 9 | 9 | 9 | 237 / 425 | 53 / 85 | 7 to go |
 | development | 3 | 3 | 3 | 125 / 4 | 22 / 45 | 1 to go |
 | discovery | 3 | 3 | 3 | 316 / 11 | 2 / 4 | 1 to go |
-| operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
+| operations | 1 | 1 | 0 | 0 / 26 | 0 / 7 | 1 to go |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 14 | 14 | 9 | 59 / 2239 | 67 / 249 | 6 to go |
 | recruitment | 19 | 19 | 19 | 520 / 4157 | 28 / 295 | 13 to go |
@@ -52,7 +52,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 181 / 11 | 1 / 3 | 11 cases pending; 2 hand-port calls |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
-| `operations/clubOperations` | not yet neutral | 6 → 6 | 273 | 273 |  |  |  |  |  | not untangled; not answered |
+| `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  |  | 0 / 26 | 0 / 7 | not answered; 26 cases pending; 7 hand-port calls |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
@@ -171,6 +171,8 @@ ported by hand to a gleeunit test.
 | `discovery/matchingAndWatchlists` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
+| `operations/clubOperations` | `domain.ts#ageOn` | 2 | args[] is a  | to do |
+| `operations/clubOperations` | `domain.ts#isAdult` | 5 | args[] is a  | to do |
 | `passport/passport` | `domains/passport/shared.mjs#mintShareSecret` | 2 | its result is random | `test/scoutbox/passport/passport_rules_test.gleam` |
 | `passport/passport` | `domains/passport/shared.mjs#normWhen` | 1 | Gleam's types can't hold its arguments: cannot print null as a date | `test/scoutbox/passport/passport_rules_test.gleam` |
 | `passport/trustScore` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
@@ -340,6 +342,13 @@ mapped, then `npm run cases`.
 | `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |
+| `operations/clubOperations` | `domains/identity/totp.mjs#b32encode` | 1 |
+| `operations/clubOperations` | `domains/identity/totp.mjs#totp` | 4 |
+| `operations/clubOperations` | `domains/identity/totp.mjs#totpValid` | 2 |
+| `operations/clubOperations` | `domains/integrations/webhooks.mjs#webhookUrlProblem` | 7 |
+| `operations/clubOperations` | `domains/recruitment/budgets.mjs#computeScenarioTotals` | 4 |
+| `operations/clubOperations` | `domains/recruitment/money.mjs#convertMinor` | 4 |
+| `operations/clubOperations` | `domains/scouting/slots.mjs#slotsOverlap` | 4 |
 | `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
 | `platform/contracts` | `domain.ts#isAdult` | 1 |
 | `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |

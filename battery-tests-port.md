@@ -107,7 +107,7 @@ Done on `battery-untangle` in `../scoutbox`:
 - One codemod moved every server start onto the launcher.
 - `sync.mjs` uses the same boundary check as the TypeScript tree.
 
-### Untangling [in progress: 52 of 53 neutral]
+### Untangling [done: 53 of 53 neutral]
 
 **Untangling is cheap.** A heavy battery takes a few minutes, not the half session first estimated. It doesn't
 have to wait for its domain's port: `contracts`, `dates`, `productionHardening` and `sessionsAndPorts` were done
@@ -279,6 +279,10 @@ are for surprising facts or points that later work depends on, not implementatio
       weights and identity values from the declared policy tables, which one test proves equal to the snapshot.
       `trustChangeReasons` and the public projection are used by no route on either server.
 7. `operations/clubOperations`.
+   1. Untangle it [**done**: its unit fixtures are a rules suite (32 checks; 26 rule cases and 7 hand-port calls
+      pending), and its MFA codes come from `support/totp.mjs`]. `NOT_YET_NEUTRAL` is now empty. The battery still
+      starts its own servers through the launcher: a restore into a second data directory, and a SIGKILL restart.
+   2. Port it.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
@@ -345,8 +349,7 @@ a battery passes; `npm run e2e` does.
 
 ## Estimate
 
-Untangling the last battery (`operations/clubOperations`) is under **1 session**, and can run ahead of the port. The real
-cost is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
+Untangling is finished. What remains is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
 6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
 
 ## Risks
