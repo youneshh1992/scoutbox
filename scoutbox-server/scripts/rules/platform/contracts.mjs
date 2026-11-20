@@ -161,9 +161,30 @@ section('§7 — every Nobody Missed and Second Look sort has a stable tie-break
 {
   // The same rows in two input orders come out in one order: ties fall to the id, never to arrival.
   const tied = [
-    { playerId: 'pl-b', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
-    { playerId: 'pl-a', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
-    { playerId: 'pl-c', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
+    {
+      playerId: 'pl-b',
+      name: 'Sam',
+      distanceKm: 5,
+      trustBand: 'established_evidence',
+      lastEvidenceAt: 10,
+      reviewedAt: 1,
+    },
+    {
+      playerId: 'pl-a',
+      name: 'Sam',
+      distanceKm: 5,
+      trustBand: 'established_evidence',
+      lastEvidenceAt: 10,
+      reviewedAt: 1,
+    },
+    {
+      playerId: 'pl-c',
+      name: 'Sam',
+      distanceKm: 5,
+      trustBand: 'established_evidence',
+      lastEvidenceAt: 10,
+      reviewedAt: 1,
+    },
   ];
   for (const sort of ['name', 'distance', 'evidence_confidence', 'newest_evidence', 'last_reviewed']) {
     const one = orderNobodyMissed(tied, sort).map((x) => x.playerId);
@@ -428,7 +449,7 @@ section('§15 — Second Look cooldown and expiry boundaries');
     dismissedAt: handledAt,
     updatedAt: handledAt,
   });
-  const candidate = { changeFingerprints: ['f1', 'f2'], changes: [{ fingerprint: 'f2', type: 'general_update' }] };
+  const candidate = { changeFingerprints: ['f1', 'f2'], changes: [{ fingerprint: 'f2', type: 'evidence_added' }] };
   neg(
     secondLookStatus({ existing: existing('dismissed', now - 29 * DAY), candidate, now }).action === 'suppress',
     'new but minor evidence 29 days after a dismissal stays quiet',

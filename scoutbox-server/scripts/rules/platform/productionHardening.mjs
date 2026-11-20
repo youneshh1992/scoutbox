@@ -297,25 +297,25 @@ section('§7 — the Passport revision is a fact about content, not about now');
 {
   const full = {
     player: { position: 'CM', level: 'semi_pro' },
-    identity: { confirmed: true, assurance: 'scoutbox_reviewed' },
-    status: { currentClub: { orgId: 'org-1', provenance: 'verified_club_confirmed', assurance: 'verified' } },
+    identity: { confirmed: true, assurance: 'scoutbox_document_review' },
+    status: { currentClub: { orgId: 'org-1', provenance: 'verified_club_confirmed' } },
     history: {
       rows: [
         {
           key: 'org-0',
           provenance: 'player_submitted',
           current: false,
-          from: { t: 2022 },
-          to: { t: 2024 },
+          from: { t: Date.UTC(2022, 0, 1), precision: 'year', y: 2022 },
+          to: { t: Date.UTC(2024, 0, 1), precision: 'year', y: 2024 },
           role: 'player',
         },
       ],
     },
     revisionSources: {
-      evidence: [{ id: 'ev-1', tier: 'verified', superseded: false, expired: false }],
+      evidence: [{ id: 'ev-1', tier: 'club_assessed', superseded: false, expired: false }],
       careerEntries: [{ id: 'ce-1' }],
     },
-    references: [{ id: 'rf-1', status: 'live', provenanceStillCurrent: true }],
+    references: [{ id: 'rf-1', status: 'active', provenanceStillCurrent: true }],
     achievements: [{ id: 'ac-1', confirmation: null, withdrawnAt: null }],
     combine: { results: [{ protocolId: 'p1', protocolVersion: 1, measuredValue: 12, combineVerified: true }] },
   };
@@ -326,7 +326,7 @@ section('§7 — the Passport revision is a fact about content, not about now');
   // Values that change with the clock must not move it.
   const withClockNoise = {
     ...full,
-    player: { ...full.player, age: 21, ageToday: 21 },
+    player: { ...full.player, age: 21 },
     daysSinceLastEvidence: 900,
     generatedAt: Date.now(),
     summary: { recency: 'stale' },
@@ -338,7 +338,8 @@ section('§8 — the revision moves when Passport truth moves');
 {
   const base = {
     player: { position: 'CM', level: 'semi_pro' },
-    identity: { confirmed: false, assurance: 'player_submitted' },
+    // The player's identity is unchecked (null) or confirmed by a ScoutBox document review: the only two states.
+    identity: null,
     status: { currentClub: null },
     history: { rows: [] },
     revisionSources: { evidence: [], careerEntries: [] },
@@ -352,7 +353,7 @@ section('§8 — the revision moves when Passport truth moves');
     'a position change moves it',
   );
   neg(
-    passportRevision({ ...base, identity: { confirmed: true, assurance: 'authoritative_registry' } }) !== r0,
+    passportRevision({ ...base, identity: { confirmed: true, assurance: 'scoutbox_document_review' } }) !== r0,
     'an identity assurance change moves it',
   );
   neg(
@@ -366,7 +367,7 @@ section('§8 — the revision moves when Passport truth moves');
     passportRevision({
       ...base,
       revisionSources: {
-        evidence: [{ id: 'e', tier: 'verified', superseded: false, expired: false }],
+        evidence: [{ id: 'e', tier: 'club_assessed', superseded: false, expired: false }],
         careerEntries: [],
       },
     }) !== r0,
@@ -376,14 +377,14 @@ section('§8 — the revision moves when Passport truth moves');
     passportRevision({
       ...base,
       revisionSources: {
-        evidence: [{ id: 'e', tier: 'verified', superseded: true, expired: false }],
+        evidence: [{ id: 'e', tier: 'club_assessed', superseded: true, expired: false }],
         careerEntries: [],
       },
     }) !==
       passportRevision({
         ...base,
         revisionSources: {
-          evidence: [{ id: 'e', tier: 'verified', superseded: false, expired: false }],
+          evidence: [{ id: 'e', tier: 'club_assessed', superseded: false, expired: false }],
           careerEntries: [],
         },
       }),
