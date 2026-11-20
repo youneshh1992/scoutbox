@@ -140,6 +140,22 @@ overlap test.
 commitments, on both servers. The `clubOperations` battery's check uses a slot that is contained, so it would still
 pass.
 
+## A reconnecting stream is replayed events the registry says are never replayed
+
+Found 2026-11-20 while porting the live events. Ported as the TypeScript server behaves.
+
+**What it is.** Each event in the registry (`domains/platform/eventRegistry.mjs`) has a `replayPolicy`, and 45 of
+them say `never`: the agent and compliance events, the trial invitations and schedule changes, a Room's decisions and
+handoffs, a draft Offer's edits. But the reconnect log in `domains/platform/liveSync.mjs` keeps every event except
+`typing`, so a client that reconnects with a `lastEventId` is sent those events again. Nothing reads `replayPolicy`
+except the tests that check each entry has one.
+
+**Where it is in the port.** `scoutbox-server/src/scoutbox/platform/live_event.gleam`, `replays`, keeps every event
+but typing too. Until 2026-11-20 this server honoured `replayPolicy`.
+
+**Fix.** Keep only `replay` events in the log, on both servers. A client sees no difference beyond fewer stale
+nudges after a reconnect, since every event is only a cue to refetch.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package

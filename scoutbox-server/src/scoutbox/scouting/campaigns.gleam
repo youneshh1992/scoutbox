@@ -2,8 +2,6 @@
 //// guardian for a child) submit attempts, the server checks only the file, and a person at the club reviews the
 //// football. The machine's verdict and the human's are kept apart: passing the file checks makes an attempt
 //// "submitted", never "verified".
-////
-//// Not ported yet: the `campaigns` live event.
 
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
@@ -26,6 +24,8 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind}
 import scoutbox/platform/store.{type Fail, type Read}
@@ -659,6 +659,7 @@ fn publish(
       opportunity_row.elig_position_group_to_string(e.position_group),
     )
   store.unit(ctx.store, fn(tx) {
+    live_pings.catalogue(tx, live_event.Campaigns)
     use cid <- result.try(id.next_campaign(tx))
     use _ <- result.try(row.insert(
       tx,

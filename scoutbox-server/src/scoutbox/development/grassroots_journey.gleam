@@ -16,6 +16,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_pings
 import scoutbox/platform/store
 import scoutbox/rows/id
 import scoutbox/rules/journey
@@ -90,14 +91,17 @@ pub fn select_programme(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
     None -> http.error(400, "TRACK_NOT_FOUND")
     Some(t) -> {
       let now = clock.now_ms()
-      // Not ported yet: the live 'players' event.
       case
-        store.unit(ctx.store, players.start_programme(
-          _,
-          p.player.row.id,
-          t.key,
-          now,
-        ))
+        store.unit(ctx.store, fn(tx) {
+          use stored <- result.map(players.start_programme(
+            tx,
+            p.player.row.id,
+            t.key,
+            now,
+          ))
+          live_pings.player(tx, p.player.row.id)
+          stored
+        })
       {
         Ok(stored) -> http.json(201, current(stored, now))
         Error(failure) -> http.internal(failure)
@@ -128,7 +132,6 @@ pub fn complete_session(
         Error(_) -> http.error(404, "SESSION_NOT_FOUND")
         Ok(s) -> {
           let now = clock.now_ms()
-          // Not ported yet: the live 'players' event.
           let done =
             store.unit(ctx.store, fn(tx) {
               use _ <- result.try(players.complete_programme_session(
@@ -137,6 +140,7 @@ pub fn complete_session(
                 s.id,
                 now,
               ))
+              live_pings.player(tx, p.player.row.id)
               activity.record(tx, p.player.row.id, now)
             })
           case done {

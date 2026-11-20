@@ -20,6 +20,8 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Read, type Store, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -1267,6 +1269,14 @@ pub fn admin_level_review(
             ]),
           )
           use entry_id <- result.try(id.next_ledger_entry(tx))
+          // The row's detail columns are past `ledger.append`'s reach, so its ping is asked for here.
+          live_pings.catalogue(
+            tx,
+            live_event.Ledger(
+              ledger_row.type_to_string(ledger_row.LevelReview),
+              Some(id.player_to_string(p.row.id)),
+            ),
+          )
           ledger_row.insert(
             tx,
             ledger_row.New(

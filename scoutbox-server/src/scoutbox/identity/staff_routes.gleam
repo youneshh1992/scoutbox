@@ -69,8 +69,6 @@ pub fn remove(ctx: Ctx, access: OrgAccess, user_id: id.OrgUserId) -> Response {
                 ),
                 now,
               ))
-              // Not ported yet: the TypeScript server also closes the removed member's live event streams
-              // after the commit. Here they stay open but receive nothing (`live_routes` re-checks the member).
               Ok(removed)
             }
             _ -> store.refuse(staff.NotFound)

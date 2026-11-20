@@ -26,6 +26,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -1636,7 +1637,7 @@ fn file(
         }
       }
     })
-    // Not ported yet: the live 'players' event.
+    live_pings.player(tx, t.row.player_id)
     http.json(
       201,
       json.object([

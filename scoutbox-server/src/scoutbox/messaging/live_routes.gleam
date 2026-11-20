@@ -4,10 +4,11 @@
 //// Authorisation is checked at delivery, from live records, in each stream's own process: a suspension or a
 //// staff member's removal silences a stream that is already open.
 ////
-//// Not ported yet: the catalogue pings (`players`, `orgs`, …) and the public_safe audience they go to, the
-//// subject rule (a payload with a `playerId` and no `orgId` reaches the player, their guardian and every org that
-//// may see them), the registry's events that no constructor of `live_event.Event` declares, and closing a removed
-//// staff member's open streams (until then, their stream stays open but receives nothing).
+//// An event naming an `orgId` reaches that organisation only. One naming a `playerId` (and no `orgId`) follows the
+//// subject rule: the player, their guardian, and every organisation that may see them and isn't blocked. A catalogue
+//// ping naming neither reaches every stream. A removed staff member's open streams are closed.
+////
+//// Not ported yet: the registry's events that no constructor of `live_event.Event` declares.
 
 import ewe
 import gleam/erlang/process
@@ -29,7 +30,8 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/live.{
-  type Frame, type Hub, type Route, Audience, Nobody, Org, Thread,
+  type Frame, type Hub, type Route, Audience, Everyone, Nobody, Org, Subject,
+  Thread,
 }
 import scoutbox/platform/live_event.{
   type Event, type TypingSide, Messages, Notify, Typing,
@@ -125,9 +127,16 @@ fn route(read: Read, event: Event) -> Result(Route, Fail(e)) {
     Notify(audience_kind:, audience_id:) ->
       Ok(Audience(audience_kind, audience_id, None))
     _ ->
-      case live_event.org_of(event) {
-        Ok(org_id) -> Ok(Org(id.org(org_id)))
-        Error(Nil) -> Ok(Nobody)
+      // In liveSync.mjs's order: an orgId makes the event private to that club, before the subject rule.
+      case live_event.org_of(event), live_event.subject_of(event) {
+        Ok(org_id), _ -> Ok(Org(id.org(org_id)))
+        Error(Nil), Ok(player_id) -> Ok(Subject(id.player(player_id)))
+        Error(Nil), Error(Nil) ->
+          case live_event.audience(event) {
+            live_event.PublicSafe -> Ok(Everyone)
+            // No event the registry has names neither an organisation nor a player outside public_safe.
+            live_event.OrgPrivate | live_event.PlayerPrivate -> Ok(Nobody)
+          }
       }
   }
 }
@@ -148,8 +157,42 @@ fn may_receive(read: Read, viewer: Viewer, route: Route) -> Bool {
       to == guardian_id
     GuardianViewer(guardian_id:), Audience(kind: audience.Guardian, id: to, ..)
     -> to == id.guardian_to_string(guardian_id)
+    OrgViewer(org_id:, user_id:), Everyone ->
+      in_good_standing(read, org_id, user_id)
+    PlayerViewer(_), Everyone | GuardianViewer(_), Everyone -> True
+    PlayerViewer(player_id:), Subject(player_id: about) -> about == player_id
+    GuardianViewer(guardian_id:), Subject(player_id: about) ->
+      case players.by_id(read, about) {
+        Ok(Some(p)) -> p.row.guardian_id == Some(guardian_id)
+        _ -> False
+      }
+    OrgViewer(org_id:, user_id:), Subject(player_id: about) ->
+      in_good_standing(read, org_id, user_id) && org_sees(read, org_id, about)
     _, _ -> False
   }
+}
+
+/// The visibility rule lets the organisation see the player, and the player hasn't blocked it.
+fn org_sees(read: Read, org_id: id.OrgId, player_id: id.PlayerId) -> Bool {
+  let seen = {
+    use org <- result.try(orgs.by_id(read, org_id))
+    case org {
+      None -> Ok(False)
+      Some(org) -> {
+        use found <- result.map(players.for_org(
+          read,
+          player_id,
+          org,
+          clock.now_ms(),
+        ))
+        case found {
+          Some(#(_, access)) -> access.visible && !access.blocked
+          None -> False
+        }
+      }
+    }
+  }
+  seen == Ok(True)
 }
 
 /// The organisation isn't suspended, and the staff member hasn't been removed.
@@ -303,9 +346,11 @@ pub fn open(
     on_init: fn(conn, selector) {
       let now = clock.now_ms()
       let signals = process.new_subject()
+      let closes = process.new_subject()
       let selector =
         selector
         |> process.select(signals)
+        |> process.select_map(closes, fn(_) { Stop })
         |> process.select_map(frames, Deliver)
       let viewer =
         store.read(ctx.store, fn(read) {
@@ -318,6 +363,10 @@ pub fn open(
           process.send(signals, Stop)
         }
         Some(viewer) -> {
+          case viewer {
+            OrgViewer(user_id:, ..) -> live.claim(ctx.live, user_id, closes)
+            PlayerViewer(_) | GuardianViewer(_) -> Nil
+          }
           let _ = send(conn, live.signal("connected", now))
           case joined {
             live.Fresh -> Nil

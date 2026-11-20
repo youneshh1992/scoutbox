@@ -26,6 +26,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_pings
 import scoutbox/platform/store
 import scoutbox/platform/temporal
 import scoutbox/recruitment/notification_targets
@@ -208,7 +209,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                           created_at: now,
                         ),
                       ))
-                      // Not ported yet: the live 'players' event.
+                      live_pings.players(tx)
                       saved_searches.alert_new_player(tx, p, now)
                       |> result.replace(p)
                     })
@@ -336,7 +337,7 @@ fn create(
           created_at: now,
         ),
       ))
-      // Not ported yet: the live 'players' event.
+      live_pings.players(tx)
       use _ <- result.try(saved_searches.alert_new_player(tx, p, now))
       use token <- result.map(sessions.create(
         tx,
@@ -388,6 +389,7 @@ pub fn add_timeline(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
       )
       let written =
         store.unit(ctx.store, fn(tx) {
+          live_pings.player(tx, p.player.row.id)
           use _ <- result.try(players.add_timeline_entry(
             tx,
             p.player.row.id,
@@ -707,7 +709,7 @@ pub fn complete_aging_up(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
             ),
             now,
           ))
-          // Not ported yet: the live 'players' event.
+          live_pings.player(tx, player.id)
           notifications.notify(
             tx,
             to: audience.Player,

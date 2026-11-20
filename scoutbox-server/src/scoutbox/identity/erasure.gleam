@@ -21,6 +21,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/recruitment/signing_packages
 import scoutbox/rows/id
@@ -327,6 +328,7 @@ pub fn erase(
       case live {
         Error(Nil) -> Ok(Error(Nil))
         Ok(_) -> {
+          live_pings.players(tx)
           use _ <- result.try(
             list.try_each(media, fn(m) {
               run(

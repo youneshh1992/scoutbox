@@ -13,4 +13,6 @@ pub type Effect {
   SendPush(to: Audience, id: String, title: String, body: String)
   /// A live event to every stream allowed to see it.
   Live(event: live_event.Event)
+  /// A staff member lost access: their open streams close (`rows/id` can't be imported here, so the id is text).
+  CloseStreams(org_user_id: String)
 }

@@ -208,8 +208,8 @@ are for surprising facts or points that later work depends on, not implementatio
       The agent contract gives a field's own code only to a field the request declares (`declaredCodes`): an unknown
       `clientKey` is `AGENT_INPUT_INVALID`.
 4. `scouting/clubWorkflows` [**done**: the scouting domain is ported]. Every section's responses match the TypeScript
-   server's, notifications included. The `feedback` and `applications` live events reach no stream on either server
-   (the registry calls them org-private but names no org), and a list is accepted as a drawing (docs/known-issues.md).
+   server's, notifications included. A list is accepted as a drawing (docs/known-issues.md). (The `feedback` and
+   `applications` live events were thought to reach no stream; the subject rule delivers them, item 9.2.)
    Uploading moved out to its own battery, `platform/uploads` (26 checks), which stays off `BATTERIES` with the upload
    subsystem; a move to another battery needs no reviewer's verdict in the ledger. A save refused after the TypeScript
    server minted a new role's id still burns that id there, so id numbers drift between the servers; no battery reads
@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -445,7 +445,16 @@ are for surprising facts or points that later work depends on, not implementatio
          share, availability, the timeline, the first-team seeker, the film room, captions), `orgs`, `opportunities`,
          `openTrials`, `campaigns`, `friendlies`, `ledger`. `feedback` and `applications` reach no stream here, but
          the subject rule delivers them in TypeScript, which contradicts item 4's note: check that first. Also close
-         a removed staff member's streams.
+         a removed staff member's streams. [**done**: the new `platform/liveDelivery` battery (44 checks) and 13 more
+         in `platform/api` and `scouting/clubWorkflows` pass on both servers.] TypeScript's rule order is kept: an
+         `orgId` makes an event that club's, then a `playerId` follows the subject rule (`live.Subject`, with
+         visibility and blocks read at delivery), then a `public_safe` event reaches every stream (`live.Everyone`).
+         `feedback` and `applications` were indeed delivered by the subject rule. Acts ping through
+         `platform/live_pings`, inside their unit; every `ledger.append` pings. A stream claims its staff member with
+         the hub, and `sessions.revoke_org_user` asks for `effect.CloseStreams`, so a removal and an agency's ended
+         membership close that person's streams after COMMIT. The reconnect log now keeps every event but typing,
+         as TypeScript's does, whatever `replayPolicy` says (docs/known-issues.md). The film room, captions, the
+         admin's vouch revoke and uploads aren't ported, so their pings come with slices 5 and 7.
       2. The domain events no `live_event.Event` constructor declares: `inbox`, `requests`, `evidence`, the eight
          `development_*`, the `contact_*` events with `contact_responded` and `contact_agent_routed`,
          `player_development_evidence_changed`, the three `box_cam_*`, and `policy_version_published`.

@@ -2,8 +2,6 @@
 //// completed signing and sets a player's contract status, level, timeline, squad row and availability. Called by a
 //// package's completion and, for a recruitment with no Offer, the legacy route. Every write and notice runs inside
 //// the caller's unit.
-////
-//// Not ported yet: the live 'players' event.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -18,6 +16,7 @@ import scoutbox/identity/players.{type Player}
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/ids
+import scoutbox/platform/live_pings
 import scoutbox/platform/operator
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/invoices
@@ -415,6 +414,7 @@ fn write(
     sid,
     at,
   ))
+  live_pings.player(tx, p.id)
   Ok(Written(signing, False, first))
 }
 

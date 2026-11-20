@@ -19,7 +19,9 @@ import scoutbox/messaging/push
 import scoutbox/operations/follow_ups
 import scoutbox/platform/clock
 import scoutbox/platform/config
-import scoutbox/platform/effect.{type Effect, Live, SendMail, SendPush}
+import scoutbox/platform/effect.{
+  type Effect, CloseStreams, Live, SendMail, SendPush,
+}
 import scoutbox/platform/faults
 import scoutbox/platform/limits
 import scoutbox/platform/live.{type Hub}
@@ -31,6 +33,7 @@ import scoutbox/platform/store.{type Store}
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/trial_routes
 import scoutbox/router
+import scoutbox/rows/id
 import scoutbox/seed
 import scoutbox/verification/review_routes as verification_review
 import scoutbox/verification/transitions
@@ -176,6 +179,8 @@ fn dispatch(
 ) -> Nil {
   case effect {
     Live(event:) -> live_routes.publish(store, hub, event)
+    CloseStreams(org_user_id:) ->
+      live.close_streams_of(hub, id.org_user(org_user_id))
     SendMail(to:, subject:, text:, secrets:) -> {
       let recorded =
         store.unit(store, fn(tx) {

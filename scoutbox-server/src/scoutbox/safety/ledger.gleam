@@ -6,6 +6,8 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
+import scoutbox/platform/effect
+import scoutbox/platform/live_event
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
@@ -44,6 +46,13 @@ pub fn append(
       actor_name: entry.actor_name,
     ),
   ))
+  store.emit(
+    tx,
+    effect.Live(live_event.Ledger(
+      row.type_to_string(entry.entry_type),
+      option.map(entry.player_id, id.player_to_string),
+    )),
+  )
   id
 }
 

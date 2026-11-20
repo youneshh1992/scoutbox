@@ -9,6 +9,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/platform/effect
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
@@ -189,9 +190,14 @@ pub fn revoke_reviewer(tx: Tx, reviewer_id: String) -> Result(Nil, Fail(e)) {
   )
 }
 
-/// Ends every session of a staff member.
+/// Ends every session of a staff member, and (after COMMIT) closes their open streams.
 pub fn revoke_org_user(tx: Tx, user_id: id.OrgUserId) -> Result(Nil, Fail(e)) {
-  store.run(tx, "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ?", [
-    id.org_user_sql(user_id),
-  ])
+  use Nil <- result.map(
+    store.run(
+      tx,
+      "DELETE FROM sessions WHERE kind = 'org' AND org_user_id = ?",
+      [id.org_user_sql(user_id)],
+    ),
+  )
+  store.emit(tx, effect.CloseStreams(id.org_user_to_string(user_id)))
 }

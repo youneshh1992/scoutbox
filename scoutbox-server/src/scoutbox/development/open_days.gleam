@@ -2,7 +2,7 @@
 //// lists, deletes and answers them; a local player registers, or a guardian registers their child. Every
 //// registrant gets an answer: an unanswered past one blocks the club's next posting.
 ////
-//// Not ported yet: the `openTrials` live event, and the `inbox` one an invitation sends.
+//// Not ported yet: the `inbox` live event an invitation sends.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -24,6 +24,8 @@ import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging
 import scoutbox/platform/sql.{type Fragment}
@@ -277,6 +279,7 @@ pub fn post(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             |> list.unique
           let posted =
             store.unit(ctx.store, fn(tx) {
+              live_pings.catalogue(tx, live_event.OpenTrials)
               use trial_id <- result.try(id.next_open_trial(tx))
               let trial =
                 trial_row.Row(
@@ -454,7 +457,7 @@ pub fn delete(ctx: Ctx, a: OrgAccess, trial_id: id.OpenTrialId) -> Response {
   use <- grassroots_only(a)
   let removed =
     store.unit(ctx.store, fn(tx) {
-      store.write(
+      use gone <- result.map(store.write(
         tx,
         "UPDATE open_trials SET deleted_at = ? WHERE id = ? AND org_id = ? AND deleted_at IS NULL RETURNING id",
         [
@@ -463,7 +466,12 @@ pub fn delete(ctx: Ctx, a: OrgAccess, trial_id: id.OpenTrialId) -> Response {
           id.org_sql(a.org.id),
         ],
         decode.at([0], decode.string),
-      )
+      ))
+      case gone {
+        [] -> Nil
+        _ -> live_pings.catalogue(tx, live_event.OpenTrials)
+      }
+      gone
     })
   case removed {
     Ok([]) -> http.error(404, "OPEN_TRIAL_NOT_FOUND")
@@ -567,6 +575,7 @@ pub fn outcome(
                     note,
                     now,
                   ))
+                  live_pings.catalogue(tx, live_event.OpenTrials)
                   answered
                 }
                 _ -> store.refuse(AlreadyResolved)

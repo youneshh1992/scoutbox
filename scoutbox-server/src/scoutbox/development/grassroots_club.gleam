@@ -2,7 +2,6 @@
 //// positions it is looking for, its pathway record and the friendlies board. Its open days are `open_days`. Only
 //// a club on ScoutBox Grassroots has them.
 ////
-//// Not ported yet: the `friendlies`, `orgs` and `players` live events.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -22,6 +21,8 @@ import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging
 import scoutbox/platform/sql
@@ -349,6 +350,7 @@ pub fn post_friendly(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               notes: option.unwrap(body.notes, ""),
               created_at: now,
             )
+          live_pings.catalogue(tx, live_event.Friendlies)
           friendly_row.insert(tx, friendly) |> result.replace(friendly)
         })
       case posted {
@@ -411,8 +413,6 @@ type Matchday {
 
 /// `POST /org/matchday`: a fixture the club played. Each named player on its squad whom it may see is credited
 /// with a verified, coach-signed attendance; anyone else named is skipped, a shadowed player included.
-///
-/// Not ported yet: the live 'players' event.
 pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   use <- grassroots_only(a)
   let shape = {
@@ -468,6 +468,7 @@ pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                     a.org.name,
                   ))
                   use _ <- result.try(activity.record(tx, p.row.id, now))
+                  live_pings.player(tx, p.row.id)
                   use _ <- result.map(notifications.notify(
                     tx,
                     to: audience.Player,
@@ -568,7 +569,12 @@ pub fn looking_for(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   }
   use positions <- http.body(req, shape, [])
   let positions = list.unique(positions)
-  case store.unit(ctx.store, orgs.set_looking_for(_, a.org.id, positions)) {
+  let saved =
+    store.unit(ctx.store, fn(tx) {
+      live_pings.catalogue(tx, live_event.Orgs)
+      orgs.set_looking_for(tx, a.org.id, positions)
+    })
+  case saved {
     Ok(_) ->
       http.json(
         200,
@@ -637,7 +643,10 @@ pub fn release(
             _ -> Ok(Nil)
           })
           use _ <- result.try(case entry.player_id {
-            Some(pid) -> released_player(tx, a, pid, reference, now)
+            Some(pid) -> {
+              live_pings.player(tx, pid)
+              released_player(tx, a, pid, reference, now)
+            }
             None -> Ok(Nil)
           })
           squad_view(store.reading(tx), a.org.id)
@@ -1185,6 +1194,7 @@ pub fn respond(
                   responded_at: now,
                 ),
               ))
+              live_pings.catalogue(tx, live_event.Friendlies)
               notifications.notify(
                 tx,
                 to: audience.OrgUser,

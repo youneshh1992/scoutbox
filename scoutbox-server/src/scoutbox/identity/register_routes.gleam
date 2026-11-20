@@ -15,6 +15,8 @@ import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/store
 import scoutbox/rows/id
 import scoutbox/rows/orgs as org_row
@@ -202,9 +204,9 @@ fn checked(
             store.reading(tx),
             org,
           ))
+          live_pings.catalogue(tx, live_event.Orgs)
           #(org, admin, token, certified)
         })
-      // Not ported yet: the `orgs` live event that tells open sign-in pickers a club joined.
       case created {
         Error(failure) -> http.internal(failure)
         Ok(#(org, admin, token, certified)) ->

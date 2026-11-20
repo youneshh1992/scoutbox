@@ -19,6 +19,7 @@ import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging
 import scoutbox/platform/secrets
@@ -278,6 +279,7 @@ fn publish(ctx: Ctx, v: row.Row, text: String, body: Submission) -> Response {
   // relationship to the player ("my son", "I run their agency") must be visible, not discoverable.
   let saved =
     store.unit(ctx.store, fn(tx) {
+      live_pings.player(tx, v.player_id)
       use changed <- result.try(store.write(
         tx,
         "UPDATE vouches SET status = 'published', text = ?, seasons = ?, conflict_of_interest = ?, published_at = ?, code_hash = NULL WHERE id = ? AND status = 'pending' RETURNING id",
@@ -329,7 +331,6 @@ fn publish(ctx: Ctx, v: row.Row, text: String, body: Submission) -> Response {
         }
       }
     })
-  // Not ported yet: the live 'players' event.
   case saved {
     Ok(Nil) -> http.json(201, json.object([#("published", json.bool(True))]))
     Error(failure) -> coaches.failed(failure)
@@ -365,10 +366,9 @@ pub fn withdraw(ctx: Ctx, req: Request, vouch_id: id.VouchId) -> Response {
           ))
           case rows {
             [] -> store.stale("coach reference withdrawal")
-            _ -> Ok(Nil)
+            _ -> Ok(live_pings.player(tx, v.player_id))
           }
         })
-      // Not ported yet: the live 'players' event.
       case saved {
         Ok(Nil) ->
           http.json(

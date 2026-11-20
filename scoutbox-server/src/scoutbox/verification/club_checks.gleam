@@ -19,6 +19,8 @@ import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/rows/email_challenges as challenge_row
@@ -313,13 +315,13 @@ fn confirm(ctx: Ctx, org: id.OrgId, hash: String, now: Int) -> Response {
             |> list.drop(1)
             |> list.first
             |> result.unwrap("")
+          live_pings.catalogue(tx, live_event.Orgs)
           use _ <- result.map(orgs.verify_email_domain(tx, org, domain))
           domain
         }
       }
     })
   case confirmed {
-    // Not ported yet: the `orgs` live event that tells open sign-in pickers a club changed.
     Ok(domain) ->
       http.json(
         200,
@@ -343,8 +345,6 @@ type Federation {
 
 /// `POST /org/verification/federation`: the club's federation registration, for Trust & Safety to cross-check.
 /// A resubmission replaces it.
-///
-/// Not ported yet: the live 'orgs' event.
 pub fn submit_federation(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   use <- grassroots_club.grassroots_only(a)
   let shape = {
@@ -422,7 +422,12 @@ fn file_federation(
       status: federation_row.Pending,
       submitted_at: clock.now_ms(),
     )
-  case store.unit(ctx.store, orgs.submit_federation_check(_, check)) {
+  let filed =
+    store.unit(ctx.store, fn(tx) {
+      live_pings.catalogue(tx, live_event.Orgs)
+      orgs.submit_federation_check(tx, check)
+    })
+  case filed {
     Ok(_) ->
       http.json(
         201,

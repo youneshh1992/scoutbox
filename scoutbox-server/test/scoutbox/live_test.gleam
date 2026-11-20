@@ -6,7 +6,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import scoutbox/platform/live.{Nobody}
 import scoutbox/platform/live_event.{
   CounterpartyTyping, Messages, Notify, OrgTyping, Typing,
@@ -16,6 +16,15 @@ import simplifile
 
 /// One of every event, with each variant of its fields.
 const samples = [
+  live_event.Players(Some("pl-1")),
+  live_event.Players(None),
+  live_event.Orgs,
+  live_event.Opportunities,
+  live_event.OpenTrials,
+  live_event.Campaigns,
+  live_event.Friendlies,
+  live_event.Ledger("contact_request", Some("pl-1")),
+  live_event.Ledger("signing", None),
   Messages("ch-1"),
   Typing("ch-1", OrgTyping),
   Typing("ch-1", CounterpartyTyping),
@@ -150,7 +159,7 @@ const samples = [
 ]
 
 type Entry {
-  Entry(payload: List(String), replays: Bool)
+  Entry(payload: List(String))
 }
 
 fn registry() -> dict.Dict(String, Entry) {
@@ -158,8 +167,7 @@ fn registry() -> dict.Dict(String, Entry) {
     simplifile.read("e2e/support/spec/platform/eventRegistry.json")
   let entry = {
     use payload <- decode.field("payload", decode.list(decode.string))
-    use replay <- decode.field("replayPolicy", decode.string)
-    decode.success(Entry(payload:, replays: replay == "replay"))
+    decode.success(Entry(payload:))
   }
   let assert Ok(registry) =
     json.parse(
@@ -184,9 +192,15 @@ pub fn events_carry_their_registered_payload_test() {
   let registry = registry()
   list.each(samples, fn(event) {
     let assert Ok(entry) = dict.get(registry, live_event.name(event))
-    assert list.map(live_event.payload(event), fn(field) { field.0 })
-      == entry.payload
-    assert live_event.replays(event) == entry.replays
+    let keys = list.map(live_event.payload(event), fn(field) { field.0 })
+    // A catalogue ping about nobody in particular sends no playerId at all (`broadcast('players')`).
+    let expected = case event {
+      live_event.Players(None) -> []
+      _ -> entry.payload
+    }
+    assert keys == expected
+    // As in the TypeScript server, every event but typing is replayed, whatever the registry's replayPolicy says.
+    assert live_event.replays(event) == { live_event.name(event) != "typing" }
   })
 }
 
@@ -278,4 +292,23 @@ pub fn a_ticket_names_its_session_until_it_expires_test() {
   assert live.redeem_ticket(hub, ticket, 1001 + live.ticket_ttl_ms)
     == Error(Nil)
   assert live.redeem_ticket(hub, "forged", 1000) == Error(Nil)
+}
+
+pub fn each_event_is_routed_by_its_registered_audience_test() {
+  let assert Ok(text) =
+    simplifile.read("e2e/support/spec/platform/eventAudience.json")
+  let assert Ok(audiences) =
+    json.parse(
+      text,
+      decode.at(["EVENT_AUDIENCE"], decode.dict(decode.string, decode.string)),
+    )
+  list.each(samples, fn(event) {
+    let assert Ok(said) = dict.get(audiences, live_event.name(event))
+    assert said
+      == case live_event.audience(event) {
+        live_event.PublicSafe -> "public_safe"
+        live_event.OrgPrivate -> "org_private"
+        live_event.PlayerPrivate -> "player_private"
+      }
+  })
 }

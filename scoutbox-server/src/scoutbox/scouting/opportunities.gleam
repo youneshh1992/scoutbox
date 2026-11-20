@@ -3,8 +3,6 @@
 //// `scouting/opportunity_board`; applications and closing are `scouting/opportunity_applications`.
 ////
 //// The structured requirements' route is `scouting/suitability`.
-////
-//// Not ported yet: the `opportunities` live event.
 
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
@@ -25,6 +23,8 @@ import scoutbox/platform/distance
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind}
 import scoutbox/platform/sql
@@ -794,6 +794,7 @@ fn publish(
   let requirements = option.unwrap(b.requirements, [])
   let published =
     store.unit(ctx.store, fn(tx) {
+      live_pings.catalogue(tx, live_event.Opportunities)
       use oid <- result.try(id.next_opportunity(tx))
       let r =
         row.Row(
@@ -849,7 +850,6 @@ fn publish(
         slots: [],
       )
     })
-  // Not ported yet: the `opportunities` live event.
   case published {
     Ok(o) ->
       http.json(201, json.object([#("opportunity", json.object(fields(o)))]))

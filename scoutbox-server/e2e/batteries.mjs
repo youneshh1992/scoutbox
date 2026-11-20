@@ -2,6 +2,7 @@
 // routes are ported.
 export const BATTERIES = [
   'platform/staff',
+  'platform/liveDelivery',
   'platform/safeguarding',
   'platform/playersAndGuardians',
   'platform/storeGuarantees',

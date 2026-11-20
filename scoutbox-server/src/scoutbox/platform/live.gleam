@@ -3,7 +3,8 @@
 //// EventSource can't send headers, and bearer tokens must not go in URLs, so a client mints a short-lived ticket
 //// (`POST /events/ticket`) and opens `GET /events?ticket=…`. The ticket holds the session's sid, never its token.
 ////
-//// The hub numbers each event, keeps the last 500 for reconnects (typing is never kept), and sends every event to
+//// The hub numbers each event, keeps the last 500 for reconnects (typing is never kept: like the TypeScript server,
+//// the hub ignores the registry's `replayPolicy`, docs/known-issues.md), and sends every event to
 //// every open stream. Each stream is its own process and decides there, from live records, whether its holder may
 //// see the event, so a suspension silences a stream that is already open, and the checks run in parallel.
 ////
@@ -41,6 +42,11 @@ pub type Route {
   Audience(kind: Audience, id: String, org_id: Option(id.OrgId))
   /// Every staff member of one organisation: an event whose payload names its `orgId`.
   Org(org_id: id.OrgId)
+  /// The subject rule: an event naming a `playerId` and no `orgId` reaches the player, their guardian, and every
+  /// organisation that may see them and isn't blocked, as their records stand at delivery.
+  Subject(player_id: id.PlayerId)
+  /// A catalogue ping naming nobody (`public_safe`): every stream.
+  Everyone
   /// The event names nothing that exists: nobody gets it.
   Nobody
 }
@@ -86,7 +92,12 @@ type Ticket {
 }
 
 type Stream {
-  Stream(frames: Subject(Frame), monitor: process.Monitor)
+  Stream(
+    frames: Subject(Frame),
+    monitor: process.Monitor,
+    /// The staff member whose stream it is, once it has claimed one, and where to tell it to close.
+    claimed: Option(#(id.OrgUserId, Subject(Nil))),
+  )
 }
 
 type State {
@@ -104,6 +115,8 @@ type Message {
   Publish(event: Event, route: Route, at: Int)
   Join(frames: Subject(Frame), after: Int, reply: Subject(Joined))
   Leave(pid: Pid)
+  Claim(pid: Pid, user: id.OrgUserId, close: Subject(Nil))
+  CloseStreamsOf(user: id.OrgUserId)
   Down(process.Down)
   Mint(sid: String, now: Int, reply: Subject(String))
   Redeem(ticket: String, now: Int, reply: Subject(Result(String, Nil)))
@@ -159,6 +172,16 @@ pub fn leave(hub: Hub) -> Nil {
   process.send(hub.subject, Leave(process.self()))
 }
 
+/// Names the staff member whose stream the calling process runs; `close` is told when they lose access.
+pub fn claim(hub: Hub, user: id.OrgUserId, close: Subject(Nil)) -> Nil {
+  process.send(hub.subject, Claim(process.self(), user, close))
+}
+
+/// Tells every stream a staff member has claimed to close (liveSync.mjs `closeStreamsOf`, on their removal).
+pub fn close_streams_of(hub: Hub, user: id.OrgUserId) -> Nil {
+  process.send(hub.subject, CloseStreamsOf(user))
+}
+
 /// How many streams are open.
 pub fn streams(hub: Hub) -> Int {
   process.call(hub.subject, 5000, Count)
@@ -193,7 +216,11 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
           let monitor = process.monitor(pid)
           State(
             ..state,
-            streams: dict.insert(state.streams, pid, Stream(frames, monitor)),
+            streams: dict.insert(
+              state.streams,
+              pid,
+              Stream(frames, monitor, option.None),
+            ),
           )
         }
         Error(Nil) -> state
@@ -207,6 +234,29 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
         Error(Nil) -> Nil
       }
       actor.continue(State(..state, streams: dict.delete(state.streams, pid)))
+    }
+    Claim(pid:, user:, close:) ->
+      actor.continue(case dict.get(state.streams, pid) {
+        Ok(stream) ->
+          State(
+            ..state,
+            streams: dict.insert(
+              state.streams,
+              pid,
+              Stream(..stream, claimed: option.Some(#(user, close))),
+            ),
+          )
+        Error(Nil) -> state
+      })
+    CloseStreamsOf(user:) -> {
+      dict.each(state.streams, fn(_, stream) {
+        case stream.claimed {
+          option.Some(#(owner, close)) if owner == user ->
+            process.send(close, Nil)
+          _ -> Nil
+        }
+      })
+      actor.continue(state)
     }
     Down(process.ProcessDown(pid:, ..)) ->
       actor.continue(State(..state, streams: dict.delete(state.streams, pid)))

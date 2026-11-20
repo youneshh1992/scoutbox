@@ -25,6 +25,7 @@ import scoutbox/passport/trust
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/request_metrics
@@ -138,7 +139,15 @@ pub fn moderation(ctx: Ctx, req: Request) -> Response {
 /// `POST /admin/blocks/:id/lift`: the row is deleted (Q5, docs/decisions.md).
 pub fn lift(ctx: Ctx, req: Request, block_id: id.BlockId) -> Response {
   use Nil <- http.body(req, input.nothing(), [])
-  let outcome = store.unit(ctx.store, fn(tx) { audit.lift_block(tx, block_id) })
+  let outcome =
+    store.unit(ctx.store, fn(tx) {
+      use lifted <- result.map(audit.lift_block(tx, block_id))
+      case lifted {
+        Some(_) -> live_pings.players(tx)
+        None -> Nil
+      }
+      lifted
+    })
   case outcome {
     Ok(Some(block)) ->
       http.json(200, json.object([#("lifted", audit.block_view(block))]))
@@ -320,8 +329,6 @@ fn too_short() -> Response {
 }
 
 /// `POST /admin/clubs/:id/verification`: the standing switches, and only those.
-///
-/// Not ported yet: the `players` live event the TypeScript server sends after the change.
 pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   use org <- with_org(ctx, id)
   let shape = {
@@ -353,6 +360,8 @@ pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   use standing <- http.body(req, shape, [])
   let updated =
     store.unit(ctx.store, fn(tx) {
+      // Visibility rules may have changed.
+      live_pings.players(tx)
       use _ <- result.try(orgs.set_standing(tx, org.id, standing))
       // Mirrored on the organisation's identity claim in the same unit.
       use _ <- result.try(verification_review.sync_legacy_toggle(

@@ -9,6 +9,22 @@ import scoutbox/vocab/audience.{type Audience}
 /// An event, by its name in the event registry (e2e/support/spec/platform/eventRegistry.json). Its fields are the
 /// registry's payload keys and nothing else; `test/scoutbox/live_test.gleam` proves they agree.
 pub type Event {
+  /// The player catalogue changed: one player's record (`Some`, by the subject rule), or who may see whom (`None`,
+  /// every stream). A catalogue ping carries no data: the refetch it triggers is authorisation-checked.
+  Players(player_id: Option(String))
+  /// The organisation catalogue changed. Every stream.
+  Orgs
+  /// A club published an opportunity. Every stream.
+  Opportunities
+  /// A grassroots open day was posted, removed or answered. Every stream.
+  OpenTrials
+  /// A club published a campaign. Every stream.
+  Campaigns
+  /// A friendly was posted or answered. Every stream.
+  Friendlies
+  /// A Discovery Ledger row was appended: its type, and its player (by the subject rule; a row naming no player
+  /// reaches every stream). Never the club.
+  Ledger(type_: String, player_id: Option(String))
   /// A thread changed: a message, or a read receipt.
   Messages(channel_id: String)
   /// Someone is typing in a thread. Never replayed.
@@ -60,11 +76,10 @@ pub type Event {
   )
   /// A scout submitted an assessment. Private to the club.
   AssessmentSubmitted(org_id: String, assessment_id: String)
-  /// A club published feedback to a player. The registry calls it private to a club but names none, so (as in
-  /// the TypeScript server) no stream receives it.
+  /// A club published feedback to a player. The registry calls it private to a club, but it names no `orgId`, so
+  /// (as in the TypeScript server) the subject rule delivers it: the player, their guardian, every club that sees them.
   Feedback(player_id: String)
-  /// An application to a club's opportunity was made or answered. Like `Feedback`, the registry calls it private to a
-  /// club but names none, so no stream receives it.
+  /// An application to a club's opportunity was made or answered. Delivered like `Feedback`.
   Applications(player_id: String)
   /// A Dynamic Watchlist changed (each change is its own registry entry). Ids only: the club re-reads it under its
   /// own authorisation. Private to the club.
@@ -346,6 +361,13 @@ pub const registered = [
 
 pub fn name(event: Event) -> String {
   case event {
+    Players(..) -> "players"
+    Orgs -> "orgs"
+    Opportunities -> "opportunities"
+    OpenTrials -> "openTrials"
+    Campaigns -> "campaigns"
+    Friendlies -> "friendlies"
+    Ledger(..) -> "ledger"
     Messages(..) -> "messages"
     Typing(..) -> "typing"
     Notify(..) -> "notify"
@@ -444,7 +466,6 @@ pub fn name(event: Event) -> String {
   }
 }
 
-/// The registry's payload, in its key order.
 /// The agency an event is private to, when the registry's payload names one (`orgId`).
 pub fn org_of(event: Event) -> Result(String, Nil) {
   case event {
@@ -486,13 +507,68 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewResolved(org_id:, ..)
     | AgentAuthorisationStateChanged(org_id:, ..)
     | RegulatoryConsentChanged(org_id:, ..) -> Ok(org_id)
-    Messages(..) | Typing(..) | Notify(..) | Feedback(..) | Applications(..) ->
-      Error(Nil)
+    Messages(..)
+    | Typing(..)
+    | Notify(..)
+    | Feedback(..)
+    | Applications(..)
+    | Players(..)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies
+    | Ledger(..) -> Error(Nil)
   }
 }
 
+/// The player an event is about, when it names one and no organisation: the subject rule delivers it.
+pub fn subject_of(event: Event) -> Result(String, Nil) {
+  case event {
+    Players(player_id: option.Some(p))
+    | Ledger(player_id: option.Some(p), ..)
+    | Feedback(player_id: p)
+    | Applications(player_id: p) -> Ok(p)
+    _ -> Error(Nil)
+  }
+}
+
+/// Who the registry says an event is for (eventAudience.mjs). Only an event naming neither an organisation nor a
+/// player is routed by it.
+pub type EventAudience {
+  PublicSafe
+  OrgPrivate
+  PlayerPrivate
+}
+
+pub fn audience(event: Event) -> EventAudience {
+  case event {
+    Players(..)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies
+    | Ledger(..) -> PublicSafe
+    Notify(..) -> PlayerPrivate
+    _ -> OrgPrivate
+  }
+}
+
+/// The registry's payload, in its key order.
 pub fn payload(event: Event) -> List(#(String, Json)) {
   case event {
+    Players(player_id: option.Some(p)) -> [#("playerId", json.string(p))]
+    Players(player_id: option.None)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies -> []
+    Ledger(type_:, player_id:) -> [
+      #("type", json.string(type_)),
+      #("playerId", json.nullable(player_id, json.string)),
+    ]
     Messages(channel_id:) -> [#("channelId", json.string(channel_id))]
     Typing(channel_id:, side:) -> [
       #("channelId", json.string(channel_id)),
@@ -690,22 +766,11 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
   }
 }
 
-/// Whether a reconnect replays it (the registry's `replayPolicy`).
+/// Whether a reconnect replays it: everything but typing. The registry's `replayPolicy` says some events are never
+/// replayed, but the TypeScript server's log ignores it, and so does this one (docs/known-issues.md).
 pub fn replays(event: Event) -> Bool {
   case event {
-    Messages(..)
-    | Notify(..)
-    | OfferResponded(..)
-    | AssessmentSubmitted(..)
-    | Feedback(..)
-    | Applications(..)
-    | WatchlistChanged(..)
-    | MatchingRoomCreated(..)
-    | RecruitmentCaseMoved(..)
-    | RecruitmentRoomArchived(..)
-    | RoomReopenedFromSecondLook(..)
-    | SigningChanged(..) -> True
-    OfferChanged(change:, ..) -> change != OfferDraftUpdated
-    _ -> False
+    Typing(..) -> False
+    _ -> True
   }
 }

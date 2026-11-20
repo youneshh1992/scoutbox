@@ -22,6 +22,7 @@ import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Tx}
 import scoutbox/platform/temporal
 import scoutbox/platform/zones
@@ -45,8 +46,26 @@ const badges_max = 6
 
 const badge_max = 60
 
-/// Runs an act on the player and answers with what `view` makes of the stored record.
+/// Runs an act on the player's record, pings the player catalogue, and answers with what `view` makes of the
+/// stored record.
 fn act(
+  ctx: Ctx,
+  work: fn(Tx) -> Result(Player, store.Fail(Nil)),
+  view: fn(Player) -> json.Json,
+) -> Response {
+  quiet_act(
+    ctx,
+    fn(tx) {
+      use p <- result.map(work(tx))
+      live_pings.player(tx, p.row.id)
+      p
+    },
+    view,
+  )
+}
+
+/// An act no catalogue ping follows (the notification preferences are the player's alone).
+fn quiet_act(
   ctx: Ctx,
   work: fn(Tx) -> Result(Player, store.Fail(Nil)),
   view: fn(Player) -> json.Json,
@@ -280,8 +299,6 @@ type StatsInput {
 }
 
 /// `POST /player/stats`.
-///
-/// Not ported yet: the `players` live event.
 pub fn stats(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let figure = fn(name, next) {
     input.field(
@@ -498,7 +515,7 @@ fn save_prefs(ctx: Ctx, p: Player, body: PrefsInput) -> Response {
       },
       timezone: pick(body.timezone, was.timezone),
     )
-  act(ctx, players.set_prefs(_, p.row.id, next), prefs_view)
+  quiet_act(ctx, players.set_prefs(_, p.row.id, next), prefs_view)
 }
 
 /// `GET /player/prefs`.
@@ -608,8 +625,6 @@ type NewMedia {
 ///
 /// Out of scope: the upload itself (`dataUrl`, which the storage adapter writes to disk), and so the Verified Clip
 /// seal, which needs the footage.
-///
-/// Not ported yet: the `players` live event.
 pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use title <- input.field(
@@ -712,8 +727,6 @@ type AttendanceInput {
 }
 
 /// `POST /player/attendance`: verified match attendance needs the fixture, venue, date, GPS and the device.
-///
-/// Not ported yet: the `players` live event.
 pub fn attendance(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use fixture <- input.field(
@@ -835,6 +848,7 @@ fn add_attendance(
         ),
         now,
       ))
+      live_pings.player(tx, player_id)
       #(item, p)
     })
   case added {
@@ -886,6 +900,7 @@ fn add_media(
       ))
       use _ <- result.try(store.seam(tx, "media.after_row"))
       use p <- result.map(activity.record(tx, player_id, now))
+      live_pings.player(tx, player_id)
       #(clip, p)
     })
   case added {
@@ -934,8 +949,6 @@ type MedicalRecord {
 }
 
 /// `POST /player/medical/records`: a record, the condition status, or both. Answers with the medical record.
-///
-/// Not ported yet: the `players` live event.
 pub fn medical_record(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use type_ <- input.field(
@@ -999,6 +1012,7 @@ pub fn medical_record(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
       })
       use found <- result.map(players.by_id(store.reading(tx), id))
       let assert Some(p) = found as "the signed-in player is live"
+      live_pings.player(tx, id)
       p
     })
   case stored {
@@ -1012,8 +1026,6 @@ type Point {
 }
 
 /// `POST /player/location`: the point the Grassroots radius is measured from.
-///
-/// Not ported yet: the live 'players' event.
 pub fn location(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use lat <- input.field("lat", input.required(input.number(-90, 90)))
@@ -1036,7 +1048,7 @@ type DrillDone {
 /// `POST /player/drills/:id/complete`: the drill is done, and a measured result is kept, verified when it came
 /// with video.
 ///
-/// Not ported yet: the live 'players' event. TypeScript doesn't keep the video either.
+/// TypeScript doesn't keep the video either.
 pub fn complete_drill(
   ctx: Ctx,
   req: Request,

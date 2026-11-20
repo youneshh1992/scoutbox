@@ -15,6 +15,7 @@ import scoutbox/insight/review_queue
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_pings
 import scoutbox/platform/operator
 import scoutbox/platform/store
 import scoutbox/rows/id
@@ -166,6 +167,7 @@ pub fn add_note(
         Some(text) -> {
           let added =
             store.unit(ctx.store, fn(tx) {
+              live_pings.player(tx, p.row.id)
               audit.add_note(
                 tx,
                 org_id: a.org.id,

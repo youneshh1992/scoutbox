@@ -14,6 +14,7 @@ import scoutbox/identity/orgs
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Tx}
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
@@ -157,7 +158,10 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
                 requests.suspend_pending(tx, org_id, p.0)
               })
           })
-          // Not ported yet: the live 'players' event the TypeScript server broadcasts after a suspension.
+          case suspend {
+            True -> live_pings.players(tx)
+            False -> Nil
+          }
           report
         })
       case outcome {
@@ -212,6 +216,7 @@ fn add_block(
       case found {
         None -> store.refuse(OrgNotFound)
         Some(org) -> {
+          live_pings.players(tx)
           use _ <- result.try(audit.add_block(
             tx,
             player_id:,

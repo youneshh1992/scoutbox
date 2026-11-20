@@ -8,6 +8,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { openFixture } from '../support/sqlFixture.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 
 const PORT = 4102;
 const API = `http://localhost:${PORT}`;
@@ -75,6 +76,15 @@ const orgLogin = async (orgId, scoutName, role, platform) =>
   (await post('/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
 const maria = await orgLogin('org-eastport', 'Maria Keane', 'Head of Recruitment');
 const MARIA = maria.token;
+// Maria's club sees Kola, so its stream witnesses the pings about him.
+const WITNESS = await liveStream(
+  API,
+  (method, p, body, token) =>
+    j(p, { method, body: body === undefined ? undefined : JSON.stringify(body) }, token ? bearer(token) : {}),
+  MARIA,
+);
+const pingedFrom = async (event, from) =>
+  !!(await WITNESS.waitFor((f) => f.event === event && f.playerId === 'pl-adeyemi', from));
 const sam = await orgLogin('org-eastport', 'Sam Ellis', 'Scout');
 const SAM = sam.token;
 const NORTH = (await orgLogin('org-northstar', 'Alex Agent', 'Agent')).token;
@@ -418,8 +428,10 @@ ok(
     vch.conflictOfInterest?.includes('former coach'),
   'the reference says exactly what was verified (mailbox, not identity) + shows the conflict declaration',
 );
+let mark = WITNESS.frames().length;
 r = await post(`/admin/vouches/${vch.id}/withdraw`, { reason: 'reference retracted on request' }, admin);
 ok(r.status === 200, 'T&S withdraws the reference');
+ok(await pingedFrom('players', mark), 'LV1 a withdrawn reference pings the player');
 r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));
 ok(
   !(r.body.vouches ?? []).some((v) => v.coachName === 'Ade Balogun'),
@@ -543,6 +555,7 @@ r = await post(
 ok(r.status === 201 && r.body.template.version === 2, 'lead publishes template v2');
 r = await j('/org/assessments?playerId=pl-adeyemi', {}, bearer(MARIA));
 ok(r.body.items.find((a) => a.id === assM).templateVersion === 1, 'historical report still pinned to v1');
+mark = WITNESS.frames().length;
 r = await post(
   `/org/assessments/${assM}/publish-feedback`,
   {
@@ -551,6 +564,10 @@ r = await post(
   bearer(MARIA),
 );
 ok(r.status === 200, 'feedback published deliberately');
+ok(
+  await pingedFrom('feedback', mark),
+  'LV2 published feedback reaches the clubs that see the player (the subject rule)',
+);
 r = await j('/player/feedback', {}, bearer(KOLA));
 ok(
   r.body.items.length === 1 && r.body.items[0].text.includes('pressing triggers'),
