@@ -15,6 +15,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 
 const { API, DATA_DIR } = await serverUnderTest();
 
@@ -189,6 +190,22 @@ const orgLogin = await j('/auth/org/login', {
   body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
 });
 const EASTPORT = orgLogin.body.token;
+// Eastport sees every adult the acts below touch, so its stream witnesses their pings.
+const WITNESS = await liveStream(
+  API,
+  (method, p, body, token) =>
+    j(p, { method, body: body === undefined ? undefined : JSON.stringify(body) }, token ? bearer(token) : {}),
+  EASTPORT,
+);
+let seen = 0;
+const mark = () => {
+  seen = WITNESS.frames().length;
+};
+const pinged = async (event, playerId) =>
+  !!(await WITNESS.waitFor(
+    (f) => f.event === event && (playerId === undefined ? !('playerId' in f) : f.playerId === playerId),
+    seen,
+  ));
 ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless demo seeds)');
 // The seed dates its attendance from its own clock: Kola's cup final 20 days before the first boot, the county trial
 // day 60 (a day either way, should the boot straddle midnight).
@@ -437,6 +454,7 @@ r = await j(`/org/searches/${savedYoung.id}`, { method: 'DELETE' }, bearer(HARBO
 ok(r.status === 404, 'another club cannot delete it');
 
 // ---- 6. mandatory report with feedback, then minor trial via guardian slot choice
+mark();
 r = await j(
   `/org/trials/${trial.id}/report`,
   {
@@ -455,6 +473,7 @@ r = await j(
   bearer(EASTPORT),
 );
 ok(r.status === 201 || r.status === 200, 'org files the mandatory trial report with feedback notes');
+ok(await pinged('players', 'pl-adeyemi'), 'LV1 the trial report pings the player');
 let me = await j('/player/me', {}, bearer(KOLA));
 ok(
   /Ruthless/.test(me.body.trialReports.find((x) => x.orgName === 'Eastport FC')?.strengthNote ?? ''),
@@ -519,12 +538,14 @@ await j(
   { method: 'POST', body: JSON.stringify({ accept: true }) },
   bearer(SVEN),
 );
+mark();
 r = await j(
   '/org/players/pl-svensson/signing',
   { method: 'POST', body: JSON.stringify({ note: 'Signed after trial run.' }) },
   bearer(EASTPORT),
 );
 ok(r.status === 201 && r.body.signing.insideAttributionWindow, 'signing recorded inside attribution window');
+ok(await pinged('players', 'pl-svensson'), 'LV2 a legacy signing pings the player');
 {
   const s = r.body.signing;
   ok(
@@ -593,12 +614,14 @@ r = await j(
 ok(r.status === 201, 'company-domain challenge sent');
 const vMail = (await j('/admin/outbox', {}, admin)).body.items.find((m) => m.to === 'recruitment@eastportfc.co.uk');
 const vCode = /code is ([A-Z0-9]{6})/.exec(vMail?.text ?? '')?.[1];
+mark();
 r = await j(
   '/org/verification/email/confirm',
   { method: 'POST', body: JSON.stringify({ code: vCode }) },
   bearer(EASTPORT),
 );
 ok(r.status === 200 && r.body.emailDomain === 'eastportfc.co.uk', 'code from the mailbox confirms domain control');
+ok(await pinged('orgs', undefined), 'LV3 a confirmed e-mail domain pings the catalogue of clubs');
 
 // ---- 10. exports, deletion rules, aging-up
 r = await j('/player/export', {}, bearer(KOLA));
@@ -623,10 +646,13 @@ r = await j('/player/account', { method: 'DELETE' }, bearer(newPlayerToken));
 ok(r.status === 200, 'adult deletes own account');
 me = await j('/player/me', {}, bearer(IMANI));
 ok(me.body.agingUp?.eligible === true, 'imani (18, guardian-linked) is aging-up eligible');
+mark();
 r = await j('/player/aging-up/complete', { method: 'POST' }, bearer(IMANI));
 ok(r.status === 200, 'aging-up handover completes');
+ok(await pinged('players', 'pl-imani'), 'LV4 the aging-up handover pings the player');
 
 // ---- 11. admin resolve reaches the reporter; push log records delivery
+mark();
 await j(
   '/player/report',
   {
@@ -640,6 +666,7 @@ await j(
   },
   bearer(KOLA),
 );
+ok(await pinged('players', undefined), 'LV5 an urgent report suspending a club pings every stream');
 const rep = (await j('/admin/reports?limit=100', {}, admin)).body.items.find(
   (x) => x.status === 'pending_review' && x.by === 'player',
 );
@@ -876,6 +903,7 @@ r = await j('/vouch/submit', {
   body: JSON.stringify({ code: vouchCode, text: "Don't tell your parents but call me on 07911 123456" }),
 });
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'vouch text passes through the same moderation screen');
+mark();
 r = await j('/vouch/submit', {
   method: 'POST',
   body: JSON.stringify({
@@ -885,6 +913,7 @@ r = await j('/vouch/submit', {
   }),
 });
 ok(r.status === 201, 'clean vouch publishes');
+ok(await pinged('players', 'pl-adeyemi'), 'LV6 a published coach reference pings the player');
 // The code is single use (stored only as its hash, cleared on publish); junk is refused, not coerced.
 r = await j('/vouch/submit', {
   method: 'POST',
@@ -1013,6 +1042,7 @@ ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'squad tools are
 // for every rostered platform player. Non-rostered ids are never credited.
 me = await j('/player/me', {}, bearer(KOLA));
 const attBefore = me.body.attendance.length;
+mark();
 r = await j(
   '/org/matchday',
   {
@@ -1027,6 +1057,7 @@ r = await j(
   bearer(MOSS),
 );
 ok(r.status === 201 && r.body.credited === 1, 'match day credits only rostered, visible platform players');
+ok(await pinged('players', 'pl-adeyemi'), 'LV7 a match day pings each credited player');
 me = await j('/player/me', {}, bearer(KOLA));
 const lastAtt = me.body.attendance[me.body.attendance.length - 1];
 ok(
@@ -1064,6 +1095,7 @@ ok(
 );
 trials = await j('/org/open-trials', {}, bearer(MOSS));
 const pastReg = trials.body.items.find((t) => t.id === pastTrialId).registrations[0];
+mark();
 r = await j(
   `/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`,
   {
@@ -1076,6 +1108,7 @@ r = await j(
   bearer(MOSS),
 );
 ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
+ok(await pinged('openTrials', undefined), 'LV8 an open-day outcome pings the open days');
 r = await j('/player/inbox', {}, bearer(KOLA));
 ok(
   r.body.items.some(
@@ -1147,6 +1180,7 @@ ok(
 // published on the way out.
 r = await j('/org/squad', {}, bearer(MOSS));
 const kolaEntry = r.body.entries.find((e) => e.playerId === 'pl-adeyemi');
+mark();
 r = await j(
   `/org/squad/${kolaEntry.id}/release`,
   {
@@ -1161,6 +1195,7 @@ ok(
   r.status === 200 && !r.body.entries.some((e) => e.playerId === 'pl-adeyemi'),
   'release removes the player from the squad',
 );
+ok(await pinged('players', 'pl-adeyemi'), 'LV9 a release pings the player');
 me = await j('/player/me', {}, bearer(KOLA));
 ok(
   me.body.availability === 'available_now' && me.body.contractStatus === 'free_agent',
@@ -1199,6 +1234,7 @@ ok(
 
 // Federation-route verification: Sunday-league clubs run on free email —
 // they verify through their federation registration instead.
+mark();
 r = await j(
   '/org/verification/federation',
   {
@@ -1212,6 +1248,7 @@ r = await j(
   bearer(MOSS),
 );
 ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verification (free-mail contact allowed)');
+ok(await pinged('orgs', undefined), 'LV10 a federation filing pings the catalogue of clubs');
 r = await j(
   '/org/verification/federation',
   {
@@ -1283,12 +1320,14 @@ r = await j(
   bearer(LEYTON),
 );
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'friendly responses are moderated like everything else');
+mark();
 r = await j(
   `/org/friendlies/${friendlyId}/respond`,
   { method: 'POST', body: JSON.stringify({ message: 'Our u15s are free that Saturday — happy to travel.' }) },
   bearer(LEYTON),
 );
 ok(r.status === 201, 'a local club responds to the friendly');
+ok(await pinged('friendlies', undefined), "LV11 a friendly's answer pings the friendlies");
 r = await j(
   `/org/friendlies/${friendlyId}/respond`,
   { method: 'POST', body: JSON.stringify({ message: 'again' }) },

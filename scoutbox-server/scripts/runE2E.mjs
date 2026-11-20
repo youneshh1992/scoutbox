@@ -37,6 +37,7 @@ export const BATTERIES = [
   'platform/delivery',
   'platform/notifications',
   'platform/staff',
+  'platform/liveDelivery',
   'agents/adversarial',
   'platform/sessionsAndPorts',
   'recruitment/trials',

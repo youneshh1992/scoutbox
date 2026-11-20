@@ -43,12 +43,30 @@ export const NOTES = {
         why: 'The resumable uploads, the media link refusal and the captions moved whole to their own battery, so this one runs on a server without the upload subsystem. The campaign attempt plants its clip as an upload stores it',
       },
     ],
+    added: [
+      {
+        checks: 2,
+        why: 'Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2)',
+      },
+    ],
   },
   'platform/api': {
     added: [
       {
         checks: 5,
         why: "Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2)",
+      },
+      {
+        checks: 11,
+        why: 'Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11)',
+      },
+    ],
+  },
+  'platform/liveDelivery': {
+    added: [
+      {
+        checks: 7,
+        why: "A new battery (44 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, and every simple act that sends a catalogue ping",
       },
     ],
   },
