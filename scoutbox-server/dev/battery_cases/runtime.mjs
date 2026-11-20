@@ -1,5 +1,5 @@
-// A call is kept as a case when its arguments and its result are data: plain JSON values, plus byte buffers and Maps,
-// which are written tagged (`{ "$bytes": base64 }`, `{ "$map": [[key, value], …] }`) so a printer can tell them from
+// A call is kept as a case when its arguments and its result are data: plain JSON values, plus byte buffers, Dates and
+// Maps, which are written tagged (`{ "$bytes": base64 }`, `{ "$date": ms }`, `{ "$map": [[key, value], …] }`) so a printer can tell them from
 // plain objects. A call that changes its arguments (a rule that updates the record it is given) also keeps the
 // arguments as they were after it. A call that throws a refusal with a code keeps the code. Everything else is kept as
 // a reason only, so the report can list it for porting by hand. Only the calls a suite makes itself are recorded: a
@@ -18,6 +18,12 @@ function encode(v, at = '$') {
   if (typeof v === 'function') return { why: `${at} is a function` };
   if (typeof v !== 'object') return { why: `${at} is a ${typeof v}` };
   if (v instanceof Uint8Array) return { data: { $bytes: Buffer.from(v).toString('base64') } };
+  // `instanceof` reads only the prototype (a Proxy's `get` may throw). The suites' Dates are all the preload's frozen
+  // `Date`, the global at call time.
+  if (v instanceof Date) {
+    const ms = v.getTime();
+    return Number.isFinite(ms) ? { data: { $date: ms } } : { why: `${at} is an invalid Date` };
+  }
   if (Array.isArray(v)) {
     const out = [];
     for (let i = 0; i < v.length; i++) {

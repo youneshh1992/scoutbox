@@ -57,7 +57,7 @@ and these files are never edited by hand. `cases:check`, part of `e2e:check`, fa
 - **Unmapped functions generate nothing.** They are listed as pending in `dev/battery_cases/report.json`.
 - **Some calls must be hand-ported** into `test/scoutbox/<domain>/` and recorded in `HAND_PORTED`. These are calls
   that take closures or stateful stores, and inputs Gleam's types can't hold (`NaN`, `Infinity`, `undefined`,
-  wrongly typed values). Most of the hand-port backlog is of the second kind. Many of those calls reduce to "the
+  wrongly typed values). Dates, byte buffers and Maps are recorded as tagged data (`$date`, `$bytes`, `$map`). Most of the hand-port backlog is of the second kind. Many of those calls reduce to "the
   type system refuses this", so a short test per function usually answers them all.
 - **Vocabulary and error-code constructors are read from the Gleam source**, so their names can't drift. A record
   printer refuses a JavaScript field it has no mapping for.
@@ -136,7 +136,7 @@ of the product, so they aren't one slice.
 | Scouting: club workflows | 1 | **ported** |
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 2 | **ported** |
-| Operations: club operations | 1 | passes; its rule cases and hand-port calls are left (slice 9) |
+| Operations: club operations | 1 | **ported** |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -336,7 +336,12 @@ are for surprising facts or points that later work depends on, not implementatio
          copies; it has its own long timeout and fails as `500 BACKUP_FAILED`, never a panic. The SIGKILL restart
          needed nothing new: every dispatch is a row, and the boot sweep picks it up. The manifest file is compact
          JSON, where TypeScript indents it.
-      9. The rule cases (26, mostly `ageOn`, `isAdult` and `b32encode`) and the 7 hand-port calls.
+      9. The rule cases (26, mostly `ageOn`, `isAdult` and `b32encode`) and the 7 hand-port calls. [**done**: all
+         33 cases are generated and none is left to port by hand, so operations is ported.] The 7 hand-port calls were
+         only a `Date` argument: the recorder now writes a Date as `{ "$date": ms }`, as it does bytes and Maps, so
+         `ageOn` and `isAdult` calls are cases in every battery, about 100 fewer hand-port calls. The ones left take or
+         give `NaN`, or a null dob, which Gleam's player can't hold. `webhookUrlProblem` is tested with local
+         destinations allowed, since its suite sets `ALLOW_LOCAL_WEBHOOKS=1`.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
@@ -404,7 +409,7 @@ a battery passes; `npm run e2e` does.
 ## Estimate
 
 Untangling is finished. What remains is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
-6,700 cases pending (2,242 of them in `dates`) and about 460 hand-port calls, by `LEDGER.md`.
+6,800 cases pending (2,175 of them in `dates`) and about 400 hand-port calls, by `LEDGER.md`.
 
 ## Risks
 

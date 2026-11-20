@@ -2708,7 +2708,55 @@ const budgetFx = record({
   },
 });
 
+// ----------------------------------------------------------------------------------------- age, TOTP, webhooks
+
+const AGE = 'scoutbox/rules/age';
+const TOTP = 'scoutbox/identity/totp';
+const WEBHOOKS = 'scoutbox/integrations/webhooks';
+
+/** The instant a rule is asked about: a Date (recorded as `{ $date: ms }`) or milliseconds; absent, the clock. */
+const instant = (v, ctx) =>
+  v === undefined ? int(ctx.now) : typeof v?.$date === 'number' ? int(v.$date) : int(v);
+
+const AGE_MAP = {
+  ['domain.ts#ageOn']: {
+    module: AGE,
+    now: true,
+    test: (c, ctx) =>
+      eq(`${ctx.use(AGE)}.age_on(${string(c.args[0])}, ${instant(c.args[1], ctx)})`, option(int)(c.result, ctx)),
+  },
+  ['domain.ts#isAdult']: {
+    module: AGE,
+    now: true,
+    test: (c, ctx) => {
+      const { dob, country } = c.args[0] ?? {};
+      return eq(
+        `${ctx.use(AGE)}.is_adult(${string(dob)}, ${string(country)}, ${instant(c.args[1], ctx)})`,
+        bool(c.result),
+      );
+    },
+  },
+};
+
+const TOTP_MAP = {
+  ['domains/identity/totp.mjs#b32encode']: plainIn(TOTP)('b32encode', [bytes], string),
+  ['domains/identity/totp.mjs#totp']: plainIn(TOTP)('totp', [string, int], string),
+  ['domains/identity/totp.mjs#totpValid']: plainIn(TOTP)('valid', [string, string, int], bool),
+};
+
+const WEBHOOK_MAP = {
+  // The rule reads ALLOW_LOCAL_WEBHOOKS at call time; the only suite that calls it sets it to 1.
+  ['domains/integrations/webhooks.mjs#webhookUrlProblem']: {
+    module: WEBHOOKS,
+    test: (c, ctx) =>
+      eq(`${ctx.use(WEBHOOKS)}.url_problem(${string(c.args[0])}, True)`, option(string)(c.result, ctx)),
+  },
+};
+
 export const MAP = {
+  ...AGE_MAP,
+  ...TOTP_MAP,
+  ...WEBHOOK_MAP,
   ['domains/recruitment/money.mjs#convertMinor']: plainIn(BUDGETS)('convert_minor', [int, string], (v) =>
     v === null ? 'Error(Nil)' : `Ok(${int(v)})`,
   ),

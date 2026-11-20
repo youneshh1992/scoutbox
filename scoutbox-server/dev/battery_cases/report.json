@@ -5,20 +5,25 @@
       {
         "function": "domain.ts#ageOn",
         "calls": 4,
-        "cases": 0,
+        "cases": 1,
         "handPort": {
-          "args[] is a ": 4
+          "result is NaN": 3
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isAdult",
         "calls": 13,
         "cases": 0,
         "handPort": {
-          "args[] is a ": 13
+          "Gleam's types can't hold its arguments: cannot print [] as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 8
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#parseDob",
@@ -1289,11 +1294,9 @@
       {
         "function": "domain.ts#ageOn",
         "calls": 2,
-        "cases": 0,
-        "handPort": {
-          "args[] is a ": 2
-        },
-        "status": "pending"
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
       },
       {
         "function": "domains/discovery/matching/criteria.mjs#criteriaVersion",
@@ -1599,48 +1602,44 @@
       {
         "function": "domain.ts#ageOn",
         "calls": 2,
-        "cases": 0,
-        "handPort": {
-          "args[] is a ": 2
-        },
-        "status": "pending"
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
       },
       {
         "function": "domain.ts#isAdult",
         "calls": 5,
-        "cases": 0,
-        "handPort": {
-          "args[] is a ": 5
-        },
-        "status": "pending"
+        "cases": 5,
+        "handPort": {},
+        "status": "generated"
       },
       {
         "function": "domains/identity/totp.mjs#b32encode",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/identity/totp.mjs#totp",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/identity/totp.mjs#totpValid",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/integrations/webhooks.mjs#webhookUrlProblem",
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/budgets.mjs#computeScenarioTotals",
@@ -1887,21 +1886,18 @@
       {
         "function": "domain.ts#ageOn",
         "calls": 8,
-        "cases": 0,
+        "cases": 6,
         "handPort": {
-          "args[] is a ": 6,
           "result is NaN": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isAdult",
         "calls": 4,
-        "cases": 1,
-        "handPort": {
-          "args[] is a ": 3
-        },
-        "status": "pending"
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#briefIsLiveOn",
@@ -2031,23 +2027,27 @@
       {
         "function": "domain.ts#ageOn",
         "calls": 20,
-        "cases": 0,
+        "cases": 4,
         "handPort": {
-          "args[] is a ": 18,
           "args[] is NaN": 1,
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "result is NaN": 12
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isAdult",
         "calls": 21,
-        "cases": 0,
+        "cases": 13,
         "handPort": {
-          "args[] is a ": 20,
-          "args[].dob is NaN": 1
+          "args[].dob is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 20100101 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 2,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isTrialDate",
@@ -3244,9 +3244,14 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 12 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel",
@@ -3442,12 +3447,15 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 11,
-        "cases": 0,
+        "cases": 6,
         "handPort": {
-          "args[] is a ": 10,
-          "args[].dob is NaN": 1
+          "args[].dob is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
@@ -3647,12 +3655,16 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 19,
-        "cases": 0,
+        "cases": 13,
         "handPort": {
-          "args[] is a ": 18,
-          "args[].dob is NaN": 1
+          "args[].dob is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 19900101 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
@@ -4058,9 +4070,12 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#canCompleteParty",
@@ -4142,9 +4157,8 @@
       {
         "function": "domain.ts#parseTrialDate",
         "calls": 47,
-        "cases": 42,
+        "cases": 43,
         "handPort": {
-          "args[] is a ": 1,
           "args[] is a function": 1,
           "args[] is a symbol": 1,
           "args[] is NaN": 1
