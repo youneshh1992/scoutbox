@@ -342,7 +342,28 @@ are for surprising facts or points that later work depends on, not implementatio
          `ageOn` and `isAdult` calls are cases in every battery, about 100 fewer hand-port calls. The ones left take or
          give `NaN`, or a null dob, which Gleam's player can't hold. `webhookUrlProblem` is tested with local
          destinations allowed, since its suite sets `ALLOW_LOCAL_WEBHOOKS=1`.
-8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
+8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`. Each slice is
+   about a session. The gaps named below come from matching the batteries' paths against the router's strings, not
+   from a run, so start each slice by syncing its battery and running it to see how far it gets. A battery goes on
+   `BATTERIES` when all its checks pass.
+   1. `platform/contracts` and `platform/productionHardening`. Both check hardening over routes that are mostly in
+      already. The gaps seen so far are `/capabilities` and its honesty about the deployment, `/source-changes`,
+      the CORS allowlist, the baseline security headers, the oversized-body refusal, and the production boot
+      refusing simulated faults. Then their rule cases (36 and 27) and hand-port calls (16 and 22).
+   2. `platform/dates`. First the live groups Q–T (65 checks): sign-up's dates of birth at both doors, the taxonomy
+      on every hardened route, authorization decided before a date is read, and normalised values surviving a
+      restart. Then its 2,175 rule cases and 97 hand-port calls, rule by rule. Many of the calls that can't be
+      recorded pass `NaN`, `±Infinity` or a value of the wrong type: decide for each rule whether it closes in
+      `NO_COUNTERPART` or is ported by hand. This may run into a second session.
+   3. `platform/api` §0–§12: auth, guardian sign-up's email-verification gate (`/auth/guardian/verify-email`,
+      `/guardian/verify-id`), pairing (`/guardian/children/:id/pairing-code`, `/auth/player/pair`), a trial with
+      alternative slots and its ICS, season history and preferences, saved searches and alerts, a mandatory report,
+      moderation's escalation, the funnel and a signing to its invoice, club email-domain verification, exports,
+      deletion and aging-up (`/player/aging-up/complete`), the admin resolve and the push log, and the platform
+      separation. The battery has no rule cases.
+   4. `platform/api` §13–§14: the Grassroots player journey (`/player/season-wrap`, `/org/looking-for`), the club
+      toolkit (`/org/squad/:id/release`, `/org/pathway-record`), the typed open days, match days and friendlies, the
+      player's record field by field, and storage and persistence on disk.
 9. **Parity beyond the batteries, after every battery passes.** The batteries reach only part of the server: 85
    `Not ported yet:` markers are left (recruitment 17, development 15, identity 11, agents 10, scouting 9, the rest
    fewer), some routes answer 501 past their guards (`/org/players/:id/morelike`, compliance decisions on facets,
