@@ -7,8 +7,6 @@
 //// An event naming an `orgId` reaches that organisation only. One naming a `playerId` (and no `orgId`) follows the
 //// subject rule: the player, their guardian, and every organisation that may see them and isn't blocked. A catalogue
 //// ping naming neither reaches every stream. A removed staff member's open streams are closed.
-////
-//// Not ported yet: the registry's events that no constructor of `live_event.Event` declares.
 
 import ewe
 import gleam/erlang/process

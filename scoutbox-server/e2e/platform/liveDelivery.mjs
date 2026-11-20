@@ -9,6 +9,8 @@
 //   C every act that sends a catalogue ping sends it: the player's own record, the guardian's, the club's notes, the
 //     grassroots catalogue (open days, looking-for, friendlies), opportunities and campaigns, applications and their
 //     outcome, sign-up, erasure, blocks and their lifting, and the Trust & Safety standing of a club
+//   D the domain events naming a player (a request in the inbox, its answer, evidence) follow the subject rule
+//   E a club development plan's events (created, goals, actions, evidence, reviews, updated, completed) reach the club
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -370,6 +372,128 @@ await delivered(
   "C30 Trust & Safety sets a club's standing",
   () => j('POST', `/admin/clubs/${freshOrg.id}/verification`, { verified: true }, null, ADMIN),
   { event: 'players', to: everyone() },
+);
+
+section('D — the domain events naming a player');
+const SUBJECT = (event) => ({ event, playerId: 'pl-adeyemi', to: ['kola', 'maria'], notTo: ['guni', 'amara'] });
+await delivered(
+  "D1 a request reaches the player's inbox, by the subject rule",
+  () =>
+    j(
+      'POST',
+      '/org/players/pl-adeyemi/request',
+      { type: 'trial', message: 'Live delivery trial day.', proposedDate: '2099-07-01', venue: 'Eastport Dome' },
+      maria,
+    ),
+  SUBJECT('inbox'),
+);
+await delivered(
+  "D2 the player's answer to a request",
+  () => j('POST', `/player/requests/${contact.body.requestId}/respond`, { accept: true }, kola),
+  SUBJECT('requests'),
+);
+const claim = await delivered(
+  'D3 a claim the player files',
+  () => j('POST', '/player/evidence', { claimType: 'statistic', label: 'Live goals', value: 3, units: 'goals' }, kola),
+  SUBJECT('evidence'),
+);
+await delivered(
+  'D4 a club corroborates it',
+  () => j('POST', `/org/evidence/${claim.body.evidence.id}/corroborate`, {}, maria),
+  SUBJECT('evidence'),
+);
+const claim2 = await j(
+  'POST',
+  '/player/evidence',
+  { claimType: 'statistic', label: 'Live assists', value: 2, units: 'assists' },
+  kola,
+);
+await delivered(
+  'D5 the player corrects one',
+  () =>
+    j(
+      'POST',
+      `/player/evidence/${claim2.body.evidence.id}/correct`,
+      { value: 1, reason: 'one was a deflection' },
+      kola,
+    ),
+  SUBJECT('evidence'),
+);
+
+section("E — a club plan's events reach that club only");
+const CLUB = (event) => ({ event, to: ['maria'], notTo: ['kola', 'guni', 'amara', 'hackney', 'moss'] });
+const plan = await delivered(
+  'E1 a club creates a development plan',
+  () =>
+    j(
+      'POST',
+      '/org/development/plans',
+      {
+        playerId: 'pl-adeyemi',
+        title: 'Live delivery plan',
+        visibility: 'org_private',
+        status: 'active',
+        goals: [{ title: 'Scan before receiving', category: 'match_understanding' }],
+      },
+      maria,
+    ),
+  CLUB('development_plan_created'),
+);
+const planId = plan.body.plan.id;
+const goal = await delivered(
+  'E2 a goal is added',
+  () => j('POST', `/org/development/plans/${planId}/goals`, { title: 'Weak foot', category: 'technical' }, maria),
+  CLUB('development_goal_created'),
+);
+const goalId = goal.body.goals.find((g) => g.title === 'Weak foot').id;
+await delivered(
+  'E3 a goal is updated',
+  () => j('PATCH', `/org/development/goals/${goalId}`, { status: 'in_progress' }, maria),
+  CLUB('development_goal_updated'),
+);
+const withAction = await j(
+  'POST',
+  `/org/development/goals/${goalId}/actions`,
+  { title: 'Watch the clips', type: 'video_review' },
+  maria,
+);
+const actionId = withAction.body.goals.find((g) => g.id === goalId).actions.slice(-1)[0].id;
+await delivered(
+  'E4 an action is completed',
+  () => j('PATCH', `/org/development/actions/${actionId}`, { status: 'done' }, maria),
+  CLUB('development_action_completed'),
+);
+await delivered(
+  "E5 the player's evidence is linked to a goal",
+  () =>
+    j(
+      'POST',
+      `/org/development/goals/${goalId}/evidence`,
+      { sourceType: 'passport_evidence', sourceId: claim.body.evidence.id },
+      maria,
+    ),
+  CLUB('development_evidence_linked'),
+);
+await delivered(
+  'E6 a coach review is submitted',
+  () => j('POST', `/org/development/plans/${planId}/reviews`, { summary: 'Good week.' }, maria),
+  CLUB('development_review_submitted'),
+);
+const updated = await delivered(
+  'E7 the plan is updated',
+  () => j('PATCH', `/org/development/plans/${planId}`, { title: 'Live delivery plan, revised' }, maria),
+  CLUB('development_plan_updated'),
+);
+await delivered(
+  'E8 the plan is completed',
+  () =>
+    j(
+      'POST',
+      `/org/development/plans/${planId}/status`,
+      { status: 'completed', expectedRev: updated.body.plan.rev },
+      maria,
+    ),
+  CLUB('development_plan_completed'),
 );
 
 console.log(`\nplatform/liveDelivery: ${passed} checks passed, ${negatives} negative, 0 failed`);

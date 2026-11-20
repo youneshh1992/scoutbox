@@ -2,7 +2,7 @@
 //// passport.mjs): each claim with its provenance, how it was checked, by whom and when.
 ////
 //// The records and their acts live here; the routes that file, correct, corroborate and dispute them are in
-//// `scouting/passport_routes`. Not ported yet: the `evidence` live event.
+//// `scouting/passport_routes`.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

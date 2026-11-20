@@ -26,6 +26,7 @@ import notificationPrefsSpec from '../support/spec/platform/notificationPrefs.js
 import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
 import { openFixture, SCHEMA_VERSION } from '../support/sqlFixture.mjs';
 import { readRows } from '../support/sqlRows.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = await freePort();
@@ -584,6 +585,7 @@ section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
     maria.token,
   );
   const C2 = d2.body.contact.id;
+  const clubStream = await liveStream(BASE, j, maria.token);
   const s2 = await j(
     'POST',
     `/org/rooms/${RID}/contacts/${C2}/send`,
@@ -591,6 +593,17 @@ section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
     maria.token,
   );
   ok(s2.status === 200 && s2.body.routing.agentParty === true, 'H8 the agent IS a party this time');
+  ok(
+    !!(await clubStream.waitFor(
+      (f) =>
+        f.event === 'contact_agent_routed' &&
+        f.orgId === 'org-eastport' &&
+        f.contactId === C2 &&
+        f.agentUserId === ana.userId,
+    )),
+    "LV1 the club's stream hears the contact routed to the agent, by the agent's id only",
+  );
+  await clubStream.stop();
   ok(
     s2.body.contact.recipient.type === 'player' && s2.body.contact.routedToAgent === true,
     'H9 and the PLAYER is still the recipient — beside, never instead',

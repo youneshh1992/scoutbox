@@ -23,6 +23,8 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
@@ -394,7 +396,6 @@ pub fn issue_contact(
         new.org_name <> " sent you a contact request.",
       )
   })
-  // Not ported yet: the live 'inbox' event.
   r
 }
 
@@ -933,6 +934,10 @@ fn answer(
       use <- bool.lazy_guard(
         option.map(current, fn(c) { c.status }) != Some(request_row.Pending),
         fn() { store.refuse(AlreadyResponded) },
+      )
+      live_pings.catalogue(
+        tx,
+        live_event.Requests(id.player_to_string(player.row.id)),
       )
       use _ <- result.try(requests.record_response(
         tx,

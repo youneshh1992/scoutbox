@@ -10,6 +10,8 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/platform/effect
+import scoutbox/platform/live_event
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
@@ -47,7 +49,16 @@ pub type NewContact {
   )
 }
 
+/// Every request reaches the player's Inbox (requests.mjs `issueRecruitmentRequest`), whoever answers it.
+fn inbox_ping(tx: Tx, c: NewContact) -> Nil {
+  store.emit(
+    tx,
+    effect.Live(live_event.Inbox(id.player_to_string(c.player_id))),
+  )
+}
+
 pub fn create_contact(tx: Tx, new: NewContact) -> Result(Request, Fail(e)) {
+  inbox_ping(tx, new)
   use id <- result.try(id.next_request(tx))
   let routed_to = case new.guardian_id {
     Some(_) -> party.Guardian
@@ -122,6 +133,7 @@ pub fn create_trial(
   new: NewTrialInvitation,
 ) -> Result(Request, Fail(e)) {
   let c = new.contact
+  inbox_ping(tx, c)
   use id <- result.try(id.next_request(tx))
   let routed_to = case c.guardian_id {
     Some(_) -> party.Guardian
@@ -209,6 +221,7 @@ pub fn create_direct_trial(
   venue: Option(String),
   notes: String,
 ) -> Result(Request, Fail(e)) {
+  inbox_ping(tx, c)
   use id <- result.try(id.next_request(tx))
   let routed_to = case c.guardian_id {
     Some(_) -> party.Guardian

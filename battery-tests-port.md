@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -457,7 +457,14 @@ are for surprising facts or points that later work depends on, not implementatio
          admin's vouch revoke and uploads aren't ported, so their pings come with slices 5 and 7.
       2. The domain events no `live_event.Event` constructor declares: `inbox`, `requests`, `evidence`, the eight
          `development_*`, the `contact_*` events with `contact_responded` and `contact_agent_routed`,
-         `player_development_evidence_changed`, the three `box_cam_*`, and `policy_version_published`.
+         `player_development_evidence_changed`, the three `box_cam_*`, and `policy_version_published`. [**done**:
+         `platform/liveDelivery` gained 13 checks (its sections D and E), and 10 more went into `recruitment/contacts`,
+         `agents/crossApp`, `development/boxCam`, `development/combine` and `agents/compliance`; all pass on both
+         servers.] Every request a club issues pings the Inbox from `requests.create_*`, as `issueRecruitmentRequest`
+         does for all of them. A plan's events go to every club that may read it (`hub_routes.emit_all`, index.mjs
+         `audienceOrgs`), read inside the unit, plus the club a share or a withdrawal names. A Combine attempt
+         pings twice, once for its session and once for itself. The three `box_cam_*` events are `Out of scope:`:
+         only the video-analysis routes send them, and the stub answers 503 first.
    3. Recruitment: citing a `local_test` Box Cam session when the test provider is on (trials, decisions, and the
       decision surface's `boxCam` candidates, which list none here), a Room decision's `lifecycle` record (always
       null; `decisions.lifecycle_json` renders it), the `contact_response` budget (30 answers an hour), and

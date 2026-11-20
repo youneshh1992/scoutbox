@@ -18,6 +18,8 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/platform/temporal
 import scoutbox/rows/evidence as row
@@ -421,6 +423,10 @@ fn submit(
           let method = option.or(input.filled(body.method), Some(method))
           let saved =
             store.unit(ctx.store, fn(tx) {
+              live_pings.catalogue(
+                tx,
+                live_event.Evidence(id.player_to_string(p.row.id)),
+              )
               evidence.create(
                 tx,
                 p,
@@ -434,7 +440,6 @@ fn submit(
                 now,
               )
             })
-          // Not ported yet: the `evidence` live event.
           case saved {
             Ok(e) ->
               http.json(
@@ -628,6 +633,10 @@ fn correct(
     )
   let saved =
     store.unit(ctx.store, fn(tx) {
+      live_pings.catalogue(
+        tx,
+        live_event.Evidence(id.player_to_string(p.row.id)),
+      )
       use created <- result.try(evidence.create(
         tx,
         p,
@@ -658,7 +667,6 @@ fn correct(
         }
       }
     })
-  // Not ported yet: the `evidence` live event.
   case saved {
     Ok(created) ->
       http.json(
@@ -821,6 +829,10 @@ pub fn corroborate(
       let now = clock.now_ms()
       let saved =
         store.unit(ctx.store, fn(tx) {
+          live_pings.catalogue(
+            tx,
+            live_event.Evidence(id.player_to_string(p.row.id)),
+          )
           use affiliation <- result.try(coaches.active_for(
             store.reading(tx),
             a.org.id,
@@ -885,7 +897,6 @@ pub fn corroborate(
           })
           evidence.by_id(store.reading(tx), e.row.id)
         })
-      // Not ported yet: the `evidence` live event.
       case saved {
         Ok(Some(fresh)) ->
           http.json(

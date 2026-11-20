@@ -21,6 +21,7 @@ import { readRows } from '../support/sqlRows.mjs';
 import conflictSpec from '../support/spec/agents/compliance/conflict.json' with { type: 'json' };
 import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 
 const { PERMITTED_WITH_CONSENT } = conflictSpec;
 // The latest table migration's number, as the migrated schema records it.
@@ -2586,6 +2587,8 @@ section('policy — dual-control publication; historical snapshots keep their ve
     ),
     'C18 while proposed, the version is not in effect for anyone',
   );
+  // A published version is a public catalogue ping: a player's stream hears it too.
+  const kolaStream = await liveStream(BASE, j, kola.token);
   const appr = await j('POST', '/ts/compliance/policies/jp-fifa-2025-2/approve', {}, LEA.token);
   ok(
     appr.status === 200 &&
@@ -2594,6 +2597,12 @@ section('policy — dual-control publication; historical snapshots keep their ve
       appr.body.policy.approvedBy.id === 'tsr-dev-admin2',
     'C19 a DIFFERENT administrator approves: published, attributed to both',
   );
+  const published = await kolaStream.waitFor((f) => f.event === 'policy_version_published');
+  ok(
+    !!published && JSON.stringify(Object.keys(published)) === JSON.stringify(['event', 'ts']),
+    'LV1 publishing a version pings every stream, naming nothing',
+  );
+  await kolaStream.stop();
   neg(
     expect(
       collect('C20', await j('POST', '/ts/compliance/policies/jp-fifa-2025-2/approve', {}, LEA.token)),

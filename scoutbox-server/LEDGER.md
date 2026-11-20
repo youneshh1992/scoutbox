@@ -35,18 +35,18 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 40 / 77 | 29 / 33 | 77 cases pending; 4 hand-port calls |
-| `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
-| `agents/crossApp` | neutral | 13 → 0 | 380 | 239 | 141 |  | yes | 13 / 89 | 4 / 12 | 89 cases pending; 8 hand-port calls |
+| `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 13 / 89 | 4 / 12 | 89 cases pending; 8 hand-port calls |
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
-| `development/boxCam` | neutral | 3 → 0 | 150 | 110 | 40 |  | yes | 40 / 0 |  | **done** |
+| `development/boxCam` | neutral | 3 → 0 | 150 | 112 | 40 | +2 added | yes | 40 / 0 |  | **done** |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
-| `development/combine` | neutral | 2 → 0 | 92 | 72 | 20 |  | yes | 22 / 0 |  | **done** |
+| `development/combine` | neutral | 2 → 0 | 92 | 73 | 20 | +1 added | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
@@ -71,7 +71,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 253 | 118 | +5 added | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
@@ -113,6 +113,10 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 
 | Battery | Checks | Why |
 |---|---|---|
+| `agents/compliance` | 1 | Live events: publishing a policy version pings every stream, naming nothing (LV1) |
+| `agents/crossApp` | 1 | Live events: the club's stream hears a contact routed to the agent, by the agent's id only (LV1) |
+| `development/boxCam` | 2 | Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2) |
+| `development/combine` | 1 | Live events: the player's stream hears their development evidence change for the session and the attempt (LV1) |
 | `development/hub` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all seventy-six) |
 | `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
@@ -120,13 +124,14 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
-| `platform/liveDelivery` | 7 | A new battery (44 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, and every simple act that sends a catalogue ping |
+| `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |
 | `platform/uploads` | 26 | Moved whole from scouting/clubWorkflows's access section (resumable uploads, media links, captions) |
 | `recruitment/analytics` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all sixty) |
 | `recruitment/analytics` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
+| `recruitment/contacts` | 5 | Live events: the club's stream hears each contact event (created, sent, responded, recorded externally, failed) for that contact (LV1–LV5) |
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
 | `scouting/clubWorkflows` | 2 | Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2) |
 

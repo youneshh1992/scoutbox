@@ -10,6 +10,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/messaging/notifications
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/cases
@@ -601,8 +603,6 @@ pub fn redact_player(tx: Tx, player_id: id.PlayerId) -> Result(Nil, Fail(e)) {
 /// respond route's unit, so both commit together. A request that carries no contact, or one no longer awaiting an
 /// answer, is left alone. The room's owner and lead scout hear, if they are not the sender (who hears through the
 /// respond route); nobody else in the organisation does.
-///
-/// Not ported yet: the live 'contact_responded' event.
 pub fn on_request_responded(
   tx: Tx,
   request_id: id.RequestId,
@@ -645,6 +645,15 @@ pub fn on_request_responded(
             by,
             Acted(at:, rev_by: None, touch: True, bump: True, history: [h]),
           ))
+          live_pings.catalogue(
+            tx,
+            live_event.ContactChanged(
+              live_event.ContactResponded,
+              id.org_to_string(c.row.org_id),
+              id.recruitment_case_to_string(c.row.case_id),
+              id.contact_to_string(c.row.id),
+            ),
+          )
           use room <- result.try(cases.room(store.reading(tx), c.row.case_id))
           case room {
             None -> Ok(Nil)

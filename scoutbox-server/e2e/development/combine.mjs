@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -99,6 +100,22 @@ const ruth = await login('org-harbour', 'Ruth Vane', 'Scout'); // unverified clu
 const alex = await login('org-northstar', 'Alex Agent', 'Agent'); // agency
 const dee = await login('org-hackneymarsh', 'Dee Mensah', 'Manager', 'grassroots'); // verified grassroots (London)
 const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body; // adult
+// Kola's own stream: how many times it heard their development evidence change, from a mark on.
+const KOLA_STREAM = await liveStream(BASE, j, kola.token);
+const evidencePings = async (from, atLeast) => {
+  await KOLA_STREAM.waitFor(
+    () =>
+      KOLA_STREAM.frames()
+        .slice(from)
+        .filter((f) => f.event === 'player_development_evidence_changed' && f.playerId === 'pl-adeyemi').length >=
+      atLeast,
+    from,
+    1500,
+  );
+  return KOLA_STREAM.frames()
+    .slice(from)
+    .filter((f) => f.event === 'player_development_evidence_changed' && f.playerId === 'pl-adeyemi').length;
+};
 const guni = (await j('POST', '/auth/player/login', { playerId: 'pl-guni' })).body; // minor, London
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
 ok(
@@ -178,10 +195,15 @@ section('C1 — Box Touch 60: 184 verified, passport shows exactly 184');
 let touchBest = null;
 let c1SessionId = null;
 {
+  const beforeC1 = KOLA_STREAM.frames().length;
   const r = await runCombine(kola.token, { protocolId: 'combine-box-touch-60' }, () => countEvents(184));
   ok(
     r.done.status === 200 && r.done.body.attempt.combineState === 'combine_verified',
     'C1: attempt is Combine Verified',
+  );
+  ok(
+    (await evidencePings(beforeC1, 2)) === 2,
+    "LV1 Kola's stream hears their development evidence change for the session and for the attempt",
   );
   ok(
     r.done.body.attempt.measuredValue === 184 && r.done.body.attempt.unit === 'touches',

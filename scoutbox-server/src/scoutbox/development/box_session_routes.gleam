@@ -29,6 +29,8 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/box_assignments as assignment_row
@@ -1009,6 +1011,7 @@ pub fn complete_session(
     "box_session_active_seconds",
     float.truncate(float.floor(f.verified_active_ms /. 1000.0)),
   ))
+  live_pings.catalogue(tx, live_event.PlayerDevelopmentEvidenceChanged(pid))
   Ok(done)
 }
 

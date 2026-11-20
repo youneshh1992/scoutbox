@@ -30,6 +30,8 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/metrics
 import scoutbox/platform/paging.{IntKey, TextKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -1433,7 +1435,12 @@ pub fn apply_challenge_progress(
           False -> Ok(Nil)
           True -> {
             use _ <- result.try(count(tx, "box_challenge_completed"))
-            // Not ported yet: the player_development_evidence_changed live event.
+            live_pings.catalogue(
+              tx,
+              live_event.PlayerDevelopmentEvidenceChanged(id.player_to_string(
+                s.player_id,
+              )),
+            )
             notifications.notify(
               tx,
               to: audience.Player,

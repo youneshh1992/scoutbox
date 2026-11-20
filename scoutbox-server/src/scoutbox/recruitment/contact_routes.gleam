@@ -5,7 +5,7 @@
 //// A send's request row, Contact and lifecycle entry commit in one unit, so the case cannot say `contacted` while
 //// the Contact that justifies it was lost.
 ////
-//// Not ported yet: the live contact events.
+//// Each change to a Contact is a live event to its club only.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/int
@@ -32,6 +32,8 @@ import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/case_lifecycle
@@ -194,6 +196,18 @@ fn guard(bad: Bool, refusal: fn() -> Response, next: fn() -> Response) {
     True -> refusal()
     False -> next()
   }
+}
+
+fn contact_event(tx: Tx, change: live_event.ContactChange, c: Contact) -> Nil {
+  live_pings.catalogue(
+    tx,
+    live_event.ContactChanged(
+      change,
+      id.org_to_string(c.row.org_id),
+      id.recruitment_case_to_string(c.row.case_id),
+      id.contact_to_string(c.row.id),
+    ),
+  )
 }
 
 fn contact_json(c: Contact) -> #(String, Json) {
@@ -830,6 +844,7 @@ fn create_draft(
       )
       |> storage,
     )
+    contact_event(tx, live_event.ContactCreated, stored)
     http.json(
       201,
       json.object([
@@ -1164,6 +1179,7 @@ fn send_now(
             <> " attempt="
             <> int.to_string(list.length(failed.attempts)),
           )
+          contact_event(tx, live_event.ContactFailed, failed)
           SendFailed(failed)
         }
         False ->
@@ -1356,6 +1372,19 @@ fn deliver(
       |> storage
     None -> Ok(Nil)
   })
+  case route.agent {
+    Some(agent) ->
+      live_pings.catalogue(
+        tx,
+        live_event.ContactAgentRouted(
+          id.org_to_string(stored.row.org_id),
+          id.contact_to_string(stored.row.id),
+          id.org_user_to_string(agent.agent_user_id),
+        ),
+      )
+    None -> Nil
+  }
+  contact_event(tx, live_event.ContactSent, stored)
   let mail =
     option.map(mail, fn(m) {
       let #(email, guardian_name) = m
@@ -1566,6 +1595,7 @@ fn file_external(
     use #(stored, moved) <- result.map(
       advance(tx, a, room, role, created, at) |> storage,
     )
+    contact_event(tx, live_event.ContactExternalRecorded, stored)
     http.json(
       201,
       json.object([contact_json(stored), #("case", case_json(moved, room))]),

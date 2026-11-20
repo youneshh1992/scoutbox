@@ -5,7 +5,7 @@
 //// Evidence is a reference resolved live from its source on every read; the Hub copies no facts from other
 //// stores. A retried create (same actor, same content, within a minute) returns the existing record.
 ////
-//// Not ported yet: the live events (`development_plan_created` and the rest, each to one organisation's stream).
+//// Each change is a live event to every organisation that may read the plan (index.mjs `audienceOrgs`), ids only.
 
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
@@ -43,6 +43,8 @@ import scoutbox/platform/input.{type Shape}
 import scoutbox/platform/json_text
 import scoutbox/platform/key_order
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/metrics
 import scoutbox/platform/paging
 import scoutbox/platform/rev
@@ -900,6 +902,47 @@ fn tell_org(
   list.try_each(users, fn(u) {
     tell(tx, audience.OrgUser, id.org_user_to_string(u.id), text, now)
   })
+}
+
+// ------------------------------------------------------------------------------------------------ live events
+
+/// The organisations a plan's events reach: the club that owns it, or the clubs a player's plan is shared with.
+fn audience_orgs(p: hub.Plan) -> List(id.OrgId) {
+  case p.row.owner_kind, p.row.owner_org_id, p.row.visibility {
+    plan_row.OwnerKindOrg, Some(org), _ -> [org]
+    plan_row.OwnerKindOrg, None, _ -> []
+    plan_row.OwnerKindPlayer, _, plan_visibility.SharedWithOrg -> p.shared_with
+    plan_row.OwnerKindPlayer, _, _ -> []
+  }
+}
+
+fn emit_to(
+  tx: Tx,
+  org: id.OrgId,
+  pid: id.DevPlanId,
+  change: live_event.DevelopmentChange,
+) -> Nil {
+  live_pings.catalogue(
+    tx,
+    live_event.Development(
+      change,
+      id.org_to_string(org),
+      id.dev_plan_to_string(pid),
+    ),
+  )
+}
+
+/// Emits a change to every organisation the plan, as it now stands in the unit, reaches.
+fn emit_all(
+  tx: Tx,
+  pid: id.DevPlanId,
+  change: live_event.DevelopmentChange,
+) -> Result(Nil, Fail(e)) {
+  use found <- result.map(hub.plan_by_id(store.reading(tx), pid))
+  case found {
+    Some(p) -> list.each(audience_orgs(p), emit_to(tx, _, pid, change))
+    None -> Nil
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ bookkeeping
@@ -2524,6 +2567,7 @@ fn create_plan(ctx: Ctx, req: Request, s: Surface) -> Response {
         |> storage,
       )
       use _ <- result.try(count(tx, "development_plan_created") |> storage)
+      use _ <- result.try(emit_all(tx, pid, live_event.PlanCreated) |> storage)
       plan_answer(r, s, pid, 201, [])
     }
   }
@@ -2652,6 +2696,12 @@ fn edit_plan(
     }
     |> storage,
   )
+  case withdrawn {
+    True ->
+      list.each(plan.shared_with, emit_to(tx, _, pid, live_event.PlanUpdated))
+    False -> Nil
+  }
+  use _ <- result.try(emit_all(tx, pid, live_event.PlanUpdated) |> storage)
   plan_answer(r, s, pid, 200, [])
 }
 
@@ -2752,6 +2802,13 @@ fn plan_status(
     )
     |> storage,
   )
+  use _ <- result.try(
+    emit_all(tx, pid, case to {
+      plan_row.Completed -> live_event.PlanCompleted
+      _ -> live_event.PlanUpdated
+    })
+    |> storage,
+  )
   plan_answer(r, s, pid, 200, [])
 }
 
@@ -2840,6 +2897,7 @@ fn share_plan(
             )
             |> storage,
           )
+          emit_to(tx, oid, pid, live_event.PlanUpdated)
           plan_answer(r, s, pid, 200, [])
         }
       }
@@ -2874,6 +2932,7 @@ fn share_plan(
             )
             |> storage,
           )
+          emit_to(tx, oid, pid, live_event.PlanCreated)
           use _ <- result.try(
             tell_org(
               tx,
@@ -2960,6 +3019,10 @@ fn create_goal(
         |> storage,
       )
       use _ <- result.try(count(tx, "development_goal_created") |> storage)
+      use _ <- result.try(
+        emit_all(tx, pid, live_event.GoalCreated(id.dev_goal_to_string(g.id)))
+        |> storage,
+      )
       plan_answer(r, s, pid, 201, [])
     }
   }
@@ -3130,6 +3193,10 @@ fn edit_goal(
         )
       _, _, _, _ -> Ok(Nil)
     }
+    |> storage,
+  )
+  use _ <- result.try(
+    emit_all(tx, p.id, live_event.GoalUpdated(id.dev_goal_to_string(row.id)))
     |> storage,
   )
   plan_answer(r, s, p.id, 200, [])
@@ -3605,6 +3672,18 @@ fn edit_action(
       }
       |> storage,
     )
+    use _ <- result.try(
+      case done {
+        True ->
+          emit_all(
+            tx,
+            p.id,
+            live_event.ActionCompleted(id.dev_action_to_string(aid)),
+          )
+        False -> Ok(Nil)
+      }
+      |> storage,
+    )
     // Completing an action never moves its goal's status.
     use _ <- result.try(
       case done, p.owner_org_id, actor {
@@ -3822,6 +3901,17 @@ fn link_evidence(
           )
           use _ <- result.try(
             count(tx, "development_evidence_linked") |> storage,
+          )
+          use _ <- result.try(
+            emit_all(
+              tx,
+              p.id,
+              live_event.EvidenceLinked(
+                option.map(link.goal_id, id.dev_goal_to_string),
+                option.map(link.action_id, id.dev_action_to_string),
+              ),
+            )
+            |> storage,
           )
           plan_answer(r, s, p.id, 201, [])
         }
@@ -4190,6 +4280,10 @@ fn create_review(
     |> storage,
   )
   use _ <- result.try(count(tx, "development_review_submitted") |> storage)
+  use _ <- result.try(
+    emit_all(tx, pid, live_event.ReviewSubmitted(id.dev_review_to_string(rid)))
+    |> storage,
+  )
   plan_answer(r, s, pid, 201, [])
 }
 

@@ -1,8 +1,6 @@
 //// A Grassroots club's open trial days (domains/development/grassrootsClub.mjs, grassroots.mjs): the club posts,
 //// lists, deletes and answers them; a local player registers, or a guardian registers their child. Every
 //// registrant gets an answer: an unanswered past one blocks the club's next posting.
-////
-//// Not ported yet: the `inbox` live event an invitation sends.
 
 import gleam/dynamic/decode
 import gleam/int

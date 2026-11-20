@@ -20,6 +20,8 @@ import scoutbox/identity/players.{type Player}
 import scoutbox/identity/staff.{type Staff}
 import scoutbox/messaging/notifications
 import scoutbox/platform/json_text
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
@@ -893,6 +895,12 @@ fn measure(
     ),
     now,
   ))
+  live_pings.catalogue(
+    tx,
+    live_event.PlayerDevelopmentEvidenceChanged(id.player_to_string(
+      player.row.id,
+    )),
+  )
   let label = case proto {
     Some(p) -> p.title
     None -> a.row.protocol_id

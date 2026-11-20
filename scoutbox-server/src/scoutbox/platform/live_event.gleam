@@ -25,6 +25,29 @@ pub type Event {
   /// A Discovery Ledger row was appended: its type, and its player (by the subject rule; a row naming no player
   /// reaches every stream). Never the club.
   Ledger(type_: String, player_id: Option(String))
+  /// A request reached the player's Inbox. By the subject rule.
+  Inbox(player_id: String)
+  /// The player (or their guardian) answered a request. By the subject rule.
+  Requests(player_id: String)
+  /// A player's Passport evidence was filed, corrected or corroborated. By the subject rule.
+  Evidence(player_id: String)
+  /// A Box Cam session, a Box Challenge or a Combine attempt changed the player's development evidence. By the
+  /// subject rule.
+  PlayerDevelopmentEvidenceChanged(player_id: String)
+  /// A compliance policy version was published. Every stream.
+  PolicyVersionPublished
+  /// A Development Hub plan changed (each change is its own registry entry), for one organisation that may read it.
+  /// Ids only.
+  Development(change: DevelopmentChange, org_id: String, plan_id: String)
+  /// A Room's contact changed (each change is its own registry entry). Private to the club.
+  ContactChanged(
+    change: ContactChange,
+    org_id: String,
+    room_id: String,
+    contact_id: String,
+  )
+  /// A club's contact was routed to the player's agent too. Private to the club; the agent is named by id only.
+  ContactAgentRouted(org_id: String, contact_id: String, agent_user_id: String)
   /// A thread changed: a message, or a read receipt.
   Messages(channel_id: String)
   /// Someone is typing in a thread. Never replayed.
@@ -190,6 +213,26 @@ pub type Event {
   )
 }
 
+/// What changed in a plan, with the ids the registry's payload adds after the plan's.
+pub type DevelopmentChange {
+  PlanCreated
+  PlanUpdated
+  PlanCompleted
+  GoalCreated(goal_id: String)
+  GoalUpdated(goal_id: String)
+  ActionCompleted(action_id: String)
+  EvidenceLinked(goal_id: Option(String), action_id: Option(String))
+  ReviewSubmitted(review_id: String)
+}
+
+pub type ContactChange {
+  ContactCreated
+  ContactSent
+  ContactFailed
+  ContactExternalRecorded
+  ContactResponded
+}
+
 pub type ConsentChange {
   ConsentRequested
   ConsentGranted
@@ -255,8 +298,8 @@ pub type TypingSide {
 }
 
 /// Every name in the TypeScript server's event registry, in its order: what `/capabilities` counts as registered.
-/// Each name an `Event` has is one of these (`name`); the rest belong to domains not ported yet, and no `Event`
-/// can carry them, so they can't be emitted. `test/scoutbox/live_test.gleam` proves the list equals the
+/// Each name an `Event` has is one of these (`name`). Out of scope: the three `box_cam_*` events, which only the
+/// video analysis routes send (`development/cv_stub` answers 503 before them), so no `Event` carries them. `test/scoutbox/live_test.gleam` proves the list equals the
 /// registry's names.
 pub const registered = [
   "players",
@@ -368,6 +411,32 @@ pub fn name(event: Event) -> String {
     Campaigns -> "campaigns"
     Friendlies -> "friendlies"
     Ledger(..) -> "ledger"
+    Inbox(..) -> "inbox"
+    Requests(..) -> "requests"
+    Evidence(..) -> "evidence"
+    PlayerDevelopmentEvidenceChanged(..) ->
+      "player_development_evidence_changed"
+    PolicyVersionPublished -> "policy_version_published"
+    Development(change:, ..) ->
+      case change {
+        PlanCreated -> "development_plan_created"
+        PlanUpdated -> "development_plan_updated"
+        PlanCompleted -> "development_plan_completed"
+        GoalCreated(..) -> "development_goal_created"
+        GoalUpdated(..) -> "development_goal_updated"
+        ActionCompleted(..) -> "development_action_completed"
+        EvidenceLinked(..) -> "development_evidence_linked"
+        ReviewSubmitted(..) -> "development_review_submitted"
+      }
+    ContactChanged(change:, ..) ->
+      case change {
+        ContactCreated -> "contact_created"
+        ContactSent -> "contact_sent"
+        ContactFailed -> "contact_failed"
+        ContactExternalRecorded -> "contact_external_recorded"
+        ContactResponded -> "contact_responded"
+      }
+    ContactAgentRouted(..) -> "contact_agent_routed"
     Messages(..) -> "messages"
     Typing(..) -> "typing"
     Notify(..) -> "notify"
@@ -506,7 +575,10 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewStarted(org_id:, ..)
     | RegulatoryReviewResolved(org_id:, ..)
     | AgentAuthorisationStateChanged(org_id:, ..)
-    | RegulatoryConsentChanged(org_id:, ..) -> Ok(org_id)
+    | RegulatoryConsentChanged(org_id:, ..)
+    | Development(org_id:, ..)
+    | ContactChanged(org_id:, ..)
+    | ContactAgentRouted(org_id:, ..) -> Ok(org_id)
     Messages(..)
     | Typing(..)
     | Notify(..)
@@ -518,7 +590,12 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | OpenTrials
     | Campaigns
     | Friendlies
-    | Ledger(..) -> Error(Nil)
+    | Ledger(..)
+    | Inbox(..)
+    | Requests(..)
+    | Evidence(..)
+    | PlayerDevelopmentEvidenceChanged(..)
+    | PolicyVersionPublished -> Error(Nil)
   }
 }
 
@@ -528,7 +605,11 @@ pub fn subject_of(event: Event) -> Result(String, Nil) {
     Players(player_id: option.Some(p))
     | Ledger(player_id: option.Some(p), ..)
     | Feedback(player_id: p)
-    | Applications(player_id: p) -> Ok(p)
+    | Applications(player_id: p)
+    | Inbox(player_id: p)
+    | Requests(player_id: p)
+    | Evidence(player_id: p)
+    | PlayerDevelopmentEvidenceChanged(player_id: p) -> Ok(p)
     _ -> Error(Nil)
   }
 }
@@ -549,8 +630,10 @@ pub fn audience(event: Event) -> EventAudience {
     | OpenTrials
     | Campaigns
     | Friendlies
-    | Ledger(..) -> PublicSafe
-    Notify(..) -> PlayerPrivate
+    | Ledger(..)
+    | PolicyVersionPublished -> PublicSafe
+    Notify(..) | Inbox(..) | PlayerDevelopmentEvidenceChanged(..) ->
+      PlayerPrivate
     _ -> OrgPrivate
   }
 }
@@ -568,6 +651,39 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
     Ledger(type_:, player_id:) -> [
       #("type", json.string(type_)),
       #("playerId", json.nullable(player_id, json.string)),
+    ]
+    Inbox(player_id:)
+    | Requests(player_id:)
+    | Evidence(player_id:)
+    | PlayerDevelopmentEvidenceChanged(player_id:) -> [
+      #("playerId", json.string(player_id)),
+    ]
+    PolicyVersionPublished -> []
+    Development(change:, org_id:, plan_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("planId", json.string(plan_id)),
+      ..case change {
+        PlanCreated | PlanUpdated | PlanCompleted -> []
+        GoalCreated(goal_id:) | GoalUpdated(goal_id:) -> [
+          #("goalId", json.string(goal_id)),
+        ]
+        ActionCompleted(action_id:) -> [#("actionId", json.string(action_id))]
+        EvidenceLinked(goal_id:, action_id:) -> [
+          #("goalId", json.nullable(goal_id, json.string)),
+          #("actionId", json.nullable(action_id, json.string)),
+        ]
+        ReviewSubmitted(review_id:) -> [#("reviewId", json.string(review_id))]
+      }
+    ]
+    ContactChanged(org_id:, room_id:, contact_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("contactId", json.string(contact_id)),
+    ]
+    ContactAgentRouted(org_id:, contact_id:, agent_user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("contactId", json.string(contact_id)),
+      #("agentUserId", json.string(agent_user_id)),
     ]
     Messages(channel_id:) -> [#("channelId", json.string(channel_id))]
     Typing(channel_id:, side:) -> [

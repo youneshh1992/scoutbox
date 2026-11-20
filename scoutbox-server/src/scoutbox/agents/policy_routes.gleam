@@ -1,9 +1,7 @@
 //// Policy versions (domains/agents/compliance/policyRoutes.mjs): proposed by one Trust & Safety administrator and
 //// published by a different one (dual control). A version is data, so a rule's status changes without a deploy.
 //// Publishing flags the open contexts of its jurisdiction that were last evaluated without it: they are never
-//// silently re-verdicted.
-////
-//// Not ported yet: the `policy_version_published` live event (the public catalogue pings are not ported).
+//// silently re-verdicted. Publishing pings every stream (`policy_version_published`).
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
@@ -23,6 +21,8 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/key_order
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
+import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
 import scoutbox/rows/compliance_context_history as context_event_row
@@ -1044,11 +1044,11 @@ fn publish(ctx: Ctx, reviewer: reviewer_row.Row, v: Version) -> Response {
           ))
           use found <- result.map(version_by_id(store.reading(tx), pid))
           let assert Some(v) = found
+          live_pings.catalogue(tx, live_event.PolicyVersionPublished)
           v
         }
       }
     })
-  // Not ported yet: the `policy_version_published` live event.
   case published {
     Ok(v) -> http.json(200, json.object([#("policy", version_json(v))]))
     Error(store.Lost(what)) -> http.stale(what)
