@@ -1,10 +1,8 @@
 //// Regulatory review items (repositories/complianceRecords.mjs `reviews`, opened by domains/agents/compliance/
 //// shared.mjs): the attributed Trust & Safety lane's queue. The agent core opens one when a facet submission needs
 //// a named reviewer, when a client disputes a relationship, and when an approach's deciding rule is uncertain.
-//// Nothing here decides one.
-////
-//// Not ported yet: the reviewer routes (`/ts/…`) that start, resolve, cancel or supersede an item, and compliance
-//// contexts' reviews.
+//// The reviewer lane's routes that start, resolve, cancel or supersede one are `agents/review_routes` and
+//// `agents/compliance_routes`.
 
 import gleam/dynamic/decode
 import gleam/list

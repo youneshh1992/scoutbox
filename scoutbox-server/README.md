@@ -134,9 +134,10 @@ Every route below is exercised by a battery, except where marked.
 | Verification | `/org/verification/email` and `/email/confirm`, `/org/verification/federation` (a Grassroots club's federation registration, for Trust & Safety), `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
-Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: the similarity engine ("more like this"),
-the insight sweep, club setup and the Expo push transport. `dev/shape_diff.mjs` lists where responses differ because of them.
+Behaviour not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`). The largest: most
+live events (the catalogue pings and the subject rule), the similarity engine ("more like this"), the ledger's
+detail, and the insight sweep. `battery-tests-port.md` (item 9) lists the rest by slice. Behaviour that stays out of
+scope for good (uploads, video analysis, the Expo push transport) says `Out of scope:`.
 
 ## Known differences from the TypeScript server
 
@@ -160,13 +161,6 @@ the insight sweep, club setup and the Expo push transport. `dev/shape_diff.mjs` 
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
-- A Trust Score never says `simulatedEvidenceIncluded: true`: no provider here produces simulated evidence. The
-  TypeScript server says true whenever `BOX_CAM_TEST_PROVIDER` is set.
-- A Room's Combine results, Box Cam's development activity (shown as a player's with none) and the
-  missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
-- The journey, the evidence provider and the decision surface see no Contact records or Trials (`Not ported yet:`):
-  no route here records one.
-- The journey has no Trust & Safety projection (`Not ported yet:`).
+- The missing-evidence rule `attribute_never_observed` is not ported (`Not ported yet:`).
 - A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
   COMMIT. Either way a completion that rolls back issues none.
-- A transaction workspace stays at DRAFT: only opening one and its notes are ported, so no party can confirm.

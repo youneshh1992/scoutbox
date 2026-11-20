@@ -938,7 +938,6 @@ pub fn input_hash(input: Input) -> String {
   canonical.Object([
     #("transaction", transaction),
     #("agents", agents),
-    // Not ported yet: regulatory consents (the consent routes), so a context has none to hash.
     #("consents", canonical.Array(list.map(input.consents, consent_value))),
     #("interests", canonical.Array([])),
     #(

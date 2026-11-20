@@ -2,11 +2,6 @@
 //// Football Passport stays the player's truth layer. A Room never widens visibility, never leaks across clubs,
 //// never reaches the player or their guardian, and never lets a Trust Score or a Combine number move a decision by
 //// itself.
-////
-//// Not ported yet: the evidence gate behind statuses that record something that must have happened (contacts,
-//// trials, offers, decisions and signings are not ported, so such a move is refused as unsatisfied); a Room's
-//// vacancy; the live events (`recruitment_case_moved`, `recruitment_room_archived`); and the lifecycle's own
-//// routes, reopen through Second Look and room creation through Nobody Missed, which share this module's rules.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

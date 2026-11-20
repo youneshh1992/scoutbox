@@ -7,8 +7,7 @@
 //// A send and a read receipt publish the live `messages` event once they commit; a typing ping publishes `typing`
 //// at once, since it records nothing.
 ////
-//// Not ported yet: attaching a trial report (the trials are recruitment's; every player has none, so one is never
-//// found).
+//// Not ported yet: attaching a trial report, which is always refused as not found.
 
 import gleam/json
 import gleam/list
@@ -241,7 +240,7 @@ fn attachment(
         Error(Nil) -> AttachmentMissing("MEDIA_NOT_FOUND")
       }
     }
-    // Not ported yet: trial reports; a player has none here.
+    // Not ported yet: attaching a trial report.
     None, Some(_) -> Ok(AttachmentMissing("TRIAL_REPORT_NOT_FOUND"))
   }
 }

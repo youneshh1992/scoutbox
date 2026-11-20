@@ -321,8 +321,7 @@ fn too_short() -> Response {
 
 /// `POST /admin/clubs/:id/verification`: the standing switches, and only those.
 ///
-/// Not ported yet: the TypeScript server mirrors the decision on the organisation's identity claim
-/// (verification), and announces the change on the live stream.
+/// Not ported yet: the `players` live event the TypeScript server sends after the change.
 pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
   use org <- with_org(ctx, id)
   let shape = {
@@ -376,7 +375,7 @@ pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
 
 /// `GET /admin/metrics`.
 ///
-/// Not ported yet: an operations event's detail fields, which arrive with the events that write them.
+/// Not ported yet: an operations event's detail, always null here, though the events that write one are ported.
 pub fn metrics(ctx: Ctx) -> Response {
   let requests = request_metrics.snapshot(ctx.request_metrics)
   // On the writer: it holds the counters units keep (`platform/metrics`).

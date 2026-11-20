@@ -401,8 +401,8 @@ fn deciding(
       ref_id: Some(id.claim_to_string(claim.id)),
       at: now,
     ))
-    // Not ported yet: the ledger's detail columns (the claim and the action), which this server's ledger table
-    // does not have.
+    // Not ported yet: the ledger row's detail (`detail_claim_id`, `detail_action`): `ledger.Entry` carries no
+    // detail.
     ledger.append(
       tx,
       ledger.Entry(

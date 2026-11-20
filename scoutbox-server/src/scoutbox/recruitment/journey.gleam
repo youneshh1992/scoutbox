@@ -3,7 +3,7 @@
 //// probability or progress percentage: how far a case has travelled is a fact about a club's process, not a
 //// measurement of a person.
 ////
-//// Not ported yet: Trust & Safety's projection.
+//// TypeScript's projection has a Trust & Safety viewer too, but no route builds that viewer, so it isn't here.
 
 import gleam/dynamic/decode
 import gleam/int

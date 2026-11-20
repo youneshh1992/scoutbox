@@ -99,8 +99,8 @@ fn state(state: String, note: String) -> Json {
 /// `GET /capabilities`.
 ///
 /// Not ported yet: the data layer's per-domain descriptions (`dataLayer.domains`, the TypeScript repositories'
-/// own account of themselves); the notification preferences, so nothing is ever suppressed by one; the fault
-/// layer; the proxy setting (SCOUTBOX_TRUST_PROXY), so no proxy is trusted.
+/// own account of themselves); the notification counters (`suppressedByPreference` and `unknownTypes`, though
+/// preferences are enforced); the proxy setting (SCOUTBOX_TRUST_PROXY), so no proxy is trusted.
 pub fn capabilities(ctx: Ctx) -> Response {
   case store.read(ctx.store, read_report(_, ctx)) {
     Error(failure) -> http.internal(failure)

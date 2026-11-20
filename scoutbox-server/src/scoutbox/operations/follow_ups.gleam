@@ -850,9 +850,9 @@ pub fn admin_due_at(ctx: Ctx, req: Request, fid: id.FollowUpId) -> Response {
 
 /// `POST /admin/sweep`: runs the scheduled work now. It changes when things happen, never what.
 ///
-/// Not ported yet: the parts of the TypeScript sweep whose subsystems aren't here: the week-old application
-/// reminders, the overdue trial-feedback escalation, the completed-trial assessment reminder and the abandoned
-/// upload sessions.
+/// Not ported yet: these parts of the TypeScript sweep: the week-old application reminders, the overdue
+/// trial-feedback escalation and the completed-trial assessment reminder. Out of scope: the abandoned upload
+/// sessions.
 pub fn admin_sweep(ctx: Ctx, req: Request) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()

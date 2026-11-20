@@ -1,8 +1,7 @@
 //// The recruitment lifecycle's vocabulary (domains/recruitment/lifecycle/lifecycle.mjs): each named action, the
 //// Room status it moves a case to, who may take it, and whether it needs reason codes.
 ////
-//// Not ported yet: taking an action (`POST /org/recruitment/cases/:id/lifecycle`) belongs to the recruitment
-//// Rooms. Only the read-only vocabulary is served.
+//// Taking an action (`POST /org/rooms/:id/lifecycle`) is `recruitment/case_routes.lifecycle_act`.
 
 import gleam/json
 import gleam/list

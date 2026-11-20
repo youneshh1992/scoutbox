@@ -3,10 +3,6 @@
 ////
 //// A workspace is permissioned, not an offer or a signing. Only the licensed agent opens one; creation grants no
 //// authority, because the parties are named, not confirmed.
-////
-//// Not ported yet: every other route of the agent, club, player and Trust & Safety lanes (lists, reads, parties,
-//// representations, status moves, terms, documents, links, timelines, confirmations), so a workspace stays at
-//// DRAFT here with its parties unconfirmed.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

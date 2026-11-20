@@ -824,8 +824,8 @@ pub fn guardian_respond(
 /// A trial invitation's chosen slot is checked before the answer is recorded, so a refused slot leaves it
 /// pending, and a case-tied invitation re-derives its recipient now (`trial_routes.accept_gate`).
 ///
-/// Not ported yet: the Contact a Room links to a request (and its budget of 30 answers an hour), and the live
-/// `requests` event.
+/// Not ported yet: the budget of 30 answers an hour to a request a Room's Contact sent (`contact_response`), and
+/// the live `requests` event.
 fn respond(
   ctx: Ctx,
   req: Request,

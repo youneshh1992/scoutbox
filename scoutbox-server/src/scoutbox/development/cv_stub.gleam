@@ -7,7 +7,7 @@
 //// The registry still lists `production_cv` as configured, as the TypeScript server's does: a deployment learns
 //// that this server has no video analysis from the provider's health, not from a rewritten registry.
 ////
-//// Not ported yet: finalizing a session whose result is already stored answers 503 rather than that result.
+//// Out of scope: finalizing a session whose result is already stored answers 503 rather than that result.
 
 import gleam/dict
 import gleam/dynamic.{type Dynamic}

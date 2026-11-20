@@ -10,8 +10,8 @@
 ////
 //// `approach_minor` is the agent's own readiness for a minor pathway, evaluated against no subject.
 ////
-//// Not ported yet: `request_consent` and the minors gate, which belong to the consent routes and the minor
-//// pathway.
+//// `request_consent` and the minors gate (`evaluateMinorGate`) are not here: no TypeScript route evaluates either,
+//// and the minor pathway is closed in every jurisdiction.
 
 import gleam/json
 import gleam/list

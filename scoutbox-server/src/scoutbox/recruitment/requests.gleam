@@ -4,8 +4,6 @@
 //// A trial invitation carries its details on the row (the days offered, the venue line) and its offered slots
 //// as `request_trial_slots`; the address and joining instructions are held back from every recipient-facing view
 //// until acceptance.
-////
-//// Not ported yet: the Contact a recruitment Room links to a request.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

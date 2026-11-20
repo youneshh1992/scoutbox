@@ -3,8 +3,8 @@
 //// workspace. It is not an offer, carries no terms and commits nobody. The workspace that cites the case accepts
 //// it (`bind`), so one invitation opens one workspace.
 ////
-//// Not ported yet: the minor pathway (closed in every jurisdiction, so a minor always meets
-//// HANDOFF_MINOR_PATHWAY_DISABLED).
+//// The minor pathway is closed, as TypeScript hard-codes it (`minorPathwayOpen: false`), so a minor always meets
+//// HANDOFF_MINOR_PATHWAY_DISABLED.
 
 import gleam/dynamic
 import gleam/dynamic/decode

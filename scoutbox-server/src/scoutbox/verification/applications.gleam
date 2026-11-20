@@ -1275,7 +1275,7 @@ fn approving(
     ),
     now,
   ))
-  // Not ported yet: the ledger row's detail (the application), which this server's ledger table does not have.
+  // Not ported yet: the ledger row's detail (`detail_root_request_id`): `ledger.Entry` carries no detail.
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(

@@ -3,7 +3,7 @@
 //// The player row stays as a tombstone that keeps only the id, the birth date and the country; each domain's
 //// records keep their ids and states and lose the name and the person's own words. Media files go after COMMIT.
 ////
-//// Not ported yet: retrying a media file that could not be removed at the next boot or sweep.
+//// Out of scope: retrying a media file that could not be removed at the next boot or sweep.
 
 import gleam/dynamic/decode
 import gleam/json

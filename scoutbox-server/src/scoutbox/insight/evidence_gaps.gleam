@@ -3,8 +3,10 @@
 //// missing evidence through `request`, the one path that turns a gap into a player-facing ask (the Recruitment Room
 //// uses it too), with its anti-pestering window and guardian routing.
 ////
-//// Not ported yet: `attribute_never_observed` and `assessment_disagreement`, which read an assessment's ratings and
-//// rubric (the scouting assessments domain).
+//// `assessment_disagreement` never fires, as in TypeScript, which reads a rating's `value` where the field is
+//// `rating`, so the spread is always NaN.
+////
+//// Not ported yet: `attribute_never_observed`, which reads the latest report's rubric and every report's ratings.
 
 import gleam/dynamic/decode
 import gleam/int

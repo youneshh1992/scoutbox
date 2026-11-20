@@ -8,9 +8,6 @@
 ////
 //// The integration layer's routes (contacts, trials and opportunity shares across the seam) are in
 //// `agents/integration_routes`, and the handoffs in `agents/handoffs`.
-////
-//// Not ported yet: the attributed reviewer lane (`/ts/…`) that decides a facet or a dispute, and the transaction
-//// workspace's rows in the agency audit.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

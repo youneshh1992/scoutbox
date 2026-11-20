@@ -409,12 +409,60 @@ are for surprising facts or points that later work depends on, not implementatio
       signing's response (`firstQualifyingInteraction` lacks the ledger row's other fields, and the record has six
       more), and `/player/export`'s threads and insights (empty here). Item 9 should take them.
 9. **Parity beyond the batteries, after every battery passes.** The batteries reach only part of the server: 85
-   `Not ported yet:` markers are left (recruitment 17, development 15, identity 11, agents 10, scouting 9, the rest
-   fewer), some routes answer 501 past their guards (`/org/players/:id/morelike`, compliance decisions on facets,
-   disputes and conflict evaluations), and some aren't routed at all (`/player/applications`). Sweep them domain by
-   domain. For each, first write the checks into a TypeScript battery (or a rules suite), pass them there and sync,
-   so the behaviour is specified on both servers, then port it here. A domain is done when `grep "Not ported yet:"`
-   finds nothing in it and it answers no 501. Uploads and video analysis stay out of scope (see Out of scope).
+   `Not ported yet:` markers are left (development 20, recruitment 16, agents 10, scouting 9, identity 8, the rest
+   fewer), `/org/players/:id/morelike` answers 501 past its guards, and a few TypeScript routes aren't routed at
+   all. Many markers are stale: later slices ported what they name. For each slice from 1 on, first write the checks
+   into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
+   servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
+   501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
+   0. Audit the markers [**done**: 66 `Not ported yet:` left, 5 re-tagged `Out of scope:`]. Each marker was checked
+      against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
+      gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
+      is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
+      describe TypeScript's own behaviour and became plain notes: the minor
+      pathway, `request_consent`, the journey's Trust & Safety viewer (no route builds it), and legacy plain-text
+      passwords. Most of what is left is live events (about 35 markers). The ledger markers were wrong: both
+      schemas have the `detail_*` columns, and only `ledger.Entry` lacks them. `assessment_disagreement` never
+      fires in TypeScript (it reads `value`, not `rating`), so it is in docs/known-issues.md, not here. The Box Cam
+      clip uploads nothing (it tags a `/player/media` row), so it is in scope after all. The route diff found
+      these TypeScript routes unrouted here: the film room's `media/:mid/tags` and `/view`,
+      `POST /player/media/:id/captions`, `POST /org/assessments/:id/review`, `POST /admin/vouches/:id/revoke`,
+      `POST /org/verification/domains/:id/remove`, the Box Cam development plan (player and guardian) and
+      `GET /org/box-cam/drills`, and the uploads routes (out of scope).
+   1. Item 8.4's leftovers: the legacy signing response's missing fields, `/player/export`'s threads and insights
+      (`channels.for_player` and `insights.for_player` exist; only the wiring is missing), and the seed's
+      attendance dates. `similarPlayers` goes with slice 5.
+   2. Live events, the whole registry. Do it in two parts:
+      1. Delivery. Add the `public_safe` audience (every stream) and the subject rule (`liveSync.mjs`: a payload with a
+         `playerId` and no `orgId` reaches the player, their guardian and every org that may see them and isn't
+         blocked). Then add the catalogue pings: `players` (from about 25 acts, some unmarked: badges, the medical
+         share, availability, the timeline, the first-team seeker, the film room, captions), `orgs`, `opportunities`,
+         `openTrials`, `campaigns`, `friendlies`, `ledger`. `feedback` and `applications` reach no stream here, but
+         the subject rule delivers them in TypeScript, which contradicts item 4's note: check that first. Also close
+         a removed staff member's streams.
+      2. The domain events no `live_event.Event` constructor declares: `inbox`, `requests`, `evidence`, the eight
+         `development_*`, the `contact_*` events with `contact_responded` and `contact_agent_routed`,
+         `player_development_evidence_changed`, the three `box_cam_*`, and `policy_version_published`.
+   3. Recruitment: citing a `local_test` Box Cam session when the test provider is on (trials, decisions, and the
+      decision surface's `boxCam` candidates, which list none here), a Room decision's `lifecycle` record (always
+      null; `decisions.lifecycle_json` renders it), the `contact_response` budget (30 answers an hour), and
+      attaching a trial report in a channel.
+   4. Agents [**done** by the audit: only `policy_version_published` is left, in slice 2].
+   5. Discovery and scouting: the similarity engine (`morelike`, and `similarPlayers`' players and archetypes),
+      the film room's tags and view, captions, an assessment's lead review, the evidence-gap rule
+      `attribute_never_observed`, the matching counters in `/admin/metrics` (`matching_query_run` and the
+      watchlist ones), and lowering text as JavaScript does in the directory search (`lower_js`).
+   6. Development: the Box Cam development plan (player and guardian), the club's drill list, and keeping a clip.
+   7. The ledger, verification and safety: a detail on `ledger.Entry`, written to the `detail_*` columns and
+      `ledger_protocols` and read back by `view`. That covers Box Cam preferences, the Combine, a verification
+      decision and a root approval. Also the operations events' detail in `/admin/metrics`, removing a
+      verification domain, and the admin's vouch revoke.
+   8. The rest of the sweep: the insight sweep (review-later reminders, pruning exposure older than 90 days), the
+      week-old application reminders, the trial-feedback escalation and the completed-trial assessment reminder.
+      Their columns (`reminded_at`, `feedback_escalated_at`) exist; nothing writes them.
+   9. Platform: `SCOUTBOX_TRUST_PROXY` (`TRUST_PROXY_INVALID`, the operator report's `proxy_trust`, and the open
+      question below), the operator report's `dataLayer.domains`, and its notification counters
+      (`suppressedByPreference`, `unknownTypes`).
 10. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible

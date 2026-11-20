@@ -52,6 +52,22 @@ lines, with a comment, so the batteries and `dev/shape_diff.mjs` agree with the 
 Check that no client or battery relies on the null first.
 
 
+## Scouts' disagreement on an attribute is never suggested as an evidence gap
+
+Found 2026-11-20 while auditing the `Not ported yet:` markers. Ported as the TypeScript server behaves.
+
+**What it is.** The missing-evidence rule `assessment_disagreement` (`domains/insight/insight.mjs`) should fire when
+two submitted reports rate one attribute two or more points apart. It reads each rating's `value`, but a rating's
+field is `rating` (`repositories/scoutingAssessments.ts`), so every value is `undefined`, the spread is `NaN`, and
+the rule never fires.
+
+**Where it is in the port.** `scoutbox-server/src/scoutbox/insight/evidence_gaps.gleam` has no such rule, and its
+module comment says why.
+
+**Fix.** Read `r.rating` in the TypeScript rule, with a battery check that two split reports raise the
+suggestion, then port the rule.
+
+
 ## An agent with no profile is told it needs a VERIFIED "undefined"
 
 Found 2026-11-16 while porting the transaction workspace. Ported as the TypeScript server behaves.

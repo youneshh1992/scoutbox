@@ -2,8 +2,7 @@
 //// (`room_decisions`, append-only, a revision superseding its predecessor), the evidence confidence it saw at each
 //// decision point (`room_snapshots`) and its internal review of each evidence record (`room_evidence_states`).
 ////
-//// Not ported yet: a formal decision's draft, finalisation, evidence refs and assessment summary (the lifecycle's
-//// decision routes).
+//// A formal decision's draft, finalisation, evidence refs and assessment summary are `recruitment/decisions`.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

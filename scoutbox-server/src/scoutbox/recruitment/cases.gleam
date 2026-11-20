@@ -6,7 +6,7 @@
 ////
 //// A case's budget scenarios are `recruitment/budgets`.
 ////
-//// Not ported yet: the case's decision draft and transaction handoff.
+//// The case's decision draft is `recruitment/decisions`, its transaction handoff `agents/handoffs`.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}

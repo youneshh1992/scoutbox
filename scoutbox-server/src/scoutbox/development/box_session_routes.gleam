@@ -5,8 +5,8 @@
 //// naming a result, a state or a provenance is refused as an unknown field. An uploaded video can never become
 //// `box_cam_observed`.
 ////
-//// Not ported yet: keeping a clip (`/box-cam/sessions/:id/clip`) and the player_development_evidence_changed live
-//// event.
+//// Not ported yet: keeping a clip (`/box-cam/sessions/:id/clip`, which tags an existing `/player/media` row and
+//// uploads nothing), and the player_development_evidence_changed live event.
 
 import gleam/float
 import gleam/int

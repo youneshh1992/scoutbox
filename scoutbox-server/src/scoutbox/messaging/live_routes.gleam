@@ -4,8 +4,10 @@
 //// Authorisation is checked at delivery, from live records, in each stream's own process: a suspension or a
 //// staff member's removal silences a stream that is already open.
 ////
-//// Not ported yet: the catalogue pings (`players`, `orgs`, …) and every other event in the registry, and closing a
-//// removed staff member's open streams (until then, their stream stays open but receives nothing).
+//// Not ported yet: the catalogue pings (`players`, `orgs`, …) and the public_safe audience they go to, the
+//// subject rule (a payload with a `playerId` and no `orgId` reaches the player, their guardian and every org that
+//// may see them), the registry's events that no constructor of `live_event.Event` declares, and closing a removed
+//// staff member's open streams (until then, their stream stays open but receives nothing).
 
 import ewe
 import gleam/erlang/process

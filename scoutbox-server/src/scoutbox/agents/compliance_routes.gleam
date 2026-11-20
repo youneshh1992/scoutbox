@@ -1,10 +1,6 @@
-//// The compliance ledger's routes a transaction workspace reaches (domains/agents/compliance): the attributed
-//// reviewer's sign-in and session, the review queue and the decision on a declared binding, and regulatory
-//// consents (the request, both parties' answers and their lists).
-////
-//// Not ported yet: the agent's own context routes, policy versions, facet re-checks, reviewer administration,
-//// a review's start, cancel and supersede, and a decision on a facet, a dispute or a conflict evaluation
-//// (answered 501), and the reviewer's full evaluation snapshot (a reviewer reads the summary a party reads).
+//// The compliance ledger's routes (domains/agents/compliance): the attributed reviewer's sign-in and session, the
+//// review queue and the decision on each kind of item (a facet, a dispute, a declared binding, a conflict
+//// evaluation), and regulatory consents (the request, both parties' answers and their lists).
 
 import gleam/bool
 import gleam/dynamic.{type Dynamic}

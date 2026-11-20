@@ -1,7 +1,7 @@
 //// Push (`push_log`, `push_tokens`; adapters.mjs `createPushSender`). The push record is written after the
 //// notice's unit commits, in a unit of its own. The device tokens are the Player app's: players' and guardians'.
 ////
-//// Not ported yet: the Expo transport. Every push is `dev-log`: the record is the delivery, as on a server with
+//// Out of scope: the Expo transport. Every push is `dev-log`: the record is the delivery, as on a server with
 //// no EXPO_ACCESS_TOKEN.
 
 import gleam/dynamic/decode

@@ -5,8 +5,8 @@
 ////
 //// A claim is its stored row. The rules that read the clock take `now`.
 ////
-//// Not ported yet: the token functions (`mintToken`, `peekToken`, `consumeToken`) work on the `ver_tokens` table
-//// and arrive with the repository; `bootstrapVerification` is a migration step.
+//// The token functions work on the `ver_tokens` table, so they are `verification/core` (`mint_token`,
+//// `peek_token`). `bootstrapVerification` is a migration step, whose output the seed holds.
 
 import gleam/bit_array
 import gleam/dict.{type Dict}

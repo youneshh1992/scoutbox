@@ -281,7 +281,7 @@ type StatsInput {
 
 /// `POST /player/stats`.
 ///
-/// Not ported yet: `season` files the figures into the season history; it is refused as not supported.
+/// Not ported yet: the `players` live event.
 pub fn stats(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let figure = fn(name, next) {
     input.field(
@@ -606,8 +606,10 @@ type NewMedia {
 
 /// `POST /player/media`: a clip, and with an attendance of the player's own, the Verified Clip seal.
 ///
-/// Not ported yet: the upload itself (`dataUrl`, which the storage adapter writes to disk), and so the Verified
-/// Clip seal, which needs the footage; the `players` live event.
+/// Out of scope: the upload itself (`dataUrl`, which the storage adapter writes to disk), and so the Verified Clip
+/// seal, which needs the footage.
+///
+/// Not ported yet: the `players` live event.
 pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use title <- input.field(
@@ -1034,7 +1036,7 @@ type DrillDone {
 /// `POST /player/drills/:id/complete`: the drill is done, and a measured result is kept, verified when it came
 /// with video.
 ///
-/// Not ported yet: the video itself, and the live 'players' event.
+/// Not ported yet: the live 'players' event. TypeScript doesn't keep the video either.
 pub fn complete_drill(
   ctx: Ctx,
   req: Request,

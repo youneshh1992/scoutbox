@@ -173,8 +173,8 @@ pub fn top_actors_for_org(
 
 /// A ledger row as the organisation, the player or the guardian reads it.
 ///
-/// Not ported yet: `detail` carries the box, combine, passport and verification events' details, from domains
-/// this server does not run; no event it writes has one.
+/// Not ported yet: `detail`, always null here. The table has the `detail_*` columns and `ledger_protocols`, but
+/// `Entry` carries no detail, so the box, Combine, passport and verification events write none.
 pub fn view(l: row.Row) -> Json {
   let opt = json.nullable(_, json.string)
   json.object([

@@ -1,8 +1,8 @@
 //// Password hashes, stored as the TypeScript server stores them (`adapters.mjs`): `scrypt$<salt>$<hash>`, where the
 //// salt is 16 random bytes as hex and that hex text itself is scrypt's salt, and the hash is 32 bytes as hex.
 ////
-//// Not ported yet: the TypeScript server also accepts a stored value without the `scrypt$` prefix as plain text,
-//// and upgrades it. No database this server opens holds one.
+//// The TypeScript server also accepts a stored value without the `scrypt$` prefix as plain text, and upgrades it.
+//// That is only for legacy rows: no database this server opens holds one, so it isn't here.
 
 import gleam/bit_array
 import gleam/string

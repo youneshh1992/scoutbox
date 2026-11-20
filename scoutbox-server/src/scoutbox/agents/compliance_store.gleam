@@ -1,8 +1,6 @@
-//// Compliance contexts as repositories/complianceRecords.mjs keeps them, as far as a transaction workspace uses
-//// one: opened with the transaction, its parties projected from the transaction's, and each evaluation recorded
-//// append-only with the reasons, outstanding consents, policy versions and the parties it saw.
-////
-//// Not ported yet: the agent's own context routes (`/agent/compliance/contexts`).
+//// Compliance contexts as repositories/complianceRecords.mjs keeps them: a transaction workspace's, opened with the
+//// transaction and its parties projected from the transaction's, and the agent's own (`agents/context_routes`).
+//// Each evaluation is recorded append-only with the reasons, outstanding consents, policy versions and the parties it saw.
 
 import gleam/dynamic/decode
 import gleam/int
