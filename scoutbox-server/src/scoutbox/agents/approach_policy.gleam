@@ -157,7 +157,7 @@ fn sets_of(items: List(item_row.Row)) -> List(#(String, List(List(String)))) {
 
 /// A day as an instant; an unreadable one is never in effect.
 fn day_ms_of(s: String) -> Option(Int) {
-  temporal.day_start_ms(s) |> option.from_result
+  temporal.parse_day(s) |> option.from_result |> option.map(temporal.day_start)
 }
 
 /// The latest version among those in effect for `ma` at `now`.

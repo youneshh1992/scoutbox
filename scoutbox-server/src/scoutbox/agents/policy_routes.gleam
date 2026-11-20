@@ -11,7 +11,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
-import gleam/string
 import scoutbox/agents/agent_store
 import scoutbox/agents/approach_policy
 import scoutbox/agents/compliance_routes as compliance
@@ -25,6 +24,7 @@ import scoutbox/platform/input
 import scoutbox/platform/key_order
 import scoutbox/platform/limits
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/rows/compliance_context_history as context_event_row
 import scoutbox/rows/id
 import scoutbox/rows/jurisdiction_policies as policy_row
@@ -149,7 +149,7 @@ fn check_of(kind: Kind) -> input.Check(Value) {
     Flag -> map(input.boolean(), FlagValue)
     Count -> map(input.whole_number(0, max_safe_integer), CountValue)
     Text -> map(input.text(200), TextValue)
-    Day -> map(input.date_only(), TextValue)
+    Day -> map(input.date_only(), fn(d) { TextValue(temporal.day_text(d)) })
     MonthDay ->
       map(
         input.matching_said(
@@ -507,8 +507,8 @@ type Source {
   Source(
     source: String,
     version: Option(String),
-    effective_date: Option(String),
-    retrieved_date: String,
+    effective_date: Option(temporal.Day),
+    retrieved_date: temporal.Day,
   )
 }
 
@@ -524,7 +524,7 @@ type NewRule {
     params: List(#(String, Value)),
     note: Option(String),
     overrides: List(Override),
-    effective_from: Option(String),
+    effective_from: Option(temporal.Day),
   )
 }
 
@@ -535,8 +535,8 @@ type NewVersion {
     jurisdiction: jurisdiction.Jurisdiction,
     policy_version: Int,
     supersedes: Option(String),
-    effective_from: String,
-    effective_to: Option(String),
+    effective_from: temporal.Day,
+    effective_to: Option(temporal.Day),
     rules: List(#(String, NewRule)),
   )
 }
@@ -690,7 +690,7 @@ pub fn propose(ctx: Ctx, req: Request, reviewer: reviewer_row.Row) -> Response {
         key_order.sort(b.rules, key_order.keys(order, [key_order.Key("rules")]))
       let count = list.length(rules)
       let ends_too_soon = case b.effective_to {
-        Some(to) -> string.compare(b.effective_from, to) != order.Lt
+        Some(to) -> temporal.compare_days(b.effective_from, to) != order.Lt
         None -> False
       }
       case rules, ends_too_soon {
@@ -764,8 +764,8 @@ fn create(
               jurisdiction: b.jurisdiction,
               policy_version: b.policy_version,
               supersedes_id: supersedes,
-              effective_from_date: b.effective_from,
-              effective_to_date: b.effective_to,
+              effective_from_date: temporal.day_text(b.effective_from),
+              effective_to_date: option.map(b.effective_to, temporal.day_text),
               status: policy_row.Proposed,
               proposed_by_id: Some(id.reviewer_to_string(reviewer.id)),
               proposed_by_name: Some(reviewer.name),
@@ -831,7 +831,7 @@ fn write_rules(
         rule_status: r.status,
         text_status: r.text_status,
         note: r.note,
-        effective_from_date: r.effective_from,
+        effective_from_date: option.map(r.effective_from, temporal.day_text),
       ),
     ))
     use _ <- result.try(
@@ -846,8 +846,8 @@ fn write_rules(
             ord: i,
             source: s.source,
             version: s.version,
-            effective_date: s.effective_date,
-            retrieved_date: s.retrieved_date,
+            effective_date: option.map(s.effective_date, temporal.day_text),
+            retrieved_date: temporal.day_text(s.retrieved_date),
           ),
         )
       }),

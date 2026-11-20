@@ -21,12 +21,13 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Tx}
+import scoutbox/platform/temporal
+import scoutbox/platform/zones
 import scoutbox/recruitment/signing_reads
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
-import scoutbox/rules/time_zones
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
@@ -459,14 +460,14 @@ pub fn prefs(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
     option.then(body.timezone, fn(z) { blank_is_none(z) |> option.map(Some) })
   case zone {
     Some(Some(z)) ->
-      case list.contains(time_zones.names, z) {
-        False ->
+      case zones.parse(z) {
+        Error(Nil) ->
           http.error_message(
             400,
             "TIMEZONE_INVALID",
             "timezone must be an IANA time zone name, for example Europe/London.",
           )
-        True -> save_prefs(ctx, p.player, body)
+        Ok(_) -> save_prefs(ctx, p.player, body)
       }
     _ -> save_prefs(ctx, p.player, body)
   }
@@ -696,7 +697,7 @@ type AttendanceInput {
   AttendanceInput(
     fixture: Option(String),
     venue: Option(String),
-    date: Option(String),
+    date: Option(temporal.Day),
     gps: Option(#(Option(Float), Option(Float))),
     device_id: Option(String),
   )
@@ -765,7 +766,7 @@ pub fn attendance(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         players.NewAttendance(
           fixture: option.unwrap(body.fixture, ""),
           venue: option.unwrap(body.venue, ""),
-          match_date: date,
+          match_date: temporal.day_text(date),
           lat:,
           lng:,
         ),
@@ -917,7 +918,7 @@ type MedicalRecord {
   MedicalRecord(
     type_: Option(String),
     title: Option(String),
-    date: Option(String),
+    date: Option(temporal.Day),
     layoff_weeks: Option(Float),
     cleared: Option(Bool),
     condition_status: Option(String),
@@ -979,7 +980,9 @@ pub fn medical_record(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
                 Some(t) -> t
               },
               title:,
-              date: option.unwrap(body.date, clock.iso_day(now)),
+              date: body.date
+                |> option.unwrap(temporal.day_of(now))
+                |> temporal.day_text,
               layoff_weeks: body.layoff_weeks,
               cleared: body.cleared,
             ),

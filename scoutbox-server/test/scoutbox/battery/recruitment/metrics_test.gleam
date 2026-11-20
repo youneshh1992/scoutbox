@@ -4,6 +4,7 @@
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import scoutbox/battery/base
 import scoutbox/recruitment/analytics/metrics
 
 // analytics: assertMetricRegistry — the registry asserts clean at boot (27 metrics, 7 families)
@@ -135,8 +136,8 @@ pub fn both_boundary_days_are_inside_the_window_test() {
       1_781_524_800_000,
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
     )
@@ -149,8 +150,8 @@ pub fn both_boundary_days_are_inside_the_window_2_test() {
       1_778_976_000_000,
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
     )
@@ -163,8 +164,8 @@ pub fn both_boundary_days_are_inside_the_window_3_test() {
       1_781_567_999_000,
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
     )
@@ -177,8 +178,8 @@ pub fn neg_n51_the_instant_before_the_first_day_is_outside_test() {
       1_778_975_999_999,
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
     )
@@ -191,8 +192,8 @@ pub fn neg_n52_and_the_instant_after_the_last_day_is_outside_test() {
       1_781_568_000_000,
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
     )
@@ -269,8 +270,8 @@ pub fn a_30_day_window_is_flagged_incomplete_against_a_120_day_typical_journey_t
   assert metrics.cohort_incomplete(
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
       Some(120.0),
@@ -284,8 +285,8 @@ pub fn and_is_not_flagged_when_the_journey_is_short_test() {
   assert metrics.cohort_incomplete(
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
       Some(5.0),
@@ -299,8 +300,8 @@ pub fn with_no_typical_journey_known_nothing_is_claimed_test() {
   assert metrics.cohort_incomplete(
       metrics.Window(
         preset: "last_30_days",
-        from: "2026-05-17",
-        to: "2026-06-15",
+        from: base.day("2026-05-17"),
+        to: base.day("2026-06-15"),
         days: 30,
       ),
       None,
@@ -419,8 +420,8 @@ pub fn the_comparison_period_is_the_same_length_as_the_window_test() {
       metrics.window_json(
         metrics.previous_window(metrics.Window(
           preset: "last_30_days",
-          from: "2026-05-17",
-          to: "2026-06-15",
+          from: base.day("2026-05-17"),
+          to: base.day("2026-06-15"),
           days: 30,
         )),
       ),

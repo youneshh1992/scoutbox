@@ -17,6 +17,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/budgets.{type Scenario}
 import scoutbox/recruitment/case_workspace
 import scoutbox/recruitment/cases
@@ -72,7 +73,7 @@ type Fx {
     to: Currency,
     rate: String,
     source: Option(String),
-    date: Option(String),
+    date: Option(temporal.Day),
   )
 }
 
@@ -357,7 +358,9 @@ fn insert_fx(
           from_currency: a.from,
           to_currency: a.to,
           rate: a.rate,
-          date: option.unwrap(a.date, clock.iso_day(now)),
+          date: a.date
+            |> option.unwrap(temporal.day_of(now))
+            |> temporal.day_text,
           manual: True,
         ),
         source: Some(option.unwrap(trimmed(a.source), "manual entry")),

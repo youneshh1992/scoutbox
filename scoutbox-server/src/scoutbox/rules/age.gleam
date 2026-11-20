@@ -1,4 +1,4 @@
-//// Ages and adulthood (domain.ts `ageOn`, `isAdult`, `adultAgeFor`; temporal.ts `parseDobStrict`).
+//// Ages and adulthood (domain.ts `ageOn`, `isAdult`, `adultAgeFor`; temporal.ts `ageOnMs`, `parseDobStrict`).
 ////
 //// A date of birth is a calendar day, `YYYY-MM-DD`, read in UTC. Someone turns N at 00:00 UTC on their birthday;
 //// a 29 February birthday counts on 1 March in other years. That rule is exactly "the birth date, as text, is
@@ -7,23 +7,18 @@
 
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option}
 import gleam/order
 import gleam/result
 import gleam/string
-import gleam/time/calendar.{type Date, Date}
-import gleam/time/timestamp
 import scoutbox/platform/sql.{type Fragment}
+import scoutbox/platform/temporal.{type Day}
 import sqlight
 
 /// Age of majority by country (ISO alpha-2); every other country is 18.
 const adult_ages = [#("KR", 19), #("TH", 20), #("EG", 21), #("SG", 21)]
 
 const default_adult_age = 18
-
-const year_min = 1900
-
-const year_max = 2100
 
 /// The oldest a living person plausibly is.
 const max_age_years = 120
@@ -32,129 +27,59 @@ pub fn adult_age_for(country: String) -> Int {
   list.key_find(adult_ages, country) |> result.unwrap(default_adult_age)
 }
 
-/// The UTC calendar day of an instant.
-pub fn day_of(now_ms: Int) -> Date {
-  let #(date, _) =
-    timestamp.from_unix_seconds_and_nanoseconds(
-      now_ms / 1000,
-      { now_ms % 1000 } * 1_000_000,
-    )
-    |> timestamp.to_calendar(calendar.utc_offset)
-  date
+/// Why text is not a date of birth a profile may hold (parseDobStrict's `why`).
+pub type DobProblem {
+  DobNotADay(temporal.DayProblem)
+  InTheFuture
+  ImplausiblyOld
+}
+
+/// A date of birth a profile may hold (parseDobStrict): a real day, not in the future, not over 120 years ago.
+pub fn parse_dob(s: String, now_ms: Int) -> Result(Day, DobProblem) {
+  use birth <- result.try(temporal.parse_day(s) |> result.map_error(DobNotADay))
+  case temporal.day_start(birth) > now_ms, on(birth, now_ms) > max_age_years {
+    True, _ -> Error(InTheFuture)
+    _, True -> Error(ImplausiblyOld)
+    False, False -> Ok(birth)
+  }
+}
+
+pub fn dob_why(p: DobProblem) -> String {
+  case p {
+    DobNotADay(p) -> temporal.day_why(p)
+    InTheFuture -> "in the future"
+    ImplausiblyOld -> "implausibly old"
+  }
+}
+
+/// The latest birth date, as text, of someone who has turned `years` by `today`. It is a cutoff to compare
+/// birth dates with, not a day: 29 February less a year is `…-02-29` still, which sorts where it should.
+pub fn born_by(today: Day, years: Int) -> String {
+  pad(temporal.day_year(today) - years, 4)
+  <> "-"
+  <> pad(temporal.day_month(today), 2)
+  <> "-"
+  <> pad(temporal.day_of_month(today), 2)
 }
 
 fn pad(n: Int, width: Int) -> String {
   int.to_string(n) |> string.pad_start(width, "0")
 }
 
-fn text_of(year: Int, month: Int, day: Int) -> String {
-  pad(year, 4) <> "-" <> pad(month, 2) <> "-" <> pad(day, 2)
-}
-
-/// A real day written `YYYY-MM-DD`, year 1900–2100 (temporal.ts `parseStrictDateOnly`).
-pub fn parse_day(s: String) -> Result(Date, Nil) {
-  case string.to_graphemes(s) {
-    [y1, y2, y3, y4, "-", m1, m2, "-", d1, d2] -> {
-      let digits = [y1, y2, y3, y4, m1, m2, d1, d2]
-      use <- bool_guard(list.all(digits, is_digit))
-      use year <- result.try(int.parse(y1 <> y2 <> y3 <> y4))
-      use month_number <- result.try(int.parse(m1 <> m2))
-      use day <- result.try(int.parse(d1 <> d2))
-      use month <- result.try(calendar.month_from_int(month_number))
-      let date = Date(year:, month:, day:)
-      case
-        year >= year_min && year <= year_max && calendar.is_valid_date(date)
-      {
-        True -> Ok(date)
-        False -> Error(Nil)
-      }
-    }
-    _ -> Error(Nil)
+/// Completed years on `today` (temporal.ts `ageOnMs`, by day).
+pub fn years_on(birth: Day, today: Day) -> Int {
+  let years = temporal.day_year(today) - temporal.day_year(birth)
+  let birthday = #(temporal.day_month(birth), temporal.day_of_month(birth))
+  let now = #(temporal.day_month(today), temporal.day_of_month(today))
+  case compare_pair(now, birthday) {
+    order.Lt -> years - 1
+    _ -> years
   }
 }
 
-fn is_digit(g: String) -> Bool {
-  string.contains("0123456789", g)
-}
-
-fn bool_guard(ok: Bool, next: fn() -> Result(a, Nil)) -> Result(a, Nil) {
-  case ok {
-    True -> next()
-    False -> Error(Nil)
-  }
-}
-
-/// A date of birth a profile may hold: a real day, not in the future, not over 120 years ago.
-pub fn parse_dob(s: String, now_ms: Int) -> Result(String, Nil) {
-  use date <- result.try(parse_day(s))
-  let today = day_of(now_ms)
-  use <- bool_guard(calendar.naive_date_compare(date, today) != order.Gt)
-  case age(s, today) {
-    Some(a) if a <= max_age_years -> Ok(s)
-    _ -> Error(Nil)
-  }
-}
-
-/// Why `s` is not a date of birth a profile may hold, in temporal.ts `parseDobStrict`'s words (`why`), or `Ok`.
-pub fn dob_problem(s: String, now_ms: Int) -> Result(Nil, String) {
-  let shaped = case string.to_graphemes(s) {
-    [y1, y2, y3, y4, "-", m1, m2, "-", d1, d2] ->
-      list.all([y1, y2, y3, y4, m1, m2, d1, d2], is_digit)
-    _ -> False
-  }
-  let number = fn(from, n) {
-    string.slice(s, from, n) |> int.parse |> result.unwrap(0)
-  }
-  let year = number(0, 4)
-  let month = number(5, 2)
-  let day = number(8, 2)
-  case shaped {
-    False -> Error("wrong shape")
-    True if year < year_min || year > year_max ->
-      Error(
-        "year outside "
-        <> int.to_string(year_min)
-        <> "–"
-        <> int.to_string(year_max),
-      )
-    True if month < 1 || month > 12 -> Error("no such month")
-    True if day < 1 || day > 31 -> Error("no such day")
-    True ->
-      case parse_day(s) {
-        Error(Nil) -> Error("no such day in that month")
-        Ok(date) -> {
-          let today = day_of(now_ms)
-          case calendar.naive_date_compare(date, today), age(s, today) {
-            order.Gt, _ -> Error("in the future")
-            _, Some(a) if a > max_age_years -> Error("implausibly old")
-            _, _ -> Ok(Nil)
-          }
-        }
-      }
-  }
-}
-
-/// The latest birth date of someone who has turned `years` by `today`, as text.
-pub fn born_by(today: Date, years: Int) -> String {
-  text_of(today.year - years, calendar.month_to_int(today.month), today.day)
-}
-
-/// Completed years on `today`, or `None` when the date of birth cannot be read.
-pub fn age(dob: String, today: Date) -> Option(Int) {
-  case parse_day(dob) {
-    Error(Nil) -> None
-    Ok(birth) -> {
-      let years = today.year - birth.year
-      let before_birthday =
-        #(calendar.month_to_int(today.month), today.day)
-        |> compare_pair(#(calendar.month_to_int(birth.month), birth.day))
-        == order.Lt
-      case before_birthday {
-        True -> Some(years - 1)
-        False -> Some(years)
-      }
-    }
-  }
+/// Completed years at an instant (temporal.ts `ageOnMs`).
+pub fn on(birth: Day, now_ms: Int) -> Int {
+  years_on(birth, temporal.day_of(now_ms))
 }
 
 fn compare_pair(a: #(Int, Int), b: #(Int, Int)) -> order.Order {
@@ -164,23 +89,29 @@ fn compare_pair(a: #(Int, Int), b: #(Int, Int)) -> order.Order {
   }
 }
 
+/// A stored date of birth's age at an instant (domain.ts `ageOn`), or `None` when it cannot be read.
 pub fn age_on(dob: String, now_ms: Int) -> Option(Int) {
-  age(dob, day_of(now_ms))
+  temporal.parse_day(dob)
+  |> option.from_result
+  |> option.map(on(_, now_ms))
 }
 
 /// Adult only when the age is known and reaches the country's threshold.
 pub fn is_adult(dob: String, country: String, now_ms: Int) -> Bool {
-  case parse_day(dob) {
-    Error(Nil) -> False
+  case temporal.parse_day(dob) {
+    Error(_) -> False
     Ok(_) ->
-      string.compare(dob, born_by(day_of(now_ms), adult_age_for(country)))
+      string.compare(
+        dob,
+        born_by(temporal.day_of(now_ms), adult_age_for(country)),
+      )
       != order.Gt
   }
 }
 
 /// The SQL form of `is_adult` over a row's birth date and country columns.
 pub fn adult_sql(dob: String, country: String, now_ms: Int) -> Fragment {
-  let today = day_of(now_ms)
+  let today = temporal.day_of(now_ms)
   sql.concat(
     list.flatten([
       [sql.text(dob <> " <= CASE " <> country)],

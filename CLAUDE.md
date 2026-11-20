@@ -39,6 +39,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
     `vocab`, so `src/` no longer compiles and the next run can't start. Restore them with
     `git checkout -- src/scoutbox/rows src/scoutbox/vocab`, fix the declaration, and run it again.
   - `clock.date_string` is JavaScript's `toDateString` (`Mon Nov 16 2026`). A `YYYY-MM-DD` day is `clock.iso_day`.
+  - A calendar day is a `temporal.Day` and a time zone a `zones.Zone`: read text into one where it arrives
+    (`temporal.parse_day`, `input.date_only`, `zones.parse`) and pass the typed value on. A refusal is a typed
+    problem; `temporal.day_why` and friends give temporal.ts's words at the HTTP edge only.
   - A domain record that is a generated `Row` is a type alias: its constructor can't be matched through the alias.
     Match with a guard (`Some(u) if u.removed_at != None`) or the row module's constructor.
   - Function calls are not allowed in case guards, nor constructors with a non-constant argument

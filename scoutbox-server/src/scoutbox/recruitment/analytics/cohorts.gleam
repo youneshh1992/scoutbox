@@ -10,7 +10,7 @@ import gleam/order.{type Order}
 import gleam/result
 import gleam/set
 import gleam/string
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/recruitment/analytics/context.{type Context, type Room}
 import scoutbox/recruitment/analytics/metrics.{count, count_json, wire}
 import scoutbox/recruitment/room_rules
@@ -154,22 +154,10 @@ pub fn reopen_rate(ctx: Context) -> Json {
 
 // ---------------------------------------------------------- C1 · live briefs
 
-/// A brief is live on `today` when it is active and the day is within its bounds; an unreadable bound closes
-/// it (discovery/shared.mjs `briefIsLiveOn`).
-pub fn brief_is_live_on(b: context.Brief, today: String) -> Bool {
-  let within = fn(bound: Option(String), ok: fn(Order) -> Bool) {
-    case bound {
-      None | Some("") -> True
-      Some(d) ->
-        case temporal.date_only(d) {
-          Ok(d) -> ok(string.compare(today, d))
-          Error(_) -> False
-        }
-    }
-  }
+/// A brief is live on `today` when it is active and the day is within its bounds (briefIsLiveOn).
+pub fn brief_is_live_on(b: context.Brief, today: Day) -> Bool {
   b.status == "active"
-  && within(b.active_from, fn(o) { o != order.Lt })
-  && within(b.active_until, fn(o) { o != order.Gt })
+  && temporal.is_day_within(today, b.active_from, b.active_until)
 }
 
 /// Titles in the order JavaScript's `localeCompare` gives for the titles a club writes: letters before case,

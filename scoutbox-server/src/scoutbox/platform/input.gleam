@@ -27,9 +27,10 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
+import gleam/result
 import gleam/string
 import scoutbox/platform/key_order.{type KeyOrder}
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 
 pub type Problem {
   Required
@@ -260,39 +261,26 @@ fn at_most(s: String, max: Int) -> Result(String, Issue) {
 /// date-time with an offset or Z, or integer milliseconds. Null and "" are no date.
 pub fn due_date() -> Check(Option(temporal.Due)) {
   fn(v) {
-    let refused = fn(why: String) {
-      Error(
-        Issue(
-          ..issue(
-            NotADate,
-            "must be a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset ("
-              <> why
-              <> ")",
-          ),
-          expected: Some(
-            "YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds",
-          ),
-          code: Some("DATE_INVALID"),
-        ),
-      )
-    }
-    case decode.run(v, decode.optional(decode.dynamic)) {
-      Ok(None) -> Ok(None)
+    case decode.run(v, decode.optional(decode.string)) {
+      Ok(None) | Ok(Some("")) -> Ok(None)
       _ ->
-        case decode.run(v, decode.string), decode.run(v, decode.int) {
-          Ok(""), _ -> Ok(None)
-          Ok(s), _ ->
-            case temporal.day_start_ms(s), temporal.instant_ms(s) {
-              Ok(ms), _ -> Ok(Some(temporal.Day(ms)))
-              _, Ok(ms) -> Ok(Some(temporal.Instant(ms)))
-              Error(Nil), Error(why) -> refused(why)
-            }
-          _, Ok(ms) -> Ok(Some(temporal.Instant(ms)))
-          _, _ ->
-            case decode.run(v, decode.float) {
-              Ok(_) -> refused("not a whole number")
-              Error(_) -> refused("not a date-time")
-            }
+        case temporal.parse_due(v) {
+          Ok(due) -> Ok(Some(due))
+          Error(problem) ->
+            Error(
+              Issue(
+                ..issue(
+                  NotADate,
+                  "must be a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset ("
+                    <> temporal.due_why(problem)
+                    <> ")",
+                ),
+                expected: Some(
+                  "YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds",
+                ),
+                code: Some("DATE_INVALID"),
+              ),
+            )
         }
     }
   }
@@ -302,15 +290,15 @@ pub fn due_date() -> Check(Option(temporal.Due)) {
 /// is kept as sent (a fingerprint is of what was sent); `temporal.instant` reads it.
 pub fn instant() -> Check(Dynamic) {
   fn(v) {
-    case temporal.instant(v, 1900, 2100) {
+    case temporal.instant(v, temporal.year_min, temporal.year_max) {
       Ok(_) -> Ok(v)
-      Error(why) ->
+      Error(problem) ->
         Error(
           Issue(
             ..issue(
               NotATimestamp,
               "must be a date-time with an offset or Z, or whole milliseconds ("
-                <> why
+                <> temporal.instant_why(problem)
                 <> ")",
             ),
             expected: Some("ISO 8601 with offset or Z, or integer milliseconds"),
@@ -322,28 +310,11 @@ pub fn instant() -> Check(Dynamic) {
 }
 
 /// A calendar day `YYYY-MM-DD` a form may leave empty (schemas.mjs `dayOrBlank`, under `nullish`): "" is no day.
-pub fn day_or_blank() -> Check(Option(String)) {
+pub fn day_or_blank() -> Check(Option(Day)) {
   fn(v) {
-    let refused = fn(why: String) {
-      Error(
-        Issue(
-          ..issue(
-            NotADate,
-            "must be a calendar day written YYYY-MM-DD (" <> why <> ")",
-          ),
-          expected: Some("YYYY-MM-DD"),
-          code: Some("DATE_INVALID"),
-        ),
-      )
-    }
     case decode.run(v, decode.string) {
       Ok("") -> Ok(None)
-      Ok(s) ->
-        case temporal.date_only(s) {
-          Ok(s) -> Ok(Some(s))
-          Error(why) -> refused(why)
-        }
-      Error(_) -> refused("not text")
+      _ -> date_only()(v) |> result.map(Some)
     }
   }
 }
@@ -370,26 +341,21 @@ pub fn date_written_as(
 }
 
 /// A calendar day `YYYY-MM-DD` (schemas.mjs `dateOnly`): anything else, "" included, is DATE_INVALID.
-pub fn date_only() -> Check(String) {
+pub fn date_only() -> Check(Day) {
   fn(v) {
-    let why = case decode.run(v, decode.string) {
-      Ok(s) -> temporal.date_only(s)
-      Error(_) -> Error("not text")
-    }
-    case why {
-      Ok(s) -> Ok(s)
-      Error(why) ->
-        Error(
-          Issue(
-            ..issue(
-              NotADate,
-              "must be a calendar day written YYYY-MM-DD (" <> why <> ")",
-            ),
-            expected: Some("YYYY-MM-DD"),
-            code: Some("DATE_INVALID"),
-          ),
-        )
-    }
+    temporal.read_day(v)
+    |> result.map_error(fn(problem) {
+      Issue(
+        ..issue(
+          NotADate,
+          "must be a calendar day written YYYY-MM-DD ("
+            <> temporal.day_why(problem)
+            <> ")",
+        ),
+        expected: Some("YYYY-MM-DD"),
+        code: Some("DATE_INVALID"),
+      )
+    })
   }
 }
 

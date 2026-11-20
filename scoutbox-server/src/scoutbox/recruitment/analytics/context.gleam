@@ -20,6 +20,7 @@ import gleam/string
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/analytics/metrics.{type Window}
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/case_history
@@ -228,7 +229,7 @@ pub type Filters {
 pub type Context {
   Context(
     now: Int,
-    today: String,
+    today: temporal.Day,
     window: Window,
     /// The filters applied, in the order the TypeScript server lists them.
     filters: List(#(String, String)),
@@ -435,7 +436,7 @@ pub fn build(
 
   Context(
     now:,
-    today: metrics.utc_day(now),
+    today: temporal.day_of(now),
     window:,
     filters: applied,
     rooms:,

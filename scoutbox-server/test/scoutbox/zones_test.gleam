@@ -23,6 +23,7 @@ pub fn local_parts_agree_with_temporal_ts_test() {
   assert list.length(cases) > 3000
   list.each(cases, fn(c) {
     let #(zone, ms, parts, offset) = c
+    let assert Ok(zone) = zones.parse(zone)
     let p = zones.local_parts(ms, zone)
     assert [p.year, p.month, p.day, p.hour, p.minute, p.second] == parts
     assert zones.offset_minutes(zone, ms) == offset

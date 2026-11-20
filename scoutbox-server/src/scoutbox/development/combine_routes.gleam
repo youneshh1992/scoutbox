@@ -30,6 +30,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/metrics
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/combine_attempts as attempt_row
@@ -1094,7 +1095,7 @@ type RequestBody {
   RequestBody(
     title: Option(String),
     protocol_ids: Option(List(String)),
-    deadline: Option(Option(String)),
+    deadline: Option(Option(temporal.Day)),
     instructions: Option(String),
     player_ids: Option(List(String)),
     player_id: Option(String),
@@ -1192,7 +1193,7 @@ pub fn create_requests(ctx: Ctx, req: HttpRequest, a: OrgAccess) -> Response {
             |> input.utf16_take(title_max)
             |> Some
             |> input.filled,
-          deadline: option.flatten(b.deadline),
+          deadline: option.flatten(b.deadline) |> option.map(temporal.day_text),
           instructions: option.map(instructions, input.utf16_take(
             _,
             instructions_max,

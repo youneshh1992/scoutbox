@@ -15,13 +15,13 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/time/calendar
 import scoutbox/identity/players.{type Player}
 import scoutbox/passport/trust
 import scoutbox/passport/trust_rules
 import scoutbox/platform/clock
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Store, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/platform/unicode
 import scoutbox/rows/evidence as evidence_row
 import scoutbox/rows/id
@@ -81,10 +81,16 @@ fn exists(
 /// The first instant at which the player is an adult (rules/age `is_adult`), or None when the birth date is not a
 /// day. Their birthday N years on, for the first N at which `is_adult` holds; a day either side covers 29 February.
 pub fn adulthood_at(p: Player) -> Option(Int) {
-  case age.parse_day(p.row.birth_date) {
-    Error(Nil) -> None
+  case temporal.parse_day(p.row.birth_date) {
+    Error(_) -> None
     Ok(d) ->
-      first_adult_birthday(p, d.year, calendar.month_to_int(d.month), d.day, 0)
+      first_adult_birthday(
+        p,
+        temporal.day_year(d),
+        temporal.day_month(d),
+        temporal.day_of_month(d),
+        0,
+      )
   }
 }
 

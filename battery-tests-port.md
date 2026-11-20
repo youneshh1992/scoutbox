@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 51 batteries pass unchanged]
+### Porting, domain by domain [in progress: 52 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -137,7 +137,7 @@ of the product, so they aren't one slice.
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 2 | **ported** |
 | Operations: club operations | 1 | **ported** |
-| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 2 | `contracts` and `productionHardening` pass |
+| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 3 | `contracts`, `dates` and `productionHardening` pass |
 
 #### Port order
 
@@ -364,11 +364,20 @@ are for surprising facts or points that later work depends on, not implementatio
       Room in a duplicated group, where TypeScript counts each one after the first. `config.problems` is now
       pure and checks the Trust Score weights in every mode, and `box_cam_test_provider` reports `test_only` when
       it is on. Mail is always the local outbox here (no SendGrid), so `email_transport` never says `configured`.
-   2. `platform/dates`. First the live groups Q–T (65 checks): sign-up's dates of birth at both doors, the taxonomy
-      on every hardened route, authorization decided before a date is read, and normalised values surviving a
-      restart. Then its 2,175 rule cases and 97 hand-port calls, rule by rule. Many of the calls that can't be
-      recorded pass `NaN`, `±Infinity` or a value of the wrong type: decide for each rule whether it closes in
-      `NO_COUNTERPART` or is ported by hand. This may run into a second session.
+   2. `platform/dates` [**done**: all 72 live checks pass and the battery is on `BATTERIES`; 2,079 of its rule
+      cases are generated and 201 of its 241 hand-port calls ported]. Only verified attendance
+      (`POST /player/attendance`) and reading the notification preferences (`GET /player/prefs`) were missing. The
+      date rules are typed now. `platform/temporal` is temporal.ts: a `Day` is always a real day, an instant is
+      whole milliseconds, and what can't be read is a typed problem (`DayProblem`, `InstantProblem`, `DueProblem`,
+      `LocalProblem`, `age.DobProblem`); only the HTTP edge writes temporal.ts's words. A `zones.Zone` is always one
+      the offsets table knows, which replaced the second zone list (`rules/time_zones`). Three day parsers became
+      one, and `briefs` and analytics now share `isDayWithin` (a blank bound is open, as in TypeScript; `briefs`
+      closed it). The analytics `Window` holds days. A record that mirrors a TEXT column and is read back from
+      rows (an Offer's terms, a contract, an assessment's context) still holds the day's text, converted where the
+      request is read: typing those is item 11's work. The 54 cases left are the agents compliance rules
+      (`selectPolicyVersion`, `ruleStatusAt`, the minor gate, `consentSufficiency`) and
+      `effectiveHandoffStatus`, which go with compliance's own pending cases; the 40 hand-port calls left are
+      theirs, verification's `effectiveStatus`, and `validateScheduleInput` (a closure).
    3. `platform/api` §0–§12: auth, guardian sign-up's email-verification gate (`/auth/guardian/verify-email`,
       `/guardian/verify-id`), pairing (`/guardian/children/:id/pairing-code`, `/auth/player/pair`), a trial with
       alternative slots and its ICS, season history and preferences, saved searches and alerts, a mandatory report,
@@ -397,8 +406,9 @@ are for surprising facts or points that later work depends on, not implementatio
     Country stays text: it is free text of 1 to 40 characters on both servers, and a closed type would first need
     the TypeScript server to take a code list.
 
-Throughout the port, map the `dates` rule cases (2,175 pending) as the date rules are ported, since every domain
-uses them.
+The date rules are mapped (`platform/temporal`, `rules/age`, the trial and contact rules): a new date rule is a
+function over `Day`, `Zone` and millisecond instants, and its cases go in `TEMPORAL_MAP`'s neighbours in
+`dev/battery_cases/map.mjs`.
 
 Patterns established on the way. New domains should reuse them, and `CLAUDE.md` holds the rules:
 
@@ -457,7 +467,7 @@ a battery passes; `npm run e2e` does.
 ## Estimate
 
 Untangling is finished. What remains is the port itself. The rule-case backlog is mostly mapping work that grows with the ported rules: about
-6,800 cases pending (2,175 of them in `dates`) and about 400 hand-port calls, by `LEDGER.md`.
+4,500 cases pending (4,003 of them in recruitment) and about 350 hand-port calls, by `LEDGER.md`.
 
 ## Risks
 

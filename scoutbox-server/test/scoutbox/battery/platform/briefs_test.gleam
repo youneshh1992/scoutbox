@@ -17,7 +17,7 @@ pub fn live_on_its_first_day_test() {
         active_from_date: Some("2026-09-12"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-09-12",
+      base.day("2026-09-12"),
     )
     == True
 }
@@ -31,7 +31,7 @@ pub fn neg_not_live_the_day_before_it_starts_test() {
         active_from_date: Some("2026-09-12"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-09-11",
+      base.day("2026-09-11"),
     )
     == False
 }
@@ -45,7 +45,7 @@ pub fn live_on_its_last_day_all_day_test() {
         active_from_date: Some("2026-09-12"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-09-30",
+      base.day("2026-09-30"),
     )
     == True
 }
@@ -59,7 +59,7 @@ pub fn neg_not_live_the_day_after_test() {
         active_from_date: Some("2026-09-12"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-10-01",
+      base.day("2026-10-01"),
     )
     == False
 }
@@ -73,7 +73,7 @@ pub fn a_window_across_the_european_dst_change_is_unaffected_there_is_no_clock_t
         active_from_date: Some("2026-03-28"),
         active_until_date: Some("2026-03-29"),
       ),
-      "2026-03-29",
+      base.day("2026-03-29"),
     )
     == True
 }
@@ -87,7 +87,7 @@ pub fn no_window_means_always_live_while_active_test() {
         active_from_date: None,
         active_until_date: None,
       ),
-      "1999-01-01",
+      base.day("1999-01-01"),
     )
     == True
 }
@@ -101,7 +101,7 @@ pub fn neg_a_paused_brief_is_not_live_inside_its_window_test() {
         active_from_date: Some("2026-09-12"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-09-15",
+      base.day("2026-09-15"),
     )
     == False
 }
@@ -139,7 +139,7 @@ pub fn today_is_the_utc_calendar_day_test() {
         active_from_date: Some("2026-11-14"),
         active_until_date: Some("2026-11-14"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == False
 }
@@ -153,7 +153,7 @@ pub fn today_is_the_utc_calendar_day_2_test() {
         active_from_date: Some("2026-11-15"),
         active_until_date: Some("2026-11-15"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == True
 }
@@ -167,7 +167,7 @@ pub fn today_is_the_utc_calendar_day_3_test() {
         active_from_date: Some("2026-11-16"),
         active_until_date: Some("2026-11-16"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == False
 }
@@ -181,7 +181,7 @@ pub fn today_is_the_utc_calendar_day_4_test() {
         active_from_date: Some("2026-11-14"),
         active_until_date: Some("2026-11-14"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == False
 }
@@ -195,7 +195,7 @@ pub fn today_is_the_utc_calendar_day_5_test() {
         active_from_date: Some("2026-11-15"),
         active_until_date: Some("2026-11-15"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == True
 }
@@ -209,7 +209,7 @@ pub fn today_is_the_utc_calendar_day_6_test() {
         active_from_date: Some("2026-11-16"),
         active_until_date: Some("2026-11-16"),
       ),
-      "2026-11-15",
+      base.day("2026-11-15"),
     )
     == False
 }
@@ -319,7 +319,7 @@ pub fn n7_live_through_the_whole_last_day_test() {
         active_from_date: Some("2026-09-01"),
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-09-30",
+      base.day("2026-09-30"),
     )
     == True
 }
@@ -332,7 +332,7 @@ pub fn n7_live_through_the_whole_last_day_2_test() {
         status: brief_status.Active,
         active_until_date: Some("2026-09-30"),
       ),
-      "2026-10-01",
+      base.day("2026-10-01"),
     )
     == False
 }
@@ -345,7 +345,7 @@ pub fn neg_n8_a_brief_with_garbage_in_a_bound_is_not_live_test() {
         status: brief_status.Active,
         active_until_date: Some("garbage"),
       ),
-      "2026-09-23",
+      base.day("2026-09-23"),
     )
     == False
 }
@@ -358,7 +358,7 @@ pub fn neg_n8_a_brief_with_garbage_in_a_bound_is_not_live_2_test() {
         status: brief_status.Active,
         active_from_date: Some("2026-02-30"),
       ),
-      "2026-09-23",
+      base.day("2026-09-23"),
     )
     == False
 }
@@ -371,7 +371,7 @@ pub fn neg_o_21_a_recruitment_brief_ending_whenever_is_live_expect_no_test() {
         status: brief_status.Active,
         active_until_date: Some("whenever"),
       ),
-      "2026-09-23",
+      base.day("2026-09-23"),
     )
     == False
 }

@@ -17,13 +17,13 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 238 / 424 | 56 / 84 | 6 to go |
+| agents | 9 | 9 | 9 | 246 / 416 | 69 / 84 | 6 to go |
 | development | 3 | 3 | 3 | 125 / 2 | 22 / 45 | 1 to go |
 | discovery | 3 | 3 | 3 | 318 / 5 | 2 / 2 | 1 to go |
 | operations | 1 | 1 | 1 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
-| platform | 14 | 14 | 12 | 147 / 2169 | 98 / 200 | 4 to go |
-| recruitment | 19 | 19 | 19 | 549 / 4142 | 28 / 281 | 13 to go |
+| platform | 14 | 14 | 12 | 2179 / 54 | 218 / 277 | 4 to go |
+| recruitment | 19 | 19 | 19 | 668 / 4003 | 48 / 301 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -34,7 +34,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 32 / 85 | 16 / 33 | 85 cases pending; 17 hand-port calls |
+| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 40 / 77 | 29 / 33 | 77 cases pending; 4 hand-port calls |
 | `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
@@ -58,7 +58,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 47 / 2169 | 81 / 164 | 2169 cases pending; 83 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2079 / 54 | 201 / 241 | 54 cases pending; 40 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -70,23 +70,23 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 3 / 232 | 0 / 46 | 232 cases pending; 46 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 248 | 118 |  | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
-| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 6 / 20 | 0 / 4 | 20 cases pending; 4 hand-port calls; 2 TypeScript-only moves unreviewed |
+| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 6 / 20 | 4 / 4 | 20 cases pending; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 16 / 2927 | 2 / 95 | 2927 cases pending; 93 hand-port calls |
-| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 14 / 151 | 6 / 25 | 151 cases pending; 19 hand-port calls |
-| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 15 / 80 | 0 / 10 | 80 cases pending; 10 hand-port calls |
+| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 17 / 148 | 11 / 25 | 148 cases pending; 14 hand-port calls |
+| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 16 / 79 | 6 / 10 | 79 cases pending; 4 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
 | `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 0 / 82 | 0 / 1 | 82 cases pending; 1 hand-port calls |
-| `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 2 / 39 | 0 / 2 | 39 cases pending; 2 hand-port calls |
+| `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 2 / 39 | 2 / 2 | 39 cases pending |
 | `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  | yes |  |  | **done** |
-| `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 1 / 106 | 0 / 5 | 106 cases pending; 5 hand-port calls |
-| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 3 / 167 | 0 / 35 | 167 cases pending; 35 hand-port calls |
+| `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
+| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 238 |  | 26 moved | yes |  |  | **done** |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
@@ -133,7 +133,7 @@ ported by hand to a gleeunit test.
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
 | `agents/adversarial` | `domain.ts#ageOn` | 3 | result is NaN | `test/scoutbox/rules/age_test.gleam` |
-| `agents/adversarial` | `domain.ts#isAdult` | 13 | Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
+| `agents/adversarial` | `domain.ts#isAdult` | 13 | Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/platform/temporal_test.gleam` |
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 | its result depends on the clock | to do |
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 1 | args[] is undefined | to do |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 11 | args[] is undefined; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is Infinity; args[].startAt is NaN; Gleam's types can't hold its arguments: cannot print "1789776000000" as an Int; Gleam's types can't hold its arguments: cannot print "2024-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "2026-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "expired" as a value of scoutbox/rows/representation_agreements.status_pairs; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -179,8 +179,8 @@ ported by hand to a gleeunit test.
 | `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | throws Error without a code | `test/scoutbox/live_test.gleam` |
 | `platform/contracts` | `domains/platform/notificationPrefs.mjs#createNotificationPrefs` | 1 | args[].notifications.create is a function | `test/scoutbox/messaging/notification_prefs_test.gleam` |
 | `platform/dates` | `domain.ts#ageOn` | 14 | args[] is NaN; args[] is undefined; result is NaN | `test/scoutbox/rules/age_test.gleam` |
-| `platform/dates` | `domain.ts#isAdult` | 8 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 20100101 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
-| `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
+| `platform/dates` | `domain.ts#isAdult` | 8 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 20100101 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 7 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN | to do |
 | `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 26 | args[].endedAt is -Infinity; args[].endedAt is Infinity; args[].endedAt is NaN; args[].startedAt is -Infinity; args[].startedAt is Infinity; args[].startedAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "2030-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 25 | args[].endAt is -Infinity; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is -Infinity; args[].startAt is Infinity; args[].startAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -188,15 +188,19 @@ ported by hand to a gleeunit test.
 | `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 13 | args[].recheckAt is -Infinity; args[].recheckAt is Infinity; args[].recheckAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `platform/dates` | `domains/agents/core/shared.mjs#verificationGap` | 2 | args[].facets.fifa_licence.recheckAt is NaN | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 4 | args[].invitedAt is -Infinity; args[].invitedAt is Infinity; args[].invitedAt is NaN | to do |
-| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 4 | args[][].deliveredAt is -Infinity; args[][].deliveredAt is Infinity; args[][].deliveredAt is NaN | to do |
+| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 | args[][].deliveredAt is -Infinity; args[][].deliveredAt is Infinity; args[][].deliveredAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "answered" as a value of scoutbox/rows/recruitment_contacts.status_pairs; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 8 | args[].mintId is a function | to do |
 | `platform/dates` | `domains/verification/claims/shared.mjs#effectiveStatus` | 18 | args[].validUntil is -Infinity; args[].validUntil is Infinity; args[].validUntil is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "garbage" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int; Gleam's types can't hold its arguments: Row has no field for the JavaScript key verification | to do |
-| `platform/dates` | `temporal.ts#isEffectiveAt` | 7 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
-| `platform/dates` | `temporal.ts#isExpiredAt` | 4 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
-| `platform/dates` | `temporal.ts#isOrderedInterval` | 7 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
-| `platform/dates` | `temporal.ts#parseInstant` | 9 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
-| `platform/dates` | `temporal.ts#parseStrictDateOnly` | 3 | args[] is NaN | to do |
+| `platform/dates` | `temporal.ts#isActiveAt` | 2 | Gleam's types can't hold its arguments: a window that is not there is no window; Gleam's types can't hold its arguments: cannot print "x" as an Int | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#isDayWithin` | 1 | Gleam's types can't hold its arguments: cannot print "garbage" as a Day | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#isEffectiveAt` | 26 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#isExpiredAt` | 13 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#isOrderedInterval` | 28 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int; Gleam's types can't hold its arguments: cannot print undefined as an Int | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#parseInstant` | 12 | args[] is -Infinity; args[] is Infinity; args[] is NaN; Gleam's types can't hold its arguments: cannot print undefined as a value sent | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#parseLocalDateTimeWithZone` | 1 | Gleam's types can't hold its arguments: a zone that isn't one never reaches local_instant (TIMEZONE_INVALID) | `test/scoutbox/platform/temporal_test.gleam` |
+| `platform/dates` | `temporal.ts#parseStrictDateOnly` | 6 | args[] is NaN; Gleam's types can't hold its arguments: cannot print undefined as a value sent | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `temporal.ts#readInstant` | 3 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
+| `platform/dates` | `temporal.ts#validateIanaZone` | 8 | Gleam's types can't hold its arguments: a zone sent as something other than text is refused by its shape | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/productionHardening` | `domains/platform/capabilities.mjs#buildCapabilityReport` | 5 | args[].rateLimit.provider.consume is a function; its result depends on the clock | `test/scoutbox/config_test.gleam` |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 3 | result is NaN | `test/scoutbox/rev_test.gleam` |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | `test/scoutbox/config_test.gleam` |
@@ -208,6 +212,7 @@ ported by hand to a gleeunit test.
 | `recruitment/analytics` | `domains/recruitment/analytics/metrics.mjs#assertMetricRegistry` | 2 | throws Error without a code | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 1 | args[] is undefined | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 1 | Gleam's types can't hold its arguments: cannot print ["x"] as a String | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].contacts.byId is a function; args[].signings.byId is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 9 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 | args[].evidence.check is a function | to do |
@@ -219,14 +224,14 @@ ported by hand to a gleeunit test.
 | `recruitment/decisions` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 8 | args[].evidence.check is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
-| `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 4 | Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 12 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String | to do |
+| `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 4 | Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 12 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/platform/temporal_test.gleam` |
 | `recruitment/lifecycle` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#sendDomainError` | 1 | args[].status is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 7 | args[].signings.byId is a function; result.check is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 63 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 8 | args[].evidence.check is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#roomStatusForStage` | 14 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "isPrototypeOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "prototype" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "valueOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs | to do |
-| `recruitment/offers` | `domain.ts#isAdult` | 5 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
+| `recruitment/offers` | `domain.ts#isAdult` | 5 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/platform/temporal_test.gleam` |
 | `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
 | `recruitment/offers` | `domains/recruitment/offers/errors.mjs#sendOfferError` | 1 | args[].status is a function | to do |
@@ -234,7 +239,7 @@ ported by hand to a gleeunit test.
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 | args[] is undefined | to do |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 4 | args[] is Infinity; args[] is NaN; args[] is undefined | to do |
 | `recruitment/offers` | `domains/recruitment/rooms/shared.mjs#roomCan` | 6 | Gleam's types can't hold its arguments: cannot print "__proto__" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "constructor" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "prototype" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "toString" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "valueOf" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
-| `recruitment/offersAdversarial` | `domain.ts#isAdult` | 6 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 19900101 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
+| `recruitment/offersAdversarial` | `domain.ts#isAdult` | 6 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 19900101 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/platform/temporal_test.gleam` |
 | `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].offers.byId is a function | to do |
 | `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 1 | args[].evidence.check is a function | to do |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
@@ -245,13 +250,15 @@ ported by hand to a gleeunit test.
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 1 | args[] is undefined | to do |
-| `recruitment/signingsAdversarial` | `domain.ts#isAdult` | 2 | Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
+| `recruitment/signingsAdversarial` | `domain.ts#isAdult` | 2 | Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/platform/temporal_test.gleam` |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 1 | args[].toString is a function | to do |
-| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 3 | args[] is a function; args[] is a symbol; args[] is NaN | to do |
-| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 16 | args[] is a function; args[] is a symbol; args[] is NaN; Gleam's types can't hold its arguments: cannot print -1 as a String; Gleam's types can't hold its arguments: cannot print ["2026-10-03"] as a String; Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {"$date":1790985600000} as a String; Gleam's types can't hold its arguments: cannot print {"proposedDate":"2026-10-03"} as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 1000000000000 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print true as a String; Gleam's types can't hold its arguments: no trial date is no date: the field is absent before the rule reads it | to do |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 3 | args[] is NaN; Gleam's types can't hold its arguments: cannot print "bad" as an Int; Gleam's types can't hold its arguments: cannot print undefined as an Int | `test/scoutbox/platform/temporal_test.gleam` |
 | `recruitment/trials` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].requests.byId is a function; result.check is a function | to do |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 2 | args[] is Infinity; args[] is NaN | to do |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 19 | args[].mintId is a function | to do |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 1 | Gleam's types can't hold its arguments: cannot print 12 as a String | to do |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 3 | Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 42 as a String | to do |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#arrayTokenStore` | 1 | result.create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#consumeToken` | 7 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#mintToken` | 2 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
@@ -267,7 +274,6 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
-| `agents/adversarial` | `domain.ts#parseDob` | 8 |
 | `agents/adversarial` | `domains/agents/compliance/conflict.mjs#canonicalJson` | 2 |
 | `agents/adversarial` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 4 |
 | `agents/adversarial` | `domains/agents/compliance/conflict.mjs#mostSevere` | 25 |
@@ -334,10 +340,6 @@ mapped, then `npm run cases`.
 | `development/hub` | `domains/development/hub/plan.mjs#planSummary` | 1 |
 | `development/hub` | `domains/development/hub/reviews.mjs#buildGoalSnapshots` | 1 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
-| `platform/dates` | `domain.ts#isTrialDate` | 2 |
-| `platform/dates` | `domain.ts#parseDob` | 10 |
-| `platform/dates` | `domain.ts#parseTrialDate` | 4 |
-| `platform/dates` | `domain.ts#trialReportDueAt` | 2 |
 | `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 13 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 7 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 |
@@ -345,42 +347,15 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
-| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
-| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 4 |
-| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#localDay` | 2 |
-| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 2 |
-| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 15 |
-| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 2 |
-| `platform/dates` | `temporal.ts#ageOnMs` | 1 |
-| `platform/dates` | `temporal.ts#endOfDayExclusive` | 2 |
-| `platform/dates` | `temporal.ts#isActiveAt` | 3 |
-| `platform/dates` | `temporal.ts#isDayWithin` | 8 |
-| `platform/dates` | `temporal.ts#isEffectiveAt` | 24 |
-| `platform/dates` | `temporal.ts#isExpiredAt` | 13 |
-| `platform/dates` | `temporal.ts#isOrderedInterval` | 25 |
-| `platform/dates` | `temporal.ts#localParts` | 1 |
-| `platform/dates` | `temporal.ts#parseDateOrInstant` | 11 |
-| `platform/dates` | `temporal.ts#parseDobStrict` | 4 |
-| `platform/dates` | `temporal.ts#parseInstant` | 27 |
-| `platform/dates` | `temporal.ts#parseLocalDateTimeWithZone` | 15 |
-| `platform/dates` | `temporal.ts#parseStrictDateOnly` | 1869 |
-| `platform/dates` | `temporal.ts#readDateOnly` | 2 |
-| `platform/dates` | `temporal.ts#readInstant` | 14 |
-| `platform/dates` | `temporal.ts#utcDayOf` | 1 |
-| `platform/dates` | `temporal.ts#validateIanaZone` | 21 |
-| `platform/dates` | `temporal.ts#zoneOffsetMinutes` | 4 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 180 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 10 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 6 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#normaliseClientKey` | 4 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 2 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactContent` | 8 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 8 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#assessmentSnapshot` | 1 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 2 |
@@ -448,8 +423,6 @@ mapped, then `npm run cases`.
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 20 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateMessages` | 3 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateTerms` | 34 |
-| `recruitment/offers` | `temporal.ts#isExpiredAt` | 1 |
-| `recruitment/offers` | `temporal.ts#parseInstant` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 11 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 20 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#liveStatus` | 9 |
@@ -463,7 +436,6 @@ mapped, then `npm run cases`.
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 1 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
-| `recruitment/offersAdversarial` | `temporal.ts#isExpiredAt` | 1 |
 | `recruitment/signings` | `domains/recruitment/signings/errors.mjs#publicErrorBody` | 1 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 6 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canStart` | 10 |
@@ -490,21 +462,15 @@ mapped, then `npm run cases`.
 | `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingCorrupt` | 1 |
 | `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 28 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 16 |
-| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#isTrialDate` | 4 |
-| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 43 |
-| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 10 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#validateTrialDetails` | 33 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 7 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#blockedAllows` | 9 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#canComplete` | 9 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#deriveWorkflowState` | 8 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#icsText` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#isLegacyTrial` | 1 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#localDay` | 4 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#materialChange` | 5 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey` | 6 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 27 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialClubView` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialFamilyView` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialIntegrity` | 10 |
@@ -512,8 +478,6 @@ mapped, then `npm run cases`.
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialOutcomeLine` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialRoleAllows` | 8 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialStateAllows` | 37 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 2 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 25 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateVenue` | 3 |
 
 ## Cases closed: no Gleam counterpart
@@ -545,6 +509,7 @@ their role, so their recorded calls get no test.
 | `platform/contracts` | `domains/platform/integrity.mjs#integritySummary` | 1 | operator.integrity counts by code as it reads (integrity_test), and there is no report with ids to summarise. |
 | `platform/contracts` | `domains/platform/notificationPrefs.mjs#defaultPrefs` | 1 | The defaults are each entry's `default` in notification_prefs.categories, which spec_test proves equal to the CATEGORIES snapshot; a person with no row has emailIntent off (`effective`). |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |
+| `platform/dates` | `temporal.ts#readInstant` | 14 | A stored instant is an INTEGER column decoded as an Int: there is no unreadable one for the reader to drop. |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 | Each domain moves its revision in its own UPDATE (rev = rev + 1, with who and when) inside the act's unit; there is no record to mutate. productionHardening's Room sections check it over HTTP. |
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#revOf` | 2 | A revision is a typed column: NOT NULL on every versioned table, and on a case present exactly when its Room is (the table's CHECK), so no record lacks one to default. |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |

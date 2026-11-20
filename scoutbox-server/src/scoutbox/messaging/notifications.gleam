@@ -242,14 +242,10 @@ fn push_deferred(
   at: Int,
 ) -> Result(Bool, Fail(e)) {
   use prefs <- result.map(person_prefs(read, kind, id, at))
-  let zone = case option.then(prefs, fn(p) { p.timezone }) {
-    Some(z) ->
-      case zones.known(z) {
-        True -> z
-        False -> home_zone
-      }
-    None -> home_zone
-  }
+  let zone =
+    option.then(prefs, fn(p) { p.timezone })
+    |> option.unwrap(home_zone)
+    |> zones.stored
   let wall = zones.local_parts(at, zone)
   let minutes = wall.hour * 60 + wall.minute
   let school_mute = case prefs {

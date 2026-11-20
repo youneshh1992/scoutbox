@@ -649,8 +649,8 @@ fn opt_day(
       case null(v), decode.run(v, decode.string) {
         True, _ -> Ok(None)
         False, Ok(s) ->
-          case temporal.date_only(s) {
-            Ok(day) -> Ok(Some(day))
+          case temporal.parse_day(s) {
+            Ok(_) -> Ok(Some(s))
             Error(_) ->
               bad(
                 at,

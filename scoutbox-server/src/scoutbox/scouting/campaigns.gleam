@@ -29,6 +29,7 @@ import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind}
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/rows/campaign_attempt_issues as issue_row
 import scoutbox/rows/campaign_attempts as attempt_row
 import scoutbox/rows/campaign_drills as drill_row
@@ -523,7 +524,7 @@ type NewCriterion {
 type NewCampaign {
   NewCampaign(
     title: Option(String),
-    deadline: Option(String),
+    deadline: Option(temporal.Day),
     drills: Option(List(NewDrill)),
     attempts_allowed: Option(Int),
     rubric: Option(List(NewCriterion)),
@@ -621,7 +622,8 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           let grassroots = a.org.level == Some(org_row.LevelGrassroots)
           case opportunities.type_eligibility(b.eligibility, grassroots, None) {
             Error(Bad(field:, message:)) -> field_invalid(field, message)
-            Ok(e) -> publish(ctx, a, b, title, deadline, drills, e)
+            Ok(e) ->
+              publish(ctx, a, b, title, temporal.day_text(deadline), drills, e)
           }
         }
       }

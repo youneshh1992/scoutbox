@@ -636,8 +636,7 @@ fn published_feedback(
 fn review_at_ms(due: Option(temporal.Due)) -> Result(Option(Int), Response) {
   let ms = case due {
     None -> None
-    Some(temporal.Day(ms)) -> Some(ms)
-    Some(temporal.Instant(ms)) -> Some(ms)
+    Some(due) -> Some(temporal.start(due))
   }
   case ms {
     Some(ms) if ms > any_length || ms < 0 - any_length ->

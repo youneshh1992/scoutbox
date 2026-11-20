@@ -61,10 +61,11 @@ required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake pro
   `insert` and `new(…)`; a CHECK vocabulary is an enum. A domain record is usually the generated `Row`, with what
   is derived from it as functions. Don't edit them: change the migration and run `npm run codegen`.
 - `src/scoutbox/platform/`: the store (unit of work, readers, effects), `input` (refusals in the TypeScript
-  format), `sql` (fragments that carry their arguments), `distance`, `keyset` and `paging`/`pages`, `http`, `ids`,
-  migrations, limits, config.
+  format), `sql` (fragments that carry their arguments), `temporal` (days, instants and their refusals, read once
+  where they arrive: a `Day` is always a real one), `zones` (a `Zone` is always one the offsets table knows, from
+  `priv/zone_offsets.json`), `distance`, `keyset` and `paging`/`pages`, `http`, `ids`, migrations, limits, config.
 - `src/scoutbox/rules/`: the pure rules, each proved against the TypeScript one: `age`, `visibility` (one SQL
-  expression for every read), `moderation`, `journey`; `time_zones` is generated.
+  expression for every read), `moderation`, `journey`.
 - `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`,
   `verification/`, `enterprise/`: the domains. `verification/claims` holds the pure rules, proved by the generated
   tests in `test/scoutbox/battery/verification/`.
@@ -78,7 +79,7 @@ required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake pro
 - `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
   seed, dumped by `dev/seed_sql.mjs`.
 - `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,
-  `distance_cases.mjs` and `rule_cases.mjs` (test cases from domain.ts), `time_zones.mjs`, `shape_diff.mjs` (the
+  `distance_cases.mjs` and `rule_cases.mjs` (test cases from domain.ts), `zone_offsets.mjs`, `shape_diff.mjs` (the
   same requests of both servers, compared shape by shape) and `perf.mjs`.
 - `e2e/`: batteries copied by `e2e/sync.mjs` (do not edit them), and the helpers they import.
 

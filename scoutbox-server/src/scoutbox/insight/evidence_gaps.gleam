@@ -87,9 +87,9 @@ fn uploaded_ms(text: Option(String)) -> Option(Int) {
   case text {
     None -> Some(0)
     Some(t) ->
-      case temporal.instant_ms(t), temporal.day_start_ms(t) {
+      case temporal.instant_ms(t), temporal.parse_day(t) {
         Ok(ms), _ -> Some(ms)
-        _, Ok(ms) -> Some(ms)
+        _, Ok(day) -> Some(temporal.day_start(day))
         _, _ -> None
       }
   }

@@ -14,6 +14,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/rows/coach_affiliation_history as history_row
 import scoutbox/rows/coach_affiliations as row
 import scoutbox/rows/id
@@ -148,7 +149,7 @@ type NewAffiliation {
     role: Option(String),
     coach_email: Option(String),
     conflict: Option(String),
-    from: Option(Option(String)),
+    from: Option(Option(temporal.Day)),
   )
 }
 
@@ -184,7 +185,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
     Some(coach_name), Some(role) -> {
       let now = clock.now_ms()
       let from = case option.flatten(body.from) {
-        Some(day) -> day
+        Some(day) -> temporal.day_text(day)
         None -> clock.iso_day(now)
       }
       let saved =

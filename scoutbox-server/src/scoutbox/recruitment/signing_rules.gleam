@@ -324,9 +324,9 @@ pub fn validate_contract_dates(
     case s {
       None | Some("") -> Error(True)
       Some(s) ->
-        case temporal.day_start_ms(s) {
-          Ok(t) -> Ok(#(s, t))
-          Error(Nil) -> Error(False)
+        case temporal.parse_day(s) {
+          Ok(d) -> Ok(#(s, temporal.day_start(d)))
+          Error(_) -> Error(False)
         }
     }
   }
@@ -866,7 +866,7 @@ fn when(c: Bool, problem: String) -> List(String) {
 fn valid_day(s: Option(String)) -> Bool {
   case s {
     None | Some("") -> True
-    Some(d) -> result.is_ok(temporal.date_only(d))
+    Some(d) -> result.is_ok(temporal.parse_day(d))
   }
 }
 

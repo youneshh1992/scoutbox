@@ -16,7 +16,7 @@ import gleam/result
 import gleam/string
 import scoutbox/platform/clock
 import scoutbox/platform/json_text
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 
 pub const policy_version = 1
 
@@ -771,14 +771,14 @@ pub const window_presets = [
 pub const default_window = "last_90_days"
 
 pub type Window {
-  Window(preset: String, from: String, to: String, days: Int)
+  Window(preset: String, from: Day, to: Day, days: Int)
 }
 
 pub fn window_json(w: Window) -> Json {
   json.object([
     #("preset", json.string(w.preset)),
-    #("from", json.string(w.from)),
-    #("to", json.string(w.to)),
+    #("from", temporal.day_json(w.from)),
+    #("to", temporal.day_json(w.to)),
     #("days", json.int(w.days)),
   ])
 }
@@ -796,7 +796,7 @@ pub fn resolve_window(
   to: Option(String),
   now: Int,
 ) -> Result(Window, WindowRefusal) {
-  let today = utc_day(now)
+  let today = temporal.day_of(now)
   let given = fn(v) { v != None && v != Some("") }
   case given(from) || given(to) {
     True -> {
@@ -805,25 +805,24 @@ pub fn resolve_window(
       }
       let day = fn(v) {
         case v {
-          Some(d) -> temporal.date_only(d) |> result.replace_error(Nil)
+          Some(d) -> temporal.parse_day(d) |> result.replace_error(Nil)
           None -> Error(Nil)
         }
       }
       case day(from), day(to) {
         Ok(f), Ok(t) ->
-          case string.compare(f, t), string.compare(f, today) {
+          case temporal.compare_days(f, t), temporal.compare_days(f, today) {
             order.Gt, _ -> invalid("from must not be after to.")
             _, order.Gt -> invalid("from must not be in the future.")
-            _, _ -> {
-              let assert Ok(fm) = temporal.day_start_ms(f)
-              let assert Ok(tm) = temporal.day_start_ms(t)
+            _, _ ->
               Ok(Window(
                 preset: "custom",
                 from: f,
                 to: t,
-                days: { tm - fm } / day_ms + 1,
+                days: { temporal.day_start(t) - temporal.day_start(f) }
+                  / day_ms
+                  + 1,
               ))
-            }
           }
         _, _ -> invalid("from and to must both be calendar days as YYYY-MM-DD.")
       }
@@ -834,7 +833,7 @@ pub fn resolve_window(
         Ok(span) ->
           Ok(Window(
             preset: key,
-            from: utc_day(now - { span - 1 } * day_ms),
+            from: temporal.add_days(today, 1 - span),
             to: today,
             days: span,
           ))
@@ -867,8 +866,9 @@ pub fn resolution_json(r: Result(Window, WindowRefusal)) -> Json {
 }
 
 pub fn in_window(ms: Int, w: Window) -> Bool {
-  let d = utc_day(ms)
-  string.compare(d, w.from) != order.Lt && string.compare(d, w.to) != order.Gt
+  let d = temporal.day_of(ms)
+  temporal.compare_days(d, w.from) != order.Lt
+  && temporal.compare_days(d, w.to) != order.Gt
 }
 
 /// An absent instant is in no window. (JavaScript's `inWindow(null)` reads it as 1970-01-01, which no window a
@@ -882,14 +882,13 @@ pub fn in_window_at(ms: Option(Int), w: Window) -> Bool {
 
 /// Equal length matters: a 7-day window against a 30-day one would make every figure look like a collapse.
 pub fn previous_window(w: Window) -> Window {
-  let assert Ok(from) = temporal.day_start_ms(w.from)
-  let assert Ok(to) = temporal.day_start_ms(w.to)
-  let span = to - from + day_ms
+  let span =
+    { temporal.day_start(w.to) - temporal.day_start(w.from) } / day_ms + 1
   Window(
     preset: "previous",
-    from: utc_day(from - span),
-    to: utc_day(from - day_ms),
-    days: span / day_ms,
+    from: temporal.add_days(w.from, 0 - span),
+    to: temporal.add_days(w.from, -1),
+    days: span,
   )
 }
 
@@ -939,8 +938,8 @@ pub fn cohort_incomplete(
 ) -> Bool {
   case typical_days {
     Some(t) if t >. 0.0 -> {
-      let assert Ok(from) = temporal.day_start_ms(w.from)
-      let assert Ok(to) = temporal.day_start_ms(w.to)
+      let from = temporal.day_start(w.from)
+      let to = temporal.day_start(w.to)
       let end = to + day_ms - 1000
       int.to_float(int.min(now, end) - from) <. t *. int.to_float(day_ms)
     }

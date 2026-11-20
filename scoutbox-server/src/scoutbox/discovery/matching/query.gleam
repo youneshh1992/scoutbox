@@ -18,6 +18,7 @@ import scoutbox/platform/keyset.{Asc, Desc, OrderKey}
 import scoutbox/platform/paging.{IntKind, TextKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rules/age
 import scoutbox/rules/visibility
@@ -74,16 +75,16 @@ pub const no_distance = 10_000_000_000
 
 /// matchOrder's lead key for `sort`, before the player id that breaks ties. An unknown sort is the default.
 pub fn lead(sort: String, org: Org, now: Int) -> keyset.OrderKey {
-  let today = age.day_of(now)
+  let today = temporal.day_of(now)
   case sort {
     "name" -> OrderKey(sql.text("f.name_key"), Asc, TextKind)
     "age" ->
       OrderKey(
         sql.concat([
           sql.text("COALESCE(("),
-          sql.arg(sqlight.int(today.year)),
+          sql.arg(sqlight.int(temporal.day_year(today))),
           sql.text(" - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - ("),
-          sql.arg(sqlight.text(string.drop_start(age.born_by(today, 0), 5))),
+          sql.arg(sqlight.text(string.drop_start(temporal.day_text(today), 5))),
           sql.text(" < substr(p.birth_date, 6, 5))), 999)"),
         ]),
         Asc,

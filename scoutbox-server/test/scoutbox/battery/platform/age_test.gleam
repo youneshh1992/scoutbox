@@ -2,6 +2,8 @@
 //// (scripts/rules/ in the TypeScript server). Don't edit: change the rule or the suite, then run `npm run cases`.
 
 import gleam/option.{Some}
+import gleam/result
+import scoutbox/platform/temporal
 import scoutbox/rules/age
 
 // contracts: ageOn — a person is 18 from the first UTC instant of their 18th birthday
@@ -71,6 +73,11 @@ pub fn neg_and_a_person_with_an_unreadable_date_of_birth_is_not_treated_as_an_a_
 
 // dates: ageOn — A6 domain.ageOn IS temporal.ageOnMs (18 on the 18th birthday, UTC)
 pub fn a6_domain_ageon_is_temporal_ageonms_18_on_the_18th_birthday_utc_test() {
+  assert age.age_on("2008-09-23", 1_790_164_800_000) == Some(18)
+}
+
+// dates: ageOnMs — A6 domain.ageOn IS temporal.ageOnMs (18 on the 18th birthday, UTC)
+pub fn a6_domain_ageon_is_temporal_ageonms_18_on_the_18th_birthday_utc_2_test() {
   assert age.age_on("2008-09-23", 1_790_164_800_000) == Some(18)
 }
 
@@ -147,4 +154,36 @@ pub fn c5_kr_adult_at_19_an_18_year_old_is_a_minor_there_3_test() {
 // dates: ageOn — C6 a 29 February birthday counts on 1 March in a non-leap year
 pub fn c6_a_29_february_birthday_counts_on_1_march_in_a_non_leap_year_test() {
   assert age.age_on("2008-02-29", 1_772_236_800_000) == Some(17)
+}
+
+// dates: parseDobStrict — [neg] C7 a date of birth in the future is refused
+pub fn neg_c7_a_date_of_birth_in_the_future_is_refused_test() {
+  assert result.map(age.parse_dob("2030-01-01", 1_790_164_800_000), fn(d) {
+      #(temporal.day_text(d), temporal.day_start(d))
+    })
+    == Error(age.InTheFuture)
+}
+
+// dates: parseDobStrict — [neg] C7b a 126-year-old is refused
+pub fn neg_c7b_a_126_year_old_is_refused_test() {
+  assert result.map(age.parse_dob("1900-01-01", 1_790_164_800_000), fn(d) {
+      #(temporal.day_text(d), temporal.day_start(d))
+    })
+    == Error(age.ImplausiblyOld)
+}
+
+// dates: parseDobStrict — C7c a 119-year-old is accepted — the bound is a bound, not a guess
+pub fn c7c_a_119_year_old_is_accepted_the_bound_is_a_bound_not_a_guess_test() {
+  assert result.map(age.parse_dob("1906-09-24", 1_790_164_800_000), fn(d) {
+      #(temporal.day_text(d), temporal.day_start(d))
+    })
+    == Ok(#("1906-09-24", -1_996_704_000_000))
+}
+
+// dates: parseDobStrict — C7d born today is accepted
+pub fn c7d_born_today_is_accepted_test() {
+  assert result.map(age.parse_dob("2026-09-23", 1_790_164_800_000), fn(d) {
+      #(temporal.day_text(d), temporal.day_start(d))
+    })
+    == Ok(#("2026-09-23", 1_790_121_600_000))
 }

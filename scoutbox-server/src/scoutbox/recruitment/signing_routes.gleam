@@ -40,6 +40,7 @@ import scoutbox/platform/live_event
 import scoutbox/platform/media
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases.{type Room}
 import scoutbox/recruitment/domain_errors
@@ -1120,7 +1121,11 @@ fn contract_shape() -> input.Check(ContractInput) {
   input.object({
     use start <- input.field("startDate", input.nullish(input.day_or_blank()))
     use end <- input.field("endDate", input.clearable(input.day_or_blank()))
-    input.done(ContractInput(option.flatten(start), end))
+    let text = option.map(_, temporal.day_text)
+    input.done(ContractInput(
+      option.flatten(start) |> text,
+      option.map(end, option.map(_, text)),
+    ))
   })
 }
 

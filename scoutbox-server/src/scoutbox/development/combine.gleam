@@ -34,8 +34,6 @@ import scoutbox/vocab/audience
 import scoutbox/vocab/capture_context
 import sqlight
 
-const day_ms = 86_400_000
-
 fn count(tx: Tx, name: String) -> Result(Nil, Fail(e)) {
   metrics.count(tx, "boxCam", name)
 }
@@ -310,8 +308,8 @@ fn done_of(
   let deadline = case r.deadline_date {
     None -> Ok(None)
     Some(d) ->
-      temporal.day_start_ms(d)
-      |> result.map(fn(t) { Some(t + day_ms) })
+      temporal.parse_day(d)
+      |> result.map(fn(d) { Some(temporal.day_end(d)) })
   }
   list.filter(protocol_ids, fn(pid) {
     list.any(verified, fn(a) {
@@ -321,7 +319,7 @@ fn done_of(
       && case deadline {
         Ok(None) -> True
         Ok(Some(end)) -> at <= end
-        Error(Nil) -> False
+        Error(_) -> False
       }
     })
   })

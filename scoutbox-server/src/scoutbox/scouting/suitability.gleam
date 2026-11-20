@@ -107,10 +107,10 @@ fn utc_range(s: Slot) -> Result(#(Int, Int), Nil) {
   use day <- result.try(day_index(s.day))
   use start <- result.try(minutes_of(s.start))
   use end <- result.try(minutes_of(s.end))
-  case zones.known(s.tz) {
-    False -> Error(Nil)
-    True -> {
-      let off = zones.offset_minutes(s.tz, offset_reference_ms)
+  case zones.parse(s.tz) {
+    Error(Nil) -> Error(Nil)
+    Ok(zone) -> {
+      let off = zones.offset_minutes(zone, offset_reference_ms)
       let from = { { day * 1440 + start - off } % week + week } % week
       let to = from + end - start
       case to > from {
@@ -525,7 +525,7 @@ fn is_currency(s: String) -> Bool {
 
 /// repositories `knownTimeZone`: a zone this runtime knows, of at most 40 characters.
 fn known_zone(tz: String) -> Bool {
-  tz != "" && input.utf16_length(tz) <= tz_max && zones.known(tz)
+  input.utf16_length(tz) <= tz_max && result.is_ok(zones.parse(tz))
 }
 
 /// repositories `typeSlot`'s checks past the schema's. Every value the schema passes is text, which the typer

@@ -2970,7 +2970,7 @@ type CombineRequest {
   CombineRequest(
     protocol_ids: Option(List(String)),
     title: Option(String),
-    deadline: Option(Option(String)),
+    deadline: Option(Option(temporal.Day)),
     instructions: Option(String),
   )
 }
@@ -3081,7 +3081,8 @@ pub fn request_combine(
                             |> string.trim
                             |> input.utf16_take(combine_title_max)
                             |> some_text,
-                          deadline: option.flatten(body.deadline),
+                          deadline: option.flatten(body.deadline)
+                            |> option.map(temporal.day_text),
                           instructions: option.map(
                             instructions,
                             input.utf16_take(_, combine_instructions_max),

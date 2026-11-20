@@ -166,7 +166,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                   #("message", json.string("name must not be blank.")),
                 ]),
               )
-            _, Error(Nil) ->
+            _, Error(_) ->
               http.error_message(
                 400,
                 "DOB_INVALID",
@@ -248,7 +248,7 @@ pub fn signup(ctx: Ctx, req: Request) -> Response {
               #("message", json.string("name must not be blank.")),
             ]),
           )
-        _, Error(Nil), _ ->
+        _, Error(_), _ ->
           http.error_message(
             400,
             "DOB_INVALID",

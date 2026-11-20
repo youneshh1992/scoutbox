@@ -29,6 +29,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind}
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/opportunities as row
 import scoutbox/rows/opportunity_texts as text_row
@@ -642,7 +643,7 @@ type NewOpportunity {
   NewOpportunity(
     type_: row.Type,
     title: Option(String),
-    deadline: Option(String),
+    deadline: Option(temporal.Day),
     team: Option(String),
     age_group: Option(String),
     role: Option(String),
@@ -742,7 +743,8 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               #("message", json.string(message)),
             ]),
           )
-        Ok(e) -> publish(ctx, a, b, title, deadline, category, e)
+        Ok(e) ->
+          publish(ctx, a, b, title, temporal.day_text(deadline), category, e)
       }
     }
   }

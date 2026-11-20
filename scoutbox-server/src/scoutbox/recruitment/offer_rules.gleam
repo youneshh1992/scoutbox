@@ -1186,8 +1186,8 @@ pub fn terms_shape() -> input.Shape(TermsInput) {
     role:,
     squad:,
     conditions:,
-    start_date: option.flatten(start_date),
-    end_date: option.flatten(end_date),
+    start_date: option.flatten(start_date) |> option.map(temporal.day_text),
+    end_date: option.flatten(end_date) |> option.map(temporal.day_text),
   ))
 }
 
@@ -1321,11 +1321,11 @@ pub fn validate_expiry(
     False, None -> Ok(None)
     False, Some(v) ->
       case parse_instant(v) {
-        Error(why) ->
+        Error(problem) ->
           bad(
             "not_a_timestamp",
             "expiresAt must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp ("
-              <> why
+              <> temporal.instant_why(problem)
               <> ").",
             [
               #(
@@ -1357,14 +1357,14 @@ pub fn validate_expiry(
 }
 
 /// parseInstant: a whole number of milliseconds, or ISO 8601 text with an offset.
-fn parse_instant(v: Dynamic) -> Result(Int, String) {
+fn parse_instant(v: Dynamic) -> Result(Int, temporal.InstantProblem) {
   case decode.run(v, decode.int), decode.run(v, decode.float) {
     Ok(n), _ -> Ok(n)
-    _, Ok(_) -> Error("not a whole number")
+    _, Ok(_) -> Error(temporal.NotAWholeNumber)
     _, _ ->
       case decode.run(v, decode.string) {
         Ok(s) -> temporal.instant_ms(s)
-        Error(_) -> Error("wrong shape")
+        Error(_) -> Error(temporal.InstantWrongShape)
       }
   }
 }

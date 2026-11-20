@@ -18,7 +18,7 @@ import scoutbox/development/combine_rules
 import scoutbox/platform/json_text
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/rows/id
 import scoutbox/rows/recruitment_brief_history as history_row
 import scoutbox/rows/recruitment_brief_values as value_row
@@ -378,7 +378,7 @@ pub fn validate(f: Fields, grassroots: Bool) -> Result(Valid, List(Detail)) {
   let band = option.map(f.min_trust_band, trust_band.from_string)
   let foot = option.map(f.foot, row.foot_from_string)
   let day = fn(d: Option(String)) {
-    option.map(d, fn(s) { temporal.date_only(s) |> result.is_ok })
+    option.map(d, fn(s) { temporal.parse_day(s) |> result.is_ok })
   }
   let errors =
     list.flatten([
@@ -494,25 +494,10 @@ pub fn validate(f: Fields, grassroots: Bool) -> Result(Valid, List(Detail)) {
   }
 }
 
-/// `active_from` / `active_until` are UTC calendar days, inclusive. Unreadable bounds close the window.
-pub fn is_live_on(b: row.Row, today: String) -> Bool {
-  let within = fn(bound: Option(String), ok: fn(String) -> Bool) {
-    case bound {
-      None -> True
-      Some(d) ->
-        case temporal.date_only(d) {
-          Ok(d) -> ok(d)
-          Error(_) -> False
-        }
-    }
-  }
+/// Live on `today`: active, and the day within its window (briefIsLiveOn).
+pub fn is_live_on(b: row.Row, today: Day) -> Bool {
   b.status == brief_status.Active
-  && within(b.active_from_date, fn(from) {
-    string.compare(today, from) != order.Lt
-  })
-  && within(b.active_until_date, fn(until) {
-    string.compare(today, until) != order.Gt
-  })
+  && temporal.is_day_within(today, b.active_from_date, b.active_until_date)
 }
 
 // ------------------------------------------------------------------------------------------------------ store

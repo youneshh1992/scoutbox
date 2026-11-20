@@ -6,6 +6,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import scoutbox/platform/input
 import scoutbox/platform/key_order
+import scoutbox/platform/temporal
 
 type Prefs {
   Prefs(start: option.Option(String), email: option.Option(Bool))
@@ -115,7 +116,7 @@ pub fn hhmm_test() {
 fn day(v: dynamic.Dynamic) -> Result(option.Option(String), input.Refusal) {
   let shape = {
     use date <- input.field("date", input.nullish(input.day_or_blank()))
-    input.done(option.flatten(date))
+    input.done(option.flatten(date) |> option.map(temporal.day_text))
   }
   input.parse(shape, body([#("date", v)]), "body", [])
 }

@@ -1,6 +1,7 @@
 //// The CSV import's parser and its date-of-birth reasons (imports.mjs `parseCsv`, temporal.ts `parseDobStrict`).
 
 import scoutbox/integrations/imports
+import scoutbox/platform/temporal
 import scoutbox/rules/age
 
 pub fn quoted_fields_test() {
@@ -29,14 +30,24 @@ pub fn code_points_test() {
 const now = 1_795_089_600_000
 
 pub fn dob_reasons_test() {
-  assert age.dob_problem("2004-03-14", now) == Ok(Nil)
-  assert age.dob_problem("20-13-99", now) == Error("wrong shape")
-  assert age.dob_problem("1899-01-01", now) == Error("year outside 1900–2100")
-  assert age.dob_problem("2004-13-01", now) == Error("no such month")
-  assert age.dob_problem("2004-02-00", now) == Error("no such day")
-  assert age.dob_problem("2004-02-30", now)
-    == Error("no such day in that month")
-  assert age.dob_problem("2026-11-20", now) == Error("in the future")
-  assert age.dob_problem("2026-11-19", now) == Ok(Nil)
-  assert age.dob_problem("1905-01-01", now) == Error("implausibly old")
+  let problem = fn(dob) {
+    case age.parse_dob(dob, now) {
+      Ok(_) -> Ok(Nil)
+      Error(p) -> Error(p)
+    }
+  }
+  assert problem("2004-03-14") == Ok(Nil)
+  assert problem("20-13-99") == Error(age.DobNotADay(temporal.DayWrongShape))
+  assert problem("1899-01-01")
+    == Error(age.DobNotADay(temporal.DayYearOutside(1900, 2100)))
+  assert problem("2004-13-01") == Error(age.DobNotADay(temporal.NoSuchMonth))
+  assert problem("2004-02-00") == Error(age.DobNotADay(temporal.NoSuchDay))
+  assert problem("2004-02-30")
+    == Error(age.DobNotADay(temporal.NoSuchDayInMonth))
+  assert problem("2026-11-20") == Error(age.InTheFuture)
+  assert problem("2026-11-19") == Ok(Nil)
+  assert problem("1905-01-01") == Error(age.ImplausiblyOld)
+  assert age.dob_why(age.DobNotADay(temporal.DayYearOutside(1900, 2100)))
+    == "year outside 1900–2100"
+  assert age.dob_why(age.ImplausiblyOld) == "implausibly old"
 }

@@ -14,7 +14,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/platform/clock
 import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal.{type Due}
@@ -1074,8 +1073,11 @@ pub fn edit(
 /// A due date's two columns: a calendar day as text, or an instant.
 pub fn due_columns(d: Option(Due)) -> #(sqlight.Value, sqlight.Value) {
   case d {
-    Some(temporal.Day(ms)) -> #(sqlight.text(clock.iso_day(ms)), sqlight.null())
-    Some(temporal.Instant(ms)) -> #(sqlight.null(), sqlight.int(ms))
+    Some(temporal.OnDay(day)) -> #(
+      sqlight.text(temporal.day_text(day)),
+      sqlight.null(),
+    )
+    Some(temporal.AtInstant(ms)) -> #(sqlight.null(), sqlight.int(ms))
     None -> #(sqlight.null(), sqlight.null())
   }
 }
@@ -1091,8 +1093,8 @@ pub fn due_json(day: Option(String), at: Option(Int)) -> Json {
 
 fn due_fields(d: Option(Due)) -> #(Option(String), Option(Int)) {
   case d {
-    Some(temporal.Day(ms)) -> #(Some(clock.iso_day(ms)), None)
-    Some(temporal.Instant(ms)) -> #(None, Some(ms))
+    Some(temporal.OnDay(day)) -> #(Some(temporal.day_text(day)), None)
+    Some(temporal.AtInstant(ms)) -> #(None, Some(ms))
     None -> #(None, None)
   }
 }

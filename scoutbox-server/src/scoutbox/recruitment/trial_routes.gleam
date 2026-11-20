@@ -43,6 +43,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/live_event
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/zones.{type Zone}
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases.{type Room}
 import scoutbox/recruitment/domain_errors
@@ -1049,7 +1050,7 @@ fn slot_shape() -> input.Shape(SlotInput) {
 
 type ValidInvitation {
   ValidInvitation(
-    timezone: String,
+    timezone: Zone,
     slots: List(#(String, ValidSession)),
     venue: trial_rules.Venue,
     message: String,
@@ -1436,7 +1437,7 @@ fn send_invitation(
               kind: { s.1 }.kind,
               starts_at: { s.1 }.starts_at,
               ends_at: { s.1 }.ends_at,
-              timezone: inv.timezone,
+              timezone: zones.name(inv.timezone),
               venue_name: inv.venue.name,
               venue_town: inv.venue.town,
             )
@@ -1733,7 +1734,7 @@ pub fn schedule(
       // The fingerprint names a new session by its place, as no id is minted until the act.
       let fp =
         fingerprint([
-          #("timezone", canonical.Str(tz)),
+          #("timezone", canonical.Str(zones.name(tz))),
           #(
             "sessions",
             canonical.Array(
@@ -1880,7 +1881,7 @@ fn propose(
   a: OrgAccess,
   room: Room,
   t: Trial,
-  tz: String,
+  tz: Zone,
   planned: List(Planned),
   reason: Option(String),
   key: Option(String),
@@ -1908,7 +1909,7 @@ fn propose(
     })
     let material =
       trial_rules.material_change(trial_rules.compared(t), #(
-        tz,
+        zones.name(tz),
         list.map(sessions, fn(s) { session_compared(s.0, s.1) }),
       ))
     let revision = option.unwrap(t.row.schedule_revision, 0) + 1
@@ -1946,7 +1947,7 @@ fn propose(
         tx,
         t,
         revision,
-        tz,
+        zones.name(tz),
         sessions,
         at,
         by,

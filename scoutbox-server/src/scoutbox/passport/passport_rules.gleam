@@ -258,10 +258,7 @@ pub fn when_of_year(year: Int, month: Option(Int)) -> Option(When) {
 }
 
 fn clock_day(s: String) -> Option(Int) {
-  case temporal.day_start_ms(s) {
-    Ok(t) -> Some(t)
-    Error(Nil) -> None
-  }
+  temporal.parse_day(s) |> option.from_result |> option.map(temporal.day_start)
 }
 
 /// normWhen of text: `YYYY-MM-DD…` (a real day, so 30 February is refused, not rolled to March), `YYYY-MM` or

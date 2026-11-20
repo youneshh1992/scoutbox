@@ -23,6 +23,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{type Page, IntKind, TextKey, TextKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Read}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/age
@@ -108,7 +109,7 @@ fn nonempty(v: Option(String)) -> Option(String) {
 
 /// The conditions on `p` the directory's filters add.
 fn filter_sql(f: Filter, now: Int) -> List(Fragment) {
-  let today = age.day_of(now)
+  let today = temporal.day_of(now)
   let equal = fn(column, v) {
     case nonempty(v) {
       Some(v) ->

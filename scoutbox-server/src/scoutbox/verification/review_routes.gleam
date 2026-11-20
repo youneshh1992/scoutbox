@@ -677,8 +677,8 @@ fn registry_checked(
     Match(row) -> {
       // The register's own expiry, never the self-declared one.
       let until =
-        temporal.day_start_ms(row.valid_until)
-        |> result.map(fn(ms) { ms + 86_400_000 })
+        temporal.parse_day(row.valid_until)
+        |> result.map(temporal.day_end)
       use _ <- result.try(core.add_evidence(
         tx,
         fn(id) {
@@ -714,7 +714,7 @@ fn registry_checked(
             ..c,
             valid_until: case until {
               Ok(u) -> Some(u)
-              Error(Nil) -> c.valid_until
+              Error(_) -> c.valid_until
             },
             display: Some("Licence verified: " <> row.licence_type),
           )

@@ -30,6 +30,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
+import scoutbox/platform/zones
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/trial_rules.{type Trial}
 import scoutbox/recruitment/trials
@@ -103,8 +104,8 @@ fn text(max: Int) -> input.Rule(Option(String)) {
 /// A stored check expiry (a day valid through that day, or an instant) as the first instant it no longer holds;
 /// `None` when unreadable.
 fn check_expiry(stored: String) -> Option(Int) {
-  case temporal.day_start_ms(stored), temporal.instant_ms(stored) {
-    Ok(ms), _ -> Some(ms + 86_400_000)
+  case temporal.parse_day(stored), temporal.instant_ms(stored) {
+    Ok(day), _ -> Some(temporal.day_end(day))
     _, Ok(ms) -> Some(ms)
     _, _ -> None
   }
@@ -262,8 +263,8 @@ pub fn review_check(
       ])
       // A day is kept as the day (valid through it); an instant as its ISO text.
       let expires_at = case expires {
-        Some(temporal.Day(ms)) -> Some(clock.iso_day(ms))
-        Some(temporal.Instant(ms)) -> Some(clock.iso(ms))
+        Some(temporal.OnDay(day)) -> Some(temporal.day_text(day))
+        Some(temporal.AtInstant(ms)) -> Some(clock.iso(ms))
         None -> None
       }
       let now = clock.now_ms()
@@ -525,8 +526,8 @@ pub fn add_staff(
             filled(c.ref),
             option.map(c.expires_at, fn(d) {
               case d {
-                temporal.Day(ms) -> clock.iso_day(ms)
-                temporal.Instant(ms) -> clock.iso(ms)
+                temporal.OnDay(day) -> temporal.day_text(day)
+                temporal.AtInstant(ms) -> clock.iso(ms)
               }
             }),
           )
@@ -760,14 +761,7 @@ pub fn day_status(
             json.object([
               #("ok", json.bool(False)),
               #("error", json.string("TRIAL_DATE_INVALID")),
-              #(
-                "message",
-                json.string(
-                  "A trial date must be a calendar day written YYYY-MM-DD ("
-                  <> why
-                  <> ").",
-                ),
-              ),
+              #("message", json.string(trial_rules.trial_date_message(why))),
               #("expected", json.string("YYYY-MM-DD")),
               #("field", json.string("newDate")),
             ]),
@@ -787,7 +781,7 @@ pub fn day_status(
                 now,
                 a.user.name,
                 reason,
-                new_day,
+                option.map(new_day, temporal.day_text),
               )
               |> storage,
             )
@@ -1304,13 +1298,13 @@ pub fn ics(ctx: Ctx, a: OrgAccess, tid: String) -> Response {
               "DTSTART;TZID="
               <> tz
               <> ":"
-              <> trial_rules.ics_local(s.row.starts_at, tz),
+              <> trial_rules.ics_local(s.row.starts_at, zones.stored(tz)),
             ),
             Some(
               "DTEND;TZID="
               <> tz
               <> ":"
-              <> trial_rules.ics_local(s.row.ends_at, tz),
+              <> trial_rules.ics_local(s.row.ends_at, zones.stored(tz)),
             ),
             Some(
               "SEQUENCE:"
@@ -1367,8 +1361,8 @@ pub fn ics(ctx: Ctx, a: OrgAccess, tid: String) -> Response {
             ]),
           )
         Ok(day) -> {
-          let start_at = case option.then(day, trial_rules.trial_date_ms) {
-            Some(ms) -> ms
+          let start_at = case day {
+            Some(day) -> temporal.day_start(day)
             None -> r.accepted_at
           }
           let start = clock.iso_day(start_at) |> string.replace("-", "")

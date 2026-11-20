@@ -30,6 +30,14 @@ import {
 
 const CLAIMS = 'scoutbox/verification/claims';
 const BASE = 'scoutbox/battery/base';
+const TEMPORAL = 'scoutbox/platform/temporal';
+
+/** A calendar day, `YYYY-MM-DD` text that is one: `base.day("…")`. Text that isn't a day can't be a `Day`. */
+const day = (v, ctx) => {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)) || new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v)
+    throw new Error(`cannot print ${JSON.stringify(v)} as a Day`);
+  return `${ctx.use(BASE)}.day(${string(v)})`;
+};
 
 // ----------------------------------------------------------------------------------------- verification types
 
@@ -490,7 +498,7 @@ const float = (v) =>
 const window_ = record({
   module: METRICS,
   constructor: 'Window',
-  fields: { preset: ['preset', string], from: ['from', string], to: ['to', string], days: ['days', int] },
+  fields: { preset: ['preset', string], from: ['from', day], to: ['to', day], days: ['days', int] },
   defaults: { preset: '"custom"', days: '0' },
 });
 
@@ -878,7 +886,7 @@ const DISCOVERY_MAP = {
     now: true,
     test: (c, ctx) =>
       eq(
-        `${ctx.use(BR)}.is_live_on(${briefRow(c.args[0], ctx)}, ${string(c.args[1] ?? new Date(ctx.now).toISOString().slice(0, 10))})`,
+        `${ctx.use(BR)}.is_live_on(${briefRow(c.args[0], ctx)}, ${day(c.args[1] ?? new Date(ctx.now).toISOString().slice(0, 10), ctx)})`,
         bool(c.result),
       ),
   },
@@ -2898,6 +2906,381 @@ const WEBHOOK_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------- temporal.ts
+
+const ZONES = 'scoutbox/platform/zones';
+
+/** A value as sent, for a rule that reads one (`unknown` in TypeScript): `base.body(json)`, a Dynamic. */
+const sent = (v, ctx) => {
+  if (v === undefined) throw new Error('cannot print undefined as a value sent');
+  return `${ctx.use(BASE)}.body(${string(JSON.stringify(v))})`;
+};
+
+/** A zone the table knows: `base.zone("…")`. A name it doesn't can't be a `Zone`; zones.parse refuses it. */
+const zone = (v, ctx) => {
+  if (typeof v !== 'string' || !ZONE_NAMES.has(v)) throw new Error(`cannot print ${JSON.stringify(v)} as a Zone`);
+  return `${ctx.use(BASE)}.zone(${string(v)})`;
+};
+const ZONE_NAMES = new Set(
+  Object.keys(JSON.parse(readFileSync(new URL('../../priv/zone_offsets.json', import.meta.url))).aliases),
+);
+
+/** parseStrictDateOnly's `why`, as the problem it names. */
+const dayProblem = (why, ctx) => {
+  const t = ctx.use(TEMPORAL);
+  const bounds = /^year outside (\d+)–(\d+)$/.exec(why);
+  if (bounds) return `${t}.DayYearOutside(${bounds[1]}, ${bounds[2]})`;
+  const c = {
+    'not text': 'DayNotText',
+    'wrong shape': 'DayWrongShape',
+    'no such month': 'NoSuchMonth',
+    'no such day': 'NoSuchDay',
+    'no such day in that month': 'NoSuchDayInMonth',
+  }[why];
+  if (!c) throw new Error(`no DayProblem for ${JSON.stringify(why)}`);
+  return `${t}.${c}`;
+};
+
+/** parseInstant's `why`, as the problem it names. */
+const instantProblem = (why, ctx) => {
+  const t = ctx.use(TEMPORAL);
+  const bounds = /^year outside (\d+)–(\d+)$/.exec(why);
+  if (bounds) return `${t}.InstantYearOutside(${bounds[1]}, ${bounds[2]})`;
+  const c = {
+    'not a whole number': 'NotAWholeNumber',
+    'not a date-time': 'NotADateTime',
+    'wrong shape': 'InstantWrongShape',
+    'no such calendar day': 'NoSuchCalendarDay',
+    'no such time of day': 'NoSuchTimeOfDay',
+    'no such offset': 'NoSuchOffset',
+  }[why];
+  if (!c) throw new Error(`no InstantProblem for ${JSON.stringify(why)}`);
+  return `${t}.${c}`;
+};
+
+/** The year bounds a call names, or the defaults; a rule here takes them as arguments. */
+const bounds = (opts = {}) => {
+  const { yearMin = 1900, yearMax = 2100, ...rest } = opts;
+  if (Object.keys(rest).length) throw new Error(`no argument for ${Object.keys(rest)}`);
+  return [int(yearMin), int(yearMax)];
+};
+
+/** A day's text and first instant, as `{ value, t }` gives them. */
+const dayAndStart = (ctx) => `fn(d) { #(${ctx.use(TEMPORAL)}.day_text(d), ${ctx.use(TEMPORAL)}.day_start(d)) }`;
+
+const isDayText = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+const TEMPORAL_MAP = {
+  ['temporal.ts#parseStrictDateOnly']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const t = ctx.use(TEMPORAL);
+      const [v, opts] = c.args;
+      const [min, max] = bounds(opts);
+      const call =
+        typeof v === 'string' ? `${t}.parse_day_between(${string(v)}, ${min}, ${max})` : opts ? null : `${t}.read_day(${sent(v, ctx)})`;
+      if (!call) throw new Error('a value that is not text, with bounds');
+      const r = c.result;
+      return eq(
+        `${ctx.use('gleam/result')}.map(${call}, ${dayAndStart(ctx)})`,
+        r.ok ? `Ok(#(${string(r.value)}, ${int(r.t)}))` : `Error(${dayProblem(r.why, ctx)})`,
+      );
+    },
+  },
+  ['temporal.ts#readDateOnly']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const t = ctx.use(TEMPORAL);
+      return eq(
+        `${ctx.use('gleam/option')}.from_result(${ctx.use('gleam/result')}.map(${t}.read_day(${sent(c.args[0], ctx)}), ${t}.day_text))`,
+        option(string)(c.result, ctx),
+      );
+    },
+  },
+  ['temporal.ts#endOfDayExclusive']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const t = ctx.use(TEMPORAL);
+      return eq(
+        `${ctx.use('gleam/option')}.from_result(${ctx.use('gleam/result')}.map(${t}.read_day(${sent(c.args[0], ctx)}), ${t}.day_end))`,
+        option(int)(c.result, ctx),
+      );
+    },
+  },
+  ['temporal.ts#utcDayOf']: {
+    module: TEMPORAL,
+    test: (c, ctx) => eq(`${ctx.use(TEMPORAL)}.day_text(${ctx.use(TEMPORAL)}.day_of(${int(c.args[0])}))`, string(c.result)),
+  },
+  // A birth date the rule reads is stored text: age_on reads it, and has no age for text that isn't a day.
+  ['temporal.ts#ageOnMs']: {
+    module: AGE,
+    test: (c, ctx) => eq(`${ctx.use(AGE)}.age_on(${string(c.args[0])}, ${int(c.args[1])})`, option(int)(c.result, ctx)),
+  },
+  ['temporal.ts#parseDobStrict']: {
+    module: AGE,
+    test: (c, ctx) => {
+      const r = c.result;
+      const why = (w) =>
+        ({ 'in the future': `${ctx.use(AGE)}.InTheFuture`, 'implausibly old': `${ctx.use(AGE)}.ImplausiblyOld` })[w] ??
+        `${ctx.use(AGE)}.DobNotADay(${dayProblem(w, ctx)})`;
+      return eq(
+        `${ctx.use('gleam/result')}.map(${ctx.use(AGE)}.parse_dob(${string(c.args[0])}, ${int(c.args[1])}), ${dayAndStart(ctx)})`,
+        r.ok ? `Ok(#(${string(r.value)}, ${int(r.t)}))` : `Error(${why(r.why)})`,
+      );
+    },
+  },
+  ['temporal.ts#parseInstant']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const [v, opts] = c.args;
+      const [min, max] = bounds(opts);
+      const r = c.result;
+      return eq(
+        `${ctx.use(TEMPORAL)}.instant(${sent(v, ctx)}, ${min}, ${max})`,
+        r.ok ? `Ok(${int(r.ms)})` : `Error(${instantProblem(r.why, ctx)})`,
+      );
+    },
+  },
+  ['temporal.ts#parseDateOrInstant']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const t = ctx.use(TEMPORAL);
+      const [v, { dayEdge = 'start', ...opts } = {}] = c.args;
+      const [min, max] = bounds(opts);
+      if (min !== '1900' || max !== '2100') throw new Error('parse_due reads the platform bounds only');
+      const r = c.result;
+      const edge = dayEdge === 'end' ? `${t}.end` : `${t}.start`;
+      const expected = !r.ok
+        ? `Error(${isDayText(v) ? `${t}.DueDay(${dayProblem(r.why, ctx)})` : `${t}.DueInstant(${instantProblem(r.why, ctx)})`})`
+        : r.precision === 'day'
+          ? `Ok(#(${t}.OnDay(${day(r.value, ctx)}), ${int(r.ms)}))`
+          : `Ok(#(${t}.AtInstant(${int(r.value)}), ${int(r.ms)}))`;
+      return eq(`${ctx.use('gleam/result')}.map(${t}.parse_due(${sent(v, ctx)}), fn(d) { #(d, ${edge}(d)) })`, expected);
+    },
+  },
+  ['temporal.ts#validateIanaZone']: {
+    module: ZONES,
+    test: (c, ctx) => {
+      const [v] = c.args;
+      if (typeof v !== 'string') throw new Error('a zone sent as something other than text is refused by its shape');
+      return eq(
+        `${ctx.use('gleam/result')}.map(${ctx.use(ZONES)}.parse(${string(v)}), ${ctx.use(ZONES)}.name)`,
+        c.result.ok ? `Ok(${string(c.result.timezone)})` : 'Error(Nil)',
+      );
+    },
+  },
+  ['temporal.ts#localParts']: {
+    module: ZONES,
+    test: (c, ctx) => {
+      const r = c.result;
+      const parts = ['year', 'month', 'day', 'hour', 'minute', 'second'].map((k) => int(Number(r[k])));
+      return eq(
+        `{ let p = ${ctx.use(ZONES)}.local_parts(${int(c.args[0])}, ${zone(c.args[1], ctx)}) [p.year, p.month, p.day, p.hour, p.minute, p.second] }`,
+        `[${parts.join(', ')}]`,
+      );
+    },
+  },
+  ['temporal.ts#zoneOffsetMinutes']: {
+    module: ZONES,
+    test: (c, ctx) => eq(`${ctx.use(ZONES)}.offset_minutes(${zone(c.args[1], ctx)}, ${int(c.args[0])})`, int(c.result)),
+  },
+  ['temporal.ts#parseLocalDateTimeWithZone']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const t = ctx.use(TEMPORAL);
+      const [local, z, { resolve = null, ...opts } = {}] = c.args;
+      bounds(opts);
+      if (Object.keys(opts).length) throw new Error('local_instant reads the platform bounds only');
+      if (typeof local !== 'string') throw new Error('a wall time sent as something other than text is refused by its shape');
+      const how = { earlier: 'Earlier', later: 'Later' }[resolve] ?? 'RefuseAmbiguous';
+      const r = c.result;
+      let expected;
+      if (r.ok) expected = `Ok(${t}.LocalInstant(ms: ${int(r.ms)}, offset_minutes: ${int(r.offsetMinutes)}, ambiguous: ${bool(r.ambiguous)}))`;
+      else if (r.error === 'LOCAL_TIME_NONEXISTENT') expected = `Error(${t}.Nonexistent)`;
+      else if (r.error === 'LOCAL_TIME_AMBIGUOUS') expected = `Error(${t}.Ambiguous(${list(int)(r.candidates, ctx)}))`;
+      else if (r.error === 'TIMESTAMP_INVALID') {
+        const c2 = { 'wrong shape': 'LocalWrongShape', 'no such calendar day': 'LocalNoSuchCalendarDay', 'no such time of day': 'LocalNoSuchTimeOfDay' }[r.why];
+        if (!c2) throw new Error(`no LocalProblem for ${r.why}`);
+        expected = `Error(${t}.${c2})`;
+      } else throw new Error(`a zone that isn't one never reaches local_instant (${r.error})`);
+      return eq(`${t}.local_instant(${string(local)}, ${zone(z, ctx)}, ${t}.${how})`, expected);
+    },
+  },
+  ['temporal.ts#isOrderedInterval']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const [a, b, { allowEqual = false, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`no argument for ${Object.keys(rest)}`);
+      return eq(`${ctx.use(TEMPORAL)}.is_ordered(${int(a)}, ${int(b)}, ${bool(allowEqual)})`, bool(c.result));
+    },
+  },
+  ['temporal.ts#isExpiredAt']: {
+    module: TEMPORAL,
+    test: (c, ctx) => eq(`${ctx.use(TEMPORAL)}.is_expired_at(${option(int)(c.args[0], ctx)}, ${int(c.args[1])})`, bool(c.result)),
+  },
+  ['temporal.ts#isEffectiveAt']: {
+    module: TEMPORAL,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(TEMPORAL)}.is_effective_at(${int(c.args[0])}, ${option(int)(c.args[1], ctx)}, ${int(c.args[2])})`,
+        bool(c.result),
+      ),
+  },
+  ['temporal.ts#isActiveAt']: {
+    module: TEMPORAL,
+    test: (c, ctx) => {
+      const [rec, now] = c.args;
+      if (rec === null || typeof rec !== 'object') throw new Error('a window that is not there is no window');
+      return eq(
+        `${ctx.use(TEMPORAL)}.is_effective_at(${int(rec.startsAt)}, ${option(int)(rec.endsAt, ctx)}, ${int(now)})`,
+        bool(c.result),
+      );
+    },
+  },
+  ['temporal.ts#isDayWithin']: {
+    module: TEMPORAL,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(TEMPORAL)}.is_day_within(${day(c.args[0], ctx)}, ${option(string)(c.args[1], ctx)}, ${option(string)(c.args[2], ctx)})`,
+        bool(c.result),
+      ),
+  },
+};
+
+// ----------------------------------------------------------------------------------------- trial dates and times
+
+const TRIALS = 'scoutbox/recruitment/trial_rules';
+const sessionKind = vocab('scoutbox/vocab/trial_session_kind');
+
+/** A refusal's error, message and remaining fields (as JSON), which is how the TypeScript rule reports one. */
+const trialRefusal = (r) => {
+  const { ok, error, message, ...fields } = r;
+  return `#(${string(error)}, ${string(message)}, ${string(JSON.stringify(fields))})`;
+};
+const refused = (call, ctx) => `${ctx.use('gleam/result')}.map_error(${call}, ${ctx.use(BASE)}.trial_refusal)`;
+
+const venueInput = (v, ctx) => {
+  if (v == null) return 'None';
+  const { name = null, town = null, address = null, ...rest } = v;
+  if (Object.keys(rest).length) throw new Error(`VenueInput has no field for ${Object.keys(rest)}`);
+  return `Some(${ctx.use(TRIALS)}.VenueInput(name: ${option(string)(name, ctx)}, town: ${option(string)(town, ctx)}, address: ${option(string)(address, ctx)}))`;
+};
+
+const TRIAL_MAP = {
+  ['domain.ts#parseDob']: {
+    module: TEMPORAL,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use('gleam/option')}.from_result(${ctx.use('gleam/result')}.map(${ctx.use(TEMPORAL)}.parse_day(${string(c.args[0])}), ${ctx.use(TEMPORAL)}.day_text))`,
+        option(string)(c.result, ctx),
+      ),
+  },
+  ['domain.ts#parseTrialDate']: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const r = c.result;
+      if (r.ok && r.value === null) throw new Error('no trial date is no date: the field is absent before the rule reads it');
+      return r.ok
+        ? eq(`${ctx.use('gleam/result')}.map(${ctx.use(TRIALS)}.trial_date(${string(c.args[0])}), ${dayAndStart(ctx)})`, `Ok(#(${string(r.value)}, ${int(r.t)}))`)
+        : eq(
+            `${ctx.use('gleam/result')}.map_error(${ctx.use(TRIALS)}.trial_date(${string(c.args[0])}), ${ctx.use(TRIALS)}.trial_date_message)`,
+            `Error(${string(r.message)})`,
+          );
+    },
+  },
+  ['domain.ts#isTrialDate']: plainIn(TRIALS)('is_trial_date', [option(string)], bool),
+  ['domain.ts#trialReportDueAt']: plainIn(TRIALS)('report_due_at', [option(string), int], int),
+  ['domains/recruitment/lifecycle/trial.mjs#icsLocal']: plainIn(TRIALS)('ics_local', [int, zone], string),
+  ['domains/recruitment/lifecycle/trial.mjs#localDay']: plainIn(TRIALS)('local_day', [int, zone], string),
+  ['domains/recruitment/lifecycle/trial.mjs#parseInstant']: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const r = c.result;
+      const why = r.ok ? null : /\(([^()]*)\)\.$/.exec(r.message)?.[1];
+      return eq(
+        `${ctx.use(TRIALS)}.instant(${sent(c.args[0], ctx)})`,
+        r.ok ? `Ok(${int(r.ms)})` : `Error(${instantProblem(why, ctx)})`,
+      );
+    },
+  },
+  ['domains/recruitment/lifecycle/trial.mjs#validateTimezone']: {
+    module: TRIALS,
+    test: (c, ctx) =>
+      eq(
+        refused(`${ctx.use('gleam/result')}.map(${ctx.use(TRIALS)}.valid_timezone(${option(string)(c.args[0], ctx)}), ${ctx.use(ZONES)}.name)`, ctx),
+        c.result.ok ? `Ok(${string(c.result.timezone)})` : `Error(${trialRefusal(c.result)})`,
+      ),
+  },
+  ['domains/recruitment/lifecycle/trial.mjs#validateSessionInput']: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const t = ctx.use(TRIALS);
+      const [raw, { now, allowPast = false, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validate_session has no argument for ${Object.keys(rest)}`);
+      const { id = null, kind = null, startsAt, endsAt, venue = null, instructions = null, ...more } = raw;
+      if (Object.keys(more).length) throw new Error(`SessionInput has no field for ${Object.keys(more)}`);
+      const at = (v) => (v === undefined ? 'None' : `Some(${sent(v, ctx)})`);
+      const input = `${t}.SessionInput(id: ${option(string)(id, ctx)}, kind: ${option(string)(kind, ctx)}, starts_at: ${at(startsAt)}, ends_at: ${at(endsAt)}, venue: ${venueInput(venue, ctx)}, instructions: ${option(string)(instructions, ctx)})`;
+      const r = c.result;
+      const expected = r.ok
+        ? `Ok(${t}.ValidSession(kind: ${sessionKind(r.session.kind, ctx)}, starts_at: ${int(r.session.startsAt)}, ends_at: ${int(r.session.endsAt)}, venue: ${t}.Venue(name: ${string(r.session.venue.name)}, town: ${option(string)(r.session.venue.town, ctx)}, address: ${option(string)(r.session.venue.address, ctx)}), instructions: ${option(string)(r.session.instructions, ctx)}))`
+        : `Error(${trialRefusal(r)})`;
+      return eq(refused(`${t}.validate_session(${input}, ${int(now)}, ${bool(allowPast)})`, ctx), expected);
+    },
+  },
+};
+
+// ----------------------------------------------------------------------------------------- contacts
+
+const CONTACTS = 'scoutbox/recruitment/contact_rules';
+const CONTACT_ROWS = 'scoutbox/rows/recruitment_contacts';
+const contactRow = record({
+  module: CONTACT_ROWS,
+  constructor: 'Row',
+  base: (ctx) => `${ctx.use(BASE)}.contact().row`,
+  fields: {
+    id: ['id', ident('contact')],
+    orgId: ['org_id', ident('org')],
+    playerId: ['player_id', ident('player')],
+    channel: ['channel', vocab(CONTACT_ROWS, 'channel_pairs')],
+    status: ['status', vocab(CONTACT_ROWS, 'status_pairs')],
+    deliveredAt: ['delivered_at', option(int)],
+  },
+});
+const contactRec = (v, ctx) => `${ctx.use(CONTACTS)}.Contact(..${ctx.use(BASE)}.contact(), row: ${contactRow(v, ctx)})`;
+
+const CONTACT_MAP = {
+  // `blockingContactId` is read by no route on either server: both answer only the time the cooldown ends.
+  ['domains/recruitment/lifecycle/contact.mjs#cooldownFor']: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [contacts, { orgId, playerId, now, exceptId = null, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`cooldown_until has no argument for ${Object.keys(rest)}`);
+      if (contacts.some((x) => x === null)) throw new Error('a contact that is not there is not read');
+      return eq(
+        `${ctx.use(CONTACTS)}.cooldown_until(${list(contactRec)(contacts, ctx)}, ${ident('org')(orgId, ctx)}, ${ident('player')(playerId, ctx)}, ${int(now)}, ${option(ident('contact'))(exceptId, ctx)})`,
+        option(int)(c.result?.retryAt, ctx),
+      );
+    },
+  },
+  ['domains/recruitment/lifecycle/contact.mjs#validateExternalRecord']: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [{ channel, occurredAt, summary = null, recipientType = null, ...rest }, { now, derivedRecipientType }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validate_external has no argument for ${Object.keys(rest)}`);
+      const at = (v) => (v === undefined ? 'None' : `Some(${sent(v, ctx)})`);
+      const call = `${ctx.use(CONTACTS)}.validate_external(${at(channel)}, ${at(occurredAt)}, ${option(string)(summary, ctx)}, ${option(string)(recipientType, ctx)}, ${int(now)}, ${vocab('scoutbox/vocab/party')(derivedRecipientType, ctx)})`;
+      const r = c.result;
+      return eq(
+        `${ctx.use('gleam/result')}.map_error(${call}, ${ctx.use(BASE)}.contact_refusal)`,
+        r.ok
+          ? `Ok(${ctx.use(CONTACTS)}.External(channel: ${vocab(CONTACT_ROWS, 'channel_pairs')(r.channel, ctx)}, occurred_at: ${int(r.occurredAt)}, summary: ${option(string)(r.summary, ctx)}))`
+          : `Error(${trialRefusal(r)})`,
+      );
+    },
+  },
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -2955,6 +3338,9 @@ const PLATFORM_MAP = {
 
 export const MAP = {
   ...PLATFORM_MAP,
+  ...TEMPORAL_MAP,
+  ...TRIAL_MAP,
+  ...CONTACT_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -3047,6 +3433,8 @@ export const MAP = {
  * has no entry in MAP, and its recorded calls get no test.
  */
 export const NO_COUNTERPART = {
+  ['temporal.ts#readInstant']:
+    'A stored instant is an INTEGER column decoded as an Int: there is no unreadable one for the reader to drop.',
   ['domains/platform/concurrency.mjs#revOf']:
     "A revision is a typed column: NOT NULL on every versioned table, and on a case present exactly when its Room is (the table's CHECK), so no record lacks one to default.",
   ['domains/platform/concurrency.mjs#bumpRev']:
@@ -3093,6 +3481,22 @@ export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
+  ...Object.fromEntries(
+    [
+      'temporal.ts#parseStrictDateOnly',
+      'temporal.ts#parseInstant',
+      'temporal.ts#isExpiredAt',
+      'temporal.ts#isEffectiveAt',
+      'temporal.ts#isOrderedInterval',
+      'temporal.ts#isActiveAt',
+      'temporal.ts#isDayWithin',
+      'temporal.ts#validateIanaZone',
+      'temporal.ts#parseLocalDateTimeWithZone',
+      'domain.ts#isAdult',
+      'domain.ts#trialReportDueAt',
+      'domains/recruitment/lifecycle/contact.mjs#cooldownFor',
+    ].map((f) => [f, 'test/scoutbox/platform/temporal_test.gleam']),
+  ),
   // Development throws on an emitted name the registry doesn't know; here no event can carry one (live_test).
   ['domains/platform/eventRegistry.mjs#assertEventRegistry']: 'test/scoutbox/live_test.gleam',
   ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',

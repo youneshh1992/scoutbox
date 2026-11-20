@@ -18,6 +18,7 @@ import scoutbox/discovery/matching/criteria.{
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/sql.{type Fragment}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/recruitment_briefs as brief_row
 import scoutbox/rules/age
@@ -421,7 +422,7 @@ pub fn ground(org: Org) -> Option(#(Float, Float)) {
 
 /// The same test as `evaluate`, as an SQL condition over `players p` joined to `player_match_facts f`.
 pub fn criterion_sql(c: Criterion, org: Org, now: Int) -> Fragment {
-  let today = age.day_of(now)
+  let today = temporal.day_of(now)
   case c.check {
     criteria.PositionIn(values, True) ->
       sql.concat([

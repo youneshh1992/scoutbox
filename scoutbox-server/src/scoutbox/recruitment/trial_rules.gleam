@@ -20,7 +20,7 @@ import gleam/string
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/temporal
-import scoutbox/platform/zones
+import scoutbox/platform/zones.{type Zone}
 import scoutbox/recruitment/room_rules.{type RoomRole}
 import scoutbox/rows/id
 import scoutbox/rows/trial_attendance as attendance_row
@@ -37,7 +37,6 @@ import scoutbox/rows/trial_schedule_revisions as revision_row
 import scoutbox/rows/trial_schedule_sessions as session_row
 import scoutbox/rows/trial_session_evidence as evidence_row
 import scoutbox/rows/trials as row
-import scoutbox/rules/time_zones
 import scoutbox/vocab/party
 import scoutbox/vocab/trial_actor_kind.{type TrialActorKind}
 import scoutbox/vocab/trial_session_kind.{type TrialSessionKind}
@@ -221,15 +220,10 @@ fn refusal(error: String, message: String) -> Refusal {
 }
 
 /// An exact IANA name this runtime knows: no case-folding, no fallback to the server's zone.
-pub fn valid_timezone(tz: Option(String)) -> Result(String, Refusal) {
-  case tz {
-    Some(z) ->
-      case list.contains(time_zones.names, z) {
-        True -> Ok(z)
-        False -> Error(timezone_refusal())
-      }
-    None -> Error(timezone_refusal())
-  }
+pub fn valid_timezone(tz: Option(String)) -> Result(Zone, Refusal) {
+  option.to_result(tz, Nil)
+  |> result.try(zones.parse)
+  |> result.replace_error(timezone_refusal())
 }
 
 fn timezone_refusal() -> Refusal {
@@ -243,17 +237,17 @@ const instant_year_min = 2000
 
 const instant_year_max = 2100
 
-/// ISO 8601 with an explicit offset or `Z`, or an integer millisecond timestamp, in 2000–2100; a bare local time or
-/// a date-only string is refused. Error: why not, in temporal.ts's words.
-pub fn instant(v: Dynamic) -> Result(Int, String) {
+/// ISO 8601 with an explicit offset or `Z`, or an integer millisecond timestamp, in 2000–2100 (trial.mjs
+/// parseInstant); a bare local time or a date-only string is refused.
+pub fn instant(v: Dynamic) -> Result(Int, temporal.InstantProblem) {
   temporal.instant(v, instant_year_min, instant_year_max)
 }
 
-fn instant_refusal(why: String, field: String) -> Refusal {
+fn instant_refusal(problem: temporal.InstantProblem, field: String) -> Refusal {
   Refusal(
     "TRIAL_SCHEDULE_INVALID",
     "A session time must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp ("
-      <> why
+      <> temporal.instant_why(problem)
       <> ").",
     [#("field", json.string(field))],
   )
@@ -264,13 +258,13 @@ fn pad(n: Int, width: Int) -> String {
 }
 
 /// `YYYY-MM-DD` in the organiser zone: the day the family sees.
-pub fn local_day(ms: Int, zone: String) -> String {
+pub fn local_day(ms: Int, zone: Zone) -> String {
   let p = zones.local_parts(ms, zone)
   pad(p.year, 4) <> "-" <> pad(p.month, 2) <> "-" <> pad(p.day, 2)
 }
 
 /// RFC 5545 local form `YYYYMMDDTHHMMSS` for `DTSTART;TZID=`.
-pub fn ics_local(ms: Int, zone: String) -> String {
+pub fn ics_local(ms: Int, zone: Zone) -> String {
   let p = zones.local_parts(ms, zone)
   pad(p.year, 4)
   <> pad(p.month, 2)
@@ -291,41 +285,41 @@ pub fn ics_text(s: String) -> String {
   |> string.replace("\n", "\\n")
 }
 
-/// A trial date: a calendar day `YYYY-MM-DD` in 2000–2100 (domain.ts parseTrialDate). Error: why not.
-pub fn trial_date(s: String) -> Result(String, String) {
-  case temporal.date_only(s) {
-    Error("wrong shape") -> Error("wrong shape")
-    checked ->
-      case string.slice(s, 0, 4) |> int.parse {
-        Ok(y) if y < 2000 || y > 2100 -> Error("year outside 2000–2100")
-        _ -> checked
-      }
-  }
+const trial_date_year_min = 2000
+
+const trial_date_year_max = 2100
+
+/// A trial date: a calendar day `YYYY-MM-DD` in 2000–2100 (domain.ts parseTrialDate).
+pub fn trial_date(s: String) -> Result(temporal.Day, temporal.DayProblem) {
+  temporal.parse_day_between(s, trial_date_year_min, trial_date_year_max)
+}
+
+/// A trial date's refusal message (TRIAL_DATE_INVALID).
+pub fn trial_date_message(problem: temporal.DayProblem) -> String {
+  "A trial date must be a calendar day written YYYY-MM-DD ("
+  <> temporal.day_why(problem)
+  <> ")."
 }
 
 /// A trial's logistics as a club types them (domain.ts validateTrialDetails): a proposed day and up to two
 /// alternative days, a one-line venue and notes. Error: the refusal's fields, in the TypeScript server's order.
 pub type Details {
   Details(
-    proposed_date: Option(String),
-    alt_days: List(String),
+    proposed_date: Option(temporal.Day),
+    alt_days: List(temporal.Day),
     venue: Option(String),
     notes: String,
   )
 }
 
-fn date_refusal(why: String, field: String) -> List(#(String, Json)) {
+fn date_refusal(
+  problem: temporal.DayProblem,
+  field: String,
+) -> List(#(String, Json)) {
   [
     #("ok", json.bool(False)),
     #("error", json.string("TRIAL_DATE_INVALID")),
-    #(
-      "message",
-      json.string(
-        "A trial date must be a calendar day written YYYY-MM-DD ("
-        <> why
-        <> ").",
-      ),
-    ),
+    #("message", json.string(trial_date_message(problem))),
     #("expected", json.string("YYYY-MM-DD")),
     #("field", json.string(field)),
   ]
@@ -345,7 +339,9 @@ fn detail_refusal(
 }
 
 /// parseTrialDate over a value as sent: absent, null or "" is no date.
-fn sent_date(v: Option(Dynamic)) -> Result(Option(String), String) {
+fn sent_date(
+  v: Option(Dynamic),
+) -> Result(Option(temporal.Day), temporal.DayProblem) {
   case v {
     None -> Ok(None)
     Some(d) ->
@@ -353,7 +349,7 @@ fn sent_date(v: Option(Dynamic)) -> Result(Option(String), String) {
         "Nil", _ -> Ok(None)
         _, Ok("") -> Ok(None)
         _, Ok(text) -> trial_date(text) |> result.map(Some)
-        _, Error(_) -> Error("not text")
+        _, Error(_) -> Error(temporal.DayNotText)
       }
   }
 }
@@ -494,10 +490,7 @@ pub fn is_trial_date(v: Option(String)) -> Bool {
 
 /// The start of a trial date's UTC day.
 pub fn trial_date_ms(s: String) -> Option(Int) {
-  case trial_date(s) {
-    Ok(day) -> temporal.day_start_ms(day) |> option.from_result
-    Error(_) -> None
-  }
+  trial_date(s) |> option.from_result |> option.map(temporal.day_start)
 }
 
 pub const report_window_ms = 604_800_000
@@ -668,10 +661,10 @@ pub fn validate_session(
   )
   let time = fn(v: Option(Dynamic), field) {
     case v {
-      None -> Error(instant_refusal("not a date-time", field))
+      None -> Error(instant_refusal(temporal.NotADateTime, field))
       Some(d) ->
         case dynamic.classify(d) {
-          "Nil" -> Error(instant_refusal("not a date-time", field))
+          "Nil" -> Error(instant_refusal(temporal.NotADateTime, field))
           _ -> instant(d) |> result.map_error(instant_refusal(_, field))
         }
     }
@@ -730,7 +723,7 @@ pub fn validate_schedule(
   sessions: Option(List(SessionInput)),
   now: Int,
   existing: List(id.TrialSessionId),
-) -> Result(#(String, List(Planned)), Refusal) {
+) -> Result(#(Zone, List(Planned)), Refusal) {
   use tz <- result.try(valid_timezone(timezone))
   case sessions {
     None -> Error(schedule_refusal("sessions must be a list."))

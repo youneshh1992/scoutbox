@@ -27,6 +27,7 @@ import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/identity_reviews as review_row
 import scoutbox/rows/import_batch_columns as column_row
@@ -177,10 +178,12 @@ fn record_errors(rec: Record, now: Int) -> List(String) {
   let dob = case get(rec, column_row.Dob) {
     "" -> []
     dob ->
-      case age.dob_problem(dob, now) {
-        Error("wrong shape") -> ["dob must be YYYY-MM-DD"]
-        Error(why) -> ["dob out of range (" <> why <> ")"]
-        Ok(Nil) ->
+      case age.parse_dob(dob, now) {
+        Error(age.DobNotADay(temporal.DayWrongShape)) -> [
+          "dob must be YYYY-MM-DD",
+        ]
+        Error(problem) -> ["dob out of range (" <> age.dob_why(problem) <> ")"]
+        Ok(_) ->
           case string.compare(dob, "1940-01-01") {
             order.Lt -> ["dob out of range"]
             _ -> []
@@ -1295,7 +1298,7 @@ fn insert_prospect(
           notes: optional(column_row.Notes),
           minor: option.map(dob, fn(d) {
             let born = string.slice(d, 0, 4) |> int.parse |> result.unwrap(0)
-            { age.day_of(now) }.year - born < 19
+            temporal.day_year(temporal.day_of(now)) - born < 19
           }),
         )
       use _ <- result.map(prospect_row.insert(tx, p))

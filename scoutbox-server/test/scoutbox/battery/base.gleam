@@ -6,6 +6,10 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
 import gleam/option.{None}
+import scoutbox/platform/temporal
+import scoutbox/platform/zones
+import scoutbox/recruitment/contact_rules
+import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
 import scoutbox/rows/agent_profiles
@@ -15,12 +19,14 @@ import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/recruitment_briefs
+import scoutbox/rows/recruitment_contacts
 import scoutbox/rows/representation_agreements
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
 import scoutbox/vocab/brief_status
 import scoutbox/vocab/claim_type
+import scoutbox/vocab/contact_mode
 import scoutbox/vocab/currency
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
@@ -258,4 +264,48 @@ pub fn brief() -> recruitment_briefs.Row {
 pub fn body(text: String) -> Dynamic {
   let assert Ok(d) = json.parse(text, decode.dynamic)
   d
+}
+
+/// A real calendar day the recording names (the printer refuses text that isn't one), whatever its year.
+pub fn day(text: String) -> temporal.Day {
+  let assert Ok(d) = temporal.parse_day_between(text, 0, 9999)
+  d
+}
+
+/// A zone the recording names (the printer refuses a name the table doesn't know).
+pub fn zone(name: String) -> zones.Zone {
+  let assert Ok(z) = zones.parse(name)
+  z
+}
+
+/// A trial rule's refusal as the TypeScript rule reports one: its error, its message and its other fields as JSON.
+pub fn trial_refusal(r: trial_rules.Refusal) -> #(String, String, String) {
+  #(r.error, r.message, json.to_string(json.object(r.fields)))
+}
+
+/// A drafted in-app contact with nothing else known: a recorded contact names its parties, channel and state.
+pub fn contact() -> contact_rules.Contact {
+  contact_rules.Contact(
+    row: recruitment_contacts.new(
+      id: id.contact("ct-base"),
+      org_id: id.org("org-base"),
+      case_id: id.recruitment_case("case-base"),
+      player_id: id.player("pl-base"),
+      status: recruitment_contacts.Draft,
+      channel: recruitment_contacts.InApp,
+      contact_mode: contact_mode.Both,
+      created_by_user_id: id.org_user("u-base"),
+      created_at: 0,
+      updated_at: 0,
+      rev: 1,
+      policy_version: 1,
+    ),
+    attempts: [],
+    history: [],
+  )
+}
+
+/// A contact rule's refusal as the TypeScript rule reports one: its error, its message and its other fields as JSON.
+pub fn contact_refusal(r: contact_rules.Refusal) -> #(String, String, String) {
+  #(r.error, r.message, json.to_string(json.object(r.fields)))
 }

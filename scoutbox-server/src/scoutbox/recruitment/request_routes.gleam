@@ -26,6 +26,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
+import scoutbox/platform/temporal
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/contacts
 import scoutbox/recruitment/requests
@@ -295,8 +296,8 @@ fn file_direct_trial(
           subject: None,
           contact_id: None,
         ),
-        details.proposed_date,
-        details.alt_days,
+        option.map(details.proposed_date, temporal.day_text),
+        list.map(details.alt_days, temporal.day_text),
         details.venue,
         details.notes,
       ))

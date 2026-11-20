@@ -23,6 +23,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind, TextKey, TextKind}
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/rows/coverage_assignment_targets as target_row
 import scoutbox/rows/coverage_assignment_warnings as warning_row
 import scoutbox/rows/coverage_assignments as row
@@ -242,7 +243,7 @@ type FixtureBody {
   FixtureBody(
     home: Option(String),
     away: Option(String),
-    date: Option(String),
+    date: Option(temporal.Day),
     competition: Option(String),
     lat: Option(Float),
     lng: Option(Float),
@@ -313,7 +314,7 @@ pub fn create_fixture(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                     org_id: a.org.id,
                     home:,
                     away:,
-                    fixture_date: date,
+                    fixture_date: temporal.day_text(date),
                     created_at: now,
                   ),
                   competition: input.filled(b.competition),

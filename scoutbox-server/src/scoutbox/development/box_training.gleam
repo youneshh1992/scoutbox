@@ -33,6 +33,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/metrics
 import scoutbox/platform/paging.{IntKey, TextKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/box_assignments as assignment_row
 import scoutbox/rows/box_cam_disputes as dispute_row
@@ -240,7 +241,7 @@ type AssignmentBody {
     drill_id: Option(String),
     target: Option(TargetBody),
     frequency: Option(Int),
-    due_date: Option(Option(String)),
+    due_date: Option(Option(temporal.Day)),
     instructions: Option(String),
     objective_id: Option(String),
   )
@@ -455,7 +456,7 @@ fn assignment_unit(
         target_type:,
         target_value: value,
         frequency_per_week: b.frequency,
-        due_date: option.flatten(b.due_date),
+        due_date: option.flatten(b.due_date) |> option.map(temporal.day_text),
         instructions:,
         objective_id: objective,
         state: assignment_row.Assigned,

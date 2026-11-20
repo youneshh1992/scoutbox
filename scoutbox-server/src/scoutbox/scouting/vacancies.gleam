@@ -22,6 +22,7 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKey, IntKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/rows/evidence as evidence_row
 import scoutbox/rows/id
 import scoutbox/rows/org_tactical_role_criteria as criterion_row
@@ -243,7 +244,7 @@ fn number(v: tactical.Value) -> Int {
 /// A criterion's verdict in SQL, as `evaluate` gives it below: 'm' (met), 'u' (unknown) or 'n' (not met). `now`
 /// is the clock for the age cutoffs.
 fn verdict_sql(c: Criterion, now: Int) -> Fragment {
-  let today = age.day_of(now)
+  let today = temporal.day_of(now)
   let v = c.value
   let #(unknown, met) = case c.key {
     criterion_row.Positiongroup -> #(

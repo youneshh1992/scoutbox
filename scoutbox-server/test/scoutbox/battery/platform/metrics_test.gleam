@@ -3,6 +3,7 @@
 
 import gleam/json
 import gleam/option.{None, Some}
+import scoutbox/battery/base
 import scoutbox/recruitment/analytics/metrics
 
 // dates: resolveWindow — N1 a custom window
@@ -75,8 +76,8 @@ pub fn n4_the_previous_window_is_the_same_length_test() {
   assert json.to_string(
       metrics.window_json(
         metrics.previous_window(metrics.Window(
-          from: "2026-03-01",
-          to: "2026-03-31",
+          from: base.day("2026-03-01"),
+          to: base.day("2026-03-31"),
           preset: "custom",
           days: 0,
         )),

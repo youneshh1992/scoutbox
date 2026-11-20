@@ -33,6 +33,7 @@ import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/rev
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/id
 import scoutbox/rows/nobody_missed_review_history as review_history_row
@@ -773,9 +774,9 @@ fn strings(xs: List(String)) -> Dynamic {
   dynamic.list(list.map(xs, dynamic.string))
 }
 
-fn day(d: Option(String)) -> Dynamic {
+fn day(d: Option(temporal.Day)) -> Dynamic {
   case d {
-    Some(s) -> dynamic.string(s)
+    Some(d) -> dynamic.string(temporal.day_text(d))
     None -> dynamic.nil()
   }
 }
@@ -1179,7 +1180,7 @@ pub fn queue(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       Some(bid) -> find_brief(read, a, bid)
       None -> store.refuse(not_found())
     })
-    case briefs.is_live_on(b.row, clock.iso_day(now)) {
+    case briefs.is_live_on(b.row, temporal.day_of(now)) {
       False ->
         Ok(http.json(
           200,
@@ -1507,7 +1508,7 @@ pub fn evaluation_coverage(ctx: Ctx, a: OrgAccess) -> Response {
   store.read(ctx.store, fn(read) {
     use all <- result.try(briefs.for_org(read, a.org.id) |> room_routes.storage)
     let live =
-      list.filter(all, fn(b) { briefs.is_live_on(b.row, clock.iso_day(now)) })
+      list.filter(all, fn(b) { briefs.is_live_on(b.row, temporal.day_of(now)) })
     use items <- result.map(
       list.try_map(live, fn(b) {
         use cov <- result.map(coverage(read, a.org, b, now))

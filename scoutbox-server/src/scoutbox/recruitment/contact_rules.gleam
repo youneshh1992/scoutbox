@@ -394,7 +394,7 @@ fn external_when(
 ) -> Result(External, Refusal) {
   let parsed = case occurred_at {
     Some(v) -> temporal.instant(v, 1900, 2100)
-    None -> Error("absent")
+    None -> Error(temporal.NotADateTime)
   }
   case parsed {
     Error(_) ->

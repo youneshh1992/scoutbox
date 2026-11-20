@@ -6,6 +6,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/moderation_flags
 import scoutbox/rows/moderation_log
@@ -205,11 +206,12 @@ pub fn moderation_agrees_with_domain_ts_test() {
 
 /// A 29 February birthday counts on 1 March in other years.
 pub fn a_leap_day_birthday_counts_on_the_first_of_march_test() {
+  let assert Ok(birth) = temporal.parse_day("2012-02-29")
   let on = fn(day) {
-    let assert Ok(d) = age.parse_day(day)
-    age.age("2012-02-29", d)
+    let assert Ok(d) = temporal.parse_day(day)
+    age.years_on(birth, d)
   }
-  assert on("2030-02-28") == Some(17)
-  assert on("2030-03-01") == Some(18)
-  assert on("2032-02-29") == Some(20)
+  assert on("2030-02-28") == 17
+  assert on("2030-03-01") == 18
+  assert on("2032-02-29") == 20
 }

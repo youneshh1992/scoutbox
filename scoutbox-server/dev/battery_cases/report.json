@@ -30,7 +30,7 @@
         "calls": 8,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#canonicalJson",
@@ -2052,21 +2052,21 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#parseDob",
         "calls": 13,
         "cases": 10,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#parseTrialDate",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#trialReportDueAt",
@@ -2075,7 +2075,7 @@
         "handPort": {
           "args[] is NaN": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
@@ -2265,41 +2265,51 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#cooldownFor",
         "calls": 18,
-        "cases": 14,
+        "cases": 4,
         "handPort": {
           "args[][].deliveredAt is -Infinity": 1,
           "args[][].deliveredAt is Infinity": 2,
-          "args[][].deliveredAt is NaN": 1
+          "args[][].deliveredAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"answered\" as a value of scoutbox/rows/recruitment_contacts.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#validateExternalRecord",
         "calls": 15,
         "cases": 13,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#icsLocal",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#localDay",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#parseInstant",
         "calls": 3,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateScheduleInput",
@@ -2315,14 +2325,14 @@
         "calls": 15,
         "cases": 15,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateTimezone",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/verification/claims/shared.mjs#effectiveStatus",
@@ -2351,119 +2361,158 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#endOfDayExclusive",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isActiveAt",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a window that is not there is no window": 1,
+          "Gleam's types can't hold its arguments: cannot print \"x\" as an Int": 1
+        },
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isDayWithin",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"garbage\" as a Day": 1
+        },
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isEffectiveAt",
         "calls": 31,
-        "cases": 24,
+        "cases": 5,
         "handPort": {
           "args[] is -Infinity": 2,
           "args[] is Infinity": 2,
           "args[] is NaN": 2,
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print null as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isExpiredAt",
         "calls": 17,
-        "cases": 13,
+        "cases": 4,
         "handPort": {
           "args[] is -Infinity": 1,
           "args[] is Infinity": 1,
           "args[] is NaN": 1,
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isOrderedInterval",
         "calls": 32,
-        "cases": 25,
+        "cases": 4,
         "handPort": {
           "args[] is -Infinity": 2,
           "args[] is Infinity": 2,
           "args[] is NaN": 2,
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print null as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print undefined as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#localParts",
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseDateOrInstant",
         "calls": 18,
         "cases": 11,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseDobStrict",
         "calls": 7,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseInstant",
         "calls": 81,
-        "cases": 27,
+        "cases": 26,
         "handPort": {
           "args[] is -Infinity": 3,
           "args[] is Infinity": 3,
-          "args[] is NaN": 3
+          "args[] is NaN": 3,
+          "Gleam's types can't hold its arguments: cannot print undefined as a value sent": 3
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseLocalDateTimeWithZone",
         "calls": 22,
-        "cases": 15,
-        "handPort": {},
-        "status": "pending"
+        "cases": 14,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a zone that isn't one never reaches local_instant (TIMEZONE_INVALID)": 1
+        },
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseStrictDateOnly",
         "calls": 1934,
-        "cases": 1869,
+        "cases": 1868,
         "handPort": {
-          "args[] is NaN": 3
+          "args[] is NaN": 3,
+          "Gleam's types can't hold its arguments: cannot print undefined as a value sent": 3
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#readDateOnly",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#readInstant",
@@ -2474,28 +2523,30 @@
           "args[] is Infinity": 1,
           "args[] is NaN": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "temporal.ts#utcDayOf",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#validateIanaZone",
         "calls": 43,
-        "cases": 21,
-        "handPort": {},
-        "status": "pending"
+        "cases": 17,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a zone sent as something other than text is refused by its shape": 8
+        },
+        "status": "generated"
       },
       {
         "function": "temporal.ts#zoneOffsetMinutes",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -2829,7 +2880,7 @@
         "calls": 8,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#normaliseClientKey",
@@ -2873,9 +2924,11 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#validateExternalRecord",
         "calls": 13,
-        "cases": 13,
-        "handPort": {},
-        "status": "pending"
+        "cases": 12,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print [\"x\"] as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
@@ -3624,14 +3677,14 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#parseInstant",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -3776,7 +3829,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -4145,27 +4198,40 @@
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#parseTrialDate",
         "calls": 47,
-        "cases": 43,
+        "cases": 30,
         "handPort": {
           "args[] is a function": 1,
           "args[] is a symbol": 1,
-          "args[] is NaN": 1
+          "args[] is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print -1 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print [\"2026-10-03\"] as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"$date\":1790985600000} as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"proposedDate\":\"2026-10-03\"} as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 1000000000000 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print true as a String": 1,
+          "Gleam's types can't hold its arguments: no trial date is no date: the field is absent before the rule reads it": 3
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#trialReportDueAt",
         "calls": 11,
-        "cases": 10,
+        "cases": 8,
         "handPort": {
-          "args[] is NaN": 1
+          "args[] is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"bad\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#validateTrialDetails",
@@ -4229,7 +4295,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#icsText",
@@ -4250,7 +4316,7 @@
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#materialChange",
@@ -4274,7 +4340,7 @@
           "args[] is Infinity": 1,
           "args[] is NaN": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialClubView",
@@ -4337,16 +4403,22 @@
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateSessionInput",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print 12 as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateTimezone",
         "calls": 25,
-        "cases": 25,
-        "handPort": {},
-        "status": "pending"
+        "cases": 22,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print [] as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print 42 as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateVenue",

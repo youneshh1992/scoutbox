@@ -22,6 +22,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Read}
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/rows/friendlies as friendly_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -302,7 +303,7 @@ fn squad_view(read: Read, org_id: id.OrgId) -> Result(Json, store.Fail(e)) {
 type OpenTrial {
   OpenTrial(
     title: Option(String),
-    date: Option(String),
+    date: Option(Day),
     venue: Option(String),
     age_group: Option(String),
     positions: Option(List(String)),
@@ -355,6 +356,7 @@ pub fn post_open_trial(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
     Ok(_) ->
       case input.filled(body.title), body.date, input.filled(body.venue) {
         Some(_), Some(date), Some(_) -> {
+          let date = temporal.day_text(date)
           use <- moderated(ctx, body.notes, context("open_trial_notes", a))
           let wanted =
             option.unwrap(body.positions, [])
@@ -461,7 +463,7 @@ fn open_trial_view(
 type Friendly {
   Friendly(
     age_group: Option(String),
-    date: Option(String),
+    date: Option(Day),
     venue: Option(String),
     notes: Option(String),
   )
@@ -484,6 +486,7 @@ pub fn post_friendly(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   case body.date {
     None -> http.required("DATE_REQUIRED", "date")
     Some(date) -> {
+      let date = temporal.day_text(date)
       use <- moderated(ctx, body.notes, context("friendly_notes", a))
       let now = clock.now_ms()
       let posted =
@@ -557,7 +560,7 @@ type Matchday {
   Matchday(
     fixture: Option(String),
     venue: Option(String),
-    date: Option(String),
+    date: Option(Day),
     result: Option(String),
     player_ids: List(String),
   )
@@ -592,6 +595,7 @@ pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
   use body <- http.body(req, shape, [])
   case input.filled(body.fixture), body.date {
     Some(fixture), Some(date) -> {
+      let date = temporal.day_text(date)
       let now = clock.now_ms()
       let venue = option.map(body.venue, string.trim)
       let logged =

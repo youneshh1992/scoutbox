@@ -53,16 +53,38 @@ fn table() -> Table {
   })
 }
 
-/// Whether `zone` is a zone name the table knows (every name `rules/time_zones` accepts).
-pub fn known(zone: String) -> Bool {
-  dict.has_key(table().aliases, zone)
+/// An IANA time zone this server knows, by the exact name it was given (validateIanaZone). Only `parse` and
+/// `stored` make one, so no rule is asked about a zone it can't read.
+pub opaque type Zone {
+  Zone(name: String)
 }
 
-/// The zone's UTC offset at `ms`, in seconds east of Greenwich. An unknown zone is UTC.
-pub fn offset_seconds(zone: String, ms: Int) -> Int {
+/// A zone name as sent: exact case, no folding, no fallback (validateIanaZone accepts exactly the table's names).
+pub fn parse(name: String) -> Result(Zone, Nil) {
+  case dict.has_key(table().aliases, name) {
+    True -> Ok(Zone(name))
+    False -> Error(Nil)
+  }
+}
+
+/// A zone a row holds. Every write takes it through `parse`; a name the table doesn't know reads as UTC.
+pub fn stored(name: String) -> Zone {
+  parse(name) |> result.unwrap(utc())
+}
+
+pub fn utc() -> Zone {
+  Zone("UTC")
+}
+
+pub fn name(zone: Zone) -> String {
+  zone.name
+}
+
+/// The zone's UTC offset at `ms`, in seconds east of Greenwich.
+pub fn offset_seconds(zone: Zone, ms: Int) -> Int {
   let t = table()
   let s = floor_div(ms, 1000)
-  case dict.get(t.aliases, zone) |> result.try(dict.get(t.zones, _)) {
+  case dict.get(t.aliases, zone.name) |> result.try(dict.get(t.zones, _)) {
     Error(Nil) -> 0
     Ok(offsets) ->
       list.find(offsets, fn(o) {
@@ -78,7 +100,7 @@ pub fn offset_seconds(zone: String, ms: Int) -> Int {
 
 /// The zone's UTC offset at `ms`, in whole minutes east (zoneOffsetMinutes), rounded as JavaScript's
 /// `Math.round` does: half a minute rounds up.
-pub fn offset_minutes(zone: String, ms: Int) -> Int {
+pub fn offset_minutes(zone: Zone, ms: Int) -> Int {
   floor_div(2 * offset_seconds(zone, ms) + 60, 120)
 }
 
@@ -95,7 +117,7 @@ pub type LocalParts {
 }
 
 /// The wall-clock date and time at `ms` in `zone`, to the second.
-pub fn local_parts(ms: Int, zone: String) -> LocalParts {
+pub fn local_parts(ms: Int, zone: Zone) -> LocalParts {
   // gleam_time rounds an offset to whole minutes, and some zones' early offsets have seconds: add it here.
   let #(date, time) =
     timestamp.from_unix_seconds(floor_div(ms, 1000) + offset_seconds(zone, ms))

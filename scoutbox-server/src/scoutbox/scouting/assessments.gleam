@@ -31,6 +31,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/live_event
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_view
@@ -427,7 +428,9 @@ fn context_shape() -> input.Shape(ContextInput) {
   use fixture <- input.field("fixture", input.clearable(input.text(120)))
   use date <- input.field(
     "date",
-    input.clearable(input.day_or_blank()) |> flatten2,
+    input.clearable(input.day_or_blank())
+      |> flatten2
+      |> as_text(option.map(_, option.map(_, temporal.day_text))),
   )
   use minutes_watched <- input.field(
     "minutesWatched",
@@ -457,9 +460,14 @@ fn context_shape() -> input.Shape(ContextInput) {
   ))
 }
 
+/// A field's value, recorded as the text its column holds.
+fn as_text(rule: input.Rule(a), f: fn(a) -> b) -> input.Rule(b) {
+  fn(v) { rule(v) |> result.map(f) }
+}
+
 fn flatten2(
-  rule: input.Rule(Option(Option(Option(String)))),
-) -> input.Rule(Option(Option(String))) {
+  rule: input.Rule(Option(Option(Option(a)))),
+) -> input.Rule(Option(Option(a))) {
   fn(v) { rule(v) |> result.map(option.map(_, option.flatten)) }
 }
 

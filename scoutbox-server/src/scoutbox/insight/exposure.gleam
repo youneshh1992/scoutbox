@@ -15,7 +15,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
 import gleam/result
-import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/players
@@ -232,9 +231,8 @@ fn read_report(read: Read, a: OrgAccess, now: Int) -> Result(Json, Fail(e)) {
 /// The quarter of a birth date's calendar month, when it is a real day.
 fn quarter(birth: option.Option(String)) -> Result(Int, Nil) {
   use day <- result.try(option.to_result(birth, Nil))
-  use day <- result.try(temporal.date_only(day) |> result.replace_error(Nil))
-  use month <- result.map(int.parse(string.slice(day, 5, 2)))
-  { month - 1 } / 3 + 1
+  use day <- result.map(temporal.parse_day(day) |> result.replace_error(Nil))
+  { temporal.day_month(day) - 1 } / 3 + 1
 }
 
 /// `GET /org/discovery-rotation`: a deterministic weekly slice of the players this club can see and has not
