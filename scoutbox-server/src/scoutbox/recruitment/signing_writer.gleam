@@ -43,9 +43,14 @@ pub type Completion {
   Legacy(note: Option(String))
 }
 
-/// The squad row's name limit (clubSetup.ts CLUB_SETUP_LIMITS.name).
+/// The signing, whether it was already on record, and the club's first ledger event with the player as the
+/// attribution read it before this signing's own row was appended (`None` for a duplicate, which reads nothing).
 pub type Written {
-  Written(signing: signing_row.Row, duplicate: Bool)
+  Written(
+    signing: signing_row.Row,
+    duplicate: Bool,
+    first: Option(ledger_row.Row),
+  )
 }
 
 fn one_signing(
@@ -198,7 +203,7 @@ pub fn record_completed(
     Legacy(_) -> Ok(None)
   })
   case existing {
-    Some(s) -> Ok(Written(s, True))
+    Some(s) -> Ok(Written(s, True, None))
     None -> write(tx, player, org, actor, at, completion)
   }
 }
@@ -410,7 +415,7 @@ fn write(
     sid,
     at,
   ))
-  Ok(Written(signing, False))
+  Ok(Written(signing, False, first))
 }
 
 fn sign_id(tx: Tx) -> Result(id.SigningId, Fail(e)) {

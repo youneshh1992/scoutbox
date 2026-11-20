@@ -17,8 +17,10 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/signing_parties as party_row
 import scoutbox/rows/signings as row
+import scoutbox/safety/ledger
 import scoutbox/vocab/recruitment_actor_kind
 import scoutbox/vocab/signing_method
 import scoutbox/vocab/signing_party_type
@@ -123,6 +125,38 @@ pub fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
         ])
       }),
     ),
+    #("policyVersion", json.nullable(s.policy_version, json.int)),
+  ])
+}
+
+/// A legacy recording as the route answers it: the record recordCompletedSigning builds, not the stored one, so it
+/// has no package fields, and its first qualifying interaction is the whole ledger row.
+pub fn legacy_json(s: row.Row, first: Option(ledger_row.Row)) -> Json {
+  let opt = json.nullable(_, json.string)
+  json.object([
+    #("id", id.signing_json(s.id)),
+    #("playerId", id.player_json(s.player_id)),
+    #("playerName", opt(s.player_name)),
+    #("orgId", id.org_json(s.org_id)),
+    #("orgName", opt(s.org_name)),
+    #("userId", json.nullable(s.user_id, id.org_user_json)),
+    #("scoutName", opt(s.scout_name)),
+    #("ts", json.int(s.ts)),
+    #("signedAt", json.nullable(s.signed_at, json.int)),
+    #("firstQualifyingInteraction", json.nullable(first, ledger.view)),
+    #(
+      "attributionWindowMonths",
+      json.nullable(s.attribution_window_months, json.int),
+    ),
+    #("insideAttributionWindow", json.bool(s.inside_attribution_window)),
+    #("method", row.method_to_json(s.method)),
+    #("note", opt(s.note)),
+    #("signingPackageId", json.null()),
+    #("signingRevisionId", json.null()),
+    #("offerId", json.null()),
+    #("caseId", json.null()),
+    #("documentSha256", json.null()),
+    #("contract", json.null()),
     #("policyVersion", json.nullable(s.policy_version, json.int)),
   ])
 }

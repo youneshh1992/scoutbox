@@ -165,6 +165,21 @@ pub fn for_player(
   with_messages(read, rows)
 }
 
+/// Every thread about a player, whoever the counterparty, oldest first: what the player's export carries
+/// (wiring.mjs `threadsFor`).
+pub fn every_for_player(
+  read: Read,
+  player_id: id.PlayerId,
+) -> Result(List(Thread), Fail(e)) {
+  use rows <- result.try(store.query(
+    read,
+    select("WHERE player_id = ? ORDER BY seq"),
+    [id.player_sql(player_id)],
+    row.decoder(),
+  ))
+  with_messages(read, rows)
+}
+
 /// A guardian's threads, oldest first.
 pub fn for_guardian(
   read: Read,

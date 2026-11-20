@@ -55,7 +55,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
-| `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  | yes |  |  | **done** |
+| `platform/api` | neutral | 0 → 0 | 198 | 203 |  | +5 added | yes |  |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2079 / 54 | 201 / 241 | 54 cases pending; 40 hand-port calls |
@@ -116,6 +116,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
+| `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |

@@ -3847,7 +3847,10 @@ pub fn legacy_record(
               201,
               json.object([
                 #("ok", json.bool(True)),
-                #("signing", signings.record_json(written.signing, [])),
+                #(
+                  "signing",
+                  signings.legacy_json(written.signing, written.first),
+                ),
               ]),
             ))
           })

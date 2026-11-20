@@ -11,6 +11,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/discovery/insights
 import scoutbox/discovery/saved_searches
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians
@@ -19,6 +20,7 @@ import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
+import scoutbox/messaging/channels
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -466,15 +468,19 @@ fn bundle(
     id.player_to_string(id),
     notification_targets.target,
   ))
+  use threads <- result.try(channels.every_for_player(read, id))
+  use insight <- result.try(insights.for_player(read, id, clock.now_ms()))
   use events <- result.map(ledger.for_player(read, id))
   json.object([
     #("exportedAt", json.string(exported_at)),
     #("profile", players.self_view(p)),
     #("requests", json.array(reqs, requests.recipient_view)),
-    // Not ported yet: message threads (messaging) and insights (discovery).
-    #("threads", json.preprocessed_array([])),
+    #(
+      "threads",
+      json.array(threads, channels.view(_, channels.ForCounterparty)),
+    ),
     #("notifications", json.array(feed, notifications.view)),
-    #("insights", json.null()),
+    #("insights", insight),
     #("ledgerEvents", json.array(events, ledger.view)),
   ])
 }

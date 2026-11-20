@@ -190,6 +190,17 @@ const orgLogin = await j('/auth/org/login', {
 });
 const EASTPORT = orgLogin.body.token;
 ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless demo seeds)');
+// The seed dates its attendance from its own clock: Kola's cup final 20 days before the first boot, the county trial
+// day 60 (a day either way, should the boot straddle midnight).
+{
+  const today = Date.parse(new Date().toISOString().slice(0, 10));
+  const att = (await j('/player/me', {}, bearer(KOLA))).body.attendance ?? [];
+  const daysAgo = (fixture) => (today - Date.parse(att.find((a) => a.fixture === fixture)?.date)) / 864e5;
+  ok(
+    Math.abs(daysAgo('Sunday League Cup Final') - 20) <= 1 && Math.abs(daysAgo('County Trial Day') - 60) <= 1,
+    'SD1 the seeded attendance is dated relative to the first boot',
+  );
+}
 
 // ---- 1. guardian signup: email verification is a hard gate
 // The address is unique per run, so a second run against the same database
@@ -514,6 +525,47 @@ r = await j(
   bearer(EASTPORT),
 );
 ok(r.status === 201 && r.body.signing.insideAttributionWindow, 'signing recorded inside attribution window');
+{
+  const s = r.body.signing;
+  ok(
+    JSON.stringify(Object.keys(s)) ===
+      JSON.stringify([
+        'id',
+        'playerId',
+        'playerName',
+        'orgId',
+        'orgName',
+        'userId',
+        'scoutName',
+        'ts',
+        'signedAt',
+        'firstQualifyingInteraction',
+        'attributionWindowMonths',
+        'insideAttributionWindow',
+        'method',
+        'note',
+        'signingPackageId',
+        'signingRevisionId',
+        'offerId',
+        'caseId',
+        'documentSha256',
+        'contract',
+        'policyVersion',
+      ]) &&
+      s.method === 'LEGACY_RECORDED' &&
+      s.note === 'Signed after trial run.',
+    'LS1 a legacy signing answers the record it recorded, with no package fields',
+  );
+  const first = s.firstQualifyingInteraction;
+  ok(
+    JSON.stringify(Object.keys(first ?? {})) ===
+      JSON.stringify(['id', 'ts', 'type', 'playerId', 'orgId', 'orgName', 'userId', 'scoutName', 'detail']) &&
+      first.type === 'contact_request' &&
+      first.playerId === 'pl-svensson' &&
+      first.orgId === 'org-eastport',
+    "LS2 its first qualifying interaction is the club's first ledger row with the player, whole",
+  );
+}
 let invoices = await j('/org/invoices', {}, bearer(EASTPORT));
 ok(
   invoices.body.items.some((i) => i.signingId === r.body.signing.id && i.amount > 0),
@@ -553,6 +605,15 @@ r = await j('/player/export', {}, bearer(KOLA));
 ok(
   r.body.profile?.id === 'pl-adeyemi' && r.body.profile.password === undefined,
   'player export bundles data, never the hash',
+);
+ok(
+  r.body.threads.length >= 1 &&
+    r.body.threads.every((t) => t.playerId === 'pl-adeyemi' && !('orgId' in t) && Array.isArray(t.messages)),
+  "EX1 the export carries the player's threads, as the player reads them",
+);
+ok(
+  typeof r.body.insights?.thisWeek?.views === 'number' && Array.isArray(r.body.insights.recent),
+  "EX2 the export carries the player's insights",
 );
 r = await j('/guardian/export', {}, bearer(AMARA));
 ok(r.body.guardian?.id === 'gd-amara' && r.body.guardian.password === undefined, 'guardian export is sanitized');

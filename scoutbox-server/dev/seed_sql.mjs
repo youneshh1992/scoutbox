@@ -1,7 +1,8 @@
 // Writes priv/seed.sql: the TypeScript server's demo world, for the tables this server has. It boots the
 // TypeScript server on an empty data directory (which loads its seed), stops it, and dumps the rows as INSERTs.
 // Timestamps become `NOW_MS + offset` from the seed's own clock, so a first boot here seeds a world as fresh as
-// the TypeScript server's; dates of birth are calendar days and stay fixed.
+// the TypeScript server's. The text columns the seed writes from its clock (`RELATIVE_TEXT`) become SQL over
+// `NOW_MS` too; every other day (dates of birth, contracts, policy dates) is a fixed literal there and stays fixed.
 //
 //   node dev/seed_sql.mjs     (Node ≥ 22.18; needs ../../scoutbox with its node_modules)
 import { spawn } from 'node:child_process';
@@ -49,8 +50,23 @@ for (const f of fs.readdirSync(MIGRATIONS).sort())
 const anchor = db.prepare('SELECT MAX(created_at) AS t FROM orgs').get().t;
 const YEAR = 365 * 24 * 3600 * 1000;
 const isInstant = (v) => typeof v === 'number' && Number.isInteger(v) && Math.abs(v - anchor) < 10 * YEAR;
-const literal = (v, type) => {
+const DAY = 24 * 3600 * 1000;
+// Text the TypeScript seed computes from its clock: an attendance's UTC day (`att`) and a clip's ISO instant (`med`).
+const RELATIVE_TEXT = {
+  'player_attendance.match_date': (v) => {
+    const days = Math.round((Date.parse(v) - Math.floor(anchor / DAY) * DAY) / DAY);
+    return `date(NOW_MS / 1000, 'unixepoch', '${days} days')`;
+  },
+  'player_media.uploaded_at': (v) => {
+    // Whole milliseconds, floored, so an instant before 1970 (a test's small NOW_MS) is written right too.
+    const at = `(NOW_MS + ${Date.parse(v) - anchor})`;
+    const ms = `((${at} % 1000 + 1000) % 1000)`;
+    return `strftime('%Y-%m-%dT%H:%M:%S', (${at} - ${ms}) / 1000, 'unixepoch') || printf('.%03dZ', ${ms})`;
+  },
+};
+const literal = (v, type, column) => {
   if (v === null) return 'NULL';
+  if (typeof v === 'string' && RELATIVE_TEXT[column]) return RELATIVE_TEXT[column](v);
   if (typeof v === 'string') return `'${v.replaceAll("'", "''")}'`;
   if (type === 'INTEGER' && isInstant(v)) return `NOW_MS + ${v - anchor}`;
   return String(v);
@@ -79,7 +95,7 @@ for (const table of ours) {
   for (const row of db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()) {
     if (theirs.has(key(row))) continue;
     sql += `INSERT INTO ${table} (${cols.map((c) => c.name).join(', ')}) VALUES (${cols
-      .map((c) => literal(row[c.name], c.type))
+      .map((c) => literal(row[c.name], c.type, `${table}.${c.name}`))
       .join(', ')});\n`;
     rows++;
   }

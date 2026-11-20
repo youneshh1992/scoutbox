@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left, 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -431,7 +431,13 @@ are for surprising facts or points that later work depends on, not implementatio
       `GET /org/box-cam/drills`, and the uploads routes (out of scope).
    1. Item 8.4's leftovers: the legacy signing response's missing fields, `/player/export`'s threads and insights
       (`channels.for_player` and `insights.for_player` exist; only the wiring is missing), and the seed's
-      attendance dates. `similarPlayers` goes with slice 5.
+      attendance dates. `similarPlayers` goes with slice 5. [**done**: `platform/api` gained SD1, LS1–LS2 and
+      EX1–EX2, and the three responses answer exactly as TypeScript's do, bar the export's signed media link.] A
+      legacy signing answers the record `recordCompletedSigning` built, not the stored one: no package fields, and its
+      first qualifying interaction is the whole ledger row (`signings.legacy_json`). The export's threads are every
+      thread about the player, whoever the counterparty (`channels.every_for_player`). The seed dumper writes the
+      two text columns TypeScript's seed takes from its clock (an attendance's day, a clip's upload instant) as SQL
+      over `NOW_MS`; both were frozen at the dump's date.
    2. Live events, the whole registry. Do it in two parts:
       1. Delivery. Add the `public_safe` audience (every stream) and the subject rule (`liveSync.mjs`: a payload with a
          `playerId` and no `orgId` reaches the player, their guardian and every org that may see them and isn't
