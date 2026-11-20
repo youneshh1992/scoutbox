@@ -2,6 +2,9 @@
 //// record names only some fields; the test updates one of these with them. Each field here stands for "not given":
 //// None, False, zero or a placeholder, whichever the TypeScript rule reads an absent field as.
 
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/json
 import gleam/option.{None}
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
@@ -11,10 +14,12 @@ import scoutbox/rows/case_budget_lines
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
+import scoutbox/rows/recruitment_briefs
 import scoutbox/rows/representation_agreements
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
+import scoutbox/vocab/brief_status
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/currency
 import scoutbox/vocab/facet_state
@@ -232,4 +237,25 @@ pub fn budget_fx() -> case_budget_fx_assumptions.Row {
     date: "",
     manual: True,
   )
+}
+
+/// A draft brief with no window, nothing else known: a recorded brief names its status and window.
+pub fn brief() -> recruitment_briefs.Row {
+  recruitment_briefs.new(
+    id: id.brief("brf-base"),
+    org_id: id.org("org-base"),
+    title: "",
+    version: 1,
+    status: brief_status.Draft,
+    created_by_user_id: id.org_user("u-base"),
+    created_at: 0,
+    updated_at: 0,
+    rev: 1,
+  )
+}
+
+/// A request body as the route reads it, from its JSON text.
+pub fn body(text: String) -> Dynamic {
+  let assert Ok(d) = json.parse(text, decode.dynamic)
+  d
 }

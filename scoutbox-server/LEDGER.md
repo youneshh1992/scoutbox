@@ -17,13 +17,13 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 238 / 425 | 53 / 84 | 7 to go |
-| development | 3 | 3 | 3 | 125 / 4 | 22 / 45 | 1 to go |
-| discovery | 3 | 3 | 3 | 318 / 11 | 2 / 2 | 1 to go |
+| agents | 9 | 9 | 9 | 238 / 424 | 56 / 84 | 6 to go |
+| development | 3 | 3 | 3 | 125 / 2 | 22 / 45 | 1 to go |
+| discovery | 3 | 3 | 3 | 318 / 5 | 2 / 2 | 1 to go |
 | operations | 1 | 1 | 1 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
-| platform | 14 | 14 | 11 | 86 / 2238 | 67 / 221 | 6 to go |
-| recruitment | 19 | 19 | 19 | 547 / 4144 | 28 / 281 | 13 to go |
+| platform | 14 | 14 | 11 | 147 / 2169 | 98 / 200 | 4 to go |
+| recruitment | 19 | 19 | 19 | 549 / 4142 | 28 / 281 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -34,13 +34,13 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 32 / 85 | 13 / 33 | 85 cases pending; 20 hand-port calls |
+| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 32 / 85 | 16 / 33 | 85 cases pending; 17 hand-port calls |
 | `agents/compliance` | neutral | 14 → 0 | 342 | 234 | 108 |  | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
 | `agents/crossApp` | neutral | 13 → 0 | 380 | 239 | 141 |  | yes | 13 / 89 | 4 / 12 | 89 cases pending; 8 hand-port calls |
-| `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 1 | 1 / 1 | 1 cases pending |
+| `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
 | `development/boxCam` | neutral | 3 → 0 | 150 | 110 | 40 |  | yes | 40 / 0 |  | **done** |
@@ -48,22 +48,22 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
 | `development/combine` | neutral | 2 → 0 | 92 | 72 | 20 |  | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
-| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 4 | 22 / 45 | 4 cases pending; 23 hand-port calls |
+| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
-| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 183 / 11 | 1 / 1 | 11 cases pending |
+| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
-| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 23 / 36 | 0 / 16 | 36 cases pending; 16 hand-port calls |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 41 / 2175 | 67 / 164 | not answered; 2175 cases pending; 97 hand-port calls |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 47 / 2169 | 81 / 164 | not answered; 2169 cases pending; 83 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
-| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 4 / 27 | 0 / 22 | 27 cases pending; 22 hand-port calls |
+| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 31 / 0 | 12 / 12 | **done** |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
@@ -79,7 +79,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 16 / 2927 | 2 / 95 | 2927 cases pending; 93 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 14 / 151 | 6 / 25 | 151 cases pending; 19 hand-port calls |
-| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 13 / 82 | 0 / 10 | 82 cases pending; 10 hand-port calls |
+| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 15 / 80 | 0 / 10 | 80 cases pending; 10 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
 | `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 0 / 82 | 0 / 1 | 82 cases pending; 1 hand-port calls |
@@ -132,7 +132,7 @@ ported by hand to a gleeunit test.
 
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
-| `agents/adversarial` | `domain.ts#ageOn` | 3 | result is NaN | to do |
+| `agents/adversarial` | `domain.ts#ageOn` | 3 | result is NaN | `test/scoutbox/rules/age_test.gleam` |
 | `agents/adversarial` | `domain.ts#isAdult` | 13 | Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 | its result depends on the clock | to do |
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 1 | args[] is undefined | to do |
@@ -174,12 +174,11 @@ ported by hand to a gleeunit test.
 | `passport/passport` | `domains/passport/shared.mjs#normWhen` | 1 | Gleam's types can't hold its arguments: cannot print null as a date | `test/scoutbox/passport/passport_rules_test.gleam` |
 | `passport/trustScore` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `passport/trustScore` | `domains/passport/trust/shared.mjs#safeTrustProjection` | 3 | Gleam's types can't hold its arguments: the projection has no viewer "other_player"; Gleam's types can't hold its arguments: the projection takes no options {"publicAllowed":false}; Gleam's types can't hold its arguments: the projection takes no options {"publicAllowed":true} | `test/scoutbox/passport/trust_rules_test.gleam` |
-| `platform/contracts` | `domain.ts#ageOn` | 2 | result is NaN | to do |
-| `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 | Gleam's types can't hold its arguments: cannot print "established" as a value of scoutbox/vocab/trust_band.pairs | to do |
-| `platform/contracts` | `domains/discovery/shared.mjs#secondLookStatus` | 2 | Gleam's types can't hold its arguments: cannot print "general_update" as a value of scoutbox/discovery/second_look_rules.change_type_pairs | to do |
-| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | throws Error without a code | to do |
-| `platform/contracts` | `domains/platform/notificationPrefs.mjs#createNotificationPrefs` | 1 | args[].notifications.create is a function | to do |
-| `platform/dates` | `domain.ts#ageOn` | 14 | args[] is NaN; args[] is undefined; result is NaN | to do |
+| `platform/contracts` | `domain.ts#ageOn` | 2 | result is NaN | `test/scoutbox/rules/age_test.gleam` |
+| `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 1 | Gleam's types can't hold its arguments: a brief that is not there is a 404 before its liveness is read | `test/scoutbox/discovery/briefs_test.gleam` |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | throws Error without a code | `test/scoutbox/live_test.gleam` |
+| `platform/contracts` | `domains/platform/notificationPrefs.mjs#createNotificationPrefs` | 1 | args[].notifications.create is a function | `test/scoutbox/messaging/notification_prefs_test.gleam` |
+| `platform/dates` | `domain.ts#ageOn` | 14 | args[] is NaN; args[] is undefined; result is NaN | `test/scoutbox/rules/age_test.gleam` |
 | `platform/dates` | `domain.ts#isAdult` | 8 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 20100101 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | to do |
 | `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
 | `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 7 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN | to do |
@@ -198,11 +197,10 @@ ported by hand to a gleeunit test.
 | `platform/dates` | `temporal.ts#parseInstant` | 9 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
 | `platform/dates` | `temporal.ts#parseStrictDateOnly` | 3 | args[] is NaN | to do |
 | `platform/dates` | `temporal.ts#readInstant` | 3 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
-| `platform/productionHardening` | `domains/passport/shared.mjs#passportRevision` | 10 | Gleam's types can't hold its arguments: cannot print {"confirmed":false,"assurance":"player_submitted"} as an identity; Gleam's types can't hold its arguments: cannot print {"confirmed":true,"assurance":"authoritative_registry"} as an identity; Gleam's types can't hold its arguments: cannot print {"confirmed":true,"assurance":"scoutbox_reviewed"} as an identity; Gleam's types can't hold its arguments: PlayerFacts has no field for the JavaScript key ageToday | to do |
-| `platform/productionHardening` | `domains/platform/capabilities.mjs#buildCapabilityReport` | 5 | args[].rateLimit.provider.consume is a function; its result depends on the clock | to do |
-| `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 3 | result is NaN | to do |
-| `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | to do |
-| `platform/productionHardening` | `domains/platform/rateLimit.mjs#memoryRateLimitProvider` | 1 | result.consume is a function | to do |
+| `platform/productionHardening` | `domains/platform/capabilities.mjs#buildCapabilityReport` | 5 | args[].rateLimit.provider.consume is a function; its result depends on the clock | `test/scoutbox/config_test.gleam` |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 3 | result is NaN | `test/scoutbox/rev_test.gleam` |
+| `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | `test/scoutbox/config_test.gleam` |
+| `platform/productionHardening` | `domains/platform/rateLimit.mjs#memoryRateLimitProvider` | 1 | result.consume is a function | `test/scoutbox/limits_test.gleam` |
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/analytics` | `domains/recruitment/analytics/dashboard.mjs#buildDashboard` | 4 | args[].roomIds is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/analytics` | `domains/recruitment/analytics/dashboard.mjs#buildReportingContext` | 3 | args[].reads.trials.byId is a function | `test/scoutbox/recruitment/analytics_test.gleam` |
@@ -312,7 +310,6 @@ mapped, then `npm run cases`.
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 1 |
-| `agents/crossAppAdversarial` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
@@ -336,20 +333,7 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
 | `development/hub` | `domains/development/hub/plan.mjs#planSummary` | 1 |
 | `development/hub` | `domains/development/hub/reviews.mjs#buildGoalSnapshots` | 1 |
-| `development/hub` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
-| `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 |
 | `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
-| `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 |
-| `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
-| `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |
-| `platform/contracts` | `domains/platform/eventAudience.mjs#audienceFor` | 2 |
-| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
-| `platform/contracts` | `domains/platform/eventRegistry.mjs#eventFingerprint` | 7 |
-| `platform/contracts` | `domains/platform/eventRegistry.mjs#minimizePayload` | 2 |
-| `platform/contracts` | `domains/platform/integrity.mjs#integrityReport` | 4 |
-| `platform/contracts` | `domains/platform/integrity.mjs#integritySummary` | 1 |
-| `platform/contracts` | `domains/platform/notificationPrefs.mjs#defaultPrefs` | 1 |
-| `platform/dates` | `domain.ts#adultAgeFor` | 1 |
 | `platform/dates` | `domain.ts#isTrialDate` | 2 |
 | `platform/dates` | `domain.ts#parseDob` | 10 |
 | `platform/dates` | `domain.ts#parseTrialDate` | 4 |
@@ -361,7 +345,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 4 |
@@ -387,14 +370,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `temporal.ts#utcDayOf` | 1 |
 | `platform/dates` | `temporal.ts#validateIanaZone` | 21 |
 | `platform/dates` | `temporal.ts#zoneOffsetMinutes` | 4 |
-| `platform/productionHardening` | `domains/platform/capabilities.mjs#productionConfigProblems` | 11 |
-| `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 |
-| `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 4 |
-| `platform/productionHardening` | `domains/platform/concurrency.mjs#revMeta` | 2 |
-| `platform/productionHardening` | `domains/platform/concurrency.mjs#revOf` | 2 |
-| `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 |
-| `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 |
-| `platform/productionHardening` | `domains/platform/rateLimit.mjs#rateLimitedBody` | 2 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 180 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 10 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
@@ -475,7 +450,6 @@ mapped, then `npm run cases`.
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateTerms` | 34 |
 | `recruitment/offers` | `temporal.ts#isExpiredAt` | 1 |
 | `recruitment/offers` | `temporal.ts#parseInstant` | 2 |
-| `recruitment/offersAdversarial` | `domain.ts#adultAgeFor` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 11 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 20 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#liveStatus` | 9 |
@@ -554,9 +528,24 @@ their role, so their recorded calls get no test.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 | A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used. |
 | `agents/corePersistence` | `domains/agents/core/shared.mjs#newFacets` | 1 | A profile's facets are rows: a new profile is written with its one UNVERIFIED FIFA licence row, which agents/core checks over HTTP. |
+| `agents/crossAppAdversarial` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | The registry is the Event type: every name an event can carry is in live_event.registered, which live_test proves is the registry's names, so there is nothing to check at boot. |
 | `development/hub` | `domains/development/hub/plan.mjs#buildTimeline` | 2 | Its cases feed it a history action the Hub never writes (plan_read) to show it is dropped; a history row's action is typed here, so no such row can exist. The internal-entry filter is checked over HTTP. |
 | `development/hub` | `domains/development/hub/shared.mjs#parseDate` | 1 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |
 | `development/hub` | `domains/development/hub/shared.mjs#scanPayloadForForbiddenFields` | 1 | A helper for tests over responses: the hub battery scans every payload for the forbidden field names itself. |
+| `development/hub` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 | The registry is the Event type: every name an event can carry is in live_event.registered, which live_test proves is the registry's names, so there is nothing to check at boot. |
+| `discovery/matchingAndWatchlists` | `domains/platform/eventAudience.mjs#audienceFor` | 5 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |
+| `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#minimizePayload` | 1 | An event's payload is its variant's fields, which live_test proves are the registry's payload keys: there is nothing to drop, and no event can carry a name outside the registry. |
 | `passport/trustScore` | `domains/passport/trust/shared.mjs#eligibleTrustComponents` | 1 | No whole component is adult-only, so every weight is eligible (the policy's, proved equal to the snapshot); the agency facet a minor's relationships drop is each profile's context.adultOnlyFacetsExcluded, which calculateTrustScore's cases compare. |
 | `passport/trustScore` | `domains/passport/trust/shared.mjs#trustChangeReasons` | 1 | No route reports change reasons on either server: they appear in no response, and the trust_recalculation_reason counter is never counted. |
+| `platform/contracts` | `domains/platform/eventAudience.mjs#audienceFor` | 2 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 | The registry is the Event type: every name an event can carry is in live_event.registered, which live_test proves is the registry's names, so there is nothing to check at boot. |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#eventFingerprint` | 7 | No TypeScript route reads it: live sync neither dedupes nor coalesces by it, and nothing outside eventRegistry.mjs calls it. |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#minimizePayload` | 2 | An event's payload is its variant's fields, which live_test proves are the registry's payload keys: there is nothing to drop, and no event can carry a name outside the registry. |
+| `platform/contracts` | `domains/platform/integrity.mjs#integrityReport` | 4 | The report here is SQL over the tables (operator.integrity), not over collections: a Room's organisation is a foreign key and ids are primary keys, so ROOM_ORPHAN_ORG and the id duplicates can't happen. test/scoutbox/platform/integrity_test.gleam checks the open-Room rule on written rows. |
+| `platform/contracts` | `domains/platform/integrity.mjs#integritySummary` | 1 | operator.integrity counts by code as it reads (integrity_test), and there is no report with ids to summarise. |
+| `platform/contracts` | `domains/platform/notificationPrefs.mjs#defaultPrefs` | 1 | The defaults are each entry's `default` in notification_prefs.categories, which spec_test proves equal to the CATEGORIES snapshot; a person with no row has emailIntent off (`effective`). |
 | `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 | Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes. |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 | Each domain moves its revision in its own UPDATE (rev = rev + 1, with who and when) inside the act's unit; there is no record to mutate. productionHardening's Room sections check it over HTTP. |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#revOf` | 2 | A revision is a typed column: NOT NULL on every versioned table, and on a case present exactly when its Room is (the table's CHECK), so no record lacks one to default. |
+| `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |
+| `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 | No event can carry a name outside the registry (live_event.registered, proved equal to it), so none is unclassified. |

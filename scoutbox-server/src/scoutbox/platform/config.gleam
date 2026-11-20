@@ -8,7 +8,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/passport/trust_rules
 import scoutbox/platform/cors
+import scoutbox/platform/input
 import scoutbox/platform/secrets
 
 pub type Config {
@@ -81,9 +83,9 @@ const media_secret_min_length = 32
 
 const day_ms = 86_400_000
 
-/// An unsafe production setting (`productionConfigProblems` in the TypeScript server). Production refuses to boot
-/// on any of them and names every code.
-type Problem {
+/// An unsafe setting (`productionConfigProblems` in the TypeScript server). Each is logged at boot; production
+/// refuses to boot on any of them and names every code.
+pub type Problem {
   Problem(code: String, message: String)
 }
 
@@ -117,21 +119,17 @@ pub fn load() -> Result(Config, String) {
         "SCOUTBOX_SEED_DEMO must be 1 (load the demo world on first boot) or 0 (start empty).",
       )
   })
-  use _ <- result.try(case production {
-    False -> Ok(Nil)
-    True ->
-      case production_problems() {
-        [] -> Ok(Nil)
-        problems -> {
-          list.each(problems, fn(p) {
-            io.println_error("CONFIG " <> p.code <> ": " <> p.message)
-          })
-          Error(
-            "Refusing to start: "
-            <> string.join(list.map(problems, fn(p) { p.code }), ", "),
-          )
-        }
-      }
+  let problems = problems(envoy.get, trust_rules.weights_total())
+  list.each(problems, fn(p) {
+    io.println_error("CONFIG " <> p.code <> ": " <> p.message)
+  })
+  use _ <- result.try(case production, problems {
+    False, _ | True, [] -> Ok(Nil)
+    True, problems ->
+      Error(
+        "Refusing to start: "
+        <> string.join(list.map(problems, fn(p) { p.code }), ", "),
+      )
   })
   let admin_key = envoy.get("ADMIN_KEY") |> result.unwrap(dev_admin_key)
   let media_secret = case envoy.get("MEDIA_SECRET") {
@@ -205,18 +203,43 @@ fn session_ttl_ms(setting: Result(String, Nil)) -> Int {
   }
 }
 
-/// Not ported yet: TRUST_WEIGHTS_INVALID (the Passport's Trust Score weights) and TRUST_PROXY_INVALID
-/// (SCOUTBOX_TRUST_PROXY, which this server doesn't read yet).
-fn production_problems() -> List(Problem) {
+/// The unsafe settings among those `get` reads, in the TypeScript server's order. The Trust Score weights must total
+/// 100 in every mode; the rest are unsafe only in production.
+///
+/// Not ported yet: TRUST_PROXY_INVALID (SCOUTBOX_TRUST_PROXY, which this server doesn't read yet).
+pub fn problems(
+  get: fn(String) -> Result(String, Nil),
+  trust_weights_total: Int,
+) -> List(Problem) {
+  let weights = case trust_weights_total {
+    100 -> []
+    total -> [
+      Problem(
+        "TRUST_WEIGHTS_INVALID",
+        "Trust Score component weights total "
+          <> int.to_string(total)
+          <> ", not 100.",
+      ),
+    ]
+  }
+  case get("NODE_ENV") {
+    Ok("production") -> list.append(weights, production_problems(get))
+    _ -> weights
+  }
+}
+
+fn production_problems(
+  get: fn(String) -> Result(String, Nil),
+) -> List(Problem) {
   let flagged = fn(name) {
-    case envoy.get(name) {
+    case get(name) {
       Ok(value) -> string.trim(value) != ""
       Error(Nil) -> False
     }
   }
-  let is_one = fn(name) { envoy.get(name) == Ok("1") }
-  let admin_key = envoy.get("ADMIN_KEY") |> result.unwrap("")
-  let media_secret = envoy.get("MEDIA_SECRET") |> result.unwrap("")
+  let is_one = fn(name) { get(name) == Ok("1") }
+  let admin_key = get("ADMIN_KEY") |> result.unwrap("")
+  let media_secret = get("MEDIA_SECRET") |> result.unwrap("")
   [
     #(
       is_one("BOX_CAM_TEST_PROVIDER"),
@@ -227,7 +250,7 @@ fn production_problems() -> List(Problem) {
     ),
     #(
       // A signed media link grants access to a player's footage, so its key must be stable, private and unguessable.
-      string.length(media_secret) < media_secret_min_length,
+      input.utf16_length(media_secret) < media_secret_min_length,
       Problem(
         "MEDIA_SECRET_MISSING",
         "MEDIA_SECRET is unset or shorter than 32 characters; signed media URLs need a stable secret of the deployment's own.",
@@ -256,7 +279,7 @@ fn production_problems() -> List(Problem) {
       ),
     ),
     #(
-      envoy.get("SCOUTBOX_FAULTS") |> result.unwrap("") != "",
+      get("SCOUTBOX_FAULTS") |> result.unwrap("") != "",
       Problem(
         "FAULTS_IN_PRODUCTION",
         "SCOUTBOX_FAULTS is set. Simulated failures must never be configured on a production instance.",
@@ -273,7 +296,7 @@ fn production_problems() -> List(Problem) {
     #(
       // `scoutbox-admin` is the publicly known development key.
       admin_key == dev_admin_key
-        || string.length(admin_key) < admin_key_min_length,
+        || input.utf16_length(admin_key) < admin_key_min_length,
       Problem(
         "ADMIN_KEY_UNSAFE",
         "ADMIN_KEY is unset, is the development default or is shorter than 16 characters; the Trust & Safety API would accept a publicly known key.",

@@ -856,7 +856,32 @@ const levelsOf = (components) =>
     .map(([k, v]) => [k, typeof v === 'string' ? v : (v?.level?.id ?? v?.id ?? null)])
     .filter(([, v]) => typeof v === 'string');
 
+/** A brief as `briefIsLiveOn` reads it: its status and its window. A brief that isn't there never reaches the rule. */
+const briefRow = (v, ctx) => {
+  if (v === null || v === undefined) throw new Error('a brief that is not there is a 404 before its liveness is read');
+  return record({
+    module: 'scoutbox/rows/recruitment_briefs',
+    constructor: 'Row',
+    base: call(BASE, 'brief'),
+    fields: {
+      status: ['status', briefStatus],
+      activeFrom: ['active_from_date', option(string)],
+      activeUntil: ['active_until_date', option(string)],
+    },
+  })(v, ctx);
+};
+
 const DISCOVERY_MAP = {
+  // Today, when the suite gives none, is the UTC calendar day of the instant the recording stood at.
+  [`${DISCOVERY}#briefIsLiveOn`]: {
+    module: BR,
+    now: true,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(BR)}.is_live_on(${briefRow(c.args[0], ctx)}, ${string(c.args[1] ?? new Date(ctx.now).toISOString().slice(0, 10))})`,
+        bool(c.result),
+      ),
+  },
   [`${DISCOVERY}#normalizeMaterialChange`]: {
     module: SL,
     test: (c, ctx) => {
@@ -1531,8 +1556,13 @@ const reference = record({
     orgId: ['org_id', ident('org')],
     orgName: ['org_name', option(string)],
     createdAt: ['created_at', int],
+    status: ['status', vocab('scoutbox/rows/ver_references', 'status_pairs')],
+    provenanceStillCurrent: ['provenance_still_current', bool],
   },
   defaults: {
+    // The revision reads a reference's id, status and provenance alone.
+    org_id: (ctx) => `${ctx.use('scoutbox/rows/id')}.org("org")`,
+    created_at: '0',
     coach_name: 'None',
     role_at_time: 'None',
     org_name: 'None',
@@ -1593,6 +1623,9 @@ const achievement = record({
   },
   defaults: {
     player_id: anyPlayer,
+    // The revision reads an achievement's id, confirmation and withdrawal alone.
+    title: '""',
+    submitted_by: (ctx) => partyV('player', ctx),
     org_name: 'None',
     when_date: 'None',
     confirmation_provenance: 'None',
@@ -1871,6 +1904,117 @@ const full = record({
   },
 });
 
+// What `passportRevision` reads of a Passport: its content, never the projected fields, the viewer or the clock.
+const evidenceSource = record({
+  module: PR,
+  constructor: 'EvidenceSource',
+  fields: {
+    id: ['id', ident('scouting_evidence')],
+    tier: ['tier', vocab(EVIDENCE_ROWS, 'verification_status_pairs')],
+    superseded: ['superseded', bool],
+    expired: ['expired', bool],
+  },
+  defaults: {
+    claim_type: (ctx) => vocab(EVIDENCE_ROWS, 'claim_type_pairs')('statistic', ctx),
+    label: '""',
+    recorded_at: '0',
+    source_kind: (ctx) => vocab(EVIDENCE_ROWS, 'source_kind_pairs')('player', ctx),
+  },
+});
+const careerMark = record({
+  module: PR,
+  constructor: 'CareerMark',
+  fields: { id: ['id', ident('career_entry')], withdrawnAt: ['withdrawn', (v) => bool(v !== null && v !== undefined)] },
+  defaults: { withdrawn: 'False' },
+});
+/** A Combine Verified personal best. The Gleam record holds only verified ones: an invalidated result is absent. */
+const combineMark = (v, ctx) => {
+  if (v.combineVerified !== true) throw new Error(`cannot print ${JSON.stringify(v)} as a Combine Verified result`);
+  return `${ctx.use(PR)}.CombineMark(protocol_id: ${string(v.protocolId)}, protocol_version: ${int(v.protocolVersion)}, measured_value: ${float(v.measuredValue)})`;
+};
+const revisionFull = record({
+  module: PR,
+  constructor: 'Full',
+  fields: {
+    player: [
+      'player',
+      record({
+        module: PR,
+        constructor: 'PlayerFacts',
+        fields: { position: ['position', option(positionV)], level: ['level', option(levelV)], age: ['age', option(int)] },
+        defaults: { id: anyPlayer, name: '""', age: 'None', minor: 'False', position: 'None', city: 'None', level: 'None' },
+      }),
+    ],
+    identity: ['identity', identity],
+    status: [
+      'status',
+      record({
+        module: PR,
+        constructor: 'Status',
+        fields: {
+          currentClub: [
+            'current_club',
+            option(
+              record({
+                module: PR,
+                constructor: 'CurrentClub',
+                fields: { orgId: ['org_id', option(ident('org'))], provenance: ['provenance', provenance] },
+                defaults: { org_id: 'None', org_name: 'None', role: 'None', since: 'None' },
+              }),
+            ),
+          ],
+        },
+        defaults: {
+          current_club: 'None',
+          positions: 'None',
+          availability: 'None',
+          available_from: 'None',
+          representation: 'None',
+          identity: 'False',
+          conflicts: '[]',
+        },
+      }),
+    ],
+    history: [
+      'history',
+      record({ module: PR, constructor: 'History', fields: { rows: ['rows', list(historyRow)] }, defaults: { folded: '[]' } }),
+    ],
+    revisionSources: (v, ctx) => {
+      const { evidence = [], careerEntries = [], ...rest } = v;
+      if (Object.keys(rest).length) throw new Error(`no revision source ${Object.keys(rest)[0]}`);
+      return [
+        ['revision_evidence', list(evidenceSource)(evidence, ctx)],
+        ['revision_careers', list(careerMark)(careerEntries, ctx)],
+      ];
+    },
+    references: ['references', list(reference)],
+    achievements: ['achievements', list(achievement)],
+    combine: (v, ctx) => [['revision_combine', list(combineMark)(v?.results ?? [], ctx)]],
+  },
+  // Clock noise the suite adds to show the revision ignores it; the Gleam record has no place for it.
+  ignore: ['daysSinceLastEvidence', 'generatedAt', 'summary'],
+  defaults: {
+    prefs: 'None',
+    evidence_summary: (ctx) => `${ctx.use(PR)}.EvidenceSummary(0, 0, 0, 0, None, "")`,
+    references: '[]',
+    achievements: '[]',
+    development_summary: '#(0, 0)',
+    trials_summary: '#(0, 0)',
+    completeness: (ctx) => `${ctx.use(PR)}.Completeness("", [], 0, 0)`,
+    development_activity: 'None',
+    combine: 'None',
+    box_share_recruitment: 'False',
+    sharing_active: '0',
+    assessments: '[]',
+    trials: '[]',
+    timeline: '[]',
+    temporal_conflicts: '[]',
+    revision_evidence: '[]',
+    revision_careers: '[]',
+    revision_combine: '[]',
+  },
+});
+
 const PASSPORT_MAP = {
   [`${PASSPORT}#evId`]: passport('ev_id', [string, string, string], string),
   [`${PASSPORT}#provRank`]: passport('provenance_rank', [provenance], int),
@@ -1958,7 +2102,7 @@ const PASSPORT_MAP = {
       );
     },
   },
-  [`${PASSPORT}#passportRevision`]: passport('passport_revision', [full], string),
+  [`${PASSPORT}#passportRevision`]: passport('passport_revision', [revisionFull], string),
   [`${PASSPORT}#projectPassport`]: {
     module: PR,
     test: (c, ctx) => {
@@ -2719,6 +2863,7 @@ const instant = (v, ctx) =>
   v === undefined ? int(ctx.now) : typeof v?.$date === 'number' ? int(v.$date) : int(v);
 
 const AGE_MAP = {
+  ['domain.ts#adultAgeFor']: plainIn(AGE)('adult_age_for', [string], int),
   ['domain.ts#ageOn']: {
     module: AGE,
     now: true,
@@ -2753,7 +2898,63 @@ const WEBHOOK_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------- platform
+
+const REV = 'scoutbox/platform/rev';
+const LIMITS = 'scoutbox/platform/limits';
+const CONFIG = 'scoutbox/platform/config';
+
+/** A request body, recorded as the object the route would parse. */
+const body = (v, ctx) => `${ctx.use(BASE)}.body(${string(JSON.stringify(v ?? {}))})`;
+
+/** `{ rev, revAt, revBy: { userId, name } }` as the record's `Rev`: a revision names who moved it by name only. */
+const revRecord = (v, ctx) => {
+  const keys = Object.keys(v ?? {}).filter((k) => !['rev', 'revAt', 'revBy'].includes(k));
+  if (keys.length) throw new Error(`Rev has no field for the JavaScript key ${keys[0]}`);
+  return `${ctx.use(REV)}.Rev(rev: ${int(v.rev ?? 1)}, at: ${option(int)(v.revAt, ctx)}, by_name: ${option(string)(v.revBy?.name, ctx)})`;
+};
+
+const PLATFORM_MAP = {
+  ['domains/platform/concurrency.mjs#expectedRevOf']: {
+    module: REV,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(REV)}.expected(${body(c.args[0], ctx)})`,
+        c.result === null ? `Ok(${ctx.use(REV)}.Unguarded)` : `Ok(${ctx.use(REV)}.Expected(${int(c.result)}))`,
+      ),
+  },
+  ['domains/platform/concurrency.mjs#revMeta']: {
+    module: REV,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(REV)}.meta(${revRecord(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  ['domains/platform/rateLimit.mjs#rateLimitedBody']: {
+    module: LIMITS,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(LIMITS)}.limited_body(${code(LIMITS, 'action_name')(c.args[0], ctx)})`,
+        list((pair) => `#(${string(pair[0])}, ${string(pair[1])})`)(Object.entries(c.result), ctx),
+      ),
+  },
+  // The suite passes the environment it means; the Trust Score weights, when it names none, are this server's own
+  // (100, proved by passport's component_weights_total_exactly_100).
+  ['domains/platform/capabilities.mjs#productionConfigProblems']: {
+    module: CONFIG,
+    test: (c, ctx) => {
+      const { env = {}, trustWeightsTotal = null } = c.args[0] ?? {};
+      if (c.result.some((p) => p.fatal !== true)) throw new Error('a problem that is not fatal');
+      const pairs = Object.entries(env).map(([k, v]) => `#(${string(k)}, ${string(v)})`);
+      const get = `${ctx.use('gleam/list')}.key_find([${pairs.join(', ')}], _)`;
+      return eq(
+        `${ctx.use(CONFIG)}.problems(${get}, ${int(trustWeightsTotal ?? 100)})`,
+        list((p) => `${ctx.use(CONFIG)}.Problem(${string(p.code)}, ${string(p.message)})`)(c.result, ctx),
+      );
+    },
+  },
+};
+
 export const MAP = {
+  ...PLATFORM_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -2846,6 +3047,26 @@ export const MAP = {
  * has no entry in MAP, and its recorded calls get no test.
  */
 export const NO_COUNTERPART = {
+  ['domains/platform/concurrency.mjs#revOf']:
+    "A revision is a typed column: NOT NULL on every versioned table, and on a case present exactly when its Room is (the table's CHECK), so no record lacks one to default.",
+  ['domains/platform/concurrency.mjs#bumpRev']:
+    "Each domain moves its revision in its own UPDATE (rev = rev + 1, with who and when) inside the act's unit; there is no record to mutate. productionHardening's Room sections check it over HTTP.",
+  ['domains/platform/notificationPrefs.mjs#defaultPrefs']:
+    "The defaults are each entry's `default` in notification_prefs.categories, which spec_test proves equal to the CATEGORIES snapshot; a person with no row has emailIntent off (`effective`).",
+  ['domains/platform/eventRegistry.mjs#eventFingerprint']:
+    'No TypeScript route reads it: live sync neither dedupes nor coalesces by it, and nothing outside eventRegistry.mjs calls it.',
+  ['domains/platform/eventRegistry.mjs#minimizePayload']:
+    "An event's payload is its variant's fields, which live_test proves are the registry's payload keys: there is nothing to drop, and no event can carry a name outside the registry.",
+  ['domains/platform/eventRegistry.mjs#assertEventRegistry']:
+    "The registry is the Event type: every name an event can carry is in live_event.registered, which live_test proves is the registry's names, so there is nothing to check at boot.",
+  ['domains/platform/eventAudience.mjs#audienceFor']:
+    'An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE.',
+  ['domains/platform/eventAudience.mjs#unclassifiedEvents']:
+    'No event can carry a name outside the registry (live_event.registered, proved equal to it), so none is unclassified.',
+  ['domains/platform/integrity.mjs#integrityReport']:
+    "The report here is SQL over the tables (operator.integrity), not over collections: a Room's organisation is a foreign key and ids are primary keys, so ROOM_ORPHAN_ORG and the id duplicates can't happen. test/scoutbox/platform/integrity_test.gleam checks the open-Room rule on written rows.",
+  ['domains/platform/integrity.mjs#integritySummary']:
+    "operator.integrity counts by code as it reads (integrity_test), and there is no report with ids to summarise.",
   ['domains/development/hub/shared.mjs#parseDate']:
     "Every date the Hub reads is first judged by the request's shape (schemas.mjs `dueDate`), which refuses a malformed one before parseDate sees it; only the out-of-range instant reaches it, refused in hub_routes.",
   ['domains/development/hub/shared.mjs#scanPayloadForForbiddenFields']:
@@ -2871,6 +3092,17 @@ export const NO_COUNTERPART = {
 export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
+  ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
+  // Development throws on an emitted name the registry doesn't know; here no event can carry one (live_test).
+  ['domains/platform/eventRegistry.mjs#assertEventRegistry']: 'test/scoutbox/live_test.gleam',
+  ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',
+  ['domains/platform/concurrency.mjs#expectedRevOf']: 'test/scoutbox/rev_test.gleam',
+  ['domains/platform/notificationPrefs.mjs#createNotificationPrefs']: 'test/scoutbox/messaging/notification_prefs_test.gleam',
+  ['domains/platform/capabilities.mjs#buildCapabilityReport']: 'test/scoutbox/config_test.gleam',
+  // There is one limiter, in process, and no provider to choose or refuse; the capability report says it is not
+  // distributed (config_test).
+  ['domains/platform/rateLimit.mjs#createRateLimiter']: 'test/scoutbox/config_test.gleam',
+  ['domains/platform/rateLimit.mjs#memoryRateLimitProvider']: 'test/scoutbox/limits_test.gleam',
   ['domains/development/hub/permissions.mjs#planAccess']: 'test/scoutbox/development/hub_access_test.gleam',
   ...Object.fromEntries(
     ['mintShareSecret', 'normWhen'].map((f) => [`${PASSPORT}#${f}`, 'test/scoutbox/passport/passport_rules_test.gleam']),

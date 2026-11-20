@@ -63,6 +63,16 @@ pub fn a91b_a_real_adult_date_does_test() {
   assert age.is_adult("2004-03-14", "GB", 1_800_000_000_000) == True
 }
 
+// offersAdversarial: adultAgeFor — S-p3 GB 18, KR 19
+pub fn s_p3_gb_18_kr_19_test() {
+  assert age.adult_age_for("GB") == 18
+}
+
+// offersAdversarial: adultAgeFor — S-p3 GB 18, KR 19
+pub fn s_p3_gb_18_kr_19_2_test() {
+  assert age.adult_age_for("KR") == 19
+}
+
 // offersAdversarial: isAdult — [neg] S-p4 GB: the day before the 18th birthday is not an adult
 pub fn neg_s_p4_gb_the_day_before_the_18th_birthday_is_not_an_adult_test() {
   assert age.is_adult("2008-03-15", "GB", 1_773_489_600_000) == False

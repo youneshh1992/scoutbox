@@ -1,4 +1,5 @@
-//// An act bounded per owner (RATE_LIMIT_POLICY): its budget is spent per owner, within its window.
+//// An act bounded per owner (RATE_LIMIT_POLICY): its budget is spent per owner, within its window. The first test is
+//// also the port of the TypeScript memory provider's checks (`memoryRateLimitProvider`, productionHardening §15).
 
 import scoutbox/platform/limits.{EmailChallengeRequest}
 

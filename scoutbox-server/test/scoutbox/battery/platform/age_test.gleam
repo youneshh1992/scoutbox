@@ -34,6 +34,21 @@ pub fn and_on_a_real_29_february_the_maths_is_exact_test() {
   assert age.age_on("2008-02-29", 1_835_395_200_000) == Some(20)
 }
 
+// contracts: adultAgeFor — majority: 18 by default, 19 in Korea
+pub fn majority_18_by_default_19_in_korea_test() {
+  assert age.adult_age_for("GB") == 18
+}
+
+// contracts: adultAgeFor — majority: 18 by default, 19 in Korea
+pub fn majority_18_by_default_19_in_korea_2_test() {
+  assert age.adult_age_for("KR") == 19
+}
+
+// contracts: adultAgeFor — majority: 18 by default, 19 in Korea
+pub fn majority_18_by_default_19_in_korea_3_test() {
+  assert age.adult_age_for("XX") == 18
+}
+
 // contracts: isAdult — a British 18-year-old is an adult
 pub fn a_british_18_year_old_is_an_adult_test() {
   assert age.is_adult("2008-03-14", "GB", 1_773_446_400_000) == True

@@ -10,6 +10,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/platform/clock
+import scoutbox/platform/config.{type Config}
 import scoutbox/platform/http
 import scoutbox/platform/live_event
 import scoutbox/platform/migrations
@@ -116,102 +117,7 @@ pub fn capabilities(ctx: Ctx) -> Response {
               False -> "production"
             }),
           ),
-          #(
-            "capabilities",
-            json.object([
-              // The provider registry is served as the spec snapshot has it, so `production_cv` is configured, as in
-              // TypeScript; its analysis is a service of its own, and this server's stub reports the provider's
-              // health as unavailable (`cv_stub`).
-              #(
-                "production_cv",
-                json.object([
-                  #("state", json.string("configured")),
-                  #(
-                    "note",
-                    json.string(
-                      "Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.",
-                    ),
-                  ),
-                  #("serverSideObservation", json.bool(True)),
-                  #("syntheticEvaluation", json.string("passed")),
-                  #("realWorldValidation", json.string("not_completed")),
-                  #("combineVerifiedProtocols", json.preprocessed_array([])),
-                  #("combineVerificationAvailable", json.bool(False)),
-                ]),
-              ),
-              #(
-                "distributed_rate_limit",
-                state(
-                  "not_configured",
-                  "Limits are counted per process. With more than one instance behind a load balancer each instance allows the full quota.",
-                ),
-              ),
-              #(
-                "authoritative_identity_provider",
-                state(
-                  "not_configured",
-                  "Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.",
-                ),
-              ),
-              #(
-                "email_transport",
-                state(
-                  "local_outbox",
-                  "Without a transport, invitations and notifications are recorded in the local outbox and the delivery centre, and are not sent anywhere.",
-                ),
-              ),
-              #(
-                "object_storage",
-                state(
-                  "not_configured",
-                  "Media is stored on the local disk of this instance.",
-                ),
-              ),
-              #(
-                "media_signing_secret",
-                state(
-                  case ctx.config.media_secret != None {
-                    True -> "configured"
-                    False -> "not_configured"
-                  },
-                  "A per-deployment secret (MEDIA_SECRET). Without one, development signs with a random key per process, so links stop working after a restart; production refuses to start.",
-                ),
-              ),
-              #(
-                "box_cam_test_provider",
-                state(
-                  "not_configured",
-                  "The clearly-labelled simulated observer. Its results never count as production evidence.",
-                ),
-              ),
-              #("staff_sso", case dev {
-                True ->
-                  state(
-                    "test_only",
-                    "Only the local test identity provider is available; it exercises the relying-party logic and never links an account that was not invited.",
-                  )
-                False ->
-                  state(
-                    "not_configured",
-                    "No staff identity provider is configured; staff sign in with organisation credentials. The local test provider is disabled outside development.",
-                  )
-              }),
-              #(
-                "proxy_trust",
-                state(
-                  "not_configured",
-                  "No reverse proxy is trusted; the connecting socket address is the client address. Behind a platform proxy every client would share the proxy's address and per-IP limits would apply to everyone at once.",
-                ),
-              ),
-              #(
-                "core_identity_storage",
-                state(
-                  "live",
-                  "Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store's unit of work.",
-                ),
-              ),
-            ]),
-          ),
+          #("capabilities", capability_states(ctx.config)),
           #("schema", schema),
           #("dataLayer", data_layer),
           #("integrity", ctx.integrity),
@@ -260,6 +166,109 @@ pub fn capabilities(ctx: Ctx) -> Response {
       )
     }
   }
+}
+
+/// Each capability's state, from the settings alone (`buildCapabilityReport`'s `capabilities`). States and notes,
+/// never a setting's value.
+pub fn capability_states(config: Config) -> Json {
+  json.object([
+    // The provider registry is served as the spec snapshot has it, so `production_cv` is configured, as in
+    // TypeScript; its analysis is a service of its own, and this server's stub reports the provider's
+    // health as unavailable (`cv_stub`).
+    #(
+      "production_cv",
+      json.object([
+        #("state", json.string("configured")),
+        #(
+          "note",
+          json.string(
+            "Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.",
+          ),
+        ),
+        #("serverSideObservation", json.bool(True)),
+        #("syntheticEvaluation", json.string("passed")),
+        #("realWorldValidation", json.string("not_completed")),
+        #("combineVerifiedProtocols", json.preprocessed_array([])),
+        #("combineVerificationAvailable", json.bool(False)),
+      ]),
+    ),
+    #(
+      "distributed_rate_limit",
+      state(
+        "not_configured",
+        "Limits are counted per process. With more than one instance behind a load balancer each instance allows the full quota.",
+      ),
+    ),
+    #(
+      "authoritative_identity_provider",
+      state(
+        "not_configured",
+        "Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.",
+      ),
+    ),
+    // The TypeScript server sends through SendGrid when SENDGRID_API_KEY is set; this one has no transport (outbound
+    // providers other than webhooks are outside the port), so its mail is always the local outbox's.
+    #(
+      "email_transport",
+      state(
+        "local_outbox",
+        "Without a transport, invitations and notifications are recorded in the local outbox and the delivery centre, and are not sent anywhere.",
+      ),
+    ),
+    #(
+      "object_storage",
+      state(
+        "not_configured",
+        "Media is stored on the local disk of this instance.",
+      ),
+    ),
+    #(
+      "media_signing_secret",
+      state(
+        case config.media_secret != None {
+          True -> "configured"
+          False -> "not_configured"
+        },
+        "A per-deployment secret (MEDIA_SECRET). Without one, development signs with a random key per process, so links stop working after a restart; production refuses to start.",
+      ),
+    ),
+    #(
+      "box_cam_test_provider",
+      state(
+        case config.box_cam_test_provider {
+          True -> "test_only"
+          False -> "not_configured"
+        },
+        "The clearly-labelled simulated observer. Its results never count as production evidence.",
+      ),
+    ),
+    #("staff_sso", case config.dev_logins {
+      True ->
+        state(
+          "test_only",
+          "Only the local test identity provider is available; it exercises the relying-party logic and never links an account that was not invited.",
+        )
+      False ->
+        state(
+          "not_configured",
+          "No staff identity provider is configured; staff sign in with organisation credentials. The local test provider is disabled outside development.",
+        )
+    }),
+    #(
+      "proxy_trust",
+      state(
+        "not_configured",
+        "No reverse proxy is trusted; the connecting socket address is the client address. Behind a platform proxy every client would share the proxy's address and per-IP limits would apply to everyone at once.",
+      ),
+    ),
+    #(
+      "core_identity_storage",
+      state(
+        "live",
+        "Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store's unit of work.",
+      ),
+    ),
+  ])
 }
 
 fn read_report(read: Read, ctx: Ctx) -> Result(#(Json, Json), Fail(e)) {
@@ -349,7 +358,8 @@ fn read_report(read: Read, ctx: Ctx) -> Result(#(Json, Json), Fail(e)) {
 
 /// The invariants the tables' own keys can't state (domains/platform/integrity.mjs): one open Room per
 /// organisation and player, Rooms that name a live player, and a valid Room revision. Checked once at boot and
-/// reported on `/capabilities`, never repaired.
+/// reported on `/capabilities`, never repaired. Each open Room after the first for one organisation and player is
+/// one violation, as `integrityReport` counts them.
 pub fn integrity(read: Read) -> Result(Json, Fail(e)) {
   use counts <- result.map(
     store.query(
@@ -358,7 +368,7 @@ pub fn integrity(read: Read) -> Result(Json, Fail(e)) {
           named AS (SELECT DISTINCT r.player_id FROM rooms r JOIN players p ON p.id = r.player_id)
      SELECT
        (SELECT COUNT(*) FROM rooms) + (SELECT COUNT(*) FROM named) + (SELECT COUNT(*) FROM orgs),
-       (SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) AS n FROM rooms
+       (SELECT COALESCE(SUM(n - 1), 0) FROM (SELECT COUNT(*) AS n FROM rooms
           WHERE room_status NOT IN ('signed', 'withdrawn', 'archived', 'closed')
           GROUP BY org_id, player_id HAVING COUNT(*) > 1)),
        (SELECT COUNT(*) FROM rooms r WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = r.player_id)),

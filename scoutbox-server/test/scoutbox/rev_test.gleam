@@ -36,6 +36,9 @@ pub fn anything_else_is_refused_test() {
       Ok(_) -> False
     }
   }
+  // productionHardening §5: a non-numeric, fractional or negative token is malformed, never coerced to 0.
+  assert refused("{\"expectedRev\":\"soon\"}")
+  assert refused("{\"expectedRev\":2.5}")
   assert refused("{\"expectedRev\":-1}")
   assert refused("{\"expectedRev\":1.5}")
   assert refused("{\"expectedRev\":\"x\"}")

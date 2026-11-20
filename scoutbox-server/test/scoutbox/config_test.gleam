@@ -3,15 +3,17 @@
 //// through a real boot). Each test sets the variables it reads and restores them after.
 
 import envoy
+import gleam/json
 import gleam/list
 import gleam/string
 import scoutbox/platform/config
+import scoutbox/platform/operator
 
 /// Every variable `config.load` reads that these tests set.
 const read = [
   "NODE_ENV", "ADMIN_KEY", "MEDIA_SECRET", "SESSION_TTL_DAYS",
   "AGENT_VERIFICATION_TEST_PROVIDER", "SCOUTBOX_FAULTS", "SCOUTBOX_TEST_CLOCK",
-  "ALLOW_DEV_LOGINS", "S3_BUCKET",
+  "ALLOW_DEV_LOGINS", "S3_BUCKET", "BOX_CAM_TEST_PROVIDER", "SENDGRID_API_KEY",
 ]
 
 fn with_env(pairs: List(#(String, String)), run: fn() -> a) -> a {
@@ -98,4 +100,55 @@ pub fn the_session_lifetime_is_any_positive_number_of_days_test() {
   let assert Ok(c) = with_env([], config.load)
   assert c.session_ttl_ms == 30 * day
   assert !string.is_empty(c.media_key)
+}
+
+// ------------------------------------------------------------------------------------ the capability report
+
+/// The capability states a configuration reports, as JSON text (`buildCapabilityReport` in the TypeScript rules
+/// suite, §49 and §50).
+fn states(pairs: List(#(String, String))) -> String {
+  let assert Ok(c) = with_env(pairs, config.load)
+  json.to_string(operator.capability_states(c))
+}
+
+pub fn the_capability_report_carries_no_secret_value_test() {
+  let report =
+    states([
+      #("NODE_ENV", "production"),
+      #("ADMIN_KEY", "sweep-production-admin-key-0123"),
+      #("MEDIA_SECRET", "super-secret-value-for-the-report-test-0123"),
+      #("SENDGRID_API_KEY", "SG.synthetic-not-a-real-key"),
+    ])
+  assert !string.contains(report, "super-secret-value")
+  assert !string.contains(report, "SG.synthetic")
+  assert !string.contains(report, "sweep-production-admin-key")
+  assert string.contains(
+    report,
+    "\"media_signing_secret\":{\"state\":\"configured\"",
+  )
+  // This server has no SendGrid transport (outbound providers are outside the port), so its mail goes to the
+  // outbox whatever key is set, and the report says so; the TypeScript server reports `configured`.
+  assert string.contains(
+    report,
+    "\"email_transport\":{\"state\":\"local_outbox\"",
+  )
+  assert string.contains(
+    report,
+    "\"distributed_rate_limit\":{\"state\":\"not_configured\"",
+  )
+}
+
+pub fn the_simulated_observer_is_test_only_when_it_is_on_test() {
+  assert string.contains(
+    states([]),
+    "\"box_cam_test_provider\":{\"state\":\"not_configured\"",
+  )
+  assert string.contains(
+    states([#("BOX_CAM_TEST_PROVIDER", "1")]),
+    "\"box_cam_test_provider\":{\"state\":\"test_only\"",
+  )
+  assert string.contains(
+    states([]),
+    "\"media_signing_secret\":{\"state\":\"not_configured\"",
+  )
 }

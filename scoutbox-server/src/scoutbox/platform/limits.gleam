@@ -318,7 +318,7 @@ const review_decision_policy = Policy(max: 120, window_ms: 3_600_000)
 
 const policy_publish_policy = Policy(max: 10, window_ms: 86_400_000)
 
-fn action_name(action: Action) -> String {
+pub fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
     RoomCreate -> "room_create"

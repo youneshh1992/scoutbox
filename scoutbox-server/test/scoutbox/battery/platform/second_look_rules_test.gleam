@@ -41,6 +41,42 @@ pub fn second_look_orders_by_relevance_kind_then_the_latest_change_then_the_id_2
     == ["sl-4", "sl-3", "sl-1", "sl-2"]
 }
 
+// contracts: secondLookStatus — [neg] new but minor evidence 29 days after a dismissal stays quiet
+pub fn neg_new_but_minor_evidence_29_days_after_a_dismissal_stays_quiet_test() {
+  assert json.to_string(
+      second_look_rules.verdict_json(second_look_rules.verdict(
+        Some(second_look_rules.Handled(
+          status: second_look_items.Dismissed,
+          fingerprints: ["f1"],
+          dismissed_at: Some(1_786_708_800_000),
+          reviewed_at: None,
+          updated_at: 1_786_708_800_000,
+        )),
+        [#("f2", second_look_rules.EvidenceAdded)],
+        1_789_214_400_000,
+      )),
+    )
+    == "{\"action\":\"suppress\",\"reason\":\"within_cooldown\"}"
+}
+
+// contracts: secondLookStatus — at exactly 30 days the cooldown has ended
+pub fn at_exactly_30_days_the_cooldown_has_ended_test() {
+  assert json.to_string(
+      second_look_rules.verdict_json(second_look_rules.verdict(
+        Some(second_look_rules.Handled(
+          status: second_look_items.Dismissed,
+          fingerprints: ["f1"],
+          dismissed_at: Some(1_786_622_400_000),
+          reviewed_at: None,
+          updated_at: 1_786_622_400_000,
+        )),
+        [#("f2", second_look_rules.EvidenceAdded)],
+        1_789_214_400_000,
+      )),
+    )
+    == "{\"action\":\"reopen\",\"reason\":\"materially_new_evidence\",\"fresh\":[\"f2\"]}"
+}
+
 // contracts: secondLookStatus — [neg] the SAME evidence never comes back, whatever the date
 pub fn neg_the_same_evidence_never_comes_back_whatever_the_date_test() {
   assert json.to_string(

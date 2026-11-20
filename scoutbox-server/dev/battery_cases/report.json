@@ -729,7 +729,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       }
     ]
   },
@@ -1277,7 +1277,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/notificationPrefs.mjs#categoryOf",
@@ -1410,7 +1410,7 @@
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#isRegistered",
@@ -1424,7 +1424,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/notificationPrefs.mjs#categoryOf",
@@ -1881,7 +1881,7 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#ageOn",
@@ -1902,17 +1902,17 @@
       {
         "function": "domains/discovery/shared.mjs#briefIsLiveOn",
         "calls": 17,
-        "cases": 14,
-        "handPort": {},
-        "status": "pending"
+        "cases": 13,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a brief that is not there is a 404 before its liveness is read": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#orderNobodyMissed",
         "calls": 10,
-        "cases": 0,
-        "handPort": {
-          "Gleam's types can't hold its arguments: cannot print \"established\" as a value of scoutbox/vocab/trust_band.pairs": 10
-        },
+        "cases": 10,
+        "handPort": {},
         "status": "generated"
       },
       {
@@ -1932,10 +1932,8 @@
       {
         "function": "domains/discovery/shared.mjs#secondLookStatus",
         "calls": 3,
-        "cases": 1,
-        "handPort": {
-          "Gleam's types can't hold its arguments: cannot print \"general_update\" as a value of scoutbox/discovery/second_look_rules.change_type_pairs": 2
-        },
+        "cases": 3,
+        "handPort": {},
         "status": "generated"
       },
       {
@@ -1950,7 +1948,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
@@ -1959,35 +1957,35 @@
         "handPort": {
           "throws Error without a code": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#eventFingerprint",
         "calls": 9,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#minimizePayload",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/integrity.mjs#integrityReport",
         "calls": 8,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/integrity.mjs#integritySummary",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/notificationPrefs.mjs#categoryOf",
@@ -2010,7 +2008,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       }
     ]
   },
@@ -2022,7 +2020,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#ageOn",
@@ -2234,7 +2232,7 @@
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/discovery/shared.mjs#validateRecruitmentBrief",
@@ -2521,13 +2519,8 @@
       {
         "function": "domains/passport/shared.mjs#passportRevision",
         "calls": 10,
-        "cases": 0,
-        "handPort": {
-          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":false,\"assurance\":\"player_submitted\"} as an identity": 6,
-          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":true,\"assurance\":\"authoritative_registry\"} as an identity": 1,
-          "Gleam's types can't hold its arguments: cannot print {\"confirmed\":true,\"assurance\":\"scoutbox_reviewed\"} as an identity": 2,
-          "Gleam's types can't hold its arguments: PlayerFacts has no field for the JavaScript key ageToday": 1
-        },
+        "cases": 8,
+        "handPort": {},
         "status": "generated"
       },
       {
@@ -2545,14 +2538,14 @@
         "calls": 11,
         "cases": 11,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/concurrency.mjs#bumpRev",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/concurrency.mjs#expectedRevOf",
@@ -2561,35 +2554,35 @@
         "handPort": {
           "result is NaN": 3
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/concurrency.mjs#revMeta",
         "calls": 3,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/concurrency.mjs#revOf",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventAudience.mjs#audienceFor",
         "calls": 4,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/eventAudience.mjs#unclassifiedEvents",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/platform/rateLimit.mjs#createRateLimiter",
@@ -2615,7 +2608,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -3650,7 +3643,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isAdult",

@@ -349,14 +349,21 @@ are for surprising facts or points that later work depends on, not implementatio
    1. `platform/contracts` and `platform/productionHardening`. Both check hardening over routes that are mostly in
       already. The gaps seen so far are `/capabilities` and its honesty about the deployment, `/source-changes`,
       the CORS allowlist, the baseline security headers, the oversized-body refusal, and the production boot
-      refusing simulated faults. Then their rule cases (36 and 27) and hand-port calls (16 and 22). [Both
-      batteries pass and are on `BATTERIES`; the rule cases and hand-port calls are left.] Most gaps were already
+      refusing simulated faults. Then their rule cases (36 and 27) and hand-port calls (16 and 22). [**done**:
+      both batteries pass and are on `BATTERIES`, and the ledger has both done: 82 cases generated, 17 hand-port
+      calls ported, and the rest closed in `NO_COUNTERPART`, mostly because the typed `Event` is the registry.] Most gaps were already
       closed. What was missing: a decision didn't re-check its Room's rev inside its unit, so two racing decisions
       both landed; CORS (`platform/cors`); `Retry-After` on a 429; and the request instrumentation
       (`platform/instrument`: correlation ids, the request log, the counters), which stands after the fault layer
       as TypeScript's does, so a preflight, a simulated fault or an unreadable body isn't counted
       (docs/known-issues.md). `events.registered` counts the registry's 98 names, declared in `live_event`, though
-      only 69 of them can be emitted yet.
+      only 69 of them can be emitted yet. Several rules-suite fixtures used values TypeScript can never produce
+      (a trust band `established`, a change type `general_update`, a Passport identity other than unchecked or a
+      ScoutBox document review, a reference status `live`, an evidence tier `verified`, a `When` without its
+      precision), so they were fixed at source on `battery-untangle`. The integrity report counted every open
+      Room in a duplicated group, where TypeScript counts each one after the first. `config.problems` is now
+      pure and checks the Trust Score weights in every mode, and `box_cam_test_provider` reports `test_only` when
+      it is on. Mail is always the local outbox here (no SendGrid), so `email_transport` never says `configured`.
    2. `platform/dates`. First the live groups Q–T (65 checks): sign-up's dates of birth at both doors, the taxonomy
       on every hardened route, authorization decided before a date is read, and normalised values surviving a
       restart. Then its 2,175 rule cases and 97 hand-port calls, rule by rule. Many of the calls that can't be
