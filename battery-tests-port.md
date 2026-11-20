@@ -362,7 +362,7 @@ are for surprising facts or points that later work depends on, not implementatio
     Country stays text: it is free text of 1 to 40 characters on both servers, and a closed type would first need
     the TypeScript server to take a code list.
 
-Throughout the port, map the `dates` rule cases (2,253 pending) as the date rules are ported, since every domain
+Throughout the port, map the `dates` rule cases (2,175 pending) as the date rules are ported, since every domain
 uses them.
 
 Patterns established on the way. New domains should reuse them, and `CLAUDE.md` holds the rules:
