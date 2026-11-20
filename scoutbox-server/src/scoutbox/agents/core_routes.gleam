@@ -1155,7 +1155,8 @@ pub fn me(ctx: Ctx, a: OrgAccess) -> Response {
           #("role", json.string(a.user.role)),
         ]),
       ),
-      #("org", json.object(orgs.view(a.org))),
+      // Only a Grassroots club sets up looking-for positions or a federation check.
+      #("org", json.object(orgs.view(a.org, orgs.no_setup))),
       #(
         "affiliation",
         json.object(list.append(
@@ -2069,7 +2070,8 @@ pub fn agency(ctx: Ctx, a: OrgAccess) -> Response {
   http.json(
     200,
     json.object([
-      #("org", json.object(orgs.view(a.org))),
+      // Only a Grassroots club sets up looking-for positions or a federation check.
+      #("org", json.object(orgs.view(a.org, orgs.no_setup))),
       #("settings", settings_json(settings)),
       #(
         "members",

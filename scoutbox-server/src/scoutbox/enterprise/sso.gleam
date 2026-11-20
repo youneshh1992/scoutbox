@@ -489,14 +489,15 @@ fn signed_in(
                   staff.link_sso(tx, user.id, sub)
                   |> store.map_refusal(fn(_) { LinkConflict })
               })
-              use token <- result.map(sessions.create_via(
+              use token <- result.try(sessions.create_via(
                 tx,
                 sessions.OrgStaff(org.id, user.id),
                 now,
                 ctx.config.session_ttl_ms,
                 Some(session_row.Sso),
               ))
-              #(org, user, token)
+              use setup <- result.map(orgs.setup(read, org.id))
+              #(org, setup, user, token)
             }
           }
         }
@@ -504,13 +505,13 @@ fn signed_in(
       }
     })
   case outcome {
-    Ok(#(org, user, token)) ->
+    Ok(#(org, setup, user, token)) ->
       http.json(
         200,
         json.object([
           #("userId", id.org_user_json(user.id)),
           #("role", json.string(user.role)),
-          #("org", json.object(orgs.view(org))),
+          #("org", json.object(orgs.view(org, setup))),
           #("token", json.string(token)),
           #("ignoredClaims", case claims.groups {
             [] -> json.null()

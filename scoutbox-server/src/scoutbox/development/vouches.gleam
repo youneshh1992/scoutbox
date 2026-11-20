@@ -4,6 +4,7 @@
 
 import gleam/dynamic/decode
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
@@ -18,6 +19,8 @@ import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/pages
+import scoutbox/platform/paging
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
@@ -25,6 +28,7 @@ import scoutbox/rows/vouches as row
 import scoutbox/safety/audit
 import scoutbox/safety/moderate
 import scoutbox/scouting/coaches
+import scoutbox/verification/vouch_view
 import scoutbox/vocab/audience
 import scoutbox/vocab/playing_level
 import sqlight
@@ -388,6 +392,49 @@ pub fn withdraw(ctx: Ctx, req: Request, vouch_id: id.VouchId) -> Response {
           )
         Error(failure) -> coaches.failed(failure)
       }
+    }
+  }
+}
+
+/// `GET /admin/vouches`: every reference, newest first. Trust & Safety sees the coach's e-mail, never the code.
+pub fn admin_list(ctx: Ctx, req: Request) -> Response {
+  use page <- pages.strict(req, [paging.IntKind])
+  let before = case page.after {
+    Some([paging.IntKey(rowid)]) -> Some(rowid)
+    _ -> None
+  }
+  let listed =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT "
+          <> row.columns
+          <> ", rowid FROM vouches WHERE (? IS NULL OR rowid < ?) ORDER BY rowid DESC LIMIT ?",
+        [
+          sqlight.nullable(sqlight.int, before),
+          sqlight.nullable(sqlight.int, before),
+          sqlight.int(page.limit + 1),
+        ],
+        {
+          use v <- decode.then(row.decoder())
+          use rowid <- decode.field(row.width, decode.int)
+          decode.success(#(v, rowid))
+        },
+      )
+    })
+  case listed {
+    Error(failure) -> http.internal(failure)
+    Ok(rows) -> {
+      let #(items, next) =
+        paging.page_of(rows, page.limit, fn(r) { [paging.IntKey(r.1)] })
+      pages.respond(items, next, fn(r) {
+        let v = r.0
+        json.object(
+          list.append(vouch_view.fields(v), [
+            #("coachEmail", json.nullable(v.coach_email, json.string)),
+          ]),
+        )
+      })
     }
   }
 }

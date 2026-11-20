@@ -612,6 +612,26 @@ pub fn number(min: Int, max: Int) -> Check(Float) {
   }
 }
 
+/// A number of at least `min`, with no upper bound (valibot's `pipe(number(), minValue(min))`).
+pub fn number_at_least(min: Int) -> Check(Float) {
+  fn(v) {
+    case number_value(v) {
+      Error(e) -> Error(e)
+      Ok(n) ->
+        case n <. int.to_float(min) {
+          True ->
+            Error(
+              Issue(
+                ..issue(TooSmall, "must be at least " <> int.to_string(min)),
+                min: Some(min),
+              ),
+            )
+          False -> Ok(n)
+        }
+    }
+  }
+}
+
 /// A whole number from `min` to `max` (JavaScript's safe integers: `4.0` is the whole number 4).
 pub fn whole_number(min: Int, max: Int) -> Check(Int) {
   fn(v) {

@@ -239,9 +239,10 @@ pub fn resolve(ctx: Ctx, req: Request, report_id: id.ReportId) -> Response {
 
 /// The organisation as the console shows it: its view and whether it is safeguarding-certified now.
 fn org_standing(read: Read, org: Org) -> Result(json.Json, store.Fail(e)) {
-  use certified <- result.map(orgs.safeguarding_certified(read, org))
+  use certified <- result.try(orgs.safeguarding_certified(read, org))
+  use setup <- result.map(orgs.setup(read, org.id))
   json.object(
-    list.append(orgs.view(org), [
+    list.append(orgs.view(org, setup), [
       #("safeguardingCertified", json.bool(certified)),
     ]),
   )

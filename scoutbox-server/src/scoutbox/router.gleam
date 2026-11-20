@@ -28,8 +28,10 @@ import scoutbox/development/combine_routes
 import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
 import scoutbox/development/grassroots_club
+import scoutbox/development/grassroots_journey
 import scoutbox/development/hub_routes
 import scoutbox/development/objectives
+import scoutbox/development/open_days
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
 import scoutbox/discovery/directory
@@ -1025,10 +1027,40 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           }
         ["matchday"] ->
           only(req, Post, fn() { grassroots_club.log_matchday(ctx, req, org) })
-        ["open-trials"] ->
+        ["matchdays"] ->
+          only(req, Get, fn() { grassroots_club.matchdays(ctx, req, org) })
+        ["squad", eid, "release"] ->
           only(req, Post, fn() {
-            grassroots_club.post_open_trial(ctx, req, org)
+            grassroots_club.release(ctx, req, org, id.squad_entry(eid))
           })
+        ["pathway-record"] ->
+          only(req, Get, fn() { grassroots_club.pathway(ctx, org) })
+        ["friendlies", fid, "respond"] ->
+          only(req, Post, fn() {
+            grassroots_club.respond(ctx, req, org, id.friendly(fid))
+          })
+        ["open-trials"] ->
+          case req.method {
+            Get -> open_days.list_for_org(ctx, req, org)
+            Post -> open_days.post(ctx, req, org)
+            _ -> not_found()
+          }
+        ["open-trials", tid] ->
+          only(req, Delete, fn() {
+            open_days.delete(ctx, org, id.open_trial(tid))
+          })
+        ["open-trials", tid, "registrations", rid, "outcome"] ->
+          only(req, Post, fn() {
+            open_days.outcome(
+              ctx,
+              req,
+              org,
+              id.open_trial(tid),
+              id.open_trial_registration(rid),
+            )
+          })
+        ["looking-for"] ->
+          only(req, Post, fn() { grassroots_club.looking_for(ctx, req, org) })
         ["opportunities"] ->
           case req.method {
             Get -> opportunities.list_for_org(ctx, req, org)
@@ -1070,7 +1102,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             suitability.set_structured(ctx, req, org, id.opportunity(oid))
           })
         ["friendlies"] ->
-          only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
+          case req.method {
+            Get -> grassroots_club.friendlies(ctx, req, org)
+            Post -> grassroots_club.post_friendly(ctx, req, org)
+            _ -> not_found()
+          }
         ["searches"] ->
           case req.method {
             Get -> saved_searches.club_list(ctx, org)
@@ -1464,6 +1500,24 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["benchmarks"] ->
           only(req, Get, fn() { benchmarks.player(ctx, player) })
+        ["programme"] ->
+          case req.method {
+            Get -> grassroots_journey.programme(player)
+            Post -> grassroots_journey.select_programme(ctx, req, player)
+            _ -> not_found()
+          }
+        ["open-trials", tid, "register"] ->
+          only(req, Post, fn() {
+            open_days.player_register(ctx, req, player, id.open_trial(tid))
+          })
+        ["opportunities"] ->
+          only(req, Get, fn() { open_days.radar(ctx, player) })
+        ["season-wrap"] ->
+          only(req, Get, fn() { grassroots_journey.season_wrap(ctx, player) })
+        ["programme", "sessions", sid, "complete"] ->
+          only(req, Post, fn() {
+            grassroots_journey.complete_session(ctx, req, player, sid)
+          })
         ["football-category"] ->
           only(req, Post, fn() {
             follow_ups.football_category(ctx, req, player)
@@ -1608,6 +1662,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["medical", "share"] ->
           only(req, Post, fn() { record.medical_share(ctx, req, player) })
         ["stats"] -> only(req, Post, fn() { record.stats(ctx, req, player) })
+        ["location"] ->
+          only(req, Post, fn() { record.location(ctx, req, player) })
+        ["drills", did, "complete"] ->
+          only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
         ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
         ["medical", "records"] ->
           only(req, Post, fn() { record.medical_record(ctx, req, player) })
@@ -1885,6 +1943,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "passport"] ->
           only(req, Get, fn() {
             passport_routes.guardian_passport(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "open-trials"] ->
+          only(req, Get, fn() {
+            use child <- record.own_child(ctx, guardian, id.player(cid))
+            open_days.for_child(ctx, child)
+          })
+        ["open-trials", tid, "register"] ->
+          only(req, Post, fn() {
+            open_days.guardian_register(ctx, req, guardian, id.open_trial(tid))
           })
         ["followups"] ->
           only(req, Get, fn() { follow_ups.guardian_list(ctx, guardian) })
@@ -2338,6 +2405,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             passport_routes.admin_resolve(ctx, req, id.evidence_dispute(did))
           })
+        ["vouches"] -> only(req, Get, fn() { vouches.admin_list(ctx, req) })
         ["vouches", vid, "withdraw"] ->
           only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
         ["drill-guidance"] ->
@@ -2498,6 +2566,8 @@ fn verification_org(
       only(req, Post, fn() {
         club_checks.request_email_challenge(ctx, req, org)
       })
+    ["federation"] ->
+      only(req, Post, fn() { club_checks.submit_federation(ctx, req, org) })
     ["email", "confirm"] ->
       only(req, Post, fn() {
         contract.rerun_on_stale(req, club_checks.confirm_email_challenge(

@@ -203,7 +203,8 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
                 ctx.config.session_ttl_ms,
               ))
               use certified <- result.try(orgs.safeguarding_certified(read, org))
-              Ok(SignedIn(user, token, certified, role_note))
+              use setup <- result.try(orgs.setup(read, org.id))
+              Ok(SignedIn(user, token, certified, setup, role_note))
             }
           }
         })
@@ -214,8 +215,8 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
             "USER_REMOVED",
             "This staff member's access was removed by the organisation.",
           )
-        Ok(SignedIn(user, token, certified, role_note)) ->
-          signed_in(org, user, token, certified, role_note)
+        Ok(SignedIn(user, token, certified, setup, role_note)) ->
+          signed_in(org, setup, user, token, certified, role_note)
         Error(store.Refused(StaffNotProvisioned)) ->
           http.error_message(
             403,
@@ -244,7 +245,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
 
 type Outcome {
   Removed
-  SignedIn(Staff, String, Bool, Option(String))
+  SignedIn(Staff, String, Bool, orgs.Setup, Option(String))
 }
 
 /// A credentialed organisation's password, checked before the unit: a hash takes about half a second, and a unit
@@ -427,6 +428,7 @@ fn provision(
 
 fn signed_in(
   org: Org,
+  setup: orgs.Setup,
   user: Staff,
   token: String,
   certified: Bool,
@@ -452,7 +454,7 @@ fn signed_in(
       #(
         "org",
         json.object(
-          list.append(orgs.view(org), [
+          list.append(orgs.view(org, setup), [
             #("safeguardingCertified", json.bool(certified)),
           ]),
         ),

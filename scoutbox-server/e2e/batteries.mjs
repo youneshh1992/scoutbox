@@ -53,4 +53,5 @@ export const BATTERIES = [
   'platform/contracts',
   'platform/productionHardening',
   'platform/dates',
+  'platform/api',
 ];

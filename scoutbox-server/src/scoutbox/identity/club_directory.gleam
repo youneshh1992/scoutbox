@@ -1,8 +1,6 @@
 //// The public club directory (`GET /orgs/directory`, domains/identity/orgs.mjs): verified identity and how clubs
-//// actually behave (trials run, reports filed, report turnaround). Aggregates only: no trial is named.
-////
-//// Not ported yet: a Grassroots club's pathway record (`progressed`, `pathwayClub`), which reads the signings,
-//// open days and squads.
+//// actually behave (trials run, reports filed, report turnaround), and a Grassroots club's pathway record.
+//// Aggregates only: no trial is named.
 
 import gleam/float
 import gleam/int
@@ -11,6 +9,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/development/grassroots_club
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/http
 import scoutbox/platform/pages
@@ -36,7 +35,13 @@ fn tenths(x: Float) -> Json {
 
 fn entry(read: Read, o: Org) -> Result(Json, Fail(e)) {
   use all <- result.try(trials.for_org(read, o.id))
-  use certified <- result.map(orgs.safeguarding_certified(read, o))
+  use certified <- result.try(orgs.safeguarding_certified(read, o))
+  use pathway <- result.map(case orgs.is_grassroots(o) {
+    True ->
+      grassroots_club.pathway_record(read, o.id)
+      |> result.map(grassroots_club.pathway_fields)
+    False -> Ok([])
+  })
   let reported =
     list.filter_map(all, fn(t) {
       case t.row.status, t.report {
@@ -63,6 +68,7 @@ fn entry(read: Read, o: Org) -> Result(Json, Fail(e)) {
     #("trialsRun", json.int(list.length(all))),
     #("reportsFiled", json.int(list.length(reported))),
     #("avgReportDays", option.unwrap(avg, json.null())),
+    ..pathway
   ])
 }
 

@@ -13,11 +13,13 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/development/activity
+import scoutbox/development/benchmarks
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players.{type Player}
 import scoutbox/platform/clock
 import scoutbox/platform/http
+import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Tx}
@@ -26,6 +28,7 @@ import scoutbox/platform/zones
 import scoutbox/recruitment/signing_reads
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/player_drill_results as drill_result_row
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
 import scoutbox/safety/audit
@@ -55,8 +58,6 @@ fn act(
 }
 
 /// `GET /player/me`.
-///
-/// Not ported yet: the published coach vouches (verification).
 pub fn me(p: PlayerAccess) -> Response {
   let now = clock.now_ms()
   let player = p.player
@@ -215,6 +216,7 @@ pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           _,
           p.player.row.id,
           clock.now_ms(),
+          None,
         ))
       {
         Error(failure) -> http.internal(failure)
@@ -404,7 +406,11 @@ pub fn badges(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use badges <- input.field(
       "badges",
-      input.required(input.list_of(input.required_text(badge_max), badges_max)),
+      input.required(input.items_between(
+        input.required_text(badge_max),
+        0,
+        badges_max,
+      )),
     )
     input.done(badges)
   }
@@ -996,5 +1002,103 @@ pub fn medical_record(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   case stored {
     Ok(p) -> http.json(201, players.medical_view(p))
     Error(failure) -> http.internal(failure)
+  }
+}
+
+type Point {
+  Point(lat: Float, lng: Float)
+}
+
+/// `POST /player/location`: the point the Grassroots radius is measured from.
+///
+/// Not ported yet: the live 'players' event.
+pub fn location(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  let shape = {
+    use lat <- input.field("lat", input.required(input.number(-90, 90)))
+    use lng <- input.field("lng", input.required(input.number(-180, 180)))
+    input.done(Point(lat:, lng:))
+  }
+  use at <- http.body(req, shape, [
+    #("lat", "BAD_COORDINATES"),
+    #("lng", "BAD_COORDINATES"),
+  ])
+  act(ctx, players.set_location(_, p.player.row.id, at.lat, at.lng), fn(_) {
+    json.object([#("ok", json.bool(True))])
+  })
+}
+
+type DrillDone {
+  DrillDone(value: Option(Float), video: Option(String))
+}
+
+/// `POST /player/drills/:id/complete`: the drill is done, and a measured result is kept, verified when it came
+/// with video.
+///
+/// Not ported yet: the video itself, and the live 'players' event.
+pub fn complete_drill(
+  ctx: Ctx,
+  req: Request,
+  p: PlayerAccess,
+  drill_id: String,
+) -> Response {
+  case list.find(benchmarks.drills, fn(d) { d.id == drill_id }) {
+    Error(_) -> http.error(404, "DRILL_NOT_FOUND")
+    Ok(drill) -> {
+      let shape = {
+        use value <- input.field(
+          "value",
+          input.nullish(input.number_at_least(0)),
+        )
+        use video <- input.field(
+          "videoDataUrl",
+          input.nullish(input.text(100_000_000)),
+        )
+        input.done(DrillDone(value:, video:))
+      }
+      use body <- http.body(req, shape, [#("value", "BAD_VALUE")])
+      let me = p.player.row.id
+      let now = clock.now_ms()
+      act(
+        ctx,
+        fn(tx) {
+          use _ <- result.try(case list.contains(p.player.drills, drill.id) {
+            True -> Ok(Nil)
+            False -> players.record_drill(tx, me, drill.id)
+          })
+          use _ <- result.try(case body.value {
+            None -> Ok(Nil)
+            Some(value) -> {
+              use result_id <- result.try(ids.next(tx, "combine"))
+              players.add_drill_result(
+                tx,
+                me,
+                drill_result_row.Row(
+                  id: id.drill_result(result_id),
+                  player_id: me,
+                  position: 0,
+                  drill_id: drill.id,
+                  drill_name: Some(drill.name),
+                  metric: drill.metric,
+                  unit: Some(drill.unit),
+                  value:,
+                  verified: body.video != None,
+                  recorded_at: now,
+                ),
+              )
+            }
+          })
+          activity.record(tx, me, now)
+        },
+        fn(stored) {
+          json.object([
+            #("drills", json.array(stored.drills, json.string)),
+            #(
+              "drillResults",
+              json.array(stored.drill_results, players.drill_result_json),
+            ),
+          ])
+        },
+      )
+    }
   }
 }

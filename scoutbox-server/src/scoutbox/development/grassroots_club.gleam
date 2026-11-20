@@ -1,9 +1,8 @@
-//// A grassroots club's own operations (domains/development/grassrootsClub.mjs): its squad, its open trial days
-//// and the friendlies board. Only a club on ScoutBox Grassroots has them.
+//// A grassroots club's own operations (domains/development/grassrootsClub.mjs): its squad, its match days, the
+//// positions it is looking for, its pathway record and the friendlies board. Its open days are `open_days`. Only
+//// a club on ScoutBox Grassroots has them.
 ////
-//// Not ported yet: the squad's release; the match days' list; listing, editing and deleting
-//// open days, their registrations and outcomes; the friendlies board's list and responses; the `openTrials` and
-//// `friendlies` live events.
+//// Not ported yet: the `friendlies`, `orgs` and `players` live events.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -19,27 +18,34 @@ import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
+import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/store.{type Read}
+import scoutbox/platform/json_text
+import scoutbox/platform/pages
+import scoutbox/platform/paging
+import scoutbox/platform/sql
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal.{type Day}
+import scoutbox/recruitment/signing_reads
 import scoutbox/rows/friendlies as friendly_row
+import scoutbox/rows/friendly_responses as response_row
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/matchday_players as matchday_player_row
 import scoutbox/rows/matchdays as matchday_row
-import scoutbox/rows/open_trial_positions as position_row
-import scoutbox/rows/open_trials as trial_row
 import scoutbox/rows/org_squad_members as squad_row
 import scoutbox/rows/orgs as org_row
+import scoutbox/rows/players as player_row
+import scoutbox/rows/vouches as vouch_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/vocab/audience
+import scoutbox/vocab/availability
+import scoutbox/vocab/position
 import sqlight
 import wisp.{type Request, type Response}
-
-const title_max = 160
 
 const venue_max = 160
 
@@ -47,15 +53,12 @@ const age_group_max = 40
 
 const notes_max = 2000
 
-const position_max = 40
-
-const positions_max = 20
-
 const squad_name_max = 120
 
 const squad_position_max = 40
 
-fn grassroots_only(a: OrgAccess, next: fn() -> Response) -> Response {
+/// Answers 403 for a club not on ScoutBox Grassroots.
+pub fn grassroots_only(a: OrgAccess, next: fn() -> Response) -> Response {
   case a.org.level {
     Some(org_row.LevelGrassroots) -> next()
     _ ->
@@ -67,7 +70,7 @@ fn grassroots_only(a: OrgAccess, next: fn() -> Response) -> Response {
   }
 }
 
-fn context(kind: String, a: OrgAccess) -> audit.Context {
+pub fn context(kind: String, a: OrgAccess) -> audit.Context {
   audit.Context(
     kind:,
     player_id: None,
@@ -79,7 +82,7 @@ fn context(kind: String, a: OrgAccess) -> audit.Context {
 }
 
 /// Moderates `notes` when there are any.
-fn moderated(
+pub fn moderated(
   ctx: Ctx,
   notes: Option(String),
   context: audit.Context,
@@ -92,7 +95,7 @@ fn moderated(
 }
 
 /// Trimmed, or `default` when nothing is left.
-fn trimmed_or(text: Option(String), default: String) -> String {
+pub fn trimmed_or(text: Option(String), default: String) -> String {
   case option.map(text, string.trim) {
     Some("") | None -> default
     Some(t) -> t
@@ -295,166 +298,6 @@ fn squad_view(read: Read, org_id: id.OrgId) -> Result(Json, store.Fail(e)) {
     ),
     #("gaps", json.array(gaps, json.string)),
     #("suggestedLookingFor", json.array(suggested, json.string)),
-  ])
-}
-
-// ------------------------------------------------------------------------------------------- open trial days
-
-type OpenTrial {
-  OpenTrial(
-    title: Option(String),
-    date: Option(Day),
-    venue: Option(String),
-    age_group: Option(String),
-    positions: Option(List(String)),
-    notes: Option(String),
-  )
-}
-
-/// `POST /org/open-trials`. No ghosting: registrants of a past open day still waiting for an answer block the
-/// next posting, as unfiled trial reports block new trials.
-pub fn post_open_trial(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
-  use <- grassroots_only(a)
-  let shape = {
-    use title <- input.field("title", input.nullish(input.text(title_max)))
-    use date <- input.field("date", input.nullish(input.day_or_blank()))
-    use venue <- input.field("venue", input.nullish(input.text(venue_max)))
-    use age_group <- input.field(
-      "ageGroup",
-      input.nullish(input.text(age_group_max)),
-    )
-    use positions <- input.field(
-      "positions",
-      input.nullish(input.list_of(
-        input.required_text(position_max),
-        positions_max,
-      )),
-    )
-    use notes <- input.field("notes", input.nullish(input.text(notes_max)))
-    input.done(OpenTrial(
-      title:,
-      date: option.flatten(date),
-      venue:,
-      age_group:,
-      positions:,
-      notes:,
-    ))
-  }
-  use body <- http.body(req, shape, [])
-  let now = clock.now_ms()
-  case
-    store.read(ctx.store, unresolved_before(_, a.org.id, clock.iso_day(now)))
-  {
-    Error(failure) -> http.internal(failure)
-    Ok(unresolved) if unresolved > 0 ->
-      http.error_message(
-        409,
-        "OUTCOMES_OUTSTANDING",
-        int.to_string(unresolved)
-          <> " player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.",
-      )
-    Ok(_) ->
-      case input.filled(body.title), body.date, input.filled(body.venue) {
-        Some(_), Some(date), Some(_) -> {
-          let date = temporal.day_text(date)
-          use <- moderated(ctx, body.notes, context("open_trial_notes", a))
-          let wanted =
-            option.unwrap(body.positions, [])
-            |> list.map(string.trim)
-            |> list.unique
-          let posted =
-            store.unit(ctx.store, fn(tx) {
-              use trial_id <- result.try(id.next_open_trial(tx))
-              let trial =
-                trial_row.Row(
-                  id: trial_id,
-                  org_id: a.org.id,
-                  title: trimmed_or(body.title, ""),
-                  trial_date: date,
-                  venue: trimmed_or(body.venue, ""),
-                  age_group: trimmed_or(body.age_group, "open"),
-                  notes: option.unwrap(body.notes, ""),
-                  created_by_user_id: a.user.id,
-                  created_at: now,
-                  deleted_at: None,
-                )
-              use _ <- result.try(trial_row.insert(tx, trial))
-              use _ <- result.try(
-                list.index_map(wanted, fn(p, i) { #(i, p) })
-                |> list.try_each(fn(entry) {
-                  position_row.insert(
-                    tx,
-                    position_row.Row(
-                      open_trial_id: trial_id,
-                      ord: entry.0,
-                      position: entry.1,
-                    ),
-                  )
-                }),
-              )
-              use _ <- result.map(ledger.append(
-                tx,
-                ledger.Entry(
-                  entry_type: ledger_row.OpenTrialPosted,
-                  player_id: None,
-                  org_id: Some(a.org.id),
-                  org_name: Some(a.org.name),
-                  user_id: Some(a.user.id),
-                  actor_name: Some(a.user.name),
-                ),
-                now,
-              ))
-              trial
-            })
-          case posted {
-            Ok(trial) ->
-              http.json(
-                201,
-                json.object([
-                  #("openTrial", open_trial_view(trial, a.org.name, wanted)),
-                ]),
-              )
-            Error(failure) -> http.internal(failure)
-          }
-        }
-        _, _, _ -> http.error(400, "TITLE_DATE_VENUE_REQUIRED")
-      }
-  }
-}
-
-fn unresolved_before(
-  read: Read,
-  org_id: id.OrgId,
-  today: String,
-) -> Result(Int, store.Fail(e)) {
-  use found <- result.map(store.one(
-    read,
-    "SELECT COUNT(*) FROM open_trial_registrations r JOIN open_trials t ON t.id = r.open_trial_id WHERE t.org_id = ? AND t.deleted_at IS NULL AND t.trial_date < ? AND r.outcome IS NULL",
-    [id.org_sql(org_id), sqlight.text(today)],
-    decode.at([0], decode.int),
-  ))
-  result.unwrap(found, 0)
-}
-
-/// A new open day, with no registrations yet. A club's name is read live, not copied when it posted.
-fn open_trial_view(
-  t: trial_row.Row,
-  org_name: String,
-  positions: List(String),
-) -> Json {
-  json.object([
-    #("id", id.open_trial_json(t.id)),
-    #("orgId", id.org_json(t.org_id)),
-    #("orgName", json.string(org_name)),
-    #("title", json.string(t.title)),
-    #("date", json.string(t.trial_date)),
-    #("venue", json.string(t.venue)),
-    #("ageGroup", json.string(t.age_group)),
-    #("positions", json.array(positions, json.string)),
-    #("notes", json.string(t.notes)),
-    #("createdByUserId", id.org_user_json(t.created_by_user_id)),
-    #("createdAt", json.int(t.created_at)),
-    #("registrations", json.preprocessed_array([])),
   ])
 }
 
@@ -702,5 +545,667 @@ pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       }
     }
     _, _ -> http.error(400, "FIXTURE_AND_DATE_REQUIRED")
+  }
+}
+
+// ------------------------------------------------------------------------------------------- looking for
+
+const looking_for_max = 5
+
+/// `POST /org/looking-for`: position codes only, which the players' opportunity radar matches against their own.
+pub fn looking_for(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  let shape = {
+    use positions <- input.field(
+      "positions",
+      input.required(input.items_between(
+        input.one_of(position.pairs),
+        0,
+        looking_for_max,
+      )),
+    )
+    input.done(positions)
+  }
+  use positions <- http.body(req, shape, [])
+  let positions = list.unique(positions)
+  case store.unit(ctx.store, orgs.set_looking_for(_, a.org.id, positions)) {
+    Ok(_) ->
+      http.json(
+        200,
+        json.object([#("lookingFor", json.array(positions, position.to_json))]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+// --------------------------------------------------------------------------------------------- release
+
+const reference_max = 400
+
+const coach_name_max = 100
+
+const role_max = 200
+
+const vouch_player_name_max = 200
+
+type ReleaseRefusal {
+  EntryNotFound
+}
+
+/// `POST /org/squad/:id/release`: the player leaves the squad and is marked available again (unless a contract
+/// another club completed still stands), with the club's reference published on the way out.
+pub fn release(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  entry_id: id.SquadEntryId,
+) -> Response {
+  use <- grassroots_only(a)
+  let shape = {
+    use text <- input.field(
+      "referenceText",
+      input.nullish(input.text(reference_max)),
+    )
+    input.done(text)
+  }
+  use text <- http.body(req, shape, [])
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.one(
+        read,
+        "SELECT " <> squad_row.columns <> " FROM org_squad_members WHERE id = ?",
+        [id.squad_entry_sql(entry_id)],
+        squad_row.decoder(),
+      )
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Ok(entry)) if entry.org_id == a.org.id -> {
+      let reference = input.filled(text)
+      use <- moderated(ctx, reference, context("release_reference", a))
+      let now = clock.now_ms()
+      let released =
+        store.unit(ctx.store, fn(tx) {
+          use gone <- result.try(store.write(
+            tx,
+            "DELETE FROM org_squad_members WHERE id = ? AND org_id = ? RETURNING id",
+            [id.squad_entry_sql(entry.id), id.org_sql(a.org.id)],
+            decode.at([0], decode.string),
+          ))
+          use _ <- result.try(case gone {
+            [] -> store.refuse(EntryNotFound)
+            _ -> Ok(Nil)
+          })
+          use _ <- result.try(case entry.player_id {
+            Some(pid) -> released_player(tx, a, pid, reference, now)
+            None -> Ok(Nil)
+          })
+          squad_view(store.reading(tx), a.org.id)
+        })
+      case released {
+        Ok(view) -> http.json(200, view)
+        Error(store.Refused(EntryNotFound)) ->
+          http.error(404, "SQUAD_ENTRY_NOT_FOUND")
+        Error(failure) -> http.internal(failure)
+      }
+    }
+    Ok(_) -> http.error(404, "SQUAD_ENTRY_NOT_FOUND")
+  }
+}
+
+fn released_player(
+  tx: Tx,
+  a: OrgAccess,
+  player_id: id.PlayerId,
+  reference: Option(String),
+  now: Int,
+) -> Result(Nil, Fail(e)) {
+  let read = store.reading(tx)
+  use found <- result.try(players.by_id(read, player_id))
+  case found {
+    None -> Ok(Nil)
+    Some(p) -> {
+      use other <- result.try(signing_reads.canonical_contract(
+        read,
+        p.row.id,
+        now,
+        Some(a.org.id),
+      ))
+      use _ <- result.try(case other {
+        Some(_) -> Ok(Nil)
+        None ->
+          players.set_availability(
+            tx,
+            p.row.id,
+            Some(availability.AvailableNow),
+            Some(player_row.FreeAgent),
+          )
+          |> result.replace(Nil)
+      })
+      use _ <- result.try(case reference {
+        None -> Ok(Nil)
+        Some(text) -> {
+          use vouch_id <- result.try(id.next_vouch(tx))
+          vouch_row.insert(
+            tx,
+            vouch_row.Row(
+              id: vouch_id,
+              player_id: p.row.id,
+              player_name: Some(input.utf16_take(
+                p.row.name,
+                vouch_player_name_max,
+              )),
+              coach_name: input.utf16_take(a.user.name, coach_name_max),
+              coach_email: None,
+              role: input.utf16_take(
+                case a.user.role {
+                  "" -> "Manager"
+                  role -> role
+                }
+                  <> ", "
+                  <> a.org.name,
+                role_max,
+              ),
+              status: vouch_row.Published,
+              code_hash: None,
+              text: Some(text),
+              seasons: None,
+              created_at: now,
+              published_at: Some(now),
+              conflict_of_interest: None,
+              withdrawn_at: None,
+              withdrawn_by: None,
+              withdrawn_reason: None,
+            ),
+          )
+        }
+      })
+      use _ <- result.try(ledger.append(
+        tx,
+        ledger.Entry(
+          entry_type: ledger_row.ReleasedByClub,
+          player_id: Some(p.row.id),
+          org_id: Some(a.org.id),
+          org_name: Some(a.org.name),
+          user_id: Some(a.user.id),
+          actor_name: Some(a.user.name),
+        ),
+        now,
+      ))
+      let with_reference = reference != None
+      use _ <- result.try(notifications.notify(
+        tx,
+        to: audience.Player,
+        id: id.player_to_string(p.row.id),
+        type_: "released",
+        text: a.org.name
+          <> " has released you"
+          <> case with_reference {
+          True -> " — with a reference now on your profile"
+          False -> ""
+        }
+          <> ". You're marked available to every local club; the First Team Seeker flag is yours to switch on.",
+        ref_id: Some(id.player_to_string(p.row.id)),
+        at: now,
+      ))
+      case p.row.guardian_id {
+        None -> Ok(Nil)
+        Some(g) ->
+          notifications.notify(
+            tx,
+            to: audience.Guardian,
+            id: id.guardian_to_string(g),
+            type_: "released",
+            text: a.org.name
+              <> " released "
+              <> p.row.name
+              <> case with_reference {
+              True -> " with a reference"
+              False -> ""
+            }
+              <> ". Their profile is marked available again.",
+            ref_id: Some(id.player_to_string(p.row.id)),
+            at: now,
+          )
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------------ match days
+
+/// `GET /org/matchdays`: the club's match days, newest first.
+pub fn matchdays(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  use page <- pages.strict(req, [paging.IntKind])
+  let before = case page.after {
+    Some([paging.IntKey(rowid)]) -> Some(rowid)
+    _ -> None
+  }
+  let listed =
+    store.read(ctx.store, fn(read) {
+      use rows <- result.try(
+        store.query(
+          read,
+          "SELECT "
+            <> matchday_row.columns
+            <> ", rowid FROM matchdays WHERE org_id = ? AND (? IS NULL OR rowid < ?) ORDER BY rowid DESC LIMIT ?",
+          [
+            id.org_sql(a.org.id),
+            sqlight.nullable(sqlight.int, before),
+            sqlight.nullable(sqlight.int, before),
+            sqlight.int(page.limit + 1),
+          ],
+          {
+            use m <- decode.then(matchday_row.decoder())
+            use rowid <- decode.field(matchday_row.width, decode.int)
+            decode.success(#(m, rowid))
+          },
+        ),
+      )
+      let #(items, next) =
+        paging.page_of(rows, page.limit, fn(r) { [paging.IntKey(r.1)] })
+      use credited <- result.map(store.query(
+        read,
+        "SELECT "
+          <> matchday_player_row.columns
+          <> " FROM matchday_players WHERE matchday_id IN (SELECT value FROM json_each(?)) ORDER BY matchday_id, ord",
+        [
+          sqlight.text(
+            json.to_string(
+              json.array(items, fn(r) { id.matchday_json({ r.0 }.id) }),
+            ),
+          ),
+        ],
+        matchday_player_row.decoder(),
+      ))
+      #(items, next, credited)
+    })
+  case listed {
+    Error(failure) -> http.internal(failure)
+    Ok(#(items, next, credited)) ->
+      pages.respond(items, next, fn(r) {
+        let m = r.0
+        json.object([
+          #("id", id.matchday_json(m.id)),
+          #("orgId", id.org_json(m.org_id)),
+          #("fixture", json.string(m.fixture)),
+          #("venue", json.string(m.venue)),
+          #("date", json.string(m.match_date)),
+          #("result", json.nullable(m.result, json.string)),
+          #(
+            "playerIds",
+            json.array(
+              list.filter(credited, fn(c) { c.matchday_id == m.id }),
+              fn(c) { id.player_json(c.player_id) },
+            ),
+          ),
+          #("loggedByUserId", id.org_user_json(m.logged_by_user_id)),
+          #("ts", json.int(m.created_at)),
+        ])
+      })
+  }
+}
+
+// ------------------------------------------------------------------------------------- pathway record
+
+/// Players the club signed, rostered or hosted at an open day who later signed for a club not on Grassroots:
+/// how many, and whether that makes it a Pathway Club.
+pub fn pathway_record(
+  read: Read,
+  org_id: id.OrgId,
+) -> Result(#(Int, Bool), Fail(e)) {
+  let pair = {
+    use p <- decode.field(0, id.player_decoder())
+    use at <- decode.field(1, decode.int)
+    decode.success(#(p, at))
+  }
+  use signed <- result.try(store.query(
+    read,
+    "SELECT player_id, ts FROM signings WHERE org_id = ? ORDER BY rowid",
+    [id.org_sql(org_id)],
+    pair,
+  ))
+  use rostered <- result.try(squad_player_ids(read, org_id))
+  use registrants <- result.try(store.query(
+    read,
+    "SELECT r.player_id, r.registered_at FROM open_trial_registrations r JOIN open_trials t ON t.id = r.open_trial_id WHERE t.org_id = ? AND t.deleted_at IS NULL ORDER BY r.rowid",
+    [id.org_sql(org_id)],
+    pair,
+  ))
+  let involved =
+    list.flatten([
+      list.map(signed, fn(s) { s.0 }),
+      rostered,
+      list.map(registrants, fn(r) { r.0 }),
+    ])
+    |> list.unique
+  use progressed <- result.map(
+    list.try_fold(involved, 0, fn(n, pid) {
+      let first =
+        list.append(signed, registrants)
+        |> list.filter_map(fn(x) {
+          case x.0 == pid {
+            True -> Ok(x.1)
+            False -> Error(Nil)
+          }
+        })
+        |> list.reduce(int.min)
+      // The first signing elsewhere, outside Grassroots; a rostered player with no other involvement never counts.
+      use upward <- result.map(store.one(
+        read,
+        "SELECT s.ts FROM signings s LEFT JOIN orgs o ON o.id = s.org_id WHERE s.player_id = ? AND s.org_id <> ? AND COALESCE(o.level, '') <> 'grassroots' ORDER BY s.rowid LIMIT 1",
+        [id.player_sql(pid), id.org_sql(org_id)],
+        decode.at([0], decode.int),
+      ))
+      case upward, first {
+        Ok(ts), Ok(first) if ts > first -> n + 1
+        _, _ -> n
+      }
+    }),
+  )
+  #(progressed, progressed >= 1)
+}
+
+fn squad_player_ids(
+  read: Read,
+  org_id: id.OrgId,
+) -> Result(List(id.PlayerId), Fail(e)) {
+  store.query(
+    read,
+    "SELECT player_id FROM org_squad_members WHERE org_id = ? AND player_id IS NOT NULL ORDER BY rowid",
+    [id.org_sql(org_id)],
+    decode.at([0], id.player_decoder()),
+  )
+}
+
+/// `progressed` and `pathwayClub`, as the directory and the radar carry them.
+pub fn pathway_fields(record: #(Int, Bool)) -> List(#(String, Json)) {
+  [
+    #("progressed", json.int(record.0)),
+    #("pathwayClub", json.bool(record.1)),
+  ]
+}
+
+fn count(read: Read, sql: String, org_id: id.OrgId) -> Result(Int, Fail(e)) {
+  store.one(read, sql, [id.org_sql(org_id)], decode.at([0], decode.int))
+  |> result.map(result.unwrap(_, 0))
+}
+
+/// `GET /org/pathway-record`.
+pub fn pathway(ctx: Ctx, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  let read =
+    store.read(ctx.store, fn(read) {
+      use record <- result.try(pathway_record(read, a.org.id))
+      use open_days <- result.try(count(
+        read,
+        "SELECT COUNT(*) FROM open_trials WHERE org_id = ? AND deleted_at IS NULL",
+        a.org.id,
+      ))
+      use matchdays <- result.map(count(
+        read,
+        "SELECT COUNT(*) FROM matchdays WHERE org_id = ?",
+        a.org.id,
+      ))
+      #(record, open_days, matchdays)
+    })
+  case read {
+    Error(failure) -> http.internal(failure)
+    Ok(#(record, open_days, matchdays)) ->
+      http.json(
+        200,
+        json.object(
+          list.append(pathway_fields(record), [
+            #("openDaysRun", json.int(open_days)),
+            #("matchdaysLogged", json.int(matchdays)),
+            #(
+              "note",
+              json.string(
+                "Progressed = players your club signed or hosted who later signed for an academy or pro club. Development is the reputation that matters here.",
+              ),
+            ),
+          ]),
+        ),
+      )
+  }
+}
+
+// ---------------------------------------------------------------------------------------- friendlies board
+
+const message_max = 200
+
+fn friendly_view(
+  f: friendly_row.Row,
+  poster: String,
+  tenths: Option(Int),
+  responses: List(#(response_row.Row, String)),
+  viewer: id.OrgId,
+) -> Json {
+  let mine = f.org_id == viewer
+  json.object([
+    #("id", id.friendly_json(f.id)),
+    #("orgId", id.org_json(f.org_id)),
+    #("orgName", json.string(poster)),
+    #("postedByUserId", id.org_user_json(f.posted_by_user_id)),
+    #("ageGroup", json.string(f.age_group)),
+    #("date", json.string(f.match_date)),
+    #("venue", json.string(f.venue)),
+    #("notes", json.string(f.notes)),
+    #("status", json.string("open")),
+    #("createdAt", json.int(f.created_at)),
+    #("mine", json.bool(mine)),
+    #("distanceKm", case mine, tenths {
+      False, Some(t) -> json_text.number(int.to_float(t) /. 10.0)
+      _, _ -> json.int(0)
+    }),
+    // The responders' messages are the poster's alone.
+    #(
+      "responses",
+      json.array(responses, fn(pair) {
+        let #(r, name) = pair
+        json.object([
+          #("orgId", id.org_json(r.org_id)),
+          #("orgName", json.string(name)),
+          #(
+            "message",
+            json.string(case mine {
+              True -> r.message
+              False -> ""
+            }),
+          ),
+          #("respondedByUserId", id.org_user_json(r.responded_by_user_id)),
+          #("ts", json.int(r.responded_at)),
+        ])
+      }),
+    ),
+  ])
+}
+
+/// `GET /org/friendlies`: the club's own friendlies and those posted by clubs within the radius, by match date.
+pub fn friendlies(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- grassroots_only(a)
+  use page <- pages.strict(req, [paging.TextKind, paging.TextKind])
+  let after = case page.after {
+    Some([paging.TextKey(date), paging.TextKey(fid)]) -> Some(#(date, fid))
+    _ -> None
+  }
+  let near = case orgs.location(a.org) {
+    Some(here) ->
+      sql.concat([
+        sql.text(" OR "),
+        distance.within_grassroots_radius(
+          Columns("o.lat", "o.lng"),
+          At(here.lat, here.lng),
+        ),
+      ])
+    None -> sql.text("")
+  }
+  let tenths = case orgs.location(a.org) {
+    Some(here) ->
+      distance.tenths(Columns("o.lat", "o.lng"), At(here.lat, here.lng))
+    None -> sql.text("NULL")
+  }
+  let after_date =
+    sqlight.nullable(sqlight.text, option.map(after, fn(x) { x.0 }))
+  let q =
+    sql.concat([
+      sql.text("SELECT " <> friendly_row.qualified("f") <> ", o.name, "),
+      tenths,
+      sql.text(
+        " FROM friendlies f JOIN orgs o ON o.id = f.org_id WHERE (f.org_id = ",
+      ),
+      sql.arg(id.org_sql(a.org.id)),
+      near,
+      sql.text(") AND ("),
+      sql.arg(after_date),
+      sql.text(" IS NULL OR f.match_date > "),
+      sql.arg(after_date),
+      sql.text(" OR (f.match_date = "),
+      sql.arg(after_date),
+      sql.text(" AND f.id > "),
+      sql.arg(sqlight.nullable(sqlight.text, option.map(after, fn(x) { x.1 }))),
+      sql.text(")) ORDER BY f.match_date, f.id LIMIT "),
+      sql.arg(sqlight.int(page.limit + 1)),
+    ])
+  let listed =
+    store.read(ctx.store, fn(read) {
+      use rows <- result.try(
+        store.query(read, q.sql, q.args, {
+          use f <- decode.then(friendly_row.decoder())
+          use name <- decode.field(friendly_row.width, decode.string)
+          use tenths <- decode.field(
+            friendly_row.width + 1,
+            decode.optional(decode.int),
+          )
+          decode.success(#(f, name, tenths))
+        }),
+      )
+      let #(items, next) =
+        paging.page_of(rows, page.limit, fn(r) {
+          [
+            paging.TextKey({ r.0 }.match_date),
+            paging.TextKey(id.friendly_to_string({ r.0 }.id)),
+          ]
+        })
+      use responses <- result.map(responses_of(
+        read,
+        list.map(items, fn(r) { { r.0 }.id }),
+      ))
+      #(items, next, responses)
+    })
+  case listed {
+    Error(failure) -> http.internal(failure)
+    Ok(#(items, next, responses)) ->
+      pages.respond(items, next, fn(r) {
+        let #(f, name, tenths) = r
+        friendly_view(
+          f,
+          name,
+          tenths,
+          list.filter(responses, fn(x) { { x.0 }.friendly_id == f.id }),
+          a.org.id,
+        )
+      })
+  }
+}
+
+fn responses_of(
+  read: Read,
+  friendly_ids: List(id.FriendlyId),
+) -> Result(List(#(response_row.Row, String)), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> response_row.qualified("r")
+      <> ", o.name FROM friendly_responses r JOIN orgs o ON o.id = r.org_id WHERE r.friendly_id IN (SELECT value FROM json_each(?)) ORDER BY r.rowid",
+    [sqlight.text(json.to_string(json.array(friendly_ids, id.friendly_json)))],
+    {
+      use r <- decode.then(response_row.decoder())
+      use name <- decode.field(response_row.width, decode.string)
+      decode.success(#(r, name))
+    },
+  )
+}
+
+type RespondRefusal {
+  AlreadyResponded
+}
+
+/// `POST /org/friendlies/:id/respond`: another club is up for it, once. The poster is told.
+pub fn respond(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  friendly_id: id.FriendlyId,
+) -> Response {
+  use <- grassroots_only(a)
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.one(
+        read,
+        "SELECT " <> friendly_row.columns <> " FROM friendlies WHERE id = ?",
+        [id.friendly_sql(friendly_id)],
+        friendly_row.decoder(),
+      )
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Error(_)) -> http.error(404, "FRIENDLY_NOT_FOUND")
+    Ok(Ok(f)) if f.org_id == a.org.id -> http.error(400, "OWN_POST")
+    Ok(Ok(f)) -> {
+      let shape = {
+        use message <- input.field(
+          "message",
+          input.nullish(input.text(message_max)),
+        )
+        input.done(message)
+      }
+      use message <- http.body(req, shape, [])
+      use <- moderated(ctx, message, context("friendly_response", a))
+      let now = clock.now_ms()
+      let answered =
+        store.unit(ctx.store, fn(tx) {
+          use taken <- result.try(store.one(
+            store.reading(tx),
+            "SELECT 1 FROM friendly_responses WHERE friendly_id = ? AND org_id = ?",
+            [id.friendly_sql(f.id), id.org_sql(a.org.id)],
+            decode.at([0], decode.int),
+          ))
+          case taken {
+            Ok(_) -> store.refuse(AlreadyResponded)
+            Error(_) -> {
+              use _ <- result.try(response_row.insert(
+                tx,
+                response_row.Row(
+                  friendly_id: f.id,
+                  org_id: a.org.id,
+                  message: option.unwrap(input.filled(message), ""),
+                  responded_by_user_id: a.user.id,
+                  responded_at: now,
+                ),
+              ))
+              notifications.notify(
+                tx,
+                to: audience.OrgUser,
+                id: id.org_user_to_string(f.posted_by_user_id),
+                type_: "friendly",
+                text: a.org.name
+                  <> " is up for your friendly on "
+                  <> f.match_date
+                  <> ".",
+                ref_id: Some(id.friendly_to_string(f.id)),
+                at: now,
+              )
+            }
+          }
+        })
+      case answered {
+        Ok(_) -> http.json(201, json.object([#("responded", json.bool(True))]))
+        Error(store.Refused(AlreadyResponded)) ->
+          http.error(409, "ALREADY_RESPONDED")
+        Error(failure) -> http.internal(failure)
+      }
+    }
   }
 }

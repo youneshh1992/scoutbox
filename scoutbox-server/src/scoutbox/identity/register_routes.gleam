@@ -216,7 +216,8 @@ fn checked(
               #(
                 "org",
                 json.object(
-                  list.append(orgs.view(org), [
+                  // A club just registered has set nothing up.
+                  list.append(orgs.view(org, orgs.no_setup), [
                     #("safeguardingCertified", json.bool(certified)),
                   ]),
                 ),

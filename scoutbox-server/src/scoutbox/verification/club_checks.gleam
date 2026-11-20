@@ -1,17 +1,17 @@
-//// A club proves control of its company mailbox (domains/verification/clubChecks.mjs): one of the safeguarding
-//// requirements before a club can see under-18 players. A code goes to the mailbox; the club enters it.
-////
-//// Not ported yet: the federation check.
+//// A club's own verification submissions (domains/verification/clubChecks.mjs): control of its company mailbox,
+//// or the federation route for a Grassroots club on free e-mail. Either is one of the safeguarding requirements
+//// before a club can see under-18 players; the decision is Trust & Safety's.
 
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/development/grassroots_club
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/platform/clock
@@ -23,10 +23,19 @@ import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/rows/email_challenges as challenge_row
 import scoutbox/rows/id
+import scoutbox/rows/org_federation_checks as federation_row
 import sqlight
 import wisp.{type Request, type Response}
 
 const email_max = 254
+
+const federation_max = 120
+
+const registration_id_max = 60
+
+const contact_email_max = 120
+
+const email_shape = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"
 
 const challenge_ttl_ms = 1_800_000
 
@@ -320,6 +329,113 @@ fn confirm(ctx: Ctx, org: id.OrgId, hash: String, now: Int) -> Response {
         ]),
       )
     Error(store.Lost(what)) -> http.stale(what)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+type Federation {
+  Federation(
+    federation: Option(String),
+    registration_id: Option(String),
+    contact_email: Option(String),
+  )
+}
+
+/// `POST /org/verification/federation`: the club's federation registration, for Trust & Safety to cross-check.
+/// A resubmission replaces it.
+///
+/// Not ported yet: the live 'orgs' event.
+pub fn submit_federation(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
+  use <- grassroots_club.grassroots_only(a)
+  let shape = {
+    use federation <- input.field(
+      "federation",
+      input.nullish(input.text(federation_max)),
+    )
+    use registration_id <- input.field(
+      "registrationId",
+      input.nullish(input.text(registration_id_max)),
+    )
+    use contact_email <- input.field(
+      "contactEmail",
+      input.nullish(input.text(contact_email_max)),
+    )
+    input.done(Federation(federation:, registration_id:, contact_email:))
+  }
+  use body <- http.body(req, shape, [])
+  let assert Ok(shape) = regexp.from_string(email_shape)
+  case input.filled(body.federation), input.filled(body.registration_id) {
+    Some(federation), Some(registration_id) -> {
+      let email = input.filled(body.contact_email)
+      case email {
+        Some(e) ->
+          case regexp.check(shape, e) {
+            True -> file_federation(ctx, a, federation, registration_id, email)
+            False ->
+              http.json(
+                400,
+                json.object([
+                  #("error", json.string("FIELD_INVALID")),
+                  #("field", json.string("contactEmail")),
+                  #("problem", json.string("invalid")),
+                  #(
+                    "message",
+                    json.string("contactEmail is an e-mail address."),
+                  ),
+                ]),
+              )
+          }
+        None -> file_federation(ctx, a, federation, registration_id, None)
+      }
+    }
+    federation, _ ->
+      http.json(
+        400,
+        json.object([
+          #("error", json.string("FEDERATION_REQUIRED")),
+          #(
+            "field",
+            json.string(case federation {
+              Some(_) -> "registrationId"
+              None -> "federation"
+            }),
+          ),
+          #("problem", json.string("required")),
+        ]),
+      )
+  }
+}
+
+fn file_federation(
+  ctx: Ctx,
+  a: OrgAccess,
+  federation: String,
+  registration_id: String,
+  contact_email: Option(String),
+) -> Response {
+  let check =
+    federation_row.Row(
+      org_id: a.org.id,
+      federation:,
+      registration_id:,
+      contact_email:,
+      status: federation_row.Pending,
+      submitted_at: clock.now_ms(),
+    )
+  case store.unit(ctx.store, orgs.submit_federation_check(_, check)) {
+    Ok(_) ->
+      http.json(
+        201,
+        json.object([
+          #("submitted", json.bool(True)),
+          #(
+            "note",
+            json.string(
+              "Trust & Safety cross-checks the registration with your federation. Verification (and with the safeguarding contract, U18 visibility) follows their approval.",
+            ),
+          ),
+        ]),
+      )
     Error(failure) -> http.internal(failure)
   }
 }

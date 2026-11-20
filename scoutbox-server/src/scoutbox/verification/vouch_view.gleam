@@ -13,7 +13,11 @@ pub fn shown(v: row.Row) -> Bool {
 }
 
 pub fn view(v: row.Row) -> Json {
-  json.object([
+  json.object(fields(v))
+}
+
+pub fn fields(v: row.Row) -> List(#(String, Json)) {
+  [
     #("id", id.vouch_json(v.id)),
     #("playerId", id.player_json(v.player_id)),
     #("playerName", json.nullable(v.player_name, json.string)),
@@ -28,7 +32,7 @@ pub fn view(v: row.Row) -> Json {
     #("withdrawn", withdrawn(v)),
     #("verificationMethod", json.string("email_code")),
     #("identityVerified", json.bool(False)),
-  ])
+  ]
 }
 
 pub fn withdrawn(v: row.Row) -> Json {

@@ -743,7 +743,7 @@ fn medical_record_json(m: medical_row.Row) -> Json {
   )
 }
 
-fn drill_result_json(d: drill_result_row.Row) -> Json {
+pub fn drill_result_json(d: drill_result_row.Row) -> Json {
   json.object(
     list.flatten([
       [
@@ -1121,6 +1121,79 @@ pub fn set_switch(
     MedicalShared -> "medical_shared"
   }
   update(tx, id, [#(column, sqlight.bool(on))])
+}
+
+/// The point the Grassroots radius is measured from. No organisation's view carries it, only the distance.
+pub fn set_location(
+  tx: Tx,
+  id: id.PlayerId,
+  lat: Float,
+  lng: Float,
+) -> Result(Player, Fail(e)) {
+  update(tx, id, [#("lat", sqlight.float(lat)), #("lng", sqlight.float(lng))])
+}
+
+/// A drill done, once per drill.
+pub fn record_drill(
+  tx: Tx,
+  player_id: id.PlayerId,
+  drill_id: String,
+) -> Result(Nil, Fail(e)) {
+  use position <- result.try(next_position(tx, drill_row.table, player_id))
+  drill_row.insert(tx, drill_row.Row(player_id:, position:, drill_id:))
+}
+
+/// A measured drill result; it is verified when it came with video.
+pub fn add_drill_result(
+  tx: Tx,
+  player_id: id.PlayerId,
+  result: drill_result_row.Row,
+) -> Result(Nil, Fail(e)) {
+  use position <- result.try(next_position(
+    tx,
+    drill_result_row.table,
+    player_id,
+  ))
+  drill_result_row.insert(tx, drill_result_row.Row(..result, position:))
+}
+
+/// Starts (or switches to) a training track at `at`: the previous track's completed sessions go with it.
+pub fn start_programme(
+  tx: Tx,
+  id: id.PlayerId,
+  track: String,
+  at: Int,
+) -> Result(Player, Fail(e)) {
+  use _ <- result.try(
+    store.run(
+      tx,
+      "DELETE FROM player_programme_completions WHERE player_id = ?",
+      [id.player_sql(id)],
+    ),
+  )
+  update(tx, id, [
+    #("programme_track", sqlight.text(track)),
+    #("programme_started_at", sqlight.int(at)),
+  ])
+}
+
+/// A session of the current track done at `at`.
+pub fn complete_programme_session(
+  tx: Tx,
+  id: id.PlayerId,
+  session_id: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "INSERT INTO player_programme_completions (player_id, position, session_id, completed_at) SELECT ?, COALESCE(MAX(position) + 1, 0), ?, ? FROM player_programme_completions WHERE player_id = ?",
+    [
+      id.player_sql(id),
+      sqlight.text(session_id),
+      sqlight.int(at),
+      id.player_sql(id),
+    ],
+  )
 }
 
 /// Figures for the current season: the given ones set, and appearances, goals and assists that were never

@@ -168,13 +168,18 @@ pub fn with_signing(
 
 /// The player's live contract (createContractLookup): a completed-signing row over a COMPLETED package that names it
 /// back, whose contract end has not passed. Some(end) when one stands; this record owns `under_contract`.
+///
+/// `except` leaves out that club's signings: a contract another club completed still stands after it releases the
+/// player.
 pub fn canonical_contract(
   read: Read,
   player_id: id.PlayerId,
   now: Int,
+  except: Option(id.OrgId),
 ) -> Result(Option(Option(String)), Fail(e)) {
   let today = clock.iso_day(now)
   use rows <- result.try(signing_writer.for_player(read, player_id))
+  let rows = list.filter(rows, fn(s) { Some(s.org_id) != except })
   list.try_fold(rows, None, fn(found, s) {
     case found, s.signing_package_id {
       Some(_), _ | None, None -> Ok(found)

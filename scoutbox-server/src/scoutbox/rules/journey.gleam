@@ -110,8 +110,6 @@ pub fn next_actions(p: Player) -> Json {
 }
 
 /// The grassroots journey; none for a pro-level player, who has moved past it.
-///
-/// Not ported yet: coach vouches belong to verification, so `coachVouches` counts none.
 pub fn pathway(p: Player) -> Json {
   case p.row.level {
     playing_level.Pro -> json.null()
@@ -160,7 +158,10 @@ pub fn pathway(p: Player) -> Json {
               "combineVerified",
               json.int(list.count(p.drill_results, fn(r) { r.verified })),
             ),
-            #("coachVouches", json.int(0)),
+            #(
+              "coachVouches",
+              json.int(list.length(players.published_vouches(p))),
+            ),
           ]),
         ),
         #(
@@ -177,7 +178,7 @@ pub fn pathway(p: Player) -> Json {
   }
 }
 
-type Session {
+pub type Session {
   Session(
     id: String,
     day: String,
@@ -186,11 +187,12 @@ type Session {
   )
 }
 
-type Track {
+pub type Track {
   Track(key: String, label: String, sessions: List(Session))
 }
 
-fn tracks() -> List(Track) {
+/// The training tracks (grassrootsJourney.mjs `PROGRAMME_TRACKS`), in its order.
+pub fn tracks() -> List(Track) {
   let s = fn(id, day, title, drill) { Session(id, day, title, drill) }
   [
     Track("attack", "Attacking track", [

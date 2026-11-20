@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 52 batteries pass unchanged]
+### Porting, domain by domain [in progress: 53 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -137,7 +137,7 @@ of the product, so they aren't one slice.
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 2 | **ported** |
 | Operations: club operations | 1 | **ported** |
-| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 3 | `contracts`, `dates` and `productionHardening` pass |
+| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 4 | done |
 
 #### Port order
 
@@ -396,7 +396,18 @@ are for surprising facts or points that later work depends on, not implementatio
       saved-search match, since the battery doesn't run yet.
    4. `platform/api` §13–§14: the Grassroots player journey (`/player/season-wrap`, `/org/looking-for`), the club
       toolkit (`/org/squad/:id/release`, `/org/pathway-record`), the typed open days, match days and friendlies, the
-      player's record field by field, and storage and persistence on disk.
+      player's record field by field, and storage and persistence on disk. [**done**: all 202 checks pass and the
+      battery is on `BATTERIES`; from the programme on, 103 of the battery's 109 requests answer as TypeScript's do,
+      with ids, codes and times masked.] The open days are `development/open_days` (the club's list, delete and
+      answers, a player's and a guardian's registration, and the radar), the journey `development/grassroots_journey`
+      (the programme and the season wrap). An organisation's view (`orgs.view`) carries its looking-for positions and
+      federation check now, read by `orgs.setup`; they were always empty. The directory and the radar share the
+      pathway record. `/player/me`'s `pathway.signals.coachVouches` counts the published references; it read 0. A
+      list refuses a bad item by its index only through `input.items` or `items_between`: `input.list_of` names the
+      list, where valibot names the item, and eight calls in six modules still use it. The six requests left differ outside this
+      slice: the seed's attendance dates, `/org/players/:id`'s `similarPlayers.archetypes` (empty here), the legacy
+      signing's response (`firstQualifyingInteraction` lacks the ledger row's other fields, and the record has six
+      more), and `/player/export`'s threads and insights (empty here). Item 9 should take them.
 9. **Parity beyond the batteries, after every battery passes.** The batteries reach only part of the server: 85
    `Not ported yet:` markers are left (recruitment 17, development 15, identity 11, agents 10, scouting 9, the rest
    fewer), some routes answer 501 past their guards (`/org/players/:id/morelike`, compliance decisions on facets,

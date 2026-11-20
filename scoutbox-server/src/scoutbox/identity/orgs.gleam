@@ -10,9 +10,12 @@ import gleam/string
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
+import scoutbox/rows/org_federation_checks as federation_row
+import scoutbox/rows/org_looking_for as looking_for_row
 import scoutbox/rows/orgs as row
 import scoutbox/safety/audit
 import scoutbox/vocab/org_type
+import scoutbox/vocab/position.{type Position}
 import sqlight
 
 pub type Org =
@@ -73,11 +76,82 @@ pub fn safeguarding_certified(read: Read, org: Org) -> Result(Bool, Fail(e)) {
   }
 }
 
+/// What a club has set up beside its record: the positions it is looking for and its federation check. Only a
+/// Grassroots club sets either.
+pub type Setup {
+  Setup(
+    looking_for: List(Position),
+    federation_check: Option(federation_row.Row),
+  )
+}
+
+/// The setup of a club that has none: an agency, or a club just registered.
+pub const no_setup = Setup([], None)
+
+pub fn setup(read: Read, org_id: id.OrgId) -> Result(Setup, Fail(e)) {
+  use looking_for <- result.try(looking_for(read, org_id))
+  use checks <- result.map(store.query(
+    read,
+    "SELECT "
+      <> federation_row.columns
+      <> " FROM org_federation_checks WHERE org_id = ?",
+    [id.org_sql(org_id)],
+    federation_row.decoder(),
+  ))
+  Setup(
+    looking_for:,
+    federation_check: list.first(checks) |> option.from_result,
+  )
+}
+
+/// The positions the club is looking for, in the order it gave them.
+pub fn looking_for(
+  read: Read,
+  org_id: id.OrgId,
+) -> Result(List(Position), Fail(e)) {
+  store.query(
+    read,
+    "SELECT "
+      <> looking_for_row.columns
+      <> " FROM org_looking_for WHERE org_id = ? ORDER BY ordinal",
+    [id.org_sql(org_id)],
+    looking_for_row.decoder(),
+  )
+  |> result.map(list.map(_, fn(r) { r.position }))
+}
+
+/// Replaces the positions the club is looking for.
+pub fn set_looking_for(
+  tx: Tx,
+  org_id: id.OrgId,
+  positions: List(Position),
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(
+    store.run(tx, "DELETE FROM org_looking_for WHERE org_id = ?", [
+      id.org_sql(org_id),
+    ]),
+  )
+  list.index_map(positions, fn(p, i) {
+    looking_for_row.Row(org_id:, ordinal: i, position: p)
+  })
+  |> list.try_each(looking_for_row.insert(tx, _))
+}
+
+/// Files (or replaces) the club's federation check, pending Trust & Safety.
+pub fn submit_federation_check(
+  tx: Tx,
+  check: federation_row.Row,
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(
+    store.run(tx, "DELETE FROM org_federation_checks WHERE org_id = ?", [
+      id.org_sql(check.org_id),
+    ]),
+  )
+  federation_row.insert(tx, check)
+}
+
 /// The organisation as responses show it: an allowlist, never the row (the password hash is not on it).
-///
-/// Not ported yet: `lookingFor` and `federationCheck` belong to club setup. They are empty here, as they are for
-/// every seeded organisation on the TypeScript server.
-pub fn view(org: Org) -> List(#(String, Json)) {
+pub fn view(org: Org, setup: Setup) -> List(#(String, Json)) {
   let opt_string = json.nullable(_, json.string)
   [
     #("id", id.org_json(org.id)),
@@ -121,8 +195,19 @@ pub fn view(org: Org) -> List(#(String, Json)) {
       json.nullable(org.verification_revoked_at, json.int),
     ),
     #("createdAt", json.int(org.created_at)),
-    #("lookingFor", json.preprocessed_array([])),
-    #("federationCheck", json.null()),
+    #("lookingFor", json.array(setup.looking_for, position.to_json)),
+    #(
+      "federationCheck",
+      json.nullable(setup.federation_check, fn(f) {
+        json.object([
+          #("federation", json.string(f.federation)),
+          #("registrationId", json.string(f.registration_id)),
+          #("contactEmail", opt_string(f.contact_email)),
+          #("status", federation_row.status_to_json(f.status)),
+          #("submittedAt", json.int(f.submitted_at)),
+        ])
+      }),
+    ),
   ]
 }
 

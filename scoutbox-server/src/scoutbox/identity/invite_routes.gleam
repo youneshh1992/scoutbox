@@ -264,10 +264,11 @@ fn accepting(
         ctx.config.session_ttl_ms,
       ))
       use onboarding <- result.try(onboarding(store.reading(tx), org, user))
-      Ok(#(user, restored, token, onboarding))
+      use setup <- result.try(orgs.setup(store.reading(tx), org.id))
+      Ok(#(user, restored, token, onboarding, setup))
     })
   case outcome {
-    Ok(#(user, restored, token, onboarding)) ->
+    Ok(#(user, restored, token, onboarding, setup)) ->
       http.json(
         201,
         json.object(
@@ -275,7 +276,7 @@ fn accepting(
             [
               #("userId", id.org_user_json(user.id)),
               #("role", json.string(user.role)),
-              #("org", json.object(orgs.view(org))),
+              #("org", json.object(orgs.view(org, setup))),
               #("token", json.string(token)),
             ],
             case restored {

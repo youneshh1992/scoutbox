@@ -3055,6 +3055,46 @@ pub fn next_open_trial(tx: Tx) -> Result(OpenTrialId, Fail(e)) {
   ids.next(tx, "open") |> result.map(OpenTrialId)
 }
 
+/// An id of `open_trial_registrations`.
+pub opaque type OpenTrialRegistrationId {
+  OpenTrialRegistrationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn open_trial_registration(text: String) -> OpenTrialRegistrationId {
+  OpenTrialRegistrationId(text)
+}
+
+pub fn open_trial_registration_to_string(
+  id: OpenTrialRegistrationId,
+) -> String {
+  let OpenTrialRegistrationId(text) = id
+  text
+}
+
+pub fn open_trial_registration_sql(
+  id: OpenTrialRegistrationId,
+) -> sqlight.Value {
+  sqlight.text(open_trial_registration_to_string(id))
+}
+
+pub fn open_trial_registration_json(id: OpenTrialRegistrationId) -> Json {
+  json.string(open_trial_registration_to_string(id))
+}
+
+pub fn open_trial_registration_decoder() -> decode.Decoder(
+  OpenTrialRegistrationId,
+) {
+  decode.map(decode.string, OpenTrialRegistrationId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_open_trial_registration(
+  tx: Tx,
+) -> Result(OpenTrialRegistrationId, Fail(e)) {
+  ids.next(tx, "otr") |> result.map(OpenTrialRegistrationId)
+}
+
 /// An id of `opportunities`.
 pub opaque type OpportunityId {
   OpportunityId(String)
