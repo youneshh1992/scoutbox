@@ -41,6 +41,7 @@ import scoutbox/discovery/saved_searches
 import scoutbox/discovery/second_look
 import scoutbox/discovery/watchlists
 import scoutbox/enterprise/audit_export
+import scoutbox/enterprise/backups
 import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/security_routes
 import scoutbox/enterprise/sso
@@ -155,6 +156,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["vouch", "submit"] -> only(req, Post, fn() { vouches.submit(ctx, req) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
+    ["readyz"] -> only(req, Get, fn() { backups.readyz(ctx) })
     ["passport", "shared", token] ->
       only(req, Get, fn() { sharing.open_public(ctx, req, token) })
     ["meta"] -> only(req, Get, operator.meta)
@@ -2319,6 +2321,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["agent", "profiles"] ->
           only(req, Get, fn() { agent.admin_profiles(ctx, req) })
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
+        ["backup"] -> only(req, Post, fn() { backups.create(ctx, req) })
+        ["backups"] -> only(req, Get, fn() { backups.list(ctx) })
+        ["backup", "verify"] ->
+          only(req, Post, fn() { backups.verify(ctx, req) })
         ["imports"] -> only(req, Get, fn() { imports.admin_recent(ctx) })
         ["signings", sid, "void"] ->
           only(req, Post, fn() {

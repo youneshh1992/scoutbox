@@ -88,7 +88,8 @@ Every route below is exercised by a battery, except where marked.
 
 | Area | Routes |
 |---|---|
-| Health | `GET /health` |
+| Health | `GET /health`, `/readyz` |
+| Backups | `POST /admin/backup` (a copy of the database from a read-only connection, `store.copy_to`, so writes carry on; the media files, less those queued for removal; a checksummed manifest written last), `POST /admin/backup/verify`, `GET /admin/backups` (no battery). The battery restores a backup into a new, empty `DATA_DIR` and boots it |
 | Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login` (a password-protected guardian by id or e-mail, checked before the unit); `/auth/sso/start` and `/callback` against the local test identity provider (`GET /testidp/authorize`, development only; both refuse in production) |
 | Staff | `GET /org/staff`, `POST /org/staff/:id/remove`, `GET`/`POST /org/invites`, `POST /org/invites/:id/revoke`, `GET /org/onboarding`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `GET /org/sessions`, `POST /org/sessions/revoke`, `PUT /org/security`, `GET`/`PUT /org/sso`, `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |

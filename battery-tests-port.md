@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 48 batteries pass unchanged]
+### Porting, domain by domain [in progress: 49 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -136,6 +136,7 @@ of the product, so they aren't one slice.
 | Scouting: club workflows | 1 | **ported** |
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 2 | **ported** |
+| Operations: club operations | 1 | passes; its rule cases and hand-port calls are left (slice 9) |
 | Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
 
 #### Port order
@@ -329,7 +330,12 @@ are for surprising facts or points that later work depends on, not implementatio
          `convertMinor` are generated rule cases now (8 of the 26). Each act reads the case and its scenario inside
          its unit. Finance access is `roles.is_finance_role`, the lead tier plus `/finance|treasurer/i`.
       8. Backup, verify and restore into an empty directory, `/readyz`, and delivery work surviving a SIGKILL
-         restart (`store.copyTo` in `wiring.mjs`). If this needs a new mechanism, propose it before building it.
+         restart (`store.copyTo` in `wiring.mjs`). [**done**: `enterprise/backups`; all 277 checks pass, and the
+         battery is on `BATTERIES`. 13 requests answer as TypeScript's do.] The copy (`store.copy_to`, `VACUUM
+         INTO`) runs on a read-only connection, not the writer as in TypeScript, so units keep committing while it
+         copies; it has its own long timeout and fails as `500 BACKUP_FAILED`, never a panic. The SIGKILL restart
+         needed nothing new: every dispatch is a row, and the boot sweep picks it up. The manifest file is compact
+         JSON, where TypeScript indents it.
       9. The rule cases (26, mostly `ageOn`, `isAdult` and `b32encode`) and the 7 hand-port calls.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
 9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls

@@ -178,3 +178,24 @@ pub fn a_query_that_meets_a_lock_retries_until_it_is_released_test() {
   let assert Ok([_]) = ffi_query(new_cache(), reader, "SELECT x FROM t", [])
   assert millis_since(started) >= 50
 }
+
+pub fn copy_to_writes_the_last_commit_to_a_new_file_and_refuses_an_existing_one_test() {
+  let s = bare_store()
+  let assert Ok(Nil) =
+    store.unit(s, fn(tx) {
+      store.run(tx, "UPDATE counters SET value = 2 WHERE name = 'hits'", [])
+    })
+  let file = fresh_path()
+  let assert Ok(Nil) = store.copy_to(s, file, timeout_ms: 5000)
+  let assert Ok(copy) =
+    store.open(path: file, readers: 1, dispatch: fn(_) { Nil })
+  assert int_of(copy, "SELECT value FROM counters", []) == Ok([2])
+  // Never over a file that is there already: a backup never replaces another.
+  let assert Error(_) = store.copy_to(s, file, timeout_ms: 5000)
+  // Units commit as usual afterwards; the copy held no lock.
+  let assert Ok(Nil) =
+    store.unit(s, fn(tx) {
+      store.run(tx, "UPDATE counters SET value = 3 WHERE name = 'hits'", [])
+    })
+  assert int_of(s, "SELECT value FROM counters", []) == Ok([3])
+}

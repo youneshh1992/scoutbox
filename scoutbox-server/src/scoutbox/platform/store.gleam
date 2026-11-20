@@ -24,6 +24,7 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import scoutbox/platform/effect.{type Effect}
+import simplifile
 import sqlight
 
 pub opaque type Tx {
@@ -421,6 +422,44 @@ pub fn read(store: Store, f: fn(Read) -> a) -> a {
   let assert Ok(value) = process.receive(reply, store.timeout)
     as "a read did not answer in time"
   value
+}
+
+/// Writes a consistent copy of the whole database, as last committed, to a new file at `file` (VACUUM INTO): the
+/// backup format. It runs on a read-only connection, so units carry on committing while it copies; the copy is that
+/// connection's snapshot. Through sqlight rather than the cache: the statement runs once, on a dirty scheduler. A
+/// large database can take longer than a read's usual wait, so the caller gives `timeout_ms`.
+pub fn copy_to(
+  store: Store,
+  file: String,
+  timeout_ms timeout_ms: Int,
+) -> Result(Nil, String) {
+  use _ <- result.try(case simplifile.is_file(file) {
+    Ok(False) -> Ok(Nil)
+    _ -> Error("copy_to: " <> file <> " already exists")
+  })
+  let index = int.random(list.length(store.readers))
+  let assert Ok(reader) = store.readers |> list.drop(index) |> list.first
+  let reply = process.new_subject()
+  process.send(
+    reader,
+    Job(fn(conn, _) {
+      process.send(
+        reply,
+        sqlight.query(
+          "VACUUM INTO ?",
+          on: conn,
+          with: [sqlight.text(file)],
+          expecting: decode.success(Nil),
+        )
+          |> result.replace(Nil)
+          |> result.map_error(fn(e) { e.message }),
+      )
+    }),
+  )
+  case process.receive(reply, timeout_ms) {
+    Ok(r) -> r
+    Error(Nil) -> Error("copy_to: the copy did not finish in time")
+  }
 }
 
 /// A unit's reads see its own writes.

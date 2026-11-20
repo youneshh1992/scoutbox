@@ -49,4 +49,5 @@ export const BATTERIES = [
   'development/boxCam',
   'development/combine',
   'development/hub',
+  'operations/clubOperations',
 ];
