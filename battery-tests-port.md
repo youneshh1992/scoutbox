@@ -348,6 +348,12 @@ are for surprising facts or points that later work depends on, not implementatio
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible
    (sets and dicts for membership and de-duplication, a length taken once), and move the hot call sites onto it.
    Measure before and after with `dev/perf.mjs`.
+10. **Type a player's date of birth, after every battery passes.** `players.birth_date` is read as a `String`, so
+    the age rules (`rules/age`) parse it again on every call. Decode it once at the row boundary into a typed day (a
+    `calendar.Date`, or an opaque `BirthDate`), through a column override in the generated row decoder, so no rule
+    can be handed a malformed one. `adult_sql` can keep comparing text: a `YYYY-MM-DD` day sorts as dates do.
+    Country stays text: it is free text of 1 to 40 characters on both servers, and a closed type would first need
+    the TypeScript server to take a code list.
 
 Throughout the port, map the `dates` rule cases (2,253 pending) as the date rules are ported, since every domain
 uses them.
