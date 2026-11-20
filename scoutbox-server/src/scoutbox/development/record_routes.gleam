@@ -19,13 +19,16 @@ import scoutbox/identity/players.{type Player}
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/json_text
 import scoutbox/platform/store.{type Tx}
 import scoutbox/recruitment/signing_reads
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
 import scoutbox/rules/time_zones
 import scoutbox/safety/audit
+import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/verification/vouch_view
 import scoutbox/vocab/availability
@@ -488,20 +491,27 @@ fn save_prefs(ctx: Ctx, p: Player, body: PrefsInput) -> Response {
       },
       timezone: pick(body.timezone, was.timezone),
     )
-  act(ctx, players.set_prefs(_, p.row.id, next), fn(s) {
-    json.object([
-      #(
-        "prefs",
-        players.prefs_json(
-          s.row.prefs_quiet_start,
-          s.row.prefs_quiet_end,
-          s.row.prefs_school_hours_mute,
-          s.row.prefs_timezone,
-        ),
+  act(ctx, players.set_prefs(_, p.row.id, next), prefs_view)
+}
+
+/// `GET /player/prefs`.
+pub fn show_prefs(p: PlayerAccess) -> Response {
+  http.json(200, prefs_view(p.player))
+}
+
+fn prefs_view(p: Player) -> json.Json {
+  json.object([
+    #(
+      "prefs",
+      players.prefs_json(
+        p.row.prefs_quiet_start,
+        p.row.prefs_quiet_end,
+        p.row.prefs_school_hours_mute,
+        p.row.prefs_timezone,
       ),
-      #("note", json.string(prefs_note)),
-    ])
-  })
+    ),
+    #("note", json.string(prefs_note)),
+  ])
 }
 
 // ----------------------------------------------------------------------------------- a guardian's child
@@ -673,6 +683,179 @@ pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           }
       }
     }
+  }
+}
+
+const fixture_max = 160
+
+const venue_max = 160
+
+const device_id_max = 120
+
+type AttendanceInput {
+  AttendanceInput(
+    fixture: Option(String),
+    venue: Option(String),
+    date: Option(String),
+    gps: Option(#(Option(Float), Option(Float))),
+    device_id: Option(String),
+  )
+}
+
+/// `POST /player/attendance`: verified match attendance needs the fixture, venue, date, GPS and the device.
+///
+/// Not ported yet: the `players` live event.
+pub fn attendance(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  let shape = {
+    use fixture <- input.field(
+      "fixture",
+      input.nullish(input.text(fixture_max)),
+    )
+    use venue <- input.field("venue", input.nullish(input.text(venue_max)))
+    use date <- input.field("date", input.nullish(input.day_or_blank()))
+    use gps <- input.field(
+      "gps",
+      input.nullish(
+        input.object({
+          use lat <- input.field("lat", input.optional(input.number(-90, 90)))
+          use lng <- input.field("lng", input.optional(input.number(-180, 180)))
+          input.done(#(lat, lng))
+        }),
+      ),
+    )
+    use device_id <- input.field(
+      "deviceId",
+      input.nullish(input.text(device_id_max)),
+    )
+    input.done(AttendanceInput(
+      fixture:,
+      venue:,
+      date: option.flatten(date),
+      gps:,
+      device_id:,
+    ))
+  }
+  use body <- http.body(req, shape, [
+    #("gps", "GPS_INVALID"),
+    #("gps.*", "GPS_INVALID"),
+  ])
+  let gps = case body.gps {
+    Some(#(Some(lat), Some(lng))) -> Some(#(lat, lng))
+    _ -> None
+  }
+  let device =
+    option.then(body.device_id, fn(d) {
+      case d {
+        "" -> None
+        d -> Some(d)
+      }
+    })
+  case
+    input.filled(body.fixture),
+    input.filled(body.venue),
+    body.date,
+    gps,
+    device
+  {
+    Some(_), Some(_), Some(date), Some(#(lat, lng)), Some(_) ->
+      add_attendance(
+        ctx,
+        p.player.row.id,
+        // Stored as sent: only a blank one is refused.
+        players.NewAttendance(
+          fixture: option.unwrap(body.fixture, ""),
+          venue: option.unwrap(body.venue, ""),
+          match_date: date,
+          lat:,
+          lng:,
+        ),
+      )
+    fixture, venue, date, gps, device -> {
+      let missing =
+        list.flatten([
+          when_none(fixture, "fixture"),
+          when_none(venue, "venue"),
+          when_none(date, "date"),
+          when_none(gps, "gps{lat,lng}"),
+          when_none(device, "deviceId"),
+        ])
+      http.json(
+        400,
+        json.object([
+          #("error", json.string("ATTENDANCE_UNVERIFIABLE")),
+          #(
+            "message",
+            json.string(
+              "Verified attendance needs fixture, venue, date, GPS and device data.",
+            ),
+          ),
+          #("missing", json.array(missing, json.string)),
+        ]),
+      )
+    }
+  }
+}
+
+fn when_none(value: Option(a), name: String) -> List(String) {
+  case value {
+    None -> [name]
+    Some(_) -> []
+  }
+}
+
+fn add_attendance(
+  ctx: Ctx,
+  player_id: id.PlayerId,
+  new: players.NewAttendance,
+) -> Response {
+  let now = clock.now_ms()
+  let added =
+    store.unit(ctx.store, fn(tx) {
+      use #(item, _) <- result.try(players.add_attendance(tx, player_id, new))
+      use _ <- result.try(store.seam(tx, "attendance.after_row"))
+      use p <- result.try(activity.record(tx, player_id, now))
+      use _ <- result.map(ledger.append(
+        tx,
+        ledger.Entry(
+          entry_type: ledger_row.AttendanceVerified,
+          player_id: Some(player_id),
+          org_id: None,
+          org_name: Some("ScoutBox"),
+          user_id: None,
+          actor_name: Some("system"),
+        ),
+        now,
+      ))
+      #(item, p)
+    })
+  case added {
+    Ok(#(item, p)) ->
+      http.json(
+        201,
+        json.object([
+          // The item as the TypeScript server builds it in the route, not the stored view's key order.
+          #(
+            "attendance",
+            json.object([
+              #("id", id.attendance_json(item.id)),
+              #("fixture", json.string(new.fixture)),
+              #("venue", json.string(new.venue)),
+              #("date", json.string(new.match_date)),
+              #(
+                "gps",
+                json.object([
+                  #("lat", json_text.number(new.lat)),
+                  #("lng", json_text.number(new.lng)),
+                ]),
+              ),
+              #("deviceConfirmed", json.bool(True)),
+              #("verified", json.bool(True)),
+            ]),
+          ),
+          #("trustScore", json.int(players.profile_signal(p))),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
   }
 }
 

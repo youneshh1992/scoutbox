@@ -52,4 +52,5 @@ export const BATTERIES = [
   'operations/clubOperations',
   'platform/contracts',
   'platform/productionHardening',
+  'platform/dates',
 ];

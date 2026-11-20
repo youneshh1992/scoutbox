@@ -1590,7 +1590,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["medical", "records"] ->
           only(req, Post, fn() { record.medical_record(ctx, req, player) })
         ["badges"] -> only(req, Post, fn() { record.badges(ctx, req, player) })
-        ["prefs"] -> only(req, Post, fn() { record.prefs(ctx, req, player) })
+        ["attendance"] ->
+          only(req, Post, fn() { record.attendance(ctx, req, player) })
+        ["prefs"] ->
+          case req.method {
+            Get -> record.show_prefs(player)
+            _ -> only(req, Post, fn() { record.prefs(ctx, req, player) })
+          }
         ["notifications"] ->
           only(req, Get, fn() {
             feed_routes.feed(

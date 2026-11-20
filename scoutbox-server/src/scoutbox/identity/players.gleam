@@ -658,7 +658,10 @@ fn attendance_json(a: attendance_row.Row) -> Json {
         Some(lat), Some(lng) -> [
           #(
             "gps",
-            json.object([#("lat", json.float(lat)), #("lng", json.float(lng))]),
+            json.object([
+              #("lat", json_text.number(lat)),
+              #("lng", json_text.number(lng)),
+            ]),
           ),
         ]
         _, _ -> [#("gps", json.null())]
@@ -808,7 +811,10 @@ fn programme_json(p: Player) -> Json {
 fn location_json(r: row.Row) -> Json {
   case r.lat, r.lng {
     Some(lat), Some(lng) ->
-      json.object([#("lat", json.float(lat)), #("lng", json.float(lng))])
+      json.object([
+        #("lat", json_text.number(lat)),
+        #("lng", json_text.number(lng)),
+      ])
     _, _ -> json.null()
   }
 }
@@ -1236,6 +1242,45 @@ fn next_position(
     decode.at([0], decode.int),
   ))
   result.unwrap(found, 0)
+}
+
+/// A match the player attended, with the GPS fix and the device that confirmed it.
+pub type NewAttendance {
+  NewAttendance(
+    fixture: String,
+    venue: String,
+    match_date: String,
+    lat: Float,
+    lng: Float,
+  )
+}
+
+/// Appends a verified attendance. Returns the stored item and record.
+pub fn add_attendance(
+  tx: Tx,
+  player_id: id.PlayerId,
+  new: NewAttendance,
+) -> Result(#(attendance_row.Row, Player), Fail(e)) {
+  use attendance_id <- result.try(id.next_attendance(tx))
+  use position <- result.try(next_position(tx, attendance_row.table, player_id))
+  let item =
+    attendance_row.Row(
+      ..attendance_row.new(
+        id: attendance_id,
+        player_id:,
+        position:,
+        fixture: new.fixture,
+        match_date: new.match_date,
+      ),
+      venue: Some(new.venue),
+      lat: Some(new.lat),
+      lng: Some(new.lng),
+      device_confirmed: Some(True),
+      verified: True,
+    )
+  use _ <- result.try(attendance_row.insert(tx, item))
+  use p <- result.map(refreshed(tx, player_id))
+  #(item, p)
 }
 
 /// Appends a clip with no footage yet (an upload is not ported). Returns the stored clip and record.
