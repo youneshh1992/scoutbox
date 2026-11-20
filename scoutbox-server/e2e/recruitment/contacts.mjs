@@ -34,6 +34,7 @@ import path from 'node:path';
 import { freePort } from '../support/testPort.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 import contactSpec from '../support/spec/recruitment/lifecycle/contact.json' with { type: 'json' };
 import lifecycleErrors from '../support/spec/recruitment/lifecycle/errors.json' with { type: 'json' };
 import eventSpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
@@ -210,6 +211,17 @@ const collect = (label, r) => {
 };
 
 const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+// The club's own stream: every contact event names the club, so only it receives them.
+const CLUB = await liveStream(BASE, j, maria.token);
+let clubMark = 0;
+const markClub = () => {
+  clubMark = CLUB.frames().length;
+};
+const clubHeard = async (event, contactId) =>
+  !!(await CLUB.waitFor(
+    (f) => f.event === event && f.orgId === 'org-eastport' && f.contactId === contactId && 'roomId' in f,
+    clubMark,
+  ));
 const tom = await login('org-eastport', 'Tom Field', 'First-Team Scout');
 const rita = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
 const agent = await login('org-northstar', 'Tomás Rivera', 'Director');
@@ -294,6 +306,7 @@ const J = {};
 
   // The draft.
   const sseP = await sseCollect(kola.token, 600);
+  markClub();
   const draft = await j(
     'POST',
     `/org/rooms/${J.RID}/contacts`,
@@ -306,6 +319,7 @@ const J = {};
   );
   ok(draft.status === 201 && draft.body.contact.status === 'draft', 'J2 a draft is created (201, status draft)');
   J.CID = draft.body.contact.id;
+  ok(await clubHeard('contact_created', J.CID), "LV1 the club's stream hears the draft created");
   ok(
     draft.body.routing.available === true && draft.body.routing.type === 'player' && draft.body.routing.minor === false,
     'J2b with a live routing preview: this will reach the player directly',
@@ -371,6 +385,7 @@ const J = {};
 
   // Send.
   const sseS = await sseCollect(kola.token, 800);
+  markClub();
   const sent = await j(
     'POST',
     `/org/rooms/${J.RID}/contacts/${J.CID}/send`,
@@ -381,6 +396,7 @@ const J = {};
     sent.status === 200 && sent.body.delivered === true && sent.body.contact.status === 'delivered',
     'J6 send hands the message to the in-app transport: delivered',
   );
+  ok(await clubHeard('contact_sent', J.CID), "LV2 the club's stream hears it sent");
   ok(
     sent.body.contact.sentAt === sent.body.contact.deliveredAt,
     'J6b sentAt and deliveredAt are ONE clock reading for the in-app transport',
@@ -449,6 +465,7 @@ const J = {};
 
   // The response.
   const tomNotifsBefore = (await j('GET', '/org/notifications', undefined, tom.token)).body.length;
+  markClub();
   const respond = await j(
     'POST',
     `/player/requests/${J.request.id}/respond`,
@@ -459,6 +476,7 @@ const J = {};
     respond.status === 200 && respond.body.status === 'accepted',
     'J10 the player accepts through the existing respond route, with a short reply',
   );
+  ok(await clubHeard('contact_responded', J.CID), "LV3 the club's stream hears the answer");
   const cAfter = (await j('GET', `/org/rooms/${J.RID}/contacts/${J.CID}`, undefined, maria.token)).body.contact;
   ok(
     cAfter.status === 'responded' &&
@@ -516,6 +534,7 @@ const J = {};
 
   // External record on the same case (already contacted): no second transition.
   const histNow = await historyLen(J.RID);
+  markClub();
   const ext = await j(
     'POST',
     `/org/rooms/${J.RID}/contacts/external`,
@@ -531,6 +550,10 @@ const J = {};
   ok(
     ext.status === 201 && ext.body.contact.status === 'recorded' && ext.body.contact.channel === 'phone',
     'J16 a phone call is recorded as an external contact (201, recorded)',
+  );
+  ok(
+    await clubHeard('contact_external_recorded', ext.body.contact.id),
+    "LV4 the club's stream hears the external record",
   );
   ok(
     ext.body.case?.unchanged === true && (await historyLen(J.RID)) === histNow,
@@ -1463,6 +1486,7 @@ section('F — honest transport failure and resend');
     'F1 the next in-app contact send is made to fail at the transport',
   );
   const theo = await playerLogin('pl-martin');
+  markClub();
   const s = await j(
     'POST',
     `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`,
@@ -1476,6 +1500,7 @@ section('F — honest transport failure and resend');
       s.body.contact.failureCode === 'TRANSPORT_REFUSED',
     'F2 the send reports delivered:false and the Contact is `failed` with a failure code — not delivered, not queued',
   );
+  ok(await clubHeard('contact_failed', d.body.contact.id), "LV5 the club's stream hears the failed send");
   neg(s.body.contact.deliveredAt === null && s.body.contact.sentAt === null, 'F2b no delivery time was invented');
   neg((await stage(RID)) === 'contact_planned', 'F3 the case did NOT move — a failed attempt is not contact');
   neg(

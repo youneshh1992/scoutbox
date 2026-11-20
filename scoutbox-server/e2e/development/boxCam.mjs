@@ -12,6 +12,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -94,6 +95,22 @@ const ruth = await login('org-harbour', 'Ruth Vane', 'Scout'); // unverified clu
 const alex = await login('org-northstar', 'Alex Agent', 'Agent'); // agency
 const dee = await login('org-hackneymarsh', 'Dee Mensah', 'Manager', 'grassroots'); // verified grassroots, London
 const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body; // adult, Manchester
+// Kola's own stream: how many times it heard their development evidence change, from a mark on.
+const KOLA_STREAM = await liveStream(BASE, j, kola.token);
+const evidencePings = async (from, atLeast) => {
+  await KOLA_STREAM.waitFor(
+    () =>
+      KOLA_STREAM.frames()
+        .slice(from)
+        .filter((f) => f.event === 'player_development_evidence_changed' && f.playerId === 'pl-adeyemi').length >=
+      atLeast,
+    from,
+    1500,
+  );
+  return KOLA_STREAM.frames()
+    .slice(from)
+    .filter((f) => f.event === 'player_development_evidence_changed' && f.playerId === 'pl-adeyemi').length;
+};
 const guni = (await j('POST', '/auth/player/login', { playerId: 'pl-guni' })).body; // minor, London
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
 ok(
@@ -342,6 +359,7 @@ section('B7 — Box Challenge completion, no endorsement implication');
   const join = await j('POST', `/player/box-cam/challenges/${touch.id}/join`, {}, kola.token);
   ok(join.status === 201, 'B7: adult joins the challenge');
   const entryId = join.body.challenge.entry.id;
+  const beforeChallenge = KOLA_STREAM.frames().length;
   // 1000 touches across two sessions.
   for (const chunk of [520, 500]) {
     await runSession(
@@ -360,6 +378,10 @@ section('B7 — Box Challenge completion, no endorsement implication');
   ok(
     done.entry.status === 'completed' && done.entry.progress >= 1000,
     'B7: challenge completed from verified sessions',
+  );
+  ok(
+    (await evidencePings(beforeChallenge, 3)) === 3,
+    "LV1 Kola's stream hears their development evidence change for each session and for the completed challenge",
   );
   const sp = (await j('GET', '/player/football-passport', undefined, kola.token)).body;
   ok(
@@ -394,8 +416,10 @@ section('B8 — replay / duplicate terminal submission rejected');
     },
     kola.token,
   );
+  const beforeFirst = KOLA_STREAM.frames().length;
   const first = await j('POST', `/player/box-cam/sessions/${session.id}/complete`, { nonce }, kola.token);
   ok(first.status === 200, 'B8: session completes once');
+  ok((await evidencePings(beforeFirst, 1)) === 1, "LV2 and Kola's stream hears it once");
   const replay = await j('POST', `/player/box-cam/sessions/${session.id}/complete`, { nonce }, kola.token);
   neg(replay.status === 409 && replay.body.error === 'ALREADY_FINALIZED', 'B8: duplicate terminal submission rejected');
   const lateEvents = await j(

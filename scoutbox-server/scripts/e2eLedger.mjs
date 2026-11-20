@@ -62,11 +62,51 @@ export const NOTES = {
       },
     ],
   },
+  'recruitment/contacts': {
+    added: [
+      {
+        checks: 5,
+        why: "Live events: the club's stream hears each contact event (created, sent, responded, recorded externally, failed) for that contact (LV1–LV5)",
+      },
+    ],
+  },
+  'agents/crossApp': {
+    added: [
+      {
+        checks: 1,
+        why: "Live events: the club's stream hears a contact routed to the agent, by the agent's id only (LV1)",
+      },
+    ],
+  },
+  'development/boxCam': {
+    added: [
+      {
+        checks: 2,
+        why: "Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2)",
+      },
+    ],
+  },
+  'development/combine': {
+    added: [
+      {
+        checks: 1,
+        why: "Live events: the player's stream hears their development evidence change for the session and the attempt (LV1)",
+      },
+    ],
+  },
+  'agents/compliance': {
+    added: [
+      {
+        checks: 1,
+        why: 'Live events: publishing a policy version pings every stream, naming nothing (LV1)',
+      },
+    ],
+  },
   'platform/liveDelivery': {
     added: [
       {
         checks: 7,
-        why: "A new battery (44 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, and every simple act that sends a catalogue ping",
+        why: "A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events",
       },
     ],
   },
