@@ -16,6 +16,7 @@ import scoutbox/agents/transaction_store
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
+import scoutbox/identity/pairing
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -342,9 +343,7 @@ pub fn erase(
               [p],
             ),
           )
-          use _ <- result.try(
-            run(tx, "DELETE FROM pairing_codes WHERE player_id = ?", [p]),
-          )
+          use _ <- result.try(pairing.revoke_for(tx, player_id))
           use _ <- result.try(
             list.try_each(child_tables, fn(t) {
               run(tx, "DELETE FROM " <> t <> " WHERE player_id = ?", [p])

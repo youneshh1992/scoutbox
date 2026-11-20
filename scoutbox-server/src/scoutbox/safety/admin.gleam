@@ -2,6 +2,7 @@
 
 import gleam/json
 import scoutbox/app.{type Ctx}
+import scoutbox/messaging/dev_mail
 import scoutbox/messaging/outbox
 import scoutbox/platform/http
 import scoutbox/platform/paging
@@ -23,7 +24,14 @@ pub fn outbox(ctx: Ctx, req: Request) -> Response {
           http.json(
             200,
             json.object([
-              #("items", json.array(items, outbox.view)),
+              // On the dev transport the outbox is the delivery: a mail whose code the stored row withholds is
+              // shown in full while this process holds it.
+              #(
+                "items",
+                json.array(items, fn(m) {
+                  outbox.view(dev_mail.shown(ctx.dev_mail, m))
+                }),
+              ),
               #("nextCursor", json.nullable(next, json.string)),
             ]),
           )

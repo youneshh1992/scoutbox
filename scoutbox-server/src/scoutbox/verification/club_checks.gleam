@@ -1,8 +1,10 @@
 //// A club proves control of its company mailbox (domains/verification/clubChecks.mjs): one of the safeguarding
 //// requirements before a club can see under-18 players. A code goes to the mailbox; the club enters it.
 ////
-//// Not ported yet: confirming the code (`/org/verification/email/confirm`) and the federation check.
+//// Not ported yet: the federation check.
 
+import gleam/bool
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -11,6 +13,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/orgs
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
@@ -163,6 +166,160 @@ fn issue(ctx: Ctx, a: OrgAccess, email: String, now: Int) -> Response {
           ),
         ]),
       )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `POST /org/verification/email/confirm`. Only a wrong code is charged against the budget, and the budget is
+/// tested before the code is judged, so a correct guess after it is gone is refused rather than rewarded. Run
+/// through `http.rerun_on_stale`: a challenge another request used first is judged again on the rerun.
+pub fn confirm_email_challenge(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+) -> Response {
+  let shape = {
+    use code <- input.field("code", input.nullish(input.text(64)))
+    input.done(code)
+  }
+  use code <- http.body(req, shape, [])
+  let hash = secrets.code_hash(option.unwrap(code, ""))
+  let now = clock.now_ms()
+  let org = a.org.id
+  let owner = id.org_to_string(org)
+  use <- bool.guard(
+    limits.spent(ctx.limits, limits.EmailChallengeConfirm, owner, now),
+    http.json(429, limits.limited_json(limits.EmailChallengeConfirm)),
+  )
+  let charge = fn() {
+    case http.rerun(req) {
+      True -> Nil
+      False -> {
+        let _ =
+          limits.limited(ctx.limits, limits.EmailChallengeConfirm, owner, now)
+        Nil
+      }
+    }
+  }
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.one(
+        read,
+        "SELECT "
+          <> challenge_row.columns
+          <> " FROM email_challenges WHERE org_id = ? AND expires_at > ? AND attempts < ?",
+        [id.org_sql(org), sqlight.int(now), sqlight.int(challenge_max_attempts)],
+        challenge_row.decoder(),
+      )
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Error(Nil)) -> {
+      charge()
+      http.error_message(
+        404,
+        "CHALLENGE_NOT_FOUND",
+        "Request a fresh code — none is active for this club.",
+      )
+    }
+    Ok(Ok(challenge)) ->
+      case secrets.equal(hash, challenge.code_hash) {
+        False -> {
+          charge()
+          wrong_code(ctx, org, now)
+        }
+        True -> confirm(ctx, org, hash, now)
+      }
+  }
+}
+
+/// A wrong code counts against the live challenge; the one that reaches the limit cancels it.
+fn wrong_code(ctx: Ctx, org: id.OrgId, now: Int) -> Response {
+  let counted =
+    store.unit(ctx.store, fn(tx) {
+      use attempts <- result.try(store.write(
+        tx,
+        "UPDATE email_challenges SET attempts = attempts + 1 WHERE org_id = ? AND expires_at > ? AND attempts < ? RETURNING attempts",
+        [id.org_sql(org), sqlight.int(now), sqlight.int(challenge_max_attempts)],
+        decode.at([0], decode.int),
+      ))
+      case attempts {
+        [n, ..] if n >= challenge_max_attempts -> {
+          use _ <- result.map(
+            store.run(tx, "DELETE FROM email_challenges WHERE org_id = ?", [
+              id.org_sql(org),
+            ]),
+          )
+          #(0, True)
+        }
+        [n, ..] -> Ok(#(challenge_max_attempts - n, False))
+        [] -> Ok(#(0, False))
+      }
+    })
+  case counted {
+    Ok(#(remaining, invalidated)) ->
+      http.json(
+        400,
+        json.object([
+          #("error", json.string("CODE_INVALID")),
+          #(
+            "message",
+            json.string(case invalidated {
+              True ->
+                "That code doesn't match, and this challenge is now cancelled after too many wrong codes — request a fresh one."
+              False -> "That code doesn't match — check the email."
+            }),
+          ),
+          #("attemptsRemaining", json.int(remaining)),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// The challenge goes in the unit that verifies the domain, so a failure anywhere keeps it live for the retry.
+fn confirm(ctx: Ctx, org: id.OrgId, hash: String, now: Int) -> Response {
+  let confirmed =
+    store.unit(ctx.store, fn(tx) {
+      use consumed <- result.try(store.write(
+        tx,
+        "DELETE FROM email_challenges WHERE org_id = ? AND code_hash = ? AND expires_at > ? AND attempts < ? RETURNING email",
+        [
+          id.org_sql(org),
+          sqlight.text(hash),
+          sqlight.int(now),
+          sqlight.int(challenge_max_attempts),
+        ],
+        decode.at([0], decode.string),
+      ))
+      case consumed {
+        [] -> store.stale("email challenge")
+        [email, ..] -> {
+          use _ <- result.try(store.seam(
+            tx,
+            "email_challenge.confirm.after_consume",
+          ))
+          let domain =
+            string.split(email, "@")
+            |> list.drop(1)
+            |> list.first
+            |> result.unwrap("")
+          use _ <- result.map(orgs.verify_email_domain(tx, org, domain))
+          domain
+        }
+      }
+    })
+  case confirmed {
+    // Not ported yet: the `orgs` live event that tells open sign-in pickers a club changed.
+    Ok(domain) ->
+      http.json(
+        200,
+        json.object([
+          #("emailDomainVerified", json.bool(True)),
+          #("emailDomain", json.string(domain)),
+        ]),
+      )
+    Error(store.Lost(what)) -> http.stale(what)
     Error(failure) -> http.internal(failure)
   }
 }

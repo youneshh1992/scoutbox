@@ -12,6 +12,7 @@ import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
+import scoutbox/messaging/dev_mail
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/outbox
 import scoutbox/messaging/push
@@ -69,8 +70,9 @@ fn boot() -> Result(Nil, String) {
   )
   use faults <- result.try(faults.start(config.dev_logins, config.fault_rules))
   use hub <- result.try(live.start())
+  use dev_mail <- result.try(dev_mail.start())
   let store =
-    store.with_dispatch(store, dispatch(store, hub, _))
+    store.with_dispatch(store, dispatch(store, hub, dev_mail, _))
     |> store.with_seams(faults.should_fail(faults, _))
   use applied <- result.try(migrations.run(
     store,
@@ -93,7 +95,7 @@ fn boot() -> Result(Nil, String) {
       _,
       config.box_cam_test_provider,
     ))
-  let store = store.with_dispatch(store, dispatch(store, hub, _))
+  let store = store.with_dispatch(store, dispatch(store, hub, dev_mail, _))
   use _ <- result.try(
     match_facts.start(store, config.box_cam_test_provider)
     |> result.map_error(string.inspect),
@@ -119,6 +121,7 @@ fn boot() -> Result(Nil, String) {
       faults:,
       live: hub,
       request_metrics:,
+      dev_mail:,
     )
   // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped. A trial's
   // reminder markers are rows too, so the boot pass re-sends nothing.
@@ -165,18 +168,24 @@ fn sweeping(ctx: Ctx) -> Nil {
 }
 
 /// After COMMIT. A failing effect never undoes the act's data; it is logged.
-fn dispatch(store: Store, hub: Hub, effect: Effect) -> Nil {
+fn dispatch(
+  store: Store,
+  hub: Hub,
+  dev_mail: dev_mail.Deliveries,
+  effect: Effect,
+) -> Nil {
   case effect {
     Live(event:) -> live_routes.publish(store, hub, event)
     SendMail(to:, subject:, text:, secrets:) -> {
       let recorded =
         store.unit(store, fn(tx) {
           outbox.append(tx, to:, subject:, text:, secrets:, at: clock.now_ms())
-          |> result.replace(Nil)
         })
-      case recorded {
-        Ok(Nil) -> Nil
-        Error(e) -> wisp.log_error("mail not recorded: " <> string.inspect(e))
+      case recorded, secrets {
+        Ok(_), [] -> Nil
+        Ok(mail), _ -> dev_mail.keep(dev_mail, mail, text)
+        Error(e), _ ->
+          wisp.log_error("mail not recorded: " <> string.inspect(e))
       }
     }
     SendPush(to:, id:, title:, body:) -> {

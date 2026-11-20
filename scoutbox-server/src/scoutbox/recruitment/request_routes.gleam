@@ -30,11 +30,14 @@ import scoutbox/platform/temporal
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/contacts
 import scoutbox/recruitment/requests
+import scoutbox/recruitment/signing_writer
 import scoutbox/recruitment/trial_routes
 import scoutbox/recruitment/trial_rules
+import scoutbox/recruitment/trials
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/recruitment_requests as request_row
+import scoutbox/rows/trials as trial_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
@@ -539,8 +542,6 @@ pub fn org_ledger(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
 }
 
 /// `GET /org/funnel`: every figure counted from recorded events.
-///
-/// Not ported yet: trials booked and reported (the trials) and signings (recruitment's signings) count none.
 pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
   let id = a.org.id
   let found =
@@ -554,6 +555,13 @@ pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
         id,
         Some(request_row.Accepted),
       ))
+      use booked <- result.try(trials.count_for_org(read, id, None))
+      use reported <- result.try(trials.count_for_org(
+        read,
+        id,
+        Some(trial_row.Reported),
+      ))
+      use signed <- result.try(signing_writer.count_for_org(read, id))
       use actors <- result.map(ledger.top_actors_for_org(read, id, 8))
       let stage = fn(key, label, count) {
         json.object([
@@ -571,9 +579,9 @@ pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
             stage("shortlists", "Shortlists", shortlists),
             stage("requests", "Requests sent", sent),
             stage("accepted", "Requests accepted", accepted),
-            stage("trials", "Trials booked", 0),
-            stage("reports", "Reports filed", 0),
-            stage("signings", "Signings", 0),
+            stage("trials", "Trials booked", booked),
+            stage("reports", "Reports filed", reported),
+            stage("signings", "Signings", signed),
           ]),
         ),
         #(

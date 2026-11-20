@@ -544,6 +544,7 @@ pub const tables = [
   "outbox",
   "outcome_report_confirmations",
   "outcome_reports",
+  "pairing_codes",
   "passport_achievements",
   "passport_career_entries",
   "passport_corrections",
@@ -704,7 +705,7 @@ pub const ided = [
   Ided("dispatches", "Dispatch", Some("dsp")),
   Ided("friendlies", "Friendly", Some("fr")),
   Ided("guardians", "Guardian", Some("gd")),
-  Ided("idv_queue", "IdvCase", None),
+  Ided("idv_queue", "IdvCase", Some("idv")),
   Ided("ledger", "LedgerEntry", Some("led")),
   Ided("messages", "Message", Some("msg")),
   Ided("moderation_log", "ModerationEntry", Some("mod")),
@@ -882,6 +883,8 @@ pub const ided = [
 
 /// Id columns no foreign key types. See `codegen.IdColumn`.
 pub const id_columns = [
+  // No foreign key on purpose (player ids carry none); the deletion unit revokes a child's codes.
+  RefersTo("pairing_codes.player_id", "players"),
   Untyped(
     "regulatory_consents.subject_id",
     "polymorphic: its kind is in another column",

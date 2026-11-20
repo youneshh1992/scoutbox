@@ -11,8 +11,11 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/discovery/saved_searches
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians
+import scoutbox/identity/pairing
+import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
@@ -22,9 +25,11 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/store
+import scoutbox/platform/temporal
 import scoutbox/recruitment/notification_targets
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/rules/age
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -39,11 +44,6 @@ const name_max = 120
 const password_min = 8
 
 const password_max = 256
-
-/// Not ported yet: storing a new player's password (`identity/passwords` hashes one). A new account's hash is this marker,
-/// which no password verifies, so the account can't be signed in to by password, and isn't mistaken for a
-/// passwordless demo identity either.
-const unhashed = "!unported:scrypt"
 
 type Signup {
   Signup(
@@ -183,7 +183,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                 False -> {
                   let created =
                     store.unit(ctx.store, fn(tx) {
-                      use p <- result.map(players.create(
+                      use p <- result.try(players.create(
                         tx,
                         players.NewPlayer(
                           name:,
@@ -206,8 +206,9 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                           created_at: now,
                         ),
                       ))
-                      // Not ported yet: the saved-search check (discovery) and the live 'players' event.
-                      p
+                      // Not ported yet: the live 'players' event.
+                      saved_searches.alert_new_player(tx, p, now)
+                      |> result.replace(p)
                     })
                   case created {
                     Ok(p) ->
@@ -255,22 +256,35 @@ pub fn signup(ctx: Ctx, req: Request) -> Response {
             "Enter a date of birth as YYYY-MM-DD.",
           )
         _, _, password ->
-          case option.map(password, input.utf16_length) {
+          case password {
             None -> password_required()
-            Some(n) if n < password_min -> password_required()
-            Some(_) ->
-              case age.is_adult(dob, country, now) {
-                False -> {
-                  let required = age.adult_age_for(country)
-                  http.error_message(
-                    403,
-                    "GUARDIAN_REQUIRED",
-                    "Under-"
-                      <> int.to_string(required)
-                      <> " profiles are owned by a parent or guardian. A guardian must verify their ID, accept the safeguarding disclaimer, and create the profile from their own account.",
-                  )
-                }
-                True -> create(ctx, body, name, dob, country, now)
+            Some(password) ->
+              case input.utf16_length(password) < password_min {
+                True -> password_required()
+                False ->
+                  case age.is_adult(dob, country, now) {
+                    False -> {
+                      let required = age.adult_age_for(country)
+                      http.error_message(
+                        403,
+                        "GUARDIAN_REQUIRED",
+                        "Under-"
+                          <> int.to_string(required)
+                          <> " profiles are owned by a parent or guardian. A guardian must verify their ID, accept the safeguarding disclaimer, and create the profile from their own account.",
+                      )
+                    }
+                    // Hashed before the unit: it takes about half a second, and a unit holds the only writer.
+                    True ->
+                      create(
+                        ctx,
+                        body,
+                        name,
+                        dob,
+                        country,
+                        passwords.hash(password),
+                        now,
+                      )
+                  }
               }
           }
       }
@@ -291,6 +305,7 @@ fn create(
   name: String,
   dob: String,
   country: String,
+  password_hash: String,
   now: Int,
 ) -> Response {
   let created =
@@ -314,12 +329,13 @@ fn create(
             Some(lat), Some(lng) -> Some(#(lat, lng))
             _, _ -> None
           },
-          password_hash: Some(unhashed),
+          password_hash: Some(password_hash),
           guardian_id: None,
           created_at: now,
         ),
       ))
-      // Not ported yet: the saved-search check (discovery) and the live 'players' event.
+      // Not ported yet: the live 'players' event.
+      use _ <- result.try(saved_searches.alert_new_player(tx, p, now))
       use token <- result.map(sessions.create(
         tx,
         sessions.Player(p.row.id),
@@ -408,26 +424,26 @@ pub fn add_timeline(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
 
 /// `GET /player/export`: everything held about the player.
 pub fn export(ctx: Ctx, p: PlayerAccess) -> Response {
-  let id = p.player.row.id
+  let exported_at = clock.iso(clock.now_ms())
+  case store.read(ctx.store, bundle(_, p.player, exported_at)) {
+    Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /guardian/export`: the guardian's record and each child's export.
+pub fn guardian_export(ctx: Ctx, g: guardians.Guardian) -> Response {
+  let exported_at = clock.iso(clock.now_ms())
   let found =
     store.read(ctx.store, fn(read) {
-      use reqs <- result.try(requests.for_player(read, id))
-      use feed <- result.try(notifications.feed(
-        read,
-        audience.Player,
-        id.player_to_string(id),
-        notification_targets.target,
-      ))
-      use events <- result.map(ledger.for_player(read, id))
+      use kids <- result.try(players.by_ids(read, g.child_ids))
+      use children <- result.map(
+        list.try_map(kids, bundle(read, _, exported_at)),
+      )
       json.object([
-        #("exportedAt", json.string(clock.iso(clock.now_ms()))),
-        #("profile", players.self_view(p.player)),
-        #("requests", json.array(reqs, requests.recipient_view)),
-        // Not ported yet: message threads (messaging) and insights (discovery).
-        #("threads", json.preprocessed_array([])),
-        #("notifications", json.array(feed, notifications.view)),
-        #("insights", json.null()),
-        #("ledgerEvents", json.array(events, ledger.view)),
+        #("exportedAt", json.string(exported_at)),
+        #("guardian", guardians.self_view(g)),
+        #("children", json.preprocessed_array(children)),
       ])
     })
   case found {
@@ -436,15 +452,43 @@ pub fn export(ctx: Ctx, p: PlayerAccess) -> Response {
   }
 }
 
-/// `POST /auth/player/login`: a demo sign-in by player id. The wrong-guess budget is checked before the lookup,
-/// so an unknown id and a real one are refused alike once it is spent.
+/// Everything held about a player, as their export carries it.
+fn bundle(
+  read: store.Read,
+  p: players.Player,
+  exported_at: String,
+) -> Result(json.Json, store.Fail(e)) {
+  let id = p.row.id
+  use reqs <- result.try(requests.for_player(read, id))
+  use feed <- result.try(notifications.feed(
+    read,
+    audience.Player,
+    id.player_to_string(id),
+    notification_targets.target,
+  ))
+  use events <- result.map(ledger.for_player(read, id))
+  json.object([
+    #("exportedAt", json.string(exported_at)),
+    #("profile", players.self_view(p)),
+    #("requests", json.array(reqs, requests.recipient_view)),
+    // Not ported yet: message threads (messaging) and insights (discovery).
+    #("threads", json.preprocessed_array([])),
+    #("notifications", json.array(feed, notifications.view)),
+    #("insights", json.null()),
+    #("ledgerEvents", json.array(events, ledger.view)),
+  ])
+}
+
+/// `POST /auth/player/login`, by player id: with the password when the player has one, else a passwordless demo
+/// sign-in (development only). The wrong-guess budget is checked before the lookup, so an unknown id and a real one
+/// are refused alike once it is spent.
 pub fn login(ctx: Ctx, req: Request) -> Response {
   let shape = {
     use player_id <- input.field("playerId", input.nullish(input.text(80)))
-    use _password <- input.field("password", input.nullish(input.text(256)))
-    input.done(player_id)
+    use password <- input.field("password", input.nullish(input.text(256)))
+    input.done(#(player_id, password))
   }
-  use player_id <- http.body(req, shape, [])
+  use #(player_id, password) <- http.body(req, shape, [])
   let now = clock.now_ms()
   let tried = "player:" <> option.unwrap(player_id, "undefined")
   use <- bool.guard(
@@ -463,43 +507,222 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
       limits.login_failed(ctx.limits, tried, now)
       http.error(404, "PLAYER_NOT_FOUND")
     }
-    // Not ported yet: signing a player in with a password (`identity/passwords` checks one).
-    Ok(Some(p)) ->
-      case p.row.password_hash, ctx.config.dev_logins {
-        Some(_), _ ->
-          http.error_message(
-            501,
-            "NOT_PORTED",
-            "Password-protected player accounts are not supported by this server yet.",
-          )
+    Ok(Some(p)) -> {
+      // The hash is checked before the unit: it takes about half a second, and a unit holds the only writer.
+      let refused = case p.row.password_hash, ctx.config.dev_logins {
+        Some(stored), _ ->
+          case passwords.verify(option.unwrap(password, ""), stored) {
+            True -> None
+            False -> {
+              limits.login_failed(
+                ctx.limits,
+                "player:" <> id.player_to_string(p.row.id),
+                now,
+              )
+              Some(http.error_message(
+                401,
+                "BAD_PASSWORD",
+                "This profile is password-protected.",
+              ))
+            }
+          }
         None, False ->
-          http.error_message(
+          Some(http.error_message(
             403,
             "DEV_LOGIN_DISABLED",
             "Passwordless demo logins are disabled outside development. Use a credentialed account.",
-          )
-        None, True ->
-          case
-            store.unit(ctx.store, fn(tx) {
-              sessions.create(
-                tx,
-                sessions.Player(p.row.id),
-                now,
-                ctx.config.session_ttl_ms,
-              )
-            })
-          {
-            Ok(token) ->
-              http.json(
-                200,
-                json.object([
-                  #("playerId", id.player_json(p.row.id)),
-                  #("name", json.string(p.row.name)),
-                  #("token", json.string(token)),
-                ]),
-              )
-            Error(failure) -> http.internal(failure)
-          }
+          ))
+        None, True -> None
       }
+      use <- option.lazy_unwrap(refused)
+      case
+        store.unit(ctx.store, fn(tx) {
+          sessions.create(
+            tx,
+            sessions.Player(p.row.id),
+            now,
+            ctx.config.session_ttl_ms,
+          )
+        })
+      {
+        Ok(token) ->
+          http.json(
+            200,
+            json.object([
+              #("playerId", id.player_json(p.row.id)),
+              #("name", json.string(p.row.name)),
+              #("token", json.string(token)),
+            ]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
+    }
+  }
+}
+
+/// `POST /auth/player/pair`: a child's device exchanges a guardian's pairing code for a session. A wrong code is
+/// charged to the client's address, on top of the /auth limiter; a correct one costs nothing. The code is used up in
+/// the unit that makes the session, so a failure anywhere keeps it live. Run through `http.rerun_on_stale`: a code
+/// another device used first is a wrong code on the rerun.
+pub fn pair(ctx: Ctx, req: Request, address: String) -> Response {
+  let shape = {
+    use code <- input.field("code", input.nullish(input.text(64)))
+    input.done(code)
+  }
+  use code <- http.body(req, shape, [])
+  let now = clock.now_ms()
+  use <- bool.guard(
+    limits.spent(ctx.limits, limits.PairingAttempt, address, now),
+    http.json(429, limits.limited_json(limits.PairingAttempt)),
+  )
+  let code = option.unwrap(code, "")
+  let found = {
+    use child <- result.try(store.read(ctx.store, pairing.live(_, code, now)))
+    case child {
+      None -> Ok(#(None, None))
+      Some(child) ->
+        store.read(ctx.store, players.by_id(_, child))
+        |> result.map(fn(p) { #(Some(child), p) })
+    }
+  }
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(#(live, None)) -> {
+      // A live code for a child who is gone pairs nothing again.
+      let revoked = case live {
+        Some(child) -> store.unit(ctx.store, pairing.revoke_for(_, child))
+        None -> Ok(Nil)
+      }
+      case revoked, http.rerun(req) {
+        Error(failure), _ -> http.internal(failure)
+        Ok(Nil), True -> code_invalid()
+        Ok(Nil), False -> {
+          let _ =
+            limits.limited(ctx.limits, limits.PairingAttempt, address, now)
+          code_invalid()
+        }
+      }
+    }
+    Ok(#(_, Some(p))) -> {
+      let paired =
+        store.unit(ctx.store, fn(tx) {
+          use consumed <- result.try(pairing.consume(tx, code, now))
+          use <- bool.guard(
+            consumed != Some(p.row.id),
+            store.stale("pairing code"),
+          )
+          use _ <- result.try(store.seam(tx, "pairing.after_consume"))
+          sessions.create(
+            tx,
+            sessions.Player(p.row.id),
+            now,
+            ctx.config.session_ttl_ms,
+          )
+        })
+      case paired {
+        Ok(token) ->
+          http.json(
+            200,
+            json.object([
+              #("playerId", id.player_json(p.row.id)),
+              #("name", json.string(p.row.name)),
+              #("token", json.string(token)),
+            ]),
+          )
+        Error(store.Lost(what)) -> http.stale(what)
+        Error(failure) -> http.internal(failure)
+      }
+    }
+  }
+}
+
+fn code_invalid() -> Response {
+  http.error_message(
+    404,
+    "CODE_INVALID",
+    "That pairing code is wrong or expired — ask your parent/guardian for a fresh one.",
+  )
+}
+
+/// `POST /player/aging-up/complete`: on their 18th birthday (the age of majority in their country), a
+/// guardian-owned player takes the account over, with their consent.
+pub fn complete_aging_up(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  use _ <- http.body(req, input.nothing(), [])
+  let player = p.player.row
+  case p.minor, player.guardian_id {
+    True, _ ->
+      http.error_message(
+        403,
+        "STILL_A_MINOR",
+        "The transition unlocks on your 18th birthday (age of majority in your country).",
+      )
+    False, None ->
+      http.error_message(400, "ALREADY_OWNED", "You already own this account.")
+    False, Some(guardian_id) -> {
+      let now = clock.now_ms()
+      let year = int.to_string(temporal.day_year(temporal.day_of(now)))
+      let player_ref = Some(id.player_to_string(player.id))
+      let done =
+        store.unit(ctx.store, fn(tx) {
+          use guardian <- result.try(guardians.by_id(
+            store.reading(tx),
+            guardian_id,
+          ))
+          use _ <- result.try(players.age_up(tx, player.id, guardian_id))
+          use _ <- result.try(case guardian {
+            Some(g) ->
+              notifications.notify(
+                tx,
+                to: audience.Guardian,
+                id: id.guardian_to_string(g.row.id),
+                type_: "aging_up",
+                text: player.name
+                  <> " is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.",
+                ref_id: player_ref,
+                at: now,
+              )
+            None -> Ok(Nil)
+          })
+          use _ <- result.try(players.add_timeline_entry(
+            tx,
+            player.id,
+            year,
+            "Turned 18 — took ownership of this ScoutBox account",
+          ))
+          use _ <- result.try(ledger.append(
+            tx,
+            ledger.Entry(
+              entry_type: ledger_row.AccountTransitioned,
+              player_id: Some(player.id),
+              org_id: None,
+              org_name: Some("ScoutBox"),
+              user_id: None,
+              actor_name: Some("system"),
+            ),
+            now,
+          ))
+          // Not ported yet: the live 'players' event.
+          notifications.notify(
+            tx,
+            to: audience.Player,
+            id: id.player_to_string(player.id),
+            type_: "aging_up",
+            text: "Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.",
+            ref_id: player_ref,
+            at: now,
+          )
+        })
+      case done {
+        Ok(Nil) ->
+          http.json(
+            200,
+            json.object([
+              #("ok", json.bool(True)),
+              #("owned", json.bool(True)),
+            ]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
+    }
   }
 }

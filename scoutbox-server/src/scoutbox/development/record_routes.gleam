@@ -368,18 +368,18 @@ pub fn stats(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           #("field", json.string(field)),
         ]),
       )
-    Ok(_), Some(_) ->
-      http.error_message(
-        501,
-        "NOT_PORTED",
-        "Filing figures into a past season is not supported by this server yet.",
-      )
-    Ok(figures), None ->
+    Ok(figures), season ->
       act(
         ctx,
         fn(tx) {
-          use _ <- result.try(players.record_stats(tx, p.player.row.id, figures))
-          activity.record(tx, p.player.row.id, clock.now_ms())
+          let id = p.player.row.id
+          use _ <- result.try(case season {
+            // `season` (e.g. "2024/25") files the figures into the season history instead of the current season.
+            Some(season) -> players.file_season(tx, id, season, figures)
+            None -> players.record_stats(tx, id, figures)
+          })
+          use _ <- result.try(store.seam(tx, "stats.after_row"))
+          activity.record(tx, id, clock.now_ms())
         },
         fn(s) {
           json.object([

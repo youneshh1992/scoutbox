@@ -6,6 +6,7 @@
 //// - wrong second-factor codes, per staff member: five lock the account's code checks for five minutes;
 //// - the acts RATE_LIMIT_POLICY bounds per owner (`Action`), each in its own window.
 
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -43,6 +44,9 @@ const auth_policy = Policy(max: 40, window_ms: 60_000)
 pub const policy = [
   #("login_failure", login_policy),
   #("email_challenge_request", email_challenge_request_policy),
+  #("email_challenge_confirm", email_challenge_confirm_policy),
+  #("pairing_code_mint", pairing_code_mint_policy),
+  #("pairing_attempt", pairing_attempt_policy),
   #("room_create", room_create_policy),
   #("room_comment", room_comment_policy),
   #("room_combine_request", room_combine_request_policy),
@@ -100,6 +104,13 @@ pub const policy = [
 pub type Action {
   /// Club e-mail-domain verification codes requested, per organisation (each one sends a mail).
   EmailChallengeRequest
+  /// Wrong club e-mail verification codes presented, per organisation. A correct code costs nothing.
+  EmailChallengeConfirm
+  /// Child pairing codes minted, per guardian.
+  PairingCodeMint
+  /// Wrong child pairing codes presented, per client address (the route is unauthenticated). A correct code costs
+  /// nothing.
+  PairingAttempt
   /// New Recruitment Rooms, per organisation.
   RoomCreate
   /// Room discussion messages, per room and staff member.
@@ -213,6 +224,12 @@ pub type Action {
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
 
+const email_challenge_confirm_policy = Policy(max: 20, window_ms: 900_000)
+
+const pairing_code_mint_policy = Policy(max: 20, window_ms: 3_600_000)
+
+const pairing_attempt_policy = Policy(max: 20, window_ms: 900_000)
+
 const room_create_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const room_comment_policy = Policy(max: 20, window_ms: 60_000)
@@ -321,6 +338,9 @@ const policy_publish_policy = Policy(max: 10, window_ms: 86_400_000)
 pub fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
+    EmailChallengeConfirm -> "email_challenge_confirm"
+    PairingCodeMint -> "pairing_code_mint"
+    PairingAttempt -> "pairing_attempt"
     RoomCreate -> "room_create"
     AnalyticsRead -> "analytics_read"
     BriefWrite -> "brief_write"
@@ -382,6 +402,9 @@ pub fn action_name(action: Action) -> String {
 fn action_policy(action: Action) -> Policy {
   case action {
     EmailChallengeRequest -> email_challenge_request_policy
+    EmailChallengeConfirm -> email_challenge_confirm_policy
+    PairingCodeMint -> pairing_code_mint_policy
+    PairingAttempt -> pairing_attempt_policy
     RoomCreate -> room_create_policy
     AnalyticsRead -> analytics_read_policy
     BriefWrite -> brief_write_policy
@@ -489,6 +512,16 @@ pub fn limited(
   })
 }
 
+/// True when `owner`'s budget for `action` is already used up, without spending any of it (the TypeScript
+/// limiter's `peek(…).remaining === 0`): for an act where only a failure is charged.
+pub fn spent(limits: Limits, action: Action, owner: String, now: Int) -> Bool {
+  let p = action_policy(action)
+  table.update(limits.acts, action_name(action) <> ":" <> owner, fn(entry) {
+    let w = current(entry, now, p.window_ms)
+    #(entry, w.count >= p.max)
+  })
+}
+
 /// The 429 body for an act over its budget (rateLimitedBody).
 /// The live buckets of the acts' budgets, as `GET /__rate-limits` lists them: the action, whose budget it is, and
 /// how much of it is spent.
@@ -502,6 +535,13 @@ pub fn snapshot(limits: Limits) -> List(#(String, String, Int)) {
     }
   })
   |> list.sort(fn(a, b) { string.compare(a.0 <> ":" <> a.1, b.0 <> ":" <> b.1) })
+}
+
+/// The 429 body for an act over its budget, as JSON.
+pub fn limited_json(action: Action) -> json.Json {
+  json.object(
+    list.map(limited_body(action), fn(kv) { #(kv.0, json.string(kv.1)) }),
+  )
 }
 
 pub fn limited_body(action: Action) -> List(#(String, String)) {

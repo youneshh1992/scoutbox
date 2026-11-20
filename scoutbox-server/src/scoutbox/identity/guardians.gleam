@@ -7,6 +7,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/identity/idv
 import scoutbox/identity/players
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -306,4 +307,62 @@ pub fn idv_view(q: idv_row.Row) -> Json {
     #("ts", json.int(q.created_at)),
     #("status", idv_row.status_to_json(q.status)),
   ])
+}
+
+/// The e-mail code matched: verified, and the code's hash goes.
+pub fn verify_email(tx: Tx, id: id.GuardianId) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE guardians SET email_verified = 1, email_code_hash = NULL WHERE id = ? AND email_verified = 0",
+    [id.guardian_sql(id)],
+  )
+}
+
+/// A passed ID check from the provider: the guardian is verified with its reference, and the check joins the
+/// queue Trust & Safety reviews.
+pub fn record_id_check(
+  tx: Tx,
+  g: Guardian,
+  document_type: String,
+  attestation: idv.Attestation,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(
+    store.run(
+      tx,
+      "UPDATE guardians SET id_verified = 1, idv_reference = ? WHERE id = ?",
+      [sqlight.text(attestation.reference), id.guardian_sql(g.row.id)],
+    ),
+  )
+  use _ <- result.try(store.seam(tx, "guardian.verify_id.after_row"))
+  use case_id <- result.try(id.next_idv_case(tx))
+  idv_row.insert(
+    tx,
+    idv_row.New(
+      ..idv_row.new(
+        id: case_id,
+        guardian_id: g.row.id,
+        document_type:,
+        document_ref_last4: attestation.document_ref_last4,
+        provider: idv.provider,
+        reference: attestation.reference,
+        created_at: at,
+        status: idv_row.Approved,
+      ),
+      guardian_name: Some(g.row.name),
+    ),
+  )
+}
+
+/// The first acceptance's time is kept.
+pub fn accept_disclaimer(
+  tx: Tx,
+  id: id.GuardianId,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE guardians SET disclaimer_accepted = 1, disclaimer_accepted_at = COALESCE(disclaimer_accepted_at, ?) WHERE id = ?",
+    [sqlight.int(at), id.guardian_sql(id)],
+  )
 }

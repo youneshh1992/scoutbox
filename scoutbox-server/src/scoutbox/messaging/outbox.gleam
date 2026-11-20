@@ -134,3 +134,8 @@ fn mail_view(m: Mail) -> Json {
     #("delivered", json.bool(option.unwrap(m.delivered, False))),
   ])
 }
+
+/// The mail with `text` in place of its stored text.
+pub fn with_text(m: Mail, text: String) -> Mail {
+  row.Row(..m, text:)
+}

@@ -1,8 +1,8 @@
 //// Saved searches (`saved_searches`, domains/discovery/savedSearches.mjs). A filter that is an empty or blank
 //// string, `false` or null means "no filter", as the apps send it; only the set ones are stored.
 ////
-//// Not ported yet: the list (`GET /org/searches`), deleting one, and the new-player match that notifies a
-//// search's owner.
+//// When a player joins, SQL narrows the saved searches of current staff to those the player could match, and the
+//// whole filter is then applied to the player as the club sees them.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -14,15 +14,21 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/orgs
+import scoutbox/identity/players.{type Player}
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/store
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/saved_searches as row
+import scoutbox/rules/age
+import scoutbox/vocab/audience
 import scoutbox/vocab/availability
 import scoutbox/vocab/foot
 import scoutbox/vocab/position
+import sqlight
 import wisp.{type Request, type Response}
 
 const name_max = 120
@@ -256,4 +262,151 @@ fn set_filters(s: row.Row) -> List(#(String, Json)) {
     option.map(s.age_group, fn(g) { #("ageGroup", row.age_group_to_json(g)) }),
     option.map(s.new_days, fn(n) { #("newDays", json.int(n)) }),
   ])
+}
+
+/// A search with its scout's name, which the view shows.
+type Saved {
+  Saved(search: row.Row, scout_name: String)
+}
+
+fn saved(where: String, args: List(sqlight.Value), read: Read) {
+  store.query(
+    read,
+    "SELECT "
+      <> row.qualified("s")
+      <> ", u.name FROM saved_searches s JOIN org_users u ON u.id = s.user_id "
+      <> where
+      <> " ORDER BY s.rowid",
+    args,
+    {
+      use search <- decode.then(row.decoder())
+      use scout_name <- decode.field(row.width, decode.string)
+      decode.success(Saved(search:, scout_name:))
+    },
+  )
+}
+
+/// `GET /org/searches`: one club's list, oldest first, not paged.
+pub fn club_list(ctx: Ctx, a: OrgAccess) -> Response {
+  case
+    store.read(ctx.store, saved("WHERE s.org_id = ?", [id.org_sql(a.org.id)], _))
+  {
+    Ok(found) ->
+      http.json(
+        200,
+        json.array(found, fn(s: Saved) { view(s.search, s.scout_name) }),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `DELETE /org/searches/:id`: only the club's own.
+pub fn delete(ctx: Ctx, a: OrgAccess, search: id.SavedSearchId) -> Response {
+  let removed =
+    store.unit(ctx.store, fn(tx) {
+      store.write(
+        tx,
+        "DELETE FROM saved_searches WHERE id = ? AND org_id = ? RETURNING id",
+        [id.saved_search_sql(search), id.org_sql(a.org.id)],
+        decode.at([0], decode.string),
+      )
+    })
+  case removed {
+    Ok([]) -> http.error(404, "SEARCH_NOT_FOUND")
+    Ok(_) -> http.json(200, json.object([#("ok", json.bool(True))]))
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// A player just joined: each saved search of current staff that they match, as its club sees them, tells its
+/// owner.
+pub fn alert_new_player(tx: Tx, p: Player, now: Int) -> Result(Nil, Fail(e)) {
+  let r = p.row
+  let read = store.reading(tx)
+  let nullable = fn(v: Option(String)) { sqlight.nullable(sqlight.text, v) }
+  use candidates <- result.try(saved(
+    "WHERE u.removed_at IS NULL AND (s.position IS NULL OR s.position = ?) AND (s.foot IS NULL OR s.foot = ?) AND (s.country IS NULL OR s.country = ?) AND (s.availability IS NULL OR s.availability = ?)",
+    [
+      nullable(option.map(r.position, position.to_string)),
+      nullable(option.map(r.foot, foot.to_string)),
+      sqlight.text(r.country),
+      sqlight.text(availability.to_string(r.availability)),
+    ],
+    read,
+  ))
+  list.try_each(candidates, fn(c: Saved) {
+    let ss = c.search
+    use org <- result.try(orgs.by_id(read, ss.org_id))
+    use seen <- result.try(case org {
+      Some(org) ->
+        players.for_org(read, r.id, org, now)
+        |> result.map(option.map(_, fn(found) { #(org, found.1) }))
+      None -> Ok(None)
+    })
+    case seen {
+      Some(#(org, access)) if access.visible && !access.blocked ->
+        case matches(p, org, ss, now) {
+          False -> Ok(Nil)
+          True ->
+            notifications.notify(
+              tx,
+              to: audience.OrgUser,
+              id: id.org_user_to_string(ss.user_id),
+              type_: "saved_search",
+              text: "New match for your saved search “"
+                <> ss.name
+                <> "”: "
+                <> r.name
+                <> " ("
+                <> option.unwrap(
+                option.map(r.position, position.to_string),
+                "—",
+              )
+                <> ") just joined.",
+              ref_id: Some(id.player_to_string(r.id)),
+              at: now,
+            )
+        }
+      _ -> Ok(Nil)
+    }
+  })
+}
+
+/// The whole filter, over the player as `org` sees them: a child's city is withheld, and Grassroots has no
+/// Academy+.
+fn matches(p: Player, org: orgs.Org, s: row.Row, now: Int) -> Bool {
+  let r = p.row
+  let city = case players.is_adult(p, now) {
+    True -> option.unwrap(r.city, "")
+    False -> ""
+  }
+  let academy_plus = r.academy_plus && !orgs.is_grassroots(org)
+  // TypeScript compares a missing age as 0.
+  let age = option.unwrap(age.age_on(r.birth_date, now), 0)
+  let q_ok = case s.q {
+    None -> True
+    Some(q) -> {
+      let n = string.lowercase(q)
+      list.any([r.name, city, r.country], fn(t) {
+        string.contains(string.lowercase(t), n)
+      })
+    }
+  }
+  let is = fn(wanted: Option(a), actual: Option(a)) {
+    wanted == None || wanted == actual
+  }
+  let age_ok = case s.age_group {
+    None -> True
+    Some(row.U16) -> age < 16
+    Some(row.U18) -> age < 18
+    Some(row.V1821) -> age >= 18 && age <= 21
+    Some(row.Senior) -> age >= 22
+  }
+  q_ok
+  && is(s.position, r.position)
+  && is(s.availability, Some(r.availability))
+  && { s.academy_plus != Some(True) || academy_plus }
+  && is(s.country, Some(r.country))
+  && is(s.foot, r.foot)
+  && age_ok
 }

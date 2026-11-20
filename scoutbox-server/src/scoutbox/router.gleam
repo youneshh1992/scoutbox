@@ -220,6 +220,16 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { guardian_routes.signup(ctx, req) })
         ["guardian", "login"] ->
           only(req, Post, fn() { guardian_routes.login(ctx, req) })
+        ["guardian", "verify-email"] ->
+          only(req, Post, fn() { guardian_routes.verify_email(ctx, req) })
+        ["player", "pair"] ->
+          only(req, Post, fn() {
+            contract.rerun_on_stale(req, player_routes.pair(
+              ctx,
+              _,
+              client_address(req),
+            ))
+          })
         ["sso", "start"] -> only(req, Post, fn() { sso.start(ctx, req) })
         ["sso", "callback"] -> only(req, Post, fn() { sso.callback(ctx, req) })
         _ -> not_found()
@@ -1062,7 +1072,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["friendlies"] ->
           only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
         ["searches"] ->
-          only(req, Post, fn() { saved_searches.create(ctx, req, org) })
+          case req.method {
+            Get -> saved_searches.club_list(ctx, org)
+            Post -> saved_searches.create(ctx, req, org)
+            _ -> not_found()
+          }
+        ["searches", sid] ->
+          only(req, Delete, fn() {
+            saved_searches.delete(ctx, org, id.saved_search(sid))
+          })
         ["channels"] -> only(req, Get, fn() { threads.org_list(ctx, req, org) })
         ["channels", "counts"] ->
           only(req, Get, fn() { threads.org_counts(ctx, org) })
@@ -1567,6 +1585,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["timeline"] ->
           only(req, Post, fn() { player_routes.add_timeline(ctx, req, player) })
         ["export"] -> only(req, Get, fn() { player_routes.export(ctx, player) })
+        ["aging-up", "complete"] ->
+          only(req, Post, fn() {
+            player_routes.complete_aging_up(ctx, req, player)
+          })
         ["verification", "org", id] ->
           only(req, Get, fn() { personal.public_org(ctx, id.org(id)) })
         ["invites", "accept"] ->
@@ -1935,6 +1957,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", id, "references"] ->
           only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
+        ["export"] ->
+          only(req, Get, fn() { player_routes.guardian_export(ctx, guardian) })
+        ["verify-id"] ->
+          only(req, Post, fn() { guardian_routes.verify_id(ctx, req, guardian) })
+        ["disclaimer"] ->
+          only(req, Post, fn() {
+            guardian_routes.disclaimer(ctx, req, guardian)
+          })
+        ["children", cid, "pairing-code"] ->
+          only(req, Post, fn() {
+            guardian_routes.pairing_code(ctx, req, guardian, id.player(cid))
+          })
         ["offers"] ->
           only(req, Get, fn() {
             offer_routes.list_for(
@@ -2464,6 +2498,14 @@ fn verification_org(
       only(req, Post, fn() {
         club_checks.request_email_challenge(ctx, req, org)
       })
+    ["email", "confirm"] ->
+      only(req, Post, fn() {
+        contract.rerun_on_stale(req, club_checks.confirm_email_challenge(
+          ctx,
+          _,
+          org,
+        ))
+      })
     ["me"] -> only(req, Get, fn() { personal.me(ctx, org) })
     ["identity"] -> only(req, Post, fn() { personal.identity(ctx, req, org) })
     ["claims", id, "evidence"] ->
@@ -2892,9 +2934,13 @@ fn rescue(handler: fn() -> Response) -> Response {
   }
 }
 
+fn client_address(req: Request) -> String {
+  contract.header(req, wisp_ewe.peer_header) |> result.unwrap("?")
+}
+
 /// Every /auth request counts against its client address: 40 a minute.
 fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
-  let address = contract.header(req, wisp_ewe.peer_header) |> result.unwrap("?")
+  let address = client_address(req)
   case limits.auth_request(ctx.limits, "auth:" <> address, clock.now_ms()) {
     Ok(Nil) -> next()
     Error(retry_after) ->

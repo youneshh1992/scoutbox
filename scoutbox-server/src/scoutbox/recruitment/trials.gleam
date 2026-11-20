@@ -1387,3 +1387,28 @@ pub fn file_report(
     _ -> store.stale("trial " <> id.trial_to_string(t.row.id) <> " report")
   }
 }
+
+/// How many trials the organisation has booked, or of them those in `status`.
+pub fn count_for_org(
+  read: Read,
+  org_id: id.OrgId,
+  status: Option(row.Status),
+) -> Result(Int, Fail(e)) {
+  let counted = case status {
+    Some(s) ->
+      store.one(
+        read,
+        "SELECT COUNT(*) FROM trials WHERE org_id = ? AND status = ?",
+        [id.org_sql(org_id), sqlight.text(row.status_to_string(s))],
+        decode.at([0], decode.int),
+      )
+    None ->
+      store.one(
+        read,
+        "SELECT COUNT(*) FROM trials WHERE org_id = ?",
+        [id.org_sql(org_id)],
+        decode.at([0], decode.int),
+      )
+  }
+  result.map(counted, result.unwrap(_, 0))
+}

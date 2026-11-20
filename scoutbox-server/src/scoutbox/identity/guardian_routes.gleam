@@ -5,7 +5,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/development/record_routes as record
 import scoutbox/identity/guardians.{type Guardian}
+import scoutbox/identity/idv
+import scoutbox/identity/pairing
 import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/identity/sessions
@@ -386,5 +389,153 @@ pub fn review_id(ctx: Ctx, req: Request, id: id.GuardianId) -> Response {
         Error(failure) -> http.internal(failure)
       }
     }
+  }
+}
+
+/// `POST /auth/guardian/verify-email`. A verified address stays verified, whatever code comes after.
+pub fn verify_email(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use guardian_id <- input.field("guardianId", input.nullish(input.text(80)))
+    use code <- input.field("code", input.nullish(input.text(64)))
+    input.done(#(guardian_id, code))
+  }
+  use #(guardian_id, code) <- http.body(req, shape, [])
+  let found = case guardian_id {
+    // From the request body.
+    Some(guardian_id) ->
+      store.read(ctx.store, guardians.by_id(_, id.guardian(guardian_id)))
+    None -> Ok(None)
+  }
+  let verified = json.object([#("emailVerified", json.bool(True))])
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "GUARDIAN_NOT_FOUND")
+    Ok(Some(g)) if g.row.email_verified -> http.json(200, verified)
+    Ok(Some(g)) -> {
+      let matches = case code, g.row.email_code_hash {
+        Some(code), Some(stored) ->
+          secrets.equal(secrets.code_hash(code), stored)
+        _, _ -> False
+      }
+      case matches {
+        False ->
+          http.error_message(
+            400,
+            "CODE_INVALID",
+            "That code doesn't match — check the email we sent you.",
+          )
+        True ->
+          case store.unit(ctx.store, guardians.verify_email(_, g.row.id)) {
+            Ok(Nil) -> http.json(200, verified)
+            Error(failure) -> http.internal(failure)
+          }
+      }
+    }
+  }
+}
+
+/// `POST /guardian/verify-id`. The provider answers before the unit: a unit never waits on one.
+pub fn verify_id(ctx: Ctx, req: Request, g: Guardian) -> Response {
+  let shape = {
+    use document_type <- input.field(
+      "documentType",
+      input.nullish(input.text(60)),
+    )
+    use document_ref <- input.field(
+      "documentRef",
+      input.nullish(input.text(120)),
+    )
+    input.done(#(document_type, document_ref))
+  }
+  use #(document_type, document_ref) <- http.body(req, shape, [])
+  case input.filled(document_type), input.filled(document_ref) {
+    Some(document_type), Some(document_ref) -> {
+      let attestation = idv.verify(document_ref)
+      let recorded =
+        store.unit(ctx.store, fn(tx) {
+          guardians.record_id_check(
+            tx,
+            g,
+            document_type,
+            attestation,
+            clock.now_ms(),
+          )
+        })
+      case recorded {
+        Ok(Nil) ->
+          http.json(
+            200,
+            json.object([
+              #("idVerified", json.bool(True)),
+              #("reference", json.string(attestation.reference)),
+            ]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
+    }
+    _, _ ->
+      http.error_message(
+        400,
+        "DOCUMENT_REQUIRED",
+        "ID verification needs a document type and reference.",
+      )
+  }
+}
+
+/// `POST /guardian/disclaimer`. Accepting again keeps the first acceptance's time.
+pub fn disclaimer(ctx: Ctx, req: Request, g: Guardian) -> Response {
+  let shape = {
+    use accepted <- input.field("accepted", input.optional(input.boolean()))
+    input.done(accepted)
+  }
+  use accepted <- http.body(req, shape, [
+    #("accepted", "DISCLAIMER_NOT_ACCEPTED"),
+  ])
+  case accepted {
+    Some(True) ->
+      case
+        store.unit(ctx.store, guardians.accept_disclaimer(
+          _,
+          g.row.id,
+          clock.now_ms(),
+        ))
+      {
+        Ok(Nil) ->
+          http.json(
+            200,
+            json.object([#("disclaimerAccepted", json.bool(True))]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
+    _ -> http.error(400, "DISCLAIMER_NOT_ACCEPTED")
+  }
+}
+
+/// `POST /guardian/children/:id/pairing-code`: one live code per child, for 15 minutes. The plain code exists in
+/// this response only.
+pub fn pairing_code(
+  ctx: Ctx,
+  req: Request,
+  g: Guardian,
+  child_id: id.PlayerId,
+) -> Response {
+  use child <- record.own_child(ctx, g, child_id)
+  use _ <- http.body(req, input.nothing(), [])
+  let now = clock.now_ms()
+  let owner = id.guardian_to_string(g.row.id)
+  case limits.limited(ctx.limits, limits.PairingCodeMint, owner, now) {
+    True -> http.json(429, limits.limited_json(limits.PairingCodeMint))
+    False ->
+      case store.unit(ctx.store, pairing.issue(_, child.row.id, now)) {
+        Ok(issued) ->
+          http.json(
+            201,
+            json.object([
+              #("code", json.string(issued.code)),
+              #("expiresAt", json.int(issued.expires_at)),
+            ]),
+          )
+        Error(failure) -> http.internal(failure)
+      }
   }
 }

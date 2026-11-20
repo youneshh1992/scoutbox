@@ -383,7 +383,17 @@ are for surprising facts or points that later work depends on, not implementatio
       alternative slots and its ICS, season history and preferences, saved searches and alerts, a mandatory report,
       moderation's escalation, the funnel and a signing to its invoice, club email-domain verification, exports,
       deletion and aging-up (`/player/aging-up/complete`), the admin resolve and the push log, and the platform
-      separation. The battery has no rule cases.
+      separation. The battery has no rule cases. [**done**: all 88 checks of §0–§12 pass; the battery stays off `BATTERIES`
+      until §13–§14 pass too.] Probed signed in against the TypeScript server, comparing error codes as well as
+      statuses (an empty body hid three routes behind a 404 that looked unrouted). Ported: player passwords at
+      sign-up and sign-in; guardian e-mail verification, the ID check (`identity/idv`: TypeScript's development
+      attestation) and the disclaimer; pairing codes (`identity/pairing`, `pairing_codes` newly generated) with
+      their two budgets (`limits.spent` reads a budget without spending it, for acts where only a failure is
+      charged); a past season filed into the history; the saved-search list, delete and the alert when a player
+      joins; the funnel's trials, reports and signings; the club e-mail confirmation; the guardian export; and
+      aging-up. The dev transport now keeps a withheld code's full mail text in memory for `/admin/outbox`
+      (`messaging/dev_mail`), as TypeScript's does. Unit tests cover pairing, the budget, season filing and the
+      saved-search match, since the battery doesn't run yet.
    4. `platform/api` §13–§14: the Grassroots player journey (`/player/season-wrap`, `/org/looking-for`), the club
       toolkit (`/org/squad/:id/release`, `/org/pathway-record`), the typed open days, match days and friendlies, the
       player's record field by field, and storage and persistence on disk.

@@ -2344,6 +2344,11 @@ pub fn idv_case_decoder() -> decode.Decoder(IdvCaseId) {
   decode.map(decode.string, IdvCaseId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_idv_case(tx: Tx) -> Result(IdvCaseId, Fail(e)) {
+  ids.next(tx, "idv") |> result.map(IdvCaseId)
+}
+
 /// An id of `import_batches`.
 pub opaque type ImportBatchId {
   ImportBatchId(String)

@@ -240,3 +240,16 @@ pub fn set_standing(tx: Tx, id: id.OrgId, s: Standing) -> Result(Nil, Fail(e)) {
       )
   }
 }
+
+/// The club proved control of a mailbox at `domain`.
+pub fn verify_email_domain(
+  tx: Tx,
+  org_id: id.OrgId,
+  domain: String,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE orgs SET email_domain = ?, email_domain_verified = 1 WHERE id = ?",
+    [sqlight.text(domain), id.org_sql(org_id)],
+  )
+}

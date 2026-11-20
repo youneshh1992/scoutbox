@@ -528,6 +528,25 @@ pub fn create(tx: Tx, new: NewPlayer) -> Result(Player, Fail(e)) {
   p
 }
 
+/// The player turned 18 and takes their account over: the primary guardian's link goes. Co-guardians keep listing
+/// the player.
+pub fn age_up(
+  tx: Tx,
+  player_id: id.PlayerId,
+  guardian_id: id.GuardianId,
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(
+    store.run(tx, "UPDATE players SET guardian_id = NULL WHERE id = ?", [
+      id.player_sql(player_id),
+    ]),
+  )
+  store.run(
+    tx,
+    "DELETE FROM guardian_children WHERE guardian_id = ? AND player_id = ?",
+    [id.guardian_sql(guardian_id), id.player_sql(player_id)],
+  )
+}
+
 /// Appends a timeline entry at the end of the list.
 pub fn add_timeline_entry(
   tx: Tx,
@@ -1143,6 +1162,71 @@ pub fn record_stats(
       )
   })
   update(tx, id, given)
+}
+
+/// Figures for a past season, filed into the season history: the given ones replace that season's, and a season
+/// not yet in the history starts with appearances, goals and assists at 0. The history is kept newest first.
+pub fn file_season(
+  tx: Tx,
+  id: id.PlayerId,
+  season: String,
+  s: Stats,
+) -> Result(Player, Fail(e)) {
+  use found <- result.try(by_id(store.reading(tx), id))
+  let history = case found {
+    Some(p) -> p.season_history
+    None -> []
+  }
+  let given = fn(old: Option(Float), new: Option(Int)) {
+    option.or(option.map(new, int.to_float), old)
+  }
+  let filed = fn(r: season_row.Row) {
+    season_row.Row(
+      ..r,
+      appearances: given(r.appearances, s.appearances),
+      goals: given(r.goals, s.goals),
+      assists: given(r.assists, s.assists),
+      pace_kmh: option.or(s.pace_kmh, r.pace_kmh),
+      pass_completion_pct: option.or(
+        s.pass_completion_pct,
+        r.pass_completion_pct,
+      ),
+      duel_success_pct: option.or(s.duel_success_pct, r.duel_success_pct),
+      clean_sheets: given(r.clean_sheets, s.clean_sheets),
+    )
+  }
+  let history = case list.any(history, fn(r) { r.season == season }) {
+    True ->
+      list.map(history, fn(r) {
+        case r.season == season {
+          True -> filed(r)
+          False -> r
+        }
+      })
+    False -> {
+      let zero = Some(0.0)
+      let fresh =
+        season_row.Row(
+          ..season_row.new(player_id: id, position: 0, season:),
+          appearances: zero,
+          goals: zero,
+          assists: zero,
+        )
+      [filed(fresh), ..history]
+    }
+  }
+  let history =
+    list.sort(history, fn(a, b) { string.compare(b.season, a.season) })
+  use _ <- result.try(
+    store.run(tx, "DELETE FROM player_season_history WHERE player_id = ?", [
+      id.player_sql(id),
+    ]),
+  )
+  use _ <- result.try(
+    list.index_map(history, fn(r, i) { season_row.Row(..r, position: i) })
+    |> list.try_each(season_row.insert(tx, _)),
+  )
+  refreshed(tx, id)
 }
 
 /// Replaces the badges, in order; a legal duplicate is kept.

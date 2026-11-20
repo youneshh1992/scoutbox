@@ -5,6 +5,7 @@
 ////
 //// Not ported yet: the live 'players' event.
 
+import gleam/dynamic/decode
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -433,4 +434,15 @@ fn join_squad(
     None,
     at,
   )
+}
+
+/// How many signings the organisation has recorded.
+pub fn count_for_org(read: Read, org_id: id.OrgId) -> Result(Int, Fail(e)) {
+  store.one(
+    read,
+    "SELECT COUNT(*) FROM signings WHERE org_id = ?",
+    [id.org_sql(org_id)],
+    decode.at([0], decode.int),
+  )
+  |> result.map(result.unwrap(_, 0))
 }

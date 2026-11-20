@@ -1,6 +1,7 @@
 //// What every route is given.
 
 import gleam/json.{type Json}
+import scoutbox/messaging/dev_mail.{type Deliveries}
 import scoutbox/platform/config.{type Config}
 import scoutbox/platform/faults.{type Faults}
 import scoutbox/platform/limits.{type Limits}
@@ -26,5 +27,7 @@ pub type Ctx {
     live: Hub,
     /// The process's request counters, for `/admin/metrics`.
     request_metrics: RequestMetrics,
+    /// The dev transport's full texts of mails whose stored record withholds a code.
+    dev_mail: Deliveries,
   )
 }
