@@ -1,6 +1,7 @@
 //// Every route the server answers, and the middleware in front of them.
 
 import exception
+import gleam/dynamic/decode
 import gleam/http.{Delete, Get, Patch, Post, Put}
 import gleam/int
 import gleam/json
@@ -80,12 +81,13 @@ import scoutbox/passport/football_passport
 import scoutbox/passport/sharing
 import scoutbox/passport/trust
 import scoutbox/platform/clock
+import scoutbox/platform/cors
 import scoutbox/platform/fault_routes
 import scoutbox/platform/faults
 import scoutbox/platform/http as contract
+import scoutbox/platform/instrument
 import scoutbox/platform/limits
 import scoutbox/platform/operator
-import scoutbox/platform/request_metrics
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
@@ -137,11 +139,12 @@ import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
 pub fn handle(ctx: Ctx, req: Request) -> Response {
-  use <- counted(ctx, req)
+  use <- cors.handle(ctx.config.allowed_origins, req)
   use <- baseline(ctx)
   use <- signed_media(ctx, req)
-  use <- rescue
   use <- fault(ctx, req)
+  use <- instrument.handle(ctx.request_metrics, ctx.config.quiet_logs, req)
+  use <- rescue
   case wisp.path_segments(req) {
     ["__faults"] ->
       case faults.enabled(ctx.faults) {
@@ -2795,20 +2798,8 @@ fn not_found() -> Response {
 
 /// The headers on every response, as the TypeScript server's HTTP baseline sets them: the schema version, the
 /// browser hardening headers, and on an error whether a retry could succeed. A response that already says
-/// whether it is retryable (a simulated fault) keeps its own answer.
-/// Every response is counted once it is built, without waiting for the count.
-fn counted(ctx: Ctx, req: Request, handler: fn() -> Response) -> Response {
-  let started = clock.now_ms()
-  let response = handler()
-  request_metrics.finished_request(
-    ctx.request_metrics,
-    path: req.path,
-    status: response.status,
-    ms: clock.now_ms() - started,
-  )
-  response
-}
-
+/// whether it is retryable (a simulated fault) keeps its own answer. A 429 without a Retry-After gets the window
+/// of the policy its body names, or a minute.
 fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
   let response =
     handler()
@@ -2831,6 +2822,30 @@ fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
         429 | 502 | 503 | 504 -> "retryable"
         _ -> "not-retryable"
       })
+    _, _ -> response
+  }
+  |> retry_after
+}
+
+fn retry_after(response: Response) -> Response {
+  case response.status, list.key_find(response.headers, "retry-after") {
+    429, Error(Nil) -> {
+      let action = case response.body {
+        wisp.Text(text) ->
+          json.parse(text, decode.at(["action"], decode.string))
+          |> result.replace_error(Nil)
+        _ -> Error(Nil)
+      }
+      let window_ms =
+        result.try(action, list.key_find(limits.policy, _))
+        |> result.map(fn(p) { p.window_ms })
+        |> result.unwrap(60_000)
+      wisp.set_header(
+        response,
+        "retry-after",
+        int.to_string(int.max(1, { window_ms + 999 } / 1000)),
+      )
+    }
     _, _ -> response
   }
 }
@@ -2988,8 +3003,10 @@ fn rooms(
     [rid, "tasks"], Post -> room_routes.add_task(ctx, req, org, room(rid))
     [rid, "tasks", tid], Patch ->
       room_routes.edit_task(ctx, req, org, room(rid), tid)
-    [rid, "decisions"], Post ->
+    [rid, "decisions"], Post -> {
+      use req <- contract.rerun_on_stale(req)
       room_routes.add_decision(ctx, req, org, room(rid))
+    }
     [rid, "decisions"], Get -> room_routes.decisions(ctx, org, room(rid))
     [rid, "evidence", eid, "review"], Post ->
       room_routes.review_evidence(ctx, req, org, room(rid), eid)

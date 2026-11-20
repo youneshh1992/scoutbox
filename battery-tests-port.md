@@ -121,7 +121,7 @@ early. What costs time:
 Every untangled battery is mutation-checked at least once. One mutation that wasn't caught turned out to be a gap
 in the original battery, so check the original before blaming the rewrite.
 
-### Porting, domain by domain [in progress: 49 batteries pass unchanged]
+### Porting, domain by domain [in progress: 51 batteries pass unchanged]
 
 Port order is domain by domain, with the cross-domain batteries last. The `platform/*` batteries reach into most
 of the product, so they aren't one slice.
@@ -137,7 +137,7 @@ of the product, so they aren't one slice.
 | Development: Box Cam, the Combine, the hub | 3 | `development/boxCam`, `combine` and `hub` pass, with the `production_cv` stub |
 | Passport: the Passport, the Trust Score | 2 | **ported** |
 | Operations: club operations | 1 | **ported** |
-| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 0 | last |
+| Cross-domain: `api`, `contracts`, `dates`, `productionHardening` | 2 | `contracts` and `productionHardening` pass |
 
 #### Port order
 
@@ -349,7 +349,14 @@ are for surprising facts or points that later work depends on, not implementatio
    1. `platform/contracts` and `platform/productionHardening`. Both check hardening over routes that are mostly in
       already. The gaps seen so far are `/capabilities` and its honesty about the deployment, `/source-changes`,
       the CORS allowlist, the baseline security headers, the oversized-body refusal, and the production boot
-      refusing simulated faults. Then their rule cases (36 and 27) and hand-port calls (16 and 22).
+      refusing simulated faults. Then their rule cases (36 and 27) and hand-port calls (16 and 22). [Both
+      batteries pass and are on `BATTERIES`; the rule cases and hand-port calls are left.] Most gaps were already
+      closed. What was missing: a decision didn't re-check its Room's rev inside its unit, so two racing decisions
+      both landed; CORS (`platform/cors`); `Retry-After` on a 429; and the request instrumentation
+      (`platform/instrument`: correlation ids, the request log, the counters), which stands after the fault layer
+      as TypeScript's does, so a preflight, a simulated fault or an unreadable body isn't counted
+      (docs/known-issues.md). `events.registered` counts the registry's 98 names, declared in `live_event`, though
+      only 69 of them can be emitted yet.
    2. `platform/dates`. First the live groups Q–T (65 checks): sign-up's dates of birth at both doors, the taxonomy
       on every hardened route, authorization decided before a date is read, and normalised values surviving a
       restart. Then its 2,175 rule cases and 97 hand-port calls, rule by rule. Many of the calls that can't be

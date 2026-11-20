@@ -50,4 +50,6 @@ export const BATTERIES = [
   'development/combine',
   'development/hub',
   'operations/clubOperations',
+  'platform/contracts',
+  'platform/productionHardening',
 ];

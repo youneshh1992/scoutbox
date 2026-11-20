@@ -169,6 +169,17 @@ fn registry() -> dict.Dict(String, Entry) {
   registry
 }
 
+pub fn the_registered_names_are_the_registry_test() {
+  let assert Ok(text) =
+    simplifile.read("e2e/support/spec/platform/eventRegistry.json")
+  let assert Ok(names) =
+    json.parse(text, decode.at(["EVENT_NAMES"], decode.list(decode.string)))
+  assert live_event.registered == names
+  list.each(samples, fn(event) {
+    assert list.contains(live_event.registered, live_event.name(event))
+  })
+}
+
 pub fn events_carry_their_registered_payload_test() {
   let registry = registry()
   list.each(samples, fn(event) {

@@ -170,3 +170,19 @@ club sees only each record's `id` and `recordedAt`, and can't tell what the play
 
 **The question.** Which of the record's fields should a receiving club see? Probably the claim type, label, value
 and verification status, since those are what the player's own Passport shows. Change both servers together.
+
+### Some requests are no longer counted in the request metrics
+
+Decided 2026-11-20 while porting `platform/contracts`: match the TypeScript server for now, and decide once the port
+is done.
+
+**What it is.** The request instrumentation (`scoutbox-server/src/scoutbox/platform/instrument.gleam`) stands where
+the TypeScript server's `requestInstrumentation` does, after CORS, the HTTP baseline and the fault layer. So three
+kinds of answer get no correlation id, no log line, and no count in `/admin/metrics`: a CORS preflight, a simulated
+fault, and a refusal of a body that couldn't be read (`413 REQUEST_TOO_LARGE`, `400 MALFORMED_JSON`). Until this
+change the Gleam server counted every request. The TypeScript server misses these only because Express parses the
+body, and runs the fault layer, before its instrumentation.
+
+**The question.** Should `/admin/metrics` count every request? An operator watching for abuse would want to see a
+burst of oversized or malformed bodies, and a 4xx rate that leaves them out understates it. If it should, change
+both servers together: in TypeScript, install the instrumentation before the body parser and the fault layer.

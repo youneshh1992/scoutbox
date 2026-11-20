@@ -22,7 +22,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 3 | 3 | 318 / 11 | 2 / 2 | 1 to go |
 | operations | 1 | 1 | 1 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
-| platform | 14 | 14 | 9 | 86 / 2238 | 67 / 221 | 6 to go |
+| platform | 14 | 14 | 11 | 86 / 2238 | 67 / 221 | 6 to go |
 | recruitment | 19 | 19 | 19 | 547 / 4144 | 28 / 281 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -57,13 +57,13 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
-| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 23 / 36 | 0 / 16 | not answered; 36 cases pending; 16 hand-port calls |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 23 / 36 | 0 / 16 | 36 cases pending; 16 hand-port calls |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 41 / 2175 | 67 / 164 | not answered; 2175 cases pending; 97 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
-| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 4 / 27 | 0 / 22 | not answered; 27 cases pending; 22 hand-port calls |
+| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 4 / 27 | 0 / 22 | 27 cases pending; 22 hand-port calls |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |

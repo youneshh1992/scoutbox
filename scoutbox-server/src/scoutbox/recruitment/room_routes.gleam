@@ -2576,6 +2576,7 @@ pub fn add_decision(
               use <- moderated(ctx, a, note, "recruitment_room_decision")
               let now = clock.now_ms()
               store.unit(ctx.store, fn(tx) {
+                use room <- result.try(still_at(tx, a, room))
                 use snapshot <- result.try(
                   room_view.capture_snapshot(
                     tx,

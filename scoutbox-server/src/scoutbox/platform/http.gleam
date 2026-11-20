@@ -126,14 +126,61 @@ pub fn internal(detail: a) -> Response {
 }
 
 fn internal_body() -> Response {
+  internal_json(json.null())
+  |> response.set_header(internal_header, "1")
+}
+
+fn internal_json(request_id: Json) -> Response {
   json(
     500,
     json.object([
       #("error", json.string("INTERNAL")),
       #("message", json.string("Something went wrong handling that request.")),
-      #("requestId", json.null()),
+      #("requestId", request_id),
     ]),
   )
+}
+
+// ------------------------------------------------------------------------------------ correlation ids
+
+/// On a 500 with fixed text, whose body names the request's correlation id once it has one.
+const internal_header = "x-scoutbox-internal"
+
+/// On a refusal of a body that couldn't be read. The TypeScript server parses every body before its request
+/// instrumentation, so such a refusal has no correlation id, and isn't counted or logged. This server reads a body
+/// in its route, after the instrumentation, so the refusal says what it is instead.
+const unread_header = "x-scoutbox-unread-body"
+
+pub type Correlated {
+  /// The answer, with its correlation id.
+  Correlated(Response)
+  /// A refusal of a body that couldn't be read: no correlation id, as in the TypeScript server.
+  BeforeInstrumentation(Response)
+}
+
+/// The answer as the request instrumentation hands it on, marked with the request's correlation id.
+pub fn correlate(answer: Response, request_id: String) -> Correlated {
+  case response.get_header(answer, unread_header) {
+    Ok(_) ->
+      BeforeInstrumentation(
+        response.Response(
+          ..answer,
+          headers: without(answer.headers, unread_header),
+        ),
+      )
+    Error(Nil) -> {
+      let answer = case response.get_header(answer, internal_header) {
+        Error(Nil) -> answer
+        // Its own headers (a lost race's, say) stay; only the body learns the id.
+        Ok(_) ->
+          response.Response(
+            ..internal_json(json.string(request_id)),
+            headers: without(answer.headers, internal_header),
+          )
+      }
+      Correlated(response.set_header(answer, "x-request-id", request_id))
+    }
+  }
 }
 
 /// `{ error }`: a refusal whose code says it all.
@@ -180,6 +227,7 @@ fn too_large() -> Response {
       #("requestId", json.null()),
     ]),
   )
+  |> response.set_header(unread_header, "1")
 }
 
 /// A body that announces more than the limit is refused for its size, as the Express parser does before reading it.
@@ -203,6 +251,7 @@ fn malformed_json() -> Response {
       #("requestId", json.null()),
     ]),
   )
+  |> response.set_header(unread_header, "1")
 }
 
 /// The JSON body, as sent. No body (or one that is not JSON-typed) reads as `{}`; a body that does not parse, or

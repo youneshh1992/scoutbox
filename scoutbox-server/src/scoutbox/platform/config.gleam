@@ -8,6 +8,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/platform/cors
 import scoutbox/platform/secrets
 
 pub type Config {
@@ -58,6 +59,8 @@ pub type Config {
     /// What the local test identity provider signs its codes with: TEST_IDP_SECRET, or a random key for this
     /// process, so a code minted against a publicly known string never verifies. Production refuses the setting.
     test_idp_secret: String,
+    /// SCOUTBOX_ALLOWED_ORIGINS: the origins a browser may read responses from. Empty, any origin.
+    allowed_origins: List(String),
   )
 }
 
@@ -139,53 +142,52 @@ pub fn load() -> Result(Config, String) {
     Some(secret) -> secret
     None -> secrets.random_hex(32)
   }
-  Ok(
-    Config(
-      port:,
-      data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
-      admin_key:,
-      dev_logins: !production,
-      fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
-      seed_demo:,
-      quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
-      media_secret:,
-      media_key:,
-      licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
-        Ok("1") -> RegistryUp
-        Ok("down") -> RegistryDown
-        _ -> NoRegistry
-      },
-      sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
-        Ok("1") -> 500
-        _ -> 60_000
-      },
-      fast_sweeps: envoy.get("SCOUTBOX_FAST_SWEEPS") == Ok("1"),
-      delivery_callback_secret: case envoy.get("DELIVERY_CALLBACK_SECRET") {
-        Ok("") | Error(Nil) -> "local-fake-callback-secret"
-        Ok(secret) -> secret
-      },
-      allow_local_webhooks: envoy.get("ALLOW_LOCAL_WEBHOOKS") == Ok("1"),
-      session_ttl_ms: session_ttl_ms(envoy.get("SESSION_TTL_DAYS")),
-      test_clock: !production && envoy.get("SCOUTBOX_TEST_CLOCK") == Ok("1"),
-      agent_verification_test: !production
-        && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
-      dev_faults: !production,
-      box_cam_test_provider: envoy.get("BOX_CAM_TEST_PROVIDER") == Ok("1"),
-      configured_connectors: list.filter(
-        ["CONNECTOR_STATS_KEY", "CONNECTOR_FED_KEY", "CONNECTOR_VIDEO_KEY"],
-        fn(name) {
-          case envoy.get(name) {
-            Ok(value) -> value != ""
-            Error(Nil) -> False
-          }
-        },
-      ),
-      test_idp_secret: case envoy.get("TEST_IDP_SECRET") {
-        Ok("") | Error(Nil) -> secrets.random_hex(32)
-        Ok(secret) -> secret
+  Ok(Config(
+    port:,
+    data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
+    admin_key:,
+    dev_logins: !production,
+    fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
+    seed_demo:,
+    quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
+    media_secret:,
+    media_key:,
+    licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
+      Ok("1") -> RegistryUp
+      Ok("down") -> RegistryDown
+      _ -> NoRegistry
+    },
+    sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
+      Ok("1") -> 500
+      _ -> 60_000
+    },
+    fast_sweeps: envoy.get("SCOUTBOX_FAST_SWEEPS") == Ok("1"),
+    delivery_callback_secret: case envoy.get("DELIVERY_CALLBACK_SECRET") {
+      Ok("") | Error(Nil) -> "local-fake-callback-secret"
+      Ok(secret) -> secret
+    },
+    allow_local_webhooks: envoy.get("ALLOW_LOCAL_WEBHOOKS") == Ok("1"),
+    session_ttl_ms: session_ttl_ms(envoy.get("SESSION_TTL_DAYS")),
+    test_clock: !production && envoy.get("SCOUTBOX_TEST_CLOCK") == Ok("1"),
+    agent_verification_test: !production
+      && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
+    dev_faults: !production,
+    box_cam_test_provider: envoy.get("BOX_CAM_TEST_PROVIDER") == Ok("1"),
+    configured_connectors: list.filter(
+      ["CONNECTOR_STATS_KEY", "CONNECTOR_FED_KEY", "CONNECTOR_VIDEO_KEY"],
+      fn(name) {
+        case envoy.get(name) {
+          Ok(value) -> value != ""
+          Error(Nil) -> False
+        }
       },
     ),
-  )
+    test_idp_secret: case envoy.get("TEST_IDP_SECRET") {
+      Ok("") | Error(Nil) -> secrets.random_hex(32)
+      Ok(secret) -> secret
+    },
+    allowed_origins: cors.parse_allowed(envoy.get("SCOUTBOX_ALLOWED_ORIGINS")),
+  ))
 }
 
 /// Any positive number of days, fractions included; anything else is the default, as in the TypeScript server.
