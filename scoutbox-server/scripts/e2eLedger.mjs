@@ -44,6 +44,14 @@ export const NOTES = {
       },
     ],
   },
+  'platform/api': {
+    added: [
+      {
+        checks: 5,
+        why: "Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2)",
+      },
+    ],
+  },
   'platform/uploads': {
     added: [
       {
