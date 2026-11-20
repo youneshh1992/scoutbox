@@ -343,12 +343,19 @@ are for surprising facts or points that later work depends on, not implementatio
          give `NaN`, or a null dob, which Gleam's player can't hold. `webhookUrlProblem` is tested with local
          destinations allowed, since its suite sets `ALLOW_LOCAL_WEBHOOKS=1`.
 8. **The cross-domain batteries:** `platform/api`, `contracts`, `dates` and `productionHardening`.
-9. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
+9. **Parity beyond the batteries, after every battery passes.** The batteries reach only part of the server: 85
+   `Not ported yet:` markers are left (recruitment 17, development 15, identity 11, agents 10, scouting 9, the rest
+   fewer), some routes answer 501 past their guards (`/org/players/:id/morelike`, compliance decisions on facets,
+   disputes and conflict evaluations), and some aren't routed at all (`/player/applications`). Sweep them domain by
+   domain. For each, first write the checks into a TypeScript battery (or a rules suite), pass them there and sync,
+   so the behaviour is specified on both servers, then port it here. A domain is done when `grep "Not ported yet:"`
+   finds nothing in it and it answers no 501. Uploads and video analysis stay out of scope (see Out of scope).
+10. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible
    (sets and dicts for membership and de-duplication, a length taken once), and move the hot call sites onto it.
    Measure before and after with `dev/perf.mjs`.
-10. **Type a player's date of birth, after every battery passes.** `players.birth_date` is read as a `String`, so
+11. **Type a player's date of birth, after every battery passes.** `players.birth_date` is read as a `String`, so
     the age rules (`rules/age`) parse it again on every call. Decode it once at the row boundary into a typed day (a
     `calendar.Date`, or an opaque `BirthDate`), through a column override in the generated row decoder, so no rule
     can be handed a malformed one. `adult_sql` can keep comparing text: a `YYYY-MM-DD` day sorts as dates do.
@@ -381,7 +388,7 @@ Patterns established on the way. New domains should reuse them, and `CLAUDE.md` 
   alphabetically. Where that order means nothing to a client (a refusal naming one of several forged fields, say),
   relax the check in the TypeScript battery to accept any of them, and sync. Where a client may reasonably rely on
   the order for a UI feature, stop and ask before changing the test. Done so far: `agents/compliance` K14 and T7.
-- **Port only as far as the battery reaches.** Mark the rest `Not ported yet:`. There are 120 such markers, and the
+- **Port only as far as the battery reaches.** Mark the rest `Not ported yet:`. There are 85 such markers, and the
   next battery in a domain usually starts by clearing some.
 
 Measured trade-offs to keep in mind:
