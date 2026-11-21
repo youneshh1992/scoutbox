@@ -153,6 +153,7 @@ export const SPEC = {
   'domains/recruitment/signings/errors.mjs': ['SIGNING_ERROR_HTTP'],
   'domains/recruitment/signings/signing.mjs': ['SIGNING_CORRUPTION', 'SIGNING_INPUT_CODES'],
   'domain.ts': ['TRIAL_DATE_SYNTAX', 'TRIAL_DETAIL_LIMITS', 'TRIAL_REPORT_FIELDS'],
+  'repositories/safetyAudit.ts': ['LEDGER_DETAIL', 'OPS_DETAIL'],
   'catalogue.mjs': ['ARCHETYPES'],
 };
 
