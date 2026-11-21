@@ -116,6 +116,10 @@ export const NOTES = {
         checks: 2,
         why: "Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2)",
       },
+      {
+        checks: 25,
+        why: "Parity beyond the batteries, slice 6: the development plan for the player and a guardian (DP0–DP7), the club's drill list (DL1–DL3), and keeping a clip (KC1–KC13)",
+      },
     ],
   },
   'development/combine': {
