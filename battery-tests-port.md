@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -480,6 +480,16 @@ are for surprising facts or points that later work depends on, not implementatio
       the film room's tags and view, captions, an assessment's lead review, the evidence-gap rule
       `attribute_never_observed`, the matching counters in `/admin/metrics` (`matching_query_run` and the
       watchlist ones), and lowering text as JavaScript does in the directory search (`lower_js`).
+      [**done**: `platform/api` gained SP1–SP7 and a rules suite of the similarity score (22 rule cases),
+      `platform/playersAndGuardians` sections E and F, `platform/liveDelivery` C14a–C14c, `scouting/clubWorkflows`
+      RV1–RV8, `discovery/exposureCalibrationAndCoverage` AN1–AN4 and `discovery/matchingAndWatchlists` MC1–MC6; all
+      pass on both servers, and 80 similarity responses and 120 directory searches answer as TypeScript's do.] The
+      archetypes are snapshotted (`spec/catalogue.json`). A match query counts itself in a unit of its own, after it
+      answers. The `secondLook` metrics group lists a counter TypeScript adds on first use after the policy versions,
+      in first-count order (`metrics.fields_beyond`). The directory's text search reads every admitted player past
+      the cursor and filters in Gleam with `js_text.lower`: the BEAM's lowercase plus JavaScript's Final_Sigma rule,
+      since esqlite can't take an SQL function written here. The two markers left in these domains are sweeps
+      (slice 8).
    6. Development: the Box Cam development plan (player and guardian), the club's drill list, and keeping a clip.
    7. The ledger, verification and safety: a detail on `ledger.Entry`, written to the `detail_*` columns and
       `ledger_protocols` and read back by `view`. That covers Box Cam preferences, the Combine, a verification

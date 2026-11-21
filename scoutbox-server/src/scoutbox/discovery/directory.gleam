@@ -18,9 +18,10 @@ import scoutbox/platform/clock
 import scoutbox/platform/distance.{At, Columns}
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/js_text
 import scoutbox/platform/keyset.{Asc, Desc, OrderKey}
 import scoutbox/platform/pages
-import scoutbox/platform/paging.{type Page, IntKind, TextKey, TextKind}
+import scoutbox/platform/paging.{type Page, IntKind, Page, TextKey, TextKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Read}
 import scoutbox/platform/temporal
@@ -147,27 +148,6 @@ fn filter_sql(f: Filter, now: Int) -> List(Fragment) {
         )
       None -> None
     },
-    // Not ported yet: the TypeScript server lowers text as JavaScript does (`lower_js`, accented letters
-    // included); SQLite's lower() is ASCII only.
-    case nonempty(f.q) {
-      Some(q) -> {
-        let needle = sqlight.text(string.lowercase(q))
-        Some(
-          sql.concat([
-            sql.text("(instr(lower(p.name), "),
-            sql.arg(needle),
-            sql.text(") > 0 OR instr(lower(p.country), "),
-            sql.arg(needle),
-            sql.text(") > 0 OR (p.city IS NOT NULL AND instr(lower(p.city), "),
-            sql.arg(needle),
-            sql.text(") > 0 AND "),
-            age.adult_sql("p.birth_date", "p.country", now),
-            sql.text("))"),
-          ]),
-        )
-      }
-      None -> None
-    },
   ])
   |> list.append(case f.age_group {
     Some("u16") -> [born_before(16)]
@@ -220,26 +200,66 @@ fn directory_page(
   now: Int,
 ) -> Result(#(List(id.PlayerId), Option(String)), store.Fail(e)) {
   let order = directory_order(org)
-  let query =
-    keyset.query(
-      "p.id",
-      sql.concat([
-        sql.text("players p WHERE "),
-        admitted(org, now, filter_sql(f, now)),
-      ]),
-      order,
-      page,
-    )
-  use rows <- result.map(
-    store.query(read, query.sql, query.args, {
-      use id <- decode.field(0, id.player_decoder())
-      use keys <- decode.then(keyset.keys_decoder(1, order))
-      decode.success(#(id, keys))
-    }),
-  )
-  let #(items, next) = paging.page_of(rows, page.limit, fn(r) { r.1 })
-  #(list.map(items, fn(r) { r.0 }), next)
+  let from =
+    sql.concat([
+      sql.text("players p WHERE "),
+      admitted(org, now, filter_sql(f, now)),
+    ])
+  case nonempty(f.q) {
+    None -> {
+      let query = keyset.query("p.id", from, order, page)
+      use rows <- result.map(
+        store.query(read, query.sql, query.args, {
+          use id <- decode.field(0, id.player_decoder())
+          use keys <- decode.then(keyset.keys_decoder(1, order))
+          decode.success(#(id, keys))
+        }),
+      )
+      let #(items, next) = paging.page_of(rows, page.limit, fn(r) { r.1 })
+      #(list.map(items, fn(r) { r.0 }), next)
+    }
+    // The text search matches the name or the country, and the city of an adult only (a minor's city is never
+    // shown to a club, so it is never matched), lowered as JavaScript lowers text; SQLite's lower() is ASCII only,
+    // so the search runs over every admitted player past the cursor, in order.
+    Some(q) -> {
+      let needle = js_text.lower(q)
+      let query =
+        keyset.query(
+          "p.id, p.name, p.country, p.city, p.birth_date",
+          from,
+          order,
+          Page(..page, limit: everyone),
+        )
+      use rows <- result.map(
+        store.query(read, query.sql, query.args, {
+          use id <- decode.field(0, id.player_decoder())
+          use name <- decode.field(1, decode.string)
+          use country <- decode.field(2, decode.string)
+          use city <- decode.field(3, decode.optional(decode.string))
+          use dob <- decode.field(4, decode.string)
+          use keys <- decode.then(keyset.keys_decoder(5, order))
+          let found = fn(text) { string.contains(js_text.lower(text), needle) }
+          let matches =
+            found(name)
+            || found(country)
+            || case city {
+              Some(c) -> found(c) && age.is_adult(dob, country, now)
+              None -> False
+            }
+          decode.success(#(id, keys, matches))
+        }),
+      )
+      let #(items, next) =
+        rows
+        |> list.filter(fn(r) { r.2 })
+        |> paging.page_of(page.limit, fn(r) { r.1 })
+      #(list.map(items, fn(r) { r.0 }), next)
+    }
+  }
 }
+
+/// Every admitted player: the text search reads them all.
+const everyone = 1_000_000_000
 
 /// `GET /org/players`.
 pub fn directory(ctx: Ctx, req: Request, a: OrgAccess) -> Response {

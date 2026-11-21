@@ -10,6 +10,8 @@
 //   D the admin guardians list pages by cursor; junk paging is refused
 //   E a clip's views and scout tags from a club that may see the player, and its caption track: set by the player,
 //     read by whoever may see the clip
+//   F the directory's text search lowers text as JavaScript does, accented and Greek letters included, never
+//     matches a minor's city, and pages like the rest of the directory
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -455,6 +457,51 @@ section("E — a clip's views, scout tags and captions");
     "C10 a guardian reads their child's clips; one without a track says so",
   );
   neg(JSON.parse((await read('media-none', maria)).text).error === 'MEDIA_NOT_FOUND', 'C11 an unknown clip');
+}
+
+section("F — the directory's text search");
+{
+  const maria = await login('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Scout' });
+  const greek = await j('POST', '/auth/player/signup', {
+    name: 'ΟΔΥΣΣΕΑΣ Παπαδόπουλος',
+    dob: '1999-05-01',
+    country: 'GR',
+    password: 'synthetic-pass-1',
+    position: 'CB',
+  });
+  ok(greek.status === 201, 'fixture: a Greek adult signs up');
+  const ids = async (q, extra = '') =>
+    (await j('GET', `/org/players?q=${encodeURIComponent(q)}&limit=50${extra}`, undefined, maria)).body.items.map(
+      (p) => p.id,
+    );
+  for (const q of ['álvarez', 'ÁLVAREZ', 'Álv']) ok((await ids(q)).includes('pl-alvarez'), `DQ1 "${q}" finds Álvarez`);
+  for (const q of ['gdańsk', 'GDAŃSK']) ok((await ids(q)).includes('pl-imani'), `DQ2 "${q}" finds an adult by city`);
+  for (const q of ['οδυσσεας', 'ΟΔΥΣΣΕΑΣ', 'οδυσσεασ'.slice(0, 7)])
+    ok((await ids(q)).includes(greek.body.player.id), `DQ3 "${q}" finds a name ending in a capital sigma`);
+  neg(
+    !(await ids('οδυσσεασ')).includes(greek.body.player.id),
+    'DQ4 a word-final capital sigma is ς, as JavaScript lowers it, so a medial σ there does not match',
+  );
+  neg(
+    !(await ids('gdańsk')).includes('pl-tomasz') && (await ids('tomasz')).includes('pl-tomasz'),
+    "DQ5 a minor's city is never matched, though the club may find the minor by name",
+  );
+  const all = await ids('a');
+  const paged = [];
+  for (let cursor = null, i = 0; i < 50; i += 1) {
+    const page = (
+      await j(
+        'GET',
+        `/org/players?q=a&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        undefined,
+        maria,
+      )
+    ).body;
+    paged.push(...page.items.map((p) => p.id));
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  ok(all.length > 2 && JSON.stringify(paged) === JSON.stringify(all), 'DQ6 a search pages by cursor in the same order');
 }
 
 console.log(`\nplayers and guardians: ${passed} checks passed (${negatives} negative)`);

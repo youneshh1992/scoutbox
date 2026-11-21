@@ -156,8 +156,6 @@ scope for good (uploads, video analysis, the Expo push transport) says `Out of s
 - Second Look's changes, and its queue, break ties of time and kind by code point; the TypeScript server uses
   `localeCompare`, which orders punctuation and case differently. Only items changed in the same millisecond can
   differ.
-- The directory's text search lowers ASCII only (SQLite's `lower()`); the TypeScript server lowers as JavaScript
-  does, accented letters included.
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
