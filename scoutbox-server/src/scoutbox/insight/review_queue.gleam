@@ -11,6 +11,7 @@ import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/ids
@@ -18,6 +19,7 @@ import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/review_later
+import scoutbox/vocab/audience
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -312,5 +314,60 @@ pub fn defer(
     Ok(True) -> http.json(200, json.object([#("deferredDays", json.int(days))]))
     Ok(False) -> http.error(403, "NOT_VISIBLE")
     Error(e) -> http.internal(e)
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ the sweep
+
+/// The insight sweep's reminders: a deferral that has come due tells the scout who deferred, once. The marker
+/// commits with the notice and re-checks inside the unit, so overlapping sweeps send it once.
+pub fn remind(ctx: Ctx, now: Int) -> Result(Nil, Nil) {
+  let due =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT "
+          <> review_later.columns
+          <> " FROM review_later WHERE reminded_at IS NULL AND due_at < ? ORDER BY due_at, id LIMIT 500",
+        [sqlight.int(now)],
+        review_later.decoder(),
+      )
+    })
+  case due {
+    Error(_) -> Error(Nil)
+    Ok(due) -> {
+      list.each(due, fn(r) {
+        store.unit(ctx.store, fn(tx) {
+          use marked <- result.try(store.write(
+            tx,
+            "UPDATE review_later SET reminded_at = ? WHERE id = ? AND reminded_at IS NULL RETURNING id",
+            [sqlight.int(now), id.deferral_sql(r.id)],
+            decode.at([0], decode.string),
+          ))
+          case marked {
+            [] -> Ok(Nil)
+            _ -> {
+              use p <- result.try(players.by_id(store.reading(tx), r.player_id))
+              let name = case p {
+                Some(p) -> p.row.name
+                None -> "a player"
+              }
+              notifications.notify(
+                tx,
+                to: audience.OrgUser,
+                id: id.org_user_to_string(r.by_user_id),
+                type_: "review_queue",
+                text: "⏰ Review reminder: you deferred "
+                  <> name
+                  <> " — they are back in your review queue.",
+                ref_id: Some(id.player_to_string(r.player_id)),
+                at: now,
+              )
+            }
+          }
+        })
+      })
+      Ok(Nil)
+    }
   }
 }

@@ -10,6 +10,7 @@ import scoutbox/agents/agent_sweep
 import scoutbox/agents/dev_reviewers
 import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
+import scoutbox/insight/exposure
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/dev_mail
@@ -132,6 +133,7 @@ fn boot() -> Result(Nil, String) {
   let _ = follow_ups.sweep(ctx, clock.now_ms())
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
+  let _ = exposure.sweep(ctx, clock.now_ms())
   transitions.sweep(ctx.store, clock.now_ms())
   process.spawn(fn() { sweeping(ctx) })
   let builder =
@@ -155,8 +157,9 @@ fn boot() -> Result(Nil, String) {
 }
 
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
-/// warnings, the signing follow-ups, the trial reminders, the match facts whose time-only change is due, and the agent core's expiry and
-/// stale-verification notices, and the transition cases' expiries and check-ins.
+/// warnings, the signing follow-ups and application reminders, the trial reminders, the match facts whose time-only
+/// change is due, the agent core's expiry and stale-verification notices, the review-later reminders and the exposure
+/// window, and the transition cases' expiries and check-ins.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
@@ -166,6 +169,7 @@ fn sweeping(ctx: Ctx) -> Nil {
   let _ = trial_routes.remind(ctx, clock.now_ms())
   let _ = match_facts.sweep(ctx.store)
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
+  let _ = exposure.sweep(ctx, clock.now_ms())
   transitions.sweep(ctx.store, clock.now_ms())
   sweeping(ctx)
 }

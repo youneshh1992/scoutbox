@@ -307,6 +307,42 @@ pub fn reminders_due(read: Read) -> Result(List(Trial), Fail(e)) {
   )
 }
 
+/// The report sweep: a deadline passed, no report, never escalated, the subject not removed.
+pub fn report_overdue(read: Read, now: Int) -> Result(List(Trial), Fail(e)) {
+  select(
+    read,
+    "report_due_at < ? AND feedback_escalated_at IS NULL AND subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = trials.id)",
+    [sqlight.int(now)],
+  )
+}
+
+/// The assessment reminder: completed at or before `before`, the subject not removed, not yet reminded.
+pub fn completed_unreminded(
+  read: Read,
+  before: Int,
+) -> Result(List(Trial), Fail(e)) {
+  select(
+    read,
+    "completion_state = 'completed' AND completion_at <= ? AND subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = trials.id AND m.marker = 'assessmentPending')",
+    [sqlight.int(before)],
+  )
+}
+
+/// The overdue-report escalation, once: `False` when it was already escalated or its report is in.
+pub fn escalate_feedback(
+  tx: Tx,
+  trial_id: id.TrialId,
+  at: Int,
+) -> Result(Bool, Fail(e)) {
+  use marked <- result.map(store.write(
+    tx,
+    "UPDATE trials SET feedback_escalated_at = ? WHERE id = ? AND feedback_escalated_at IS NULL AND subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = trials.id) RETURNING id",
+    [sqlight.int(at), id.trial_sql(trial_id)],
+    decode.at([0], decode.string),
+  ))
+  marked != []
+}
+
 // --------------------------------------------------------------------------------------------------- writes
 
 /// Who did something to a trial: a club member, the recipient, or the system.

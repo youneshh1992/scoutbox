@@ -20,7 +20,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | agents | 9 | 9 | 9 | 246 / 416 | 69 / 84 | 6 to go |
 | development | 3 | 3 | 3 | 125 / 2 | 22 / 45 | 1 to go |
 | discovery | 3 | 3 | 3 | 318 / 5 | 2 / 2 | 1 to go |
-| operations | 1 | 1 | 1 | 33 / 0 | 0 / 0 | **ported** |
+| operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2201 / 54 | 218 / 277 | 3 to go |
 | recruitment | 19 | 19 | 19 | 668 / 4003 | 48 / 301 | 13 to go |
@@ -53,6 +53,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 87 | 73 | +8 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 244 | 32 | +3 added | yes | 33 / 0 |  | **done** |
+| `operations/sweeps` | neutral | 0 → 0 | 0 | 20 |  | +20 added | yes |  |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 164 | 54 | +3 added | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 225 | 17 | +44 added | yes | 22 / 0 |  | **done** |
@@ -127,6 +128,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `discovery/matchingAndWatchlists` | 6 | Parity beyond the batteries, slice 5: /admin/metrics counts match queries, watchlists created and reconciled, players entering and leaving, and Room bridge calls, after the policy versions, for the process only (MC1–MC6) |
 | `operations/clubOperations` | 3 | Parity beyond the batteries, slice 7: a level review's ledger detail (LD1), and the ops events' detail in /admin/metrics for a backup and an audit export (OD1, OD2) |
+| `operations/sweeps` | 20 | A new battery, parity beyond the batteries, slice 8: the sweeps' reminders over state moved into the past offline: the week-old application reminder, the overdue trial-feedback escalation, the completed-trial assessment reminder and the review-later reminder, each sent once over every sweep, and exposure beyond the 90-day window deleted |
 | `passport/passport` | 3 | Parity beyond the batteries, slice 7: the share rows name the share, its mode and who revoked it, and a recruitment view through a share link says so (LD1–LD3) |
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |

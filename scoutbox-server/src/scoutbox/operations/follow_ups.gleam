@@ -34,6 +34,7 @@ import scoutbox/rows/outcome_reports as report_row
 import scoutbox/rows/signings as signing_row
 import scoutbox/safety/audit
 import scoutbox/safety/moderate
+import scoutbox/scouting/opportunity_applications
 import scoutbox/vocab/audience
 import scoutbox/vocab/party
 import sqlight
@@ -850,9 +851,7 @@ pub fn admin_due_at(ctx: Ctx, req: Request, fid: id.FollowUpId) -> Response {
 
 /// `POST /admin/sweep`: runs the scheduled work now. It changes when things happen, never what.
 ///
-/// Not ported yet: these parts of the TypeScript sweep: the week-old application reminders, the overdue
-/// trial-feedback escalation and the completed-trial assessment reminder. Out of scope: the abandoned upload
-/// sessions.
+/// Out of scope: the TypeScript sweep's clean-up of abandoned upload sessions.
 pub fn admin_sweep(ctx: Ctx, req: Request) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()
@@ -864,11 +863,13 @@ pub fn admin_sweep(ctx: Ctx, req: Request) -> Response {
 // -------------------------------------------------------------------------------------------------- the sweep
 
 /// The follow-ups' part of the sweep: schedule any a signing is missing, mark those whose time has come due, and
-/// tell the club and the family once. Each step re-checks inside its unit, so overlapping sweeps do nothing twice.
+/// tell the club and the family once; then the week-old application reminders. Each step re-checks inside its unit,
+/// so overlapping sweeps do nothing twice.
 pub fn sweep(ctx: Ctx, now: Int) -> Result(Nil, Nil) {
   use _ <- result.try(backfill(ctx, now))
   use _ <- result.try(mark_due(ctx, now))
-  notify_due(ctx, now)
+  use _ <- result.try(notify_due(ctx, now))
+  opportunity_applications.remind(ctx, now)
 }
 
 fn ignore(r: Result(a, b)) -> Result(Nil, Nil) {

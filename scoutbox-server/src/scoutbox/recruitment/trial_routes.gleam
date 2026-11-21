@@ -30,6 +30,7 @@ import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs as org_store
 import scoutbox/identity/players
+import scoutbox/identity/staff as staff_store
 import scoutbox/messaging/delivery
 import scoutbox/messaging/notifications
 import scoutbox/platform/canonical
@@ -4060,11 +4061,128 @@ pub fn policy() -> Response {
 
 // ---------------------------------------------------------------------------------------------------- reminders
 
-/// The trial reminders of the follow-up sweep: a confirmed session within 48 hours reminds the recipient (the
-/// guardian for a minor) once per session per revision, and a trial whose last session ended a day ago without
-/// completion reminds the club lead once. A blocked club sends the family nothing. The markers are rows, so a
-/// restart re-sends nothing.
+/// The trial reminders of the follow-up sweep: overdue feedback escalates to the club lead once; a confirmed
+/// session within 48 hours reminds the recipient (the guardian for a minor) once per session per revision; a trial
+/// whose last session ended a day ago without completion, and a completed trial without an assessment after a week,
+/// remind the club lead once each. A blocked club sends the family nothing. The markers are rows, so a restart
+/// re-sends nothing.
 pub fn remind(ctx: Ctx, now: Int) -> Int {
+  let escalated = escalate_overdue(ctx, now)
+  let reminded = remind_sessions(ctx, now)
+  escalated + reminded + remind_assessments(ctx, now)
+}
+
+fn count_sent(
+  found: Result(List(Trial), store.Fail(Nil)),
+  send: fn(Trial) -> Result(Bool, store.UnitError(Nil)),
+) -> Int {
+  case found {
+    Error(_) -> 0
+    Ok(found) ->
+      list.fold(found, 0, fn(n, t) {
+        case send(t) {
+          Ok(True) -> n + 1
+          _ -> n
+        }
+      })
+  }
+}
+
+/// The lead's notice about a trial, when the organisation has an active member.
+fn tell_lead(
+  tx: Tx,
+  t: Trial,
+  text: String,
+  now: Int,
+) -> Result(Nil, store.Fail(e)) {
+  use lead <- result.try(staff_store.first_active(
+    store.reading(tx),
+    t.row.org_id,
+  ))
+  case lead {
+    Some(lead) ->
+      notifications.notify(
+        tx,
+        to: audience.OrgUser,
+        id: id.org_user_to_string(lead.id),
+        type_: "trial_day",
+        text:,
+        ref_id: Some(id.trial_to_string(t.row.id)),
+        at: now,
+      )
+    None -> Ok(Nil)
+  }
+}
+
+/// TypeScript writes a missing player name into the text as it is.
+fn name_as_written(t: Trial) -> String {
+  option.unwrap(t.row.player_name, "null")
+}
+
+fn escalate_overdue(ctx: Ctx, now: Int) -> Int {
+  count_sent(store.read(ctx.store, trials.report_overdue(_, now)), fn(t) {
+    store.unit(ctx.store, fn(tx) {
+      use escalated <- result.try(trials.escalate_feedback(tx, t.row.id, now))
+      use _ <- result.map(case escalated {
+        True ->
+          tell_lead(
+            tx,
+            t,
+            "🚨 Trial feedback for "
+              <> name_as_written(t)
+              <> " is overdue — the mandatory report blocks new trials until filed.",
+            now,
+          )
+        False -> Ok(Nil)
+      })
+      escalated
+    })
+  })
+}
+
+fn remind_assessments(ctx: Ctx, now: Int) -> Int {
+  let week = 7 * 86_400_000
+  count_sent(
+    store.read(ctx.store, trials.completed_unreminded(_, now - week)),
+    fn(t) {
+      store.unit(ctx.store, fn(tx) {
+        let rd = store.reading(tx)
+        use assessed <- result.try(store.query(
+          rd,
+          "SELECT 1 FROM assessments WHERE context_trial_id = ? LIMIT 1",
+          [id.trial_sql(t.row.id)],
+          decode.at([0], decode.int),
+        ))
+        // Inside the unit, so a sweep that overlaps this one finds the marker and sends nothing.
+        use marked <- result.try(store.query(
+          rd,
+          "SELECT 1 FROM trial_reminders WHERE trial_id = ? AND marker = 'assessmentPending'",
+          [id.trial_sql(t.row.id)],
+          decode.at([0], decode.int),
+        ))
+        case assessed, marked {
+          [], [] -> {
+            use _ <- result.try(
+              trials.mark_reminders(tx, t.row.id, [#("assessmentPending", now)]),
+            )
+            use _ <- result.map(tell_lead(
+              tx,
+              t,
+              "No assessment has been recorded for "
+                <> name_as_written(t)
+                <> "'s completed trial yet.",
+              now,
+            ))
+            True
+          }
+          _, _ -> Ok(False)
+        }
+      })
+    },
+  )
+}
+
+fn remind_sessions(ctx: Ctx, now: Int) -> Int {
   let due = store.read(ctx.store, trials.reminders_due)
   case due {
     Error(_) -> 0

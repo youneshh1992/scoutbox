@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6, 5 after slice 7), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6, 5 after slice 7, 2 after slice 8), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -513,6 +513,13 @@ are for surprising facts or points that later work depends on, not implementatio
    8. The rest of the sweep: the insight sweep (review-later reminders, pruning exposure older than 90 days), the
       week-old application reminders, the trial-feedback escalation and the completed-trial assessment reminder.
       Their columns (`reminded_at`, `feedback_escalated_at`) exist; nothing writes them.
+      [**done**: the new `operations/sweeps` battery (20 checks) passes on both servers and is on `BATTERIES`.] It
+      makes the state through the routes, stops the server, moves the rows' times into the past with plain SQL, and
+      boots again, so the boot pass, `/admin/sweep` and the fast periodic sweeps all run over it: each reminder is
+      checked to go once. The application reminder is part of `follow_ups.sweep`, the escalation and the assessment
+      reminder of `trial_routes.remind`, as in TypeScript's follow-up sweep; the insight sweep (`exposure.sweep`)
+      runs at boot and with the periodic sweeps, not on `/admin/sweep`, as there. Each marker is written by a
+      conditional UPDATE inside the unit that sends its notice, so overlapping sweeps send it once.
    9. Platform: `SCOUTBOX_TRUST_PROXY` (`TRUST_PROXY_INVALID`, the operator report's `proxy_trust`, and the open
       question below), the operator report's `dataLayer.domains`, and its notification counters
       (`suppressedByPreference`, `unknownTypes`).

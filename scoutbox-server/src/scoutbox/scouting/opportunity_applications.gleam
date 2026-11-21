@@ -3,8 +3,6 @@
 //// opportunity (no ghosting).
 ////
 //// The suitability summary's share and unshare are `scouting/suitability`.
-////
-//// Not ported yet: the week-old reminder sweep (`remindersDue`, `markReminded`).
 
 import gleam/dict
 import gleam/dynamic/decode
@@ -970,4 +968,57 @@ fn opportunity_answer(o: opportunities.Opportunity) -> Response {
     200,
     json.object([#("opportunity", json.object(opportunities.fields(o)))]),
   )
+}
+
+// ------------------------------------------------------------------------------------------------ the sweep
+
+/// The sweep's week-old reminder: an application still unanswered seven days after it was sent nags the club lead
+/// once. The marker commits with the notice, and re-checks inside the unit, so overlapping sweeps send it once.
+pub fn remind(ctx: Ctx, now: Int) -> Result(Nil, Nil) {
+  let due =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT "
+          <> row.columns
+          <> " FROM applications WHERE status = 'submitted' AND reminded_at IS NULL AND created_at < ? ORDER BY created_at",
+        [sqlight.int(now - 7 * 86_400_000)],
+        row.decoder(),
+      )
+    })
+  case due {
+    Error(_) -> Error(Nil)
+    Ok(due) -> {
+      list.each(due, fn(a) {
+        store.unit(ctx.store, fn(tx) {
+          use marked <- result.try(store.write(
+            tx,
+            "UPDATE applications SET reminded_at = ? WHERE id = ? AND status = 'submitted' AND reminded_at IS NULL RETURNING id",
+            [sqlight.int(now), id.application_sql(a.id)],
+            decode.at([0], decode.string),
+          ))
+          use lead <- result.try(case marked {
+            [] -> Ok(None)
+            _ -> staff.first_active(store.reading(tx), a.org_id)
+          })
+          case lead {
+            Some(lead) ->
+              notifications.notify(
+                tx,
+                to: audience.OrgUser,
+                id: id.org_user_to_string(lead.id),
+                type_: "application",
+                text: "⏳ "
+                  <> option.unwrap(a.player_name, "A player")
+                  <> "'s application has waited a week — every applicant gets an answer.",
+                ref_id: Some(id.application_to_string(a.id)),
+                at: now,
+              )
+            None -> Ok(Nil)
+          }
+        })
+      })
+      Ok(Nil)
+    }
+  }
 }

@@ -3,8 +3,6 @@
 //// themselves, and the decision review. No inference of protected characteristics, no public rankings, nothing
 //// pays its way in, and small aggregates are suppressed. Every count carries its window and denominators instead of
 //// a claim about discrimination.
-////
-//// Not ported yet: the insight sweep (review-later reminders, and deleting exposure events older than the window).
 
 import gleam/bit_array
 import gleam/crypto
@@ -444,4 +442,18 @@ pub fn decision_review(ctx: Ctx, a: OrgAccess) -> Response {
       )
     }
   }
+}
+
+// ------------------------------------------------------------------------------------------------ the sweep
+
+/// The insight sweep, at boot and with the periodic sweeps: the review-later reminders, then deleting the exposure
+/// events before the window, which no reader looks at.
+pub fn sweep(ctx: Ctx, now: Int) -> Result(Nil, Nil) {
+  let _ = review_queue.remind(ctx, now)
+  store.unit(ctx.store, fn(tx) {
+    store.run(tx, "DELETE FROM exposure_events WHERE day_index < ?", [
+      sqlight.int(now / day_ms - window_days),
+    ])
+  })
+  |> result.replace_error(Nil)
 }
