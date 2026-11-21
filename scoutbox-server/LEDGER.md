@@ -67,7 +67,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 75 |  | +30 added | yes |  |  | **done** |
 | `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 31 / 0 | 12 / 12 | **done** |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
-| `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
+| `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 51 |  | 3 moved, +14 added | yes |  |  | **done** |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
@@ -138,6 +138,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
 | `platform/playersAndGuardians` | 23 | Parity beyond the batteries, slice 5: a club's clip views and scout tags (V1–V4, T1–T8) and a clip's caption track, set by the player and read by whoever may see the clip (C1–C11) |
 | `platform/playersAndGuardians` | 7 | Parity beyond the batteries, slice 5: the directory's text search lowers text as JavaScript does, accented and Greek letters included, never matches a minor's city, and pages by cursor (DQ1–DQ6) |
+| `platform/sessionsAndPorts` | 14 | Parity beyond the batteries, slice 9: SCOUTBOX_TRUST_PROXY in production, refused when unreadable and started with a list (P7, P8), and the client address per-address budgets key on, for each kind of setting, with the state /capabilities reports (X0–X11) |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |

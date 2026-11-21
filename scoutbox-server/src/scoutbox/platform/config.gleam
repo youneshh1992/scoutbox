@@ -4,6 +4,7 @@ import envoy
 import gleam/float
 import gleam/int
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -11,6 +12,7 @@ import gleam/string
 import scoutbox/passport/trust_rules
 import scoutbox/platform/cors
 import scoutbox/platform/input
+import scoutbox/platform/proxy_trust
 import scoutbox/platform/secrets
 
 pub type Config {
@@ -63,6 +65,8 @@ pub type Config {
     test_idp_secret: String,
     /// SCOUTBOX_ALLOWED_ORIGINS: the origins a browser may read responses from. Empty, any origin.
     allowed_origins: List(String),
+    /// SCOUTBOX_TRUST_PROXY: which proxies' X-Forwarded-For to believe for the client address.
+    trust_proxy: proxy_trust.Setting,
   )
 }
 
@@ -185,6 +189,7 @@ pub fn load() -> Result(Config, String) {
       Ok(secret) -> secret
     },
     allowed_origins: cors.parse_allowed(envoy.get("SCOUTBOX_ALLOWED_ORIGINS")),
+    trust_proxy: proxy_trust.parse(envoy.get("SCOUTBOX_TRUST_PROXY")),
   ))
 }
 
@@ -205,8 +210,6 @@ fn session_ttl_ms(setting: Result(String, Nil)) -> Int {
 
 /// The unsafe settings among those `get` reads, in the TypeScript server's order. The Trust Score weights must total
 /// 100 in every mode; the rest are unsafe only in production.
-///
-/// Not ported yet: TRUST_PROXY_INVALID (SCOUTBOX_TRUST_PROXY, which this server doesn't read yet).
 pub fn problems(
   get: fn(String) -> Result(String, Nil),
   trust_weights_total: Int,
@@ -315,6 +318,19 @@ fn production_problems(
       Problem(
         "TEST_IDP_IN_PRODUCTION",
         "TEST_IDP_SECRET is set. The local test identity provider must never be configured on a production instance.",
+      ),
+    ),
+    #(
+      // An unreadable value would key every per-address limit on the proxy's own address.
+      proxy_trust.parse(get("SCOUTBOX_TRUST_PROXY")).state
+        == proxy_trust.Invalid,
+      Problem(
+        "TRUST_PROXY_INVALID",
+        "SCOUTBOX_TRUST_PROXY="
+          <> json.to_string(json.string(
+          get("SCOUTBOX_TRUST_PROXY") |> result.unwrap(""),
+        ))
+          <> " is not a hop count, true/false, or a list of addresses and subnets.",
       ),
     ),
   ])

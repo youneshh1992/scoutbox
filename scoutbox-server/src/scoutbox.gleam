@@ -139,6 +139,7 @@ fn boot() -> Result(Nil, String) {
   let builder =
     router.handle(ctx, _)
     |> wisp_ewe.handler(
+      config.trust_proxy.trust,
       secrets.random_hex(32),
       live_routes.stream_header,
       fn(marker, resp) { live_routes.open(ctx, marker, resp) },

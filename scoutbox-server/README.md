@@ -135,8 +135,7 @@ Every route below is exercised by a battery, except where marked.
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`). What is left is the
-platform's: `SCOUTBOX_TRUST_PROXY` and parts of the operator report. `battery-tests-port.md` (item 9) lists it by
-slice. Behaviour that stays out of
+platform's: parts of the operator report. `battery-tests-port.md` (item 9) lists it by slice. Behaviour that stays out of
 scope for good (uploads, video analysis, the Expo push transport) says `Out of scope:`.
 
 ## Known differences from the TypeScript server
@@ -161,3 +160,6 @@ scope for good (uploads, video analysis, the Expo push transport) says `Out of s
   the first in the order sent.
 - A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
   COMMIT. Either way a completion that rolls back issues none.
+- A forwarded address is read as an address only in standard notation. proxy-addr also reads IPv4 written as one
+  number or in hex or octal parts (`2130706433` is 127.0.0.1), so a trusted-proxy list could match such an entry
+  there and not here. Proxies write standard notation.

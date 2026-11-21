@@ -25,7 +25,35 @@ noted.
 | `ALLOW_DEV_LOGINS` | Passwordless demo logins are available outside production anyway; set in production, the server refuses to boot. |
 | `ALLOW_LOCAL_WEBHOOKS` | `1`: webhooks may target loopback addresses, so a battery can run the receiver. |
 | `SCOUTBOX_ALLOWED_ORIGINS` | Comma-separated CORS origins. Unset, any origin. |
-| `SENDGRID_API_KEY` | Set, mail goes through SendGrid; unset, to the local outbox. Batteries only name it in production-configuration checks. |
+| `SENDGRID_API_KEY` | Set, mail goes through SendGrid; unset, to the local outbox (see Mail). Batteries only name it in production-configuration checks. |
+| `SCOUTBOX_TRUST_PROXY` | Which proxies' `X-Forwarded-For` to believe when working out the client address (see The client address). Unset, `0`, `false`, `off` or `no`: none. `true` or `all`: every hop. A whole number N: N hops. Otherwise a comma-separated list of IPv4 or IPv6 addresses, subnets with a prefix of at least 1 (`10.0.0.0/8`, `2001:db8::/32`) and the names `loopback`, `linklocal` and `uniquelocal`, which are trusted proxies. Anything else is invalid: nothing is trusted, and production refuses to boot (`TRUST_PROXY_INVALID`). `/capabilities` reports the setting as `proxy_trust.state`: `not_configured`, `configured` or `invalid`. |
+
+## The client address
+
+Per-address budgets (the `/auth` limiter, `passport_share_read`, `pairing_attempt`) are keyed on the client address.
+`/__rate-limits` shows it as the `key` of a `passport_share_read` or `pairing_attempt` bucket. It is worked out as
+Express's `trust proxy` does:
+
+1. List the socket's address, then the `X-Forwarded-For` entries from right to left.
+2. Walk the list from the socket's address while each address is trusted, and stop at the first that isn't. The
+   client address is where the walk stops, or the last entry when every entry before it was trusted.
+
+With a hop count N, the first N entries are trusted, so the client address is the (N+1)th, or the last entry if the
+list is shorter. With `true`, every entry is trusted, so the client address is the leftmost forwarded address. With
+a list, an entry is trusted when it lies in one of its addresses or subnets. An IPv4-mapped IPv6 address
+(`::ffff:127.0.0.1`) matches as its IPv4 address. With nothing trusted, `X-Forwarded-For` is ignored.
+
+## Mail
+
+| Route | Meaning |
+|---|---|
+| `/admin/outbox` | `GET` with `x-admin-key`: the mail outbox, newest first, as `{ items, nextCursor }`, paged with `limit` and `cursor` (junk paging is 400). A mail the server sent is `{ id, ts, to, subject, text, transport, delivered }`. An e-mail notice the delivery centre dispatched is `{ id, at, channel, to, text, providerMessageId, provider }`. |
+
+Batteries find a mail by `to` and read a one-time code from its `text`, after the words `code is`. The stored outbox
+row never holds a code the mail marks as secret: its text reads `[code withheld — delivered to the recipient only]`
+instead. With the local outbox as the transport (no `SENDGRID_API_KEY`), the outbox is the delivery, so
+`/admin/outbox` shows such a mail's full text, code included, for as long as the process that sent it runs. After a
+restart it shows the stored text. With SendGrid, it never shows the code.
 
 ## Test providers
 

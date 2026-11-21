@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6, 5 after slice 7, 2 after slice 8), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6, 5 after slice 7, 2 after slice 8, 1 after slice 9's proxy setting), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -523,6 +523,14 @@ are for surprising facts or points that later work depends on, not implementatio
    9. Platform: `SCOUTBOX_TRUST_PROXY` (`TRUST_PROXY_INVALID`, the operator report's `proxy_trust`, and the open
       question below), the operator report's `dataLayer.domains`, and its notification counters
       (`suppressedByPreference`, `unknownTypes`).
+      [**`SCOUTBOX_TRUST_PROXY` done**: `platform/sessionsAndPorts` gained P7–P8 and X0–X11, and passes on both
+      servers; `dataLayer.domains` and the counters are left.] `CONTRACT.md` now names the setting, the client
+      address rule (Express's `trust proxy` walk, in one paragraph) and the outbox, and `e2eContract.mjs` lists
+      `/admin/outbox` among the routes whose development behaviour batteries rely on, which a scan of the source
+      can't find. The client address is worked out in the adapter (`platform/proxy_trust`, through `wisp_ewe`), so
+      every reader of `peer_header` gets it; 6,783 requests generated from proxy-addr itself
+      (`dev/proxy_cases.mjs`) settle on the same address. A `/0` prefix was accepted by `parseTrustProxy` and then
+      refused by proxy-addr, so the TypeScript server crashed at boot; it is invalid on both servers now.
 10. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible
@@ -580,8 +588,6 @@ Open questions:
 
 - **Reviewer verdicts** in `ACCEPTED` are missing for the moves to TypeScript unit suites made while untangling
   `sessionsAndPorts` and `contracts`.
-- **The process contract** still lacks `SCOUTBOX_TRUST_PROXY` and the dev mail transport's full-text copy
-  (`/admin/outbox`).
 
 ### The ledger [done]
 

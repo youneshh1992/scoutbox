@@ -14,6 +14,7 @@ import scoutbox/platform/config.{type Config}
 import scoutbox/platform/http
 import scoutbox/platform/live_event
 import scoutbox/platform/migrations
+import scoutbox/platform/proxy_trust
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/vocab/position
 import wisp.{type Response}
@@ -100,7 +101,7 @@ fn state(state: String, note: String) -> Json {
 ///
 /// Not ported yet: the data layer's per-domain descriptions (`dataLayer.domains`, the TypeScript repositories'
 /// own account of themselves); the notification counters (`suppressedByPreference` and `unknownTypes`, though
-/// preferences are enforced); the proxy setting (SCOUTBOX_TRUST_PROXY), so no proxy is trusted.
+/// preferences are enforced).
 pub fn capabilities(ctx: Ctx) -> Response {
   case store.read(ctx.store, read_report(_, ctx)) {
     Error(failure) -> http.internal(failure)
@@ -257,8 +258,8 @@ pub fn capability_states(config: Config) -> Json {
     #(
       "proxy_trust",
       state(
-        "not_configured",
-        "No reverse proxy is trusted; the connecting socket address is the client address. Behind a platform proxy every client would share the proxy's address and per-IP limits would apply to everyone at once.",
+        proxy_trust.state_text(config.trust_proxy.state),
+        config.trust_proxy.note,
       ),
     ),
     #(

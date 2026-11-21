@@ -11,10 +11,12 @@ import gleam/http/response
 import gleam/list
 import gleam/option
 import gleam/string
+import scoutbox/platform/proxy_trust
 import wisp
 import wisp/internal
 
-/// The header the client's address travels in, replaced on every request.
+/// The header the client's address travels in, replaced on every request: the socket's address, or the forwarded
+/// one the trusted proxies vouch for (`proxy_trust.client_address`).
 pub const peer_header = "x-scoutbox-peer"
 
 fn peer(connection: ewe.Connection) -> String {
@@ -46,6 +48,7 @@ pub fn http1_options() -> ewe.Http1Options {
 /// (without it) and opens the stream. Wisp's body type can't carry an ewe stream.
 pub fn handler(
   handler: fn(wisp.Request) -> wisp.Response,
+  trust: proxy_trust.Trust,
   secret_key_base: String,
   stream_header: String,
   stream: fn(String, response.Response(Nil)) -> response.Response(ewe.Body),
@@ -53,7 +56,15 @@ pub fn handler(
   fn(req: Request(ewe.Connection)) {
     let connection = req.body
     // Wisp's request has no client address, so the adapter carries it in a header the client cannot set.
-    let req = request.set_header(req, peer_header, peer(connection))
+    let forwarded =
+      list.filter_map(req.headers, fn(h) {
+        case h.0 == "x-forwarded-for" {
+          True -> Ok(h.1)
+          False -> Error(Nil)
+        }
+      })
+    let client = proxy_trust.client_address(trust, peer(connection), forwarded)
+    let req = request.set_header(req, peer_header, client)
     let conn =
       internal.Connection(
         ..internal.make_connection(reader(req), secret_key_base),
