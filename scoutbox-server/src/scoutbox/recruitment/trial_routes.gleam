@@ -1523,10 +1523,10 @@ pub fn request_notices(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: case minor {
+      event: ledger.Plain(case minor {
         True -> ledger_row.TrialRequestToGuardian
         False -> ledger_row.TrialRequest
-      },
+      }),
       player_id: Some(player.row.id),
       org_id: Some(a.org.id),
       org_name: Some(a.org.name),

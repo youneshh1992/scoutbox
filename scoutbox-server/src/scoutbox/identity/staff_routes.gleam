@@ -60,7 +60,7 @@ pub fn remove(ctx: Ctx, access: OrgAccess, user_id: id.OrgUserId) -> Response {
               use _ <- result.try(ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger_row.StaffRemoved,
+                  event: ledger.Plain(ledger_row.StaffRemoved),
                   player_id: None,
                   org_id: Some(access.org.id),
                   org_name: Some(access.org.name),

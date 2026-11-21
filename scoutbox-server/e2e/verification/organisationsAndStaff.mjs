@@ -249,6 +249,11 @@ let tomAffId, tomRoleId, tomEvidenceId;
     led.body.items.some((l) => l.type === 'verification_decision'),
     'decision landed in the tenant audit ledger',
   );
+  ok(
+    JSON.stringify(led.body.items.find((l) => l.type === 'verification_decision')?.detail) ===
+      JSON.stringify({ claimId: tomAffId, action: 'confirm' }),
+    'LD1 the ledger row names the claim and the decision',
+  );
 }
 
 // Identity claim: document evidence + T&S review (never auto).
@@ -425,6 +430,13 @@ let riverton = null,
     'organisation now listed as verified',
   );
   rivertonRootTok = (await login(riverton.orgId, 'Priya Nair')).token;
+  const rootLedger = (await j('GET', '/org/ledger', undefined, rivertonRootTok)).body.items;
+  ok(
+    rootLedger.filter((l) => l.type === 'verification_root_approved').length === 1 &&
+      JSON.stringify(rootLedger.find((l) => l.type === 'verification_root_approved').detail) ===
+        JSON.stringify({ request: rootReqId }),
+    "LD2 the approval is one row in the new organisation's ledger, naming the root request",
+  );
   const dash = await j('GET', '/org/verification/dashboard', undefined, rivertonRootTok);
   ok(
     dash.status === 200 && dash.body.organisationStatus === 'verified' && dash.body.counts.administrators === 1,
@@ -434,6 +446,43 @@ let riverton = null,
   ok(
     doms.body.domains.some((d) => d.domain === 'rivertonathletic.com' && d.status === 'verified'),
     'aligned mailbox proof recorded the official domain',
+  );
+  // Removing a domain: a subdomain needs verification-admin authority, the root domain a root admin with MFA.
+  const sub = await j(
+    'POST',
+    '/org/verification/domains',
+    { domain: 'academy.rivertonathletic.com', challengeEmail: 'it@academy.rivertonathletic.com' },
+    rivertonRootTok,
+  );
+  const subCode = await outboxCode('it@academy.rivertonathletic.com');
+  const confirmed = await j(
+    'POST',
+    `/org/verification/domains/${sub.body.request?.id}/confirm`,
+    { code: subCode },
+    rivertonRootTok,
+  );
+  ok(
+    sub.status === 201 && confirmed.status === 200 && confirmed.body.status === 'verified',
+    'DR0 a subdomain of a verified domain is confirmed by its mailbox',
+  );
+  r = await j('POST', '/org/verification/domains/nowhere.example/remove', {}, rivertonRootTok);
+  ok(r.status === 404 && r.body.error === 'DOMAIN_NOT_FOUND', 'DR1 a domain the organisation has not got');
+  r = await j('POST', '/org/verification/domains/rivertonathletic.com/remove', {}, maria.token);
+  ok(r.status === 404 && r.body.error === 'DOMAIN_NOT_FOUND', "DR2 nor another organisation's domain");
+  r = await j('POST', '/org/verification/domains/rivertonathletic.com/remove', {}, rivertonRootTok);
+  ok(
+    r.status === 403 && r.body.error === 'MFA_REQUIRED_FOR_ROOT_OPERATION',
+    'DR3 the root domain needs a root admin with MFA',
+  );
+  r = await j('POST', '/org/verification/domains/ACADEMY.RivertonAthletic.com/remove', {}, rivertonRootTok);
+  const left = (await j('GET', '/org/verification/domains', undefined, rivertonRootTok)).body.domains.map(
+    (d) => d.domain,
+  );
+  ok(
+    r.status === 200 &&
+      JSON.stringify(r.body) === JSON.stringify({ removed: 'academy.rivertonathletic.com' }) &&
+      JSON.stringify(left) === JSON.stringify(['rivertonathletic.com']),
+    'DR4 a subdomain is removed, named in any case; the root stays',
   );
   const kase = await j('GET', `/admin/verification/queue`, undefined, null, A);
   ok(

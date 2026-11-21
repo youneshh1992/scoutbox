@@ -437,6 +437,54 @@ ok(
   !(r.body.vouches ?? []).some((v) => v.coachName === 'Ade Balogun'),
   'withdrawn reference leaves every view (history retained server-side)',
 );
+// T&S revokes a reference: its code can never be spent, and a published one leaves every view
+r = await post(
+  '/player/vouches/request',
+  { coachName: 'Rae Okafor', coachEmail: 'rae@sundayleague.example', role: 'Assistant Coach' },
+  bearer(KOLA),
+);
+outbox = (await j('/admin/outbox', {}, admin)).body;
+const raeMail = outbox.items.find(
+  (m) => String(m.to ?? '').includes('rae@') && String(m.text ?? m.body ?? '').includes('reference code is'),
+);
+const raeCode = /reference code is ([A-Z0-9]{8})/.exec(raeMail?.text ?? raeMail?.body ?? '')?.[1];
+const everyVouch = async () => {
+  const items = [];
+  let cursor = null;
+  do {
+    const page = (await j(`/admin/vouches?limit=100${cursor ? `&cursor=${cursor}` : ''}`, {}, admin)).body;
+    items.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
+};
+const rae = (await everyVouch()).find((v) => v.coachName === 'Rae Okafor');
+ok(!!raeCode && rae?.status === 'pending', 'RK0 a second reference is requested, its code mailed');
+r = await post('/admin/vouches/vch-none/revoke', {}, admin);
+ok(r.status === 404 && r.body.error === 'VOUCH_NOT_FOUND', 'RK1 an unknown reference is not found');
+r = await post(`/admin/vouches/${rae.id}/revoke`, { reason: 'x' }, admin);
+ok(r.status === 400 && r.body.field === 'reason', 'RK2 a revocation takes no body');
+r = await post(`/admin/vouches/${rae.id}/revoke`, {}, admin);
+ok(
+  r.status === 200 &&
+    JSON.stringify(r.body) === JSON.stringify({ revoked: true }) &&
+    (await everyVouch()).find((v) => v.id === rae.id)?.status === 'revoked',
+  'RK3 T&S revokes a pending reference',
+);
+r = await post('/vouch/submit', {
+  code: raeCode,
+  text: 'Coached Kola one season.',
+  seasons: '2024–2025',
+  conflictOfInterest: 'None.',
+});
+ok(r.status === 404 && r.body.error === 'CODE_INVALID', "RK4 a revoked reference's code can't be spent");
+mark = WITNESS.frames().length;
+r = await post(`/admin/vouches/${vch.id}/revoke`, {}, admin);
+ok(
+  r.status === 200 && (await everyVouch()).find((v) => v.id === vch.id)?.status === 'revoked',
+  'RK5 a published reference can be revoked too',
+);
+ok(await pingedFrom('players', mark), 'RK6 a revocation pings the player');
 // squad invitations
 r = await post('/org/squad/invite', { playerId: 'pl-guni', note: 'U15 development squad' }, bearer(MARIA));
 ok(r.status === 201 && r.body.invite.status === 'pending_guardian', 'minor squad invite routes to the guardian');

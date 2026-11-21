@@ -41,7 +41,6 @@ import scoutbox/rows/box_challenges as challenge_row
 import scoutbox/rows/box_session_integrity_events as event_row
 import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
@@ -467,7 +466,7 @@ fn assignment_unit(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.BoxAssignmentCreated,
+          event: ledger.BoxAssignmentCreated(drill.id, target_type, value),
           player_id: Some(p.row.id),
           org_id: Some(org.id),
           org_name: Some(org.name),
@@ -672,7 +671,7 @@ pub fn cancel_assignment(
               ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger_row.BoxAssignmentCancelled,
+                  event: ledger.BoxAssignmentCancelled(aid),
                   player_id: Some(asg.player_id),
                   org_id: Some(a.org.id),
                   org_name: Some(a.org.name),
@@ -1203,7 +1202,7 @@ fn publish_challenge(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.BoxChallengePublished,
+          event: ledger.BoxChallengePublished(cid, drill.id),
           player_id: None,
           org_id: Some(org.id),
           org_name: Some(org.name),
@@ -1910,7 +1909,7 @@ fn invalidate(
   ledger.append(
     tx,
     ledger.Entry(
-      entry_type: ledger_row.BoxResultInvalidated,
+      event: ledger.BoxResultInvalidated(s.row.id, d.id, outcome),
       player_id: Some(s.row.player_id),
       org_id: None,
       org_name: None,
@@ -1991,7 +1990,7 @@ pub fn restore(ctx: Ctx, req: Request, sid: id.BoxSessionId) -> Response {
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.BoxResultRestored,
+          event: ledger.BoxResultRestored(sid, reason),
           player_id: Some(s.row.player_id),
           org_id: None,
           org_name: None,

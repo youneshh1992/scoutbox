@@ -21,7 +21,6 @@ import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/safety/ledger
@@ -401,12 +400,10 @@ fn deciding(
       ref_id: Some(id.claim_to_string(claim.id)),
       at: now,
     ))
-    // Not ported yet: the ledger row's detail (`detail_claim_id`, `detail_action`): `ledger.Entry` carries no
-    // detail.
     ledger.append(
       tx,
       ledger.Entry(
-        entry_type: ledger_row.VerificationDecision,
+        event: ledger.VerificationDecision(claim.id, action_text(body.action)),
         player_id: None,
         org_id: Some(access.org.id),
         org_name: None,

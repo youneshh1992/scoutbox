@@ -24,7 +24,6 @@ import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/wisp_ewe
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/passport_shares as share_row
 import scoutbox/safety/ledger
 import scoutbox/vocab/audience
@@ -155,7 +154,7 @@ fn create_share(
       use entry <- result.try(ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.PassportShareCreated,
+          event: ledger.PassportShareCreated(body.mode, share.id),
           player_id: Some(p.row.id),
           org_id: None,
           org_name: None,
@@ -397,7 +396,7 @@ fn revoke(
           use entry <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.PassportShareRevoked,
+              event: ledger.PassportShareRevoked(s.id, by),
               player_id: Some(s.player_id),
               org_id: None,
               org_name: None,
@@ -616,7 +615,7 @@ pub fn open_recruitment(ctx: Ctx, a: OrgAccess, secret: String) -> Response {
               use entry <- result.try(ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger_row.PassportRecruitmentView,
+                  event: ledger.PassportRecruitmentView(through_share: True),
                   player_id: Some(p.row.id),
                   org_id: Some(a.org.id),
                   org_name: Some(a.org.name),

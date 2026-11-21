@@ -803,7 +803,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
         ledger.append(
           tx,
           ledger.Entry(
-            entry_type: ledger_row.RecruitmentRoomCreated,
+            event: ledger.Plain(ledger_row.RecruitmentRoomCreated),
             player_id: Some(p.row.id),
             org_id: Some(a.org.id),
             org_name: Some(a.org.name),
@@ -951,7 +951,7 @@ pub fn create_for_player(
         ledger.append(
           tx,
           ledger.Entry(
-            entry_type: ledger_row.RecruitmentRoomCreated,
+            event: ledger.Plain(ledger_row.RecruitmentRoomCreated),
             player_id: Some(p.row.id),
             org_id: Some(a.org.id),
             org_name: Some(a.org.name),

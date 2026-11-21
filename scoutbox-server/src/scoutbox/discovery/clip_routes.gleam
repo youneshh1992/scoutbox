@@ -132,7 +132,7 @@ pub fn tag(
           use _ <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.ClipTagged,
+              event: ledger.Plain(ledger_row.ClipTagged),
               player_id: Some(p.row.id),
               org_id: Some(a.org.id),
               org_name: Some(a.org.name),

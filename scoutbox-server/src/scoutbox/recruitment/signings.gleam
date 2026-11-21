@@ -17,7 +17,6 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/signing_parties as party_row
 import scoutbox/rows/signings as row
 import scoutbox/safety/ledger
@@ -131,7 +130,7 @@ pub fn record_json(s: row.Row, parties: List(party_row.Row)) -> Json {
 
 /// A legacy recording as the route answers it: the record recordCompletedSigning builds, not the stored one, so it
 /// has no package fields, and its first qualifying interaction is the whole ledger row.
-pub fn legacy_json(s: row.Row, first: Option(ledger_row.Row)) -> Json {
+pub fn legacy_json(s: row.Row, first: Option(ledger.Logged)) -> Json {
   let opt = json.nullable(_, json.string)
   json.object([
     #("id", id.signing_json(s.id)),

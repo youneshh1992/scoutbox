@@ -220,7 +220,7 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           use _ <- result.map(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.CoachAffiliationConfirmed,
+              event: ledger.Plain(ledger_row.CoachAffiliationConfirmed),
               player_id: None,
               org_id: Some(a.org.id),
               org_name: Some(a.org.name),

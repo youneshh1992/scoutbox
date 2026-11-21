@@ -24,7 +24,6 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/orgs as org_row
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claims as claim_row
@@ -1275,11 +1274,10 @@ fn approving(
     ),
     now,
   ))
-  // Not ported yet: the ledger row's detail (`detail_root_request_id`): `ledger.Entry` carries no detail.
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: ledger_row.VerificationRootApproved,
+      event: ledger.VerificationRootApproved(a.id),
       player_id: None,
       org_id: Some(org.id),
       org_name: None,

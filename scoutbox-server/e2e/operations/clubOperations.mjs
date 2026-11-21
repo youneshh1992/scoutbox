@@ -1152,6 +1152,16 @@ section('consent-based transitions');
     body: JSON.stringify({ level: levelBefore, reason: 'no-op review for the audit trail test' }),
   });
   ok(lr.status === 200, 'authorised level review is explicit, reasoned and ledger-audited');
+  const reviews = (await j('GET', '/player/export', undefined, adeyemi.token)).body.ledgerEvents.filter(
+    (l) => l.type === 'level_review',
+  );
+  ok(
+    reviews.length === 1 &&
+      JSON.stringify(reviews[0].detail) ===
+        JSON.stringify({ from: levelBefore, to: levelBefore, reason: 'no-op review for the audit trail test' }) &&
+      reviews[0].orgName === 'Trust & Safety',
+    'LD1 the review row records the level before and after, and the reason',
+  );
 
   // Guardian-controlled for minors + recipient eligibility fail-closed.
   const guniMedia = null;
@@ -1657,6 +1667,26 @@ section('F12D — backup and isolated restore');
     body: JSON.stringify({ dir: path.basename(backup.dir) }),
   });
   ok((await r.json()).ok === true, 'backup verifies against its manifest');
+  const ops = (await j('GET', '/admin/metrics', undefined, null, A())).body.opsEvents;
+  const made = ops.find((e) => e.kind === 'backup_created');
+  ok(
+    made &&
+      JSON.stringify(made.detail) ===
+        JSON.stringify({
+          dir: path.basename(backup.dir),
+          files: backup.manifest.files.length,
+          queuedForRemoval: backup.manifest.media.queuedForRemoval,
+        }),
+    'OD1 the backup ops event names its directory, its file count and the media queued for removal',
+  );
+  ok(
+    ops.some(
+      (e) =>
+        e.kind === 'audit_export' &&
+        JSON.stringify(e.detail) === JSON.stringify({ orgId: 'org-eastport', by: 'Maria Keane' }),
+    ),
+    'OD2 an audit export ops event names the club and who exported',
+  );
 
   const restoreDir = mkdtempSync(path.join(tmpdir(), 'sbx-restore-'));
   cpSync(backup.dir, restoreDir, { recursive: true });

@@ -228,10 +228,10 @@ fn add_block(
           use _ <- result.map(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: case by {
+              event: ledger.Plain(case by {
                 party.Player -> ledger_row.OrgBlockedByPlayer
                 party.Guardian -> ledger_row.OrgBlockedByGuardian
-              },
+              }),
               player_id: Some(player_id),
               org_id: Some(org_id),
               org_name: Some(org.name),

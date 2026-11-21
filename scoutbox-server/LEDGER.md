@@ -43,17 +43,17 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
-| `development/boxCam` | neutral | 3 → 0 | 150 | 137 | 40 | +27 added | yes | 40 / 0 |  | **done** |
+| `development/boxCam` | neutral | 3 → 0 | 150 | 146 | 40 | +36 added | yes | 40 / 0 |  | **done** |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
-| `development/combine` | neutral | 2 → 0 | 92 | 73 | 20 | +1 added | yes | 22 / 0 |  | **done** |
+| `development/combine` | neutral | 2 → 0 | 92 | 75 | 20 | +3 added | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 90 |  | +4 added | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 87 | 73 | +8 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
-| `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
-| `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
+| `operations/clubOperations` | neutral | 6 → 0 | 273 | 244 | 32 | +3 added | yes | 33 / 0 |  | **done** |
+| `passport/passport` | neutral | 1 → 0 | 215 | 164 | 54 | +3 added | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
 | `platform/api` | neutral | 0 → 0 | 198 | 225 | 17 | +44 added | yes | 22 / 0 |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
@@ -89,8 +89,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
-| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 248 |  | 26 moved, +10 added | yes |  |  | **done** |
-| `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
+| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 255 |  | 26 moved, +17 added | yes |  |  | **done** |
+| `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 191 | 47 | +7 added | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
 
 ## Checks moved to TypeScript unit suites
@@ -115,8 +115,10 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 |---|---|---|
 | `agents/compliance` | 1 | Live events: publishing a policy version pings every stream, naming nothing (LV1) |
 | `agents/crossApp` | 1 | Live events: the club's stream hears a contact routed to the agent, by the agent's id only (LV1) |
+| `development/boxCam` | 9 | Parity beyond the batteries, slice 7: each Box Cam ledger row carries its detail: a published challenge, an assignment and its cancellation, the privacy settings, an invalidation and a restore, a kept clip (LD0–LD8) |
 | `development/boxCam` | 2 | Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2) |
 | `development/boxCam` | 25 | Parity beyond the batteries, slice 6: the development plan for the player and a guardian (DP0–DP7), the club's drill list (DL1–DL3), and keeping a clip (KC1–KC13) |
+| `development/combine` | 2 | Parity beyond the batteries, slice 7: the Combine's ledger rows carry their detail: the request and its protocols, and each completed attempt's protocol and state (LD1, LD2) |
 | `development/combine` | 1 | Live events: the player's stream hears their development evidence change for the session and the attempt (LV1) |
 | `development/hub` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all seventy-six) |
 | `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
@@ -124,6 +126,8 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `discovery/matchingAndWatchlists` | 6 | Parity beyond the batteries, slice 5: /admin/metrics counts match queries, watchlists created and reconciled, players entering and leaving, and Room bridge calls, after the policy versions, for the process only (MC1–MC6) |
+| `operations/clubOperations` | 3 | Parity beyond the batteries, slice 7: a level review's ledger detail (LD1), and the ops events' detail in /admin/metrics for a backup and an audit export (OD1, OD2) |
+| `passport/passport` | 3 | Parity beyond the batteries, slice 7: the share rows name the share, its mode and who revoked it, and a recruitment view through a share link says so (LD1–LD3) |
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |
 | `platform/api` | 4 | Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4) |
@@ -143,8 +147,10 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `recruitment/decisions` | 2 | Parity beyond the batteries, slice 3: the Room projection carries a formal decision's lifecycle record, applied or not, and a recommendation none (J25c, H13b) |
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
 | `recruitment/trials` | 10 | Parity beyond the batteries, slice 3: a simulated Box Cam session is a candidate, citable on a trial and in a decision only while BOX_CAM_TEST_PROVIDER is on, and the decision surface lists the case's cited sessions (TP1–TP9) |
+| `scouting/clubWorkflows` | 7 | Parity beyond the batteries, slice 7: Trust & Safety revokes a reference, pending or published: its code can never be spent, a body is refused, and the player is pinged (RK0–RK6) |
 | `scouting/clubWorkflows` | 2 | Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2) |
 | `scouting/clubWorkflows` | 8 | Parity beyond the batteries, slice 5: a lead's review of a submitted assessment, once, with its note as written, and the refusals (RV1–RV8) |
+| `verification/organisationsAndStaff` | 7 | Parity beyond the batteries, slice 7: a decision's and a root approval's ledger detail (LD1, LD2), and removing a domain: a subdomain confirmed by its mailbox and removed, the refusals, and the root domain's MFA gate (DR0–DR4) |
 
 ## Calls to port by hand
 

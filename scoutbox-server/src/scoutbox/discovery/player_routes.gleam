@@ -61,7 +61,7 @@ fn append(
     use id <- result.map(ledger.append(
       tx,
       ledger.Entry(
-        entry_type: type_,
+        event: ledger.Plain(type_),
         player_id: Some(p.row.id),
         org_id: Some(a.org.id),
         org_name: Some(a.org.name),
@@ -350,7 +350,9 @@ pub fn proof_pack(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
               let span =
                 int.to_float(months) *. 30.44 *. 24.0 *. 3600.0 *. 1000.0
               json.string(
-                clock.iso(float.truncate(int.to_float(e.occurred_at) +. span)),
+                clock.iso(float.truncate(
+                  int.to_float(e.row.occurred_at) +. span,
+                )),
               )
             }
             Error(Nil) -> json.null()

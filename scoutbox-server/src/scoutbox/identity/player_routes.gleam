@@ -700,7 +700,7 @@ pub fn complete_aging_up(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           use _ <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.AccountTransitioned,
+              event: ledger.Plain(ledger_row.AccountTransitioned),
               player_id: Some(player.id),
               org_id: None,
               org_name: Some("ScoutBox"),

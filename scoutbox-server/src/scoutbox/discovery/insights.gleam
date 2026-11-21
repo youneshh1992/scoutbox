@@ -48,7 +48,8 @@ type OrgTally {
 fn events(read: Read, player_id: id.PlayerId) -> Result(List(Event), Fail(e)) {
   use rows <- result_map(ledger.for_player(read, player_id))
   rows
-  |> list.map(fn(r: ledger_row.Row) {
+  |> list.map(fn(l: ledger.Logged) {
+    let r = l.row
     Event(
       ledger_row.type_to_string(r.type_),
       r.org_name,

@@ -385,6 +385,26 @@ let reqId = null;
       JSON.stringify(results.body).includes('dob') === false,
     'C5: club result carries no raw video URL and no DOB',
   );
+  const ledger = (await j('GET', '/player/export', undefined, kola.token)).body.ledgerEvents;
+  const about = (type) => ledger.filter((l) => l.type === type && l.detail?.requestId === reqId);
+  ok(
+    JSON.stringify(about('combine_request_created').map((l) => l.detail)) ===
+      JSON.stringify([{ requestId: reqId, protocols: ['combine-box-control-60', 'combine-box-footwork'] }]) &&
+      JSON.stringify(about('combine_request_completed').map((l) => l.detail)) ===
+        JSON.stringify([{ requestId: reqId }]),
+    'LD1 the request rows name the request, and its creation the protocols it asks for',
+  );
+  const attempts = ledger.filter((l) => l.type === 'combine_attempt_completed');
+  ok(
+    attempts.length > 0 &&
+      attempts.every(
+        (l) =>
+          JSON.stringify(Object.keys(l.detail)) === JSON.stringify(['attemptId', 'protocol', 'state']) &&
+          /^combine-[a-z0-9-]+@[0-9]+$/.test(l.detail.protocol),
+      ) &&
+      attempts.some((l) => l.detail.protocol === 'combine-box-control-60@1' && l.detail.state === 'combine_verified'),
+    'LD2 a completed attempt names itself, its protocol at its version, and its state',
+  );
 }
 
 // ============================================================ C10

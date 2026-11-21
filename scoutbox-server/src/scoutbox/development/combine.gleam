@@ -4,9 +4,6 @@
 ////
 //// An attempt's live state is read with its bound session's: invalidating the session stops a Combine Verified
 //// result counting, and a restore brings it back, without rewriting the attempt.
-////
-//// Not ported yet: the ledger entries' detail (the request and its protocols, the attempt and its state), and the
-//// player_development_evidence_changed live event.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -29,7 +26,6 @@ import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/combine_attempts as attempt_row
 import scoutbox/rows/combine_requests as row
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/orgs
 import scoutbox/safety/ledger
 import scoutbox/vocab/audience
@@ -565,7 +561,7 @@ pub fn create(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: ledger_row.CombineRequestCreated,
+      event: ledger.CombineRequestCreated(request_id, new.protocol_ids),
       player_id: Some(p.row.id),
       org_id: Some(org.id),
       org_name: Some(org.name),
@@ -886,7 +882,11 @@ fn measure(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: ledger_row.CombineAttemptCompleted,
+      event: ledger.CombineAttemptCompleted(
+        a.row.id,
+        a.row.protocol_id <> "@" <> int.to_string(a.row.protocol_version),
+        m.combine_state,
+      ),
       player_id: Some(player.row.id),
       org_id: None,
       org_name: None,
@@ -986,7 +986,7 @@ fn apply_request_progress(
         ledger.append(
           tx,
           ledger.Entry(
-            entry_type: ledger_row.CombineRequestCompleted,
+            event: ledger.CombineRequestCompleted(r.row.id),
             player_id: Some(player.row.id),
             org_id: Some(r.row.org_id),
             org_name: r.row.org_name,

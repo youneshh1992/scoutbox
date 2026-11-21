@@ -48,7 +48,7 @@ pub type Written {
   Written(
     signing: signing_row.Row,
     duplicate: Bool,
-    first: Option(ledger_row.Row),
+    first: Option(ledger.Logged),
   )
 }
 
@@ -119,16 +119,8 @@ fn first_event(
   read: Read,
   player_id: id.PlayerId,
   org_id: id.OrgId,
-) -> Result(Option(ledger_row.Row), Fail(e)) {
-  store.query(
-    read,
-    "SELECT "
-      <> ledger_row.columns
-      <> " FROM ledger WHERE player_id = ? AND org_id = ? ORDER BY seq LIMIT 1",
-    [id.player_sql(player_id), id.org_sql(org_id)],
-    ledger_row.decoder(),
-  )
-  |> result.map(fn(rows) { list.first(rows) |> option.from_result })
+) -> Result(Option(ledger.Logged), Fail(e)) {
+  ledger.first_for_player_org(read, player_id, org_id)
 }
 
 /// The UTC calendar year of an instant, as text.
@@ -226,7 +218,7 @@ fn write(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: ledger_row.Signing,
+      event: ledger.Plain(ledger_row.Signing),
       player_id: Some(p.id),
       org_id: Some(org.id),
       org_name: Some(org.name),
@@ -242,7 +234,7 @@ fn write(
   let inside = case first {
     Some(f) ->
       int.to_float(ts)
-      <=. int.to_float(f.occurred_at)
+      <=. int.to_float(f.row.occurred_at)
       +. int.to_float(window_months)
       *. 30.44
       *. 24.0
@@ -259,10 +251,10 @@ fn write(
       user_id: option.map(actor, fn(a) { a.0 }),
       scout_name: option.map(actor, fn(a) { a.1 }),
       signed_at: Some(ts),
-      first_qualifying_ledger_id: option.map(first, fn(f) { f.id }),
-      first_qualifying_at: option.map(first, fn(f) { f.occurred_at }),
+      first_qualifying_ledger_id: option.map(first, fn(f) { f.row.id }),
+      first_qualifying_at: option.map(first, fn(f) { f.row.occurred_at }),
       first_qualifying_type: option.map(first, fn(f) {
-        ledger_row.type_to_string(f.type_)
+        ledger_row.type_to_string(f.row.type_)
       }),
       attribution_window_months: Some(window_months),
       inside_attribution_window: inside,

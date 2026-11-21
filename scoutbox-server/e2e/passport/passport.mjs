@@ -840,6 +840,15 @@ section('H13 — minors: guardian control, agency wall, radius, redaction');
   );
   r = await j('POST', `/guardian/children/pl-guni/football-passport/shares/${shareId}/revoke`, {}, amara.token);
   ok(r.status === 200, 'guardian revokes');
+  const log = (await j('GET', '/guardian/log?limit=100', undefined, amara.token)).body.items;
+  ok(
+    JSON.stringify(log.filter((l) => l.detail?.shareId === shareId).map((l) => [l.type, l.detail])) ===
+      JSON.stringify([
+        ['passport_share_revoked', { shareId, by: 'guardian' }],
+        ['passport_share_created', { mode: 'public', shareId }],
+      ]),
+    'LD1 the share rows name the share, its mode, and who revoked it',
+  );
   const revoked = await j('GET', guniPub);
   const bogus = await j('GET', '/passport/shared/definitely-not-a-real-token-000');
   neg(
@@ -1019,6 +1028,20 @@ section('H17 — audit + metrics honesty');
   ok(
     ledger.body.items.some((l) => l.type === 'passport_recruitment_view' && l.playerId === 'pl-adeyemi'),
     'recruitment passport views land in the existing ledger',
+  );
+  ok(
+    ledger.body.items.filter((l) => l.type === 'passport_recruitment_view').every((l) => l.detail === null),
+    'LD2 a view through the club route carries no detail',
+  );
+  const agency = (await j('GET', '/org/ledger', undefined, alex.token)).body.items;
+  ok(
+    agency.some(
+      (l) =>
+        l.type === 'passport_recruitment_view' &&
+        l.playerId === 'pl-adeyemi' &&
+        JSON.stringify(l.detail) === JSON.stringify({ via: 'share' }),
+    ),
+    'LD3 a view through a share link says so',
   );
   const m = await j('GET', '/admin/metrics', undefined, null, A);
   const p = m.body.passport;

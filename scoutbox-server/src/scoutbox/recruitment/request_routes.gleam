@@ -350,10 +350,10 @@ pub fn issue_contact(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: case minor {
+      event: ledger.Plain(case minor {
         True -> ledger_row.ContactRequestToGuardian
         False -> ledger_row.ContactRequest
-      },
+      }),
       player_id: Some(p.row.id),
       org_id: Some(new.org_id),
       org_name: Some(new.org_name),
@@ -1011,7 +1011,7 @@ fn answer(
       use _ <- result.try(ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_type,
+          event: ledger.Plain(ledger_type),
           player_id: Some(player.row.id),
           org_id: Some(r.org_id),
           org_name: Some(r.org_name),

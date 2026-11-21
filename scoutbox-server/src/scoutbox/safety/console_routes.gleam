@@ -384,7 +384,6 @@ pub fn verification(ctx: Ctx, req: Request, id: id.OrgId) -> Response {
 
 /// `GET /admin/metrics`.
 ///
-/// Not ported yet: an operations event's detail, always null here, though the events that write one are ported.
 pub fn metrics(ctx: Ctx) -> Response {
   let requests = request_metrics.snapshot(ctx.request_metrics)
   // On the writer: it holds the counters units keep (`platform/metrics`).
@@ -442,7 +441,7 @@ pub fn metrics(ctx: Ctx) -> Response {
               #("id", id.ops_event_json(e.id)),
               #("at", json.int(e.occurred_at)),
               #("kind", ops_events.kind_to_json(e.kind)),
-              #("detail", json.null()),
+              #("detail", audit.ops_detail_json(e)),
             ])
           }),
         ),

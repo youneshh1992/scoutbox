@@ -1324,7 +1324,7 @@ pub fn submit(ctx: Ctx, a: OrgAccess, aid: id.AssessmentId) -> Response {
           ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.AssessmentSubmitted,
+              event: ledger.Plain(ledger_row.AssessmentSubmitted),
               player_id: Some(x.row.player_id),
               org_id: Some(a.org.id),
               org_name: Some(a.org.name),

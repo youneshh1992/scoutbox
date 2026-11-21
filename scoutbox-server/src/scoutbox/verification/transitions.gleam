@@ -20,8 +20,6 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/live_event
-import scoutbox/platform/live_pings
 import scoutbox/platform/store.{type Fail, type Read, type Store, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -1124,7 +1122,7 @@ pub fn org_pack(
               use _ <- result.try(ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger_row.TransitionPackView,
+                  event: ledger.Plain(ledger_row.TransitionPackView),
                   player_id: Some(player.row.id),
                   org_id: Some(org.org.id),
                   org_name: Some(org.org.name),
@@ -1268,30 +1266,17 @@ pub fn admin_level_review(
               id.player_sql(p.row.id),
             ]),
           )
-          use entry_id <- result.try(id.next_ledger_entry(tx))
-          // The row's detail columns are past `ledger.append`'s reach, so its ping is asked for here.
-          live_pings.catalogue(
+          ledger.append(
             tx,
-            live_event.Ledger(
-              ledger_row.type_to_string(ledger_row.LevelReview),
-              Some(id.player_to_string(p.row.id)),
-            ),
-          )
-          ledger_row.insert(
-            tx,
-            ledger_row.New(
-              ..ledger_row.new(
-                id: entry_id,
-                occurred_at: now,
-                type_: ledger_row.LevelReview,
-              ),
+            ledger.Entry(
+              event: ledger.LevelReview(from, body.level, body.reason),
               player_id: Some(p.row.id),
+              org_id: None,
               org_name: Some("Trust & Safety"),
+              user_id: None,
               actor_name: Some("T&S level review"),
-              detail_from_value: Some(playing_level.to_string(from)),
-              detail_to_value: Some(playing_level.to_string(body.level)),
-              detail_reason: Some(body.reason),
             ),
+            now,
           )
         })
       case reviewed {

@@ -973,7 +973,7 @@ fn checked_in(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.TrialCheckin,
+          event: ledger.Plain(ledger_row.TrialCheckin),
           player_id: Some(t.row.player_id),
           org_id: Some(a.org.id),
           org_name: Some(a.org.name),
@@ -1582,7 +1582,7 @@ fn file(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.TrialReport,
+          event: ledger.Plain(ledger_row.TrialReport),
           player_id: Some(p.row.id),
           org_id: Some(a.org.id),
           org_name: Some(a.org.name),

@@ -302,7 +302,7 @@ pub fn post(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
               use _ <- result.map(ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger_row.OpenTrialPosted,
+                  event: ledger.OpenTrialPosted,
                   player_id: None,
                   org_id: Some(a.org.id),
                   org_name: Some(a.org.name),
@@ -704,10 +704,10 @@ fn invite(
   use _ <- result.try(ledger.append(
     tx,
     ledger.Entry(
-      entry_type: case adult {
+      event: ledger.Plain(case adult {
         True -> ledger_row.TrialRequest
         False -> ledger_row.TrialRequestToGuardian
-      },
+      }),
       player_id: Some(p.row.id),
       org_id: Some(a.org.id),
       org_name: Some(a.org.name),
@@ -798,10 +798,10 @@ fn register(
           use _ <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: case guardian {
+              event: ledger.Plain(case guardian {
                 Some(_) -> ledger_row.OpenTrialRegistrationByGuardian
                 None -> ledger_row.OpenTrialRegistration
-              },
+              }),
               player_id: Some(child.row.id),
               org_id: Some(t.row.org_id),
               org_name: Some(t.org_name),

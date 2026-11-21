@@ -1,8 +1,6 @@
 //// A player's Box Cam privacy preferences (domains/development/boxcam/training.mjs `applyPrefs`): whether their
 //// development activity is shared for recruitment (the Combine consent rule reads it), and whether clips are
 //// kept. An adult sets their own; a child's are the guardian's.
-////
-//// Not ported yet: the ledger row's detail.
 
 import gleam/json.{type Json}
 import gleam/list
@@ -19,7 +17,6 @@ import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/room_routes
 import scoutbox/rows/box_cam_prefs as row
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/safety/ledger
 import scoutbox/vocab/party
 import sqlight
@@ -148,7 +145,11 @@ fn apply(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.BoxPrefsChanged,
+          event: ledger.BoxPrefsChanged(
+            by,
+            next.share_development_activity,
+            next.retain_clips,
+          ),
           player_id: Some(player_id),
           org_id: None,
           org_name: None,

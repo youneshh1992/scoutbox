@@ -515,7 +515,7 @@ pub fn log_matchday(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
           use _ <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.MatchdayLogged,
+              event: ledger.Plain(ledger_row.MatchdayLogged),
               player_id: None,
               org_id: Some(a.org.id),
               org_name: Some(a.org.name),
@@ -732,7 +732,7 @@ fn released_player(
       use _ <- result.try(ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.ReleasedByClub,
+          event: ledger.Plain(ledger_row.ReleasedByClub),
           player_id: Some(p.row.id),
           org_id: Some(a.org.id),
           org_name: Some(a.org.name),

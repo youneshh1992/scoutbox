@@ -840,7 +840,7 @@ fn add_attendance(
       use _ <- result.map(ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.AttendanceVerified,
+          event: ledger.Plain(ledger_row.AttendanceVerified),
           player_id: Some(player_id),
           org_id: None,
           org_name: Some("ScoutBox"),

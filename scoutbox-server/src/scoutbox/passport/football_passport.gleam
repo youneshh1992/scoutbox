@@ -26,7 +26,6 @@ import scoutbox/platform/metrics
 import scoutbox/platform/paging
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/orgs as org_row
 import scoutbox/rows/passport_achievements as achievement_row
 import scoutbox/rows/passport_career_entries as career_row
@@ -185,7 +184,7 @@ pub fn org_view(ctx: Ctx, a: OrgAccess, player_id: id.PlayerId) -> Response {
       use _ <- result.try(ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.PassportRecruitmentView,
+          event: ledger.PassportRecruitmentView(through_share: False),
           player_id: Some(p.row.id),
           org_id: Some(a.org.id),
           org_name: Some(a.org.name),

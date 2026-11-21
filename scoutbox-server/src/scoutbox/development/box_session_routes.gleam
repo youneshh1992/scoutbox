@@ -7,8 +7,6 @@
 ////
 //// Keeping a clip tags one of the player's existing `/player/media` items as Box Cam captured; Box Cam itself never
 //// receives session video.
-////
-//// Not ported yet: the `box_clip_saved` ledger row's detail (the session and the media item).
 
 import gleam/float
 import gleam/int
@@ -41,7 +39,6 @@ import scoutbox/rows/box_challenge_entries as entry_row
 import scoutbox/rows/box_session_observations as obs_row
 import scoutbox/rows/box_sessions as row
 import scoutbox/rows/id
-import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/player_media as media_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -1247,7 +1244,7 @@ fn keep_clip(
       ledger.append(
         tx,
         ledger.Entry(
-          entry_type: ledger_row.BoxClipSaved,
+          event: ledger.BoxClipSaved(sid, media),
           player_id: Some(pid),
           org_id: None,
           org_name: None,

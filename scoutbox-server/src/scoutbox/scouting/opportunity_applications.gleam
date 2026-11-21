@@ -519,7 +519,7 @@ fn apply_to(
         use _ <- result.try(ledger.append(
           tx,
           ledger.Entry(
-            entry_type: ledger_row.OpportunityApplication,
+            event: ledger.Plain(ledger_row.OpportunityApplication),
             player_id: Some(p.row.id),
             org_id: Some(o.row.org_id),
             org_name: Some(o.row.org_name),

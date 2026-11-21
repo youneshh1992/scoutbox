@@ -564,6 +564,55 @@ pub fn ops_count(read: Read, kind: ops_row.Kind) -> Result(Int, Fail(e)) {
   ])
 }
 
+/// The keys an ops event's detail carries, in the order it is written (the TypeScript server's `OPS_DETAIL`,
+/// `spec/repositories/safetyAudit.json`).
+pub fn ops_detail_keys(kind: ops_row.Kind) -> List(String) {
+  case kind {
+    ops_row.StaffBootstrapped -> ["orgId", "userId", "by"]
+    ops_row.AuditExport -> ["orgId", "by"]
+    ops_row.BackupCreated -> ["dir", "files", "queuedForRemoval"]
+    ops_row.BackupRefused -> ["dir", "error", "conflictCount"]
+    ops_row.BackupFailed -> ["dir", "error"]
+    ops_row.DeliveryFailed -> ["dispatchId", "channel"]
+    ops_row.WebhookFailed -> ["deliveryId", "endpointId"]
+  }
+}
+
+/// An ops event's detail: the keys its kind carries whose columns are set, or null when none are.
+pub fn ops_detail_json(e: ops_row.Row) -> Json {
+  let text = fn(v: Option(String)) { option.map(v, json.string) }
+  let int = fn(v: Option(Int)) { option.map(v, json.int) }
+  let fields =
+    list.filter_map(ops_detail_keys(e.kind), fn(key) {
+      case key {
+        "orgId" -> option.map(e.detail_org_id, id.org_json)
+        "userId" -> option.map(e.detail_user_id, id.org_user_json)
+        "by" -> text(e.detail_by)
+        "dir" -> text(e.detail_dir)
+        "files" -> int(e.detail_files)
+        "queuedForRemoval" -> int(e.detail_queued_for_removal)
+        "error" -> text(e.detail_error)
+        "conflictCount" -> int(e.detail_conflict_count)
+        "dispatchId" -> option.map(e.detail_dispatch_id, id.dispatch_json)
+        "channel" -> text(e.detail_channel)
+        "deliveryId" ->
+          option.map(e.detail_delivery_id, id.webhook_delivery_json)
+        "endpointId" ->
+          option.map(e.detail_endpoint_id, id.webhook_endpoint_json)
+        other ->
+          panic as {
+            "audit.ops_detail_keys names a key it can't read: " <> other
+          }
+      }
+      |> option.map(fn(v) { #(key, v) })
+      |> option.to_result(Nil)
+    })
+  case fields {
+    [] -> json.null()
+    _ -> json.object(fields)
+  }
+}
+
 /// The newest `n`, newest first.
 pub fn ops_newest(read: Read, n: Int) -> Result(List(ops_row.Row), Fail(e)) {
   store.query(

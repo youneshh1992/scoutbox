@@ -374,7 +374,7 @@ fn post(
           use _ <- result.try(ledger.append(
             tx,
             ledger.Entry(
-              entry_type: ledger_row.Message,
+              event: ledger.Plain(ledger_row.Message),
               player_id: Some(c.player_id),
               org_id: Some(c.org_id),
               org_name: Some(c.org_name),
