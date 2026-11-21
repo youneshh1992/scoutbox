@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
+import { retainedPlayerReferences, unresolvedPlayerReferences } from '../repositories/safetyAudit.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -188,6 +189,16 @@ const auditRows = (dir) =>
     JSON.stringify(Object.fromEntries(AUDIT_TABLES.map((t) => [t, c.all(`SELECT * FROM ${t} ORDER BY seq`)]))),
   );
 const retainedRowsOf = (dir) => qAll(dir, 'SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid');
+const livePlayers = (dir) => qAll(dir, 'SELECT id FROM players WHERE deleted_at IS NULL').length;
+/** The audit tables' player references that resolve to no player, and to a retained one (safetyAudit.ts). */
+const auditRefsOf = (dir) => {
+  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try {
+    return { unresolved: unresolvedPlayerReferences(s), retained: retainedPlayerReferences(s) };
+  } finally {
+    s.close();
+  }
+};
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => {
   const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role });
   assert.equal(r.status, 200, r.text);
@@ -296,20 +307,18 @@ await test("[cutover] a fresh boot records 0014_player_erasure last; DELETE /pla
     MIGRATION,
     `0014 recorded after 0013 (0015–0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`,
   );
-  assert.equal(cap.dataLayer.domains.players.retained, 0, 'the report counts retained records');
+  assert.equal(retainedRowsOf(dir).length, 0, 'no retained record yet');
   const maria = await orgLogin(S);
   const { pid, token, file } = await signupAdult(S, 'Erased Adult');
   await auditFor(S, pid, token, maria);
-  const rowsBefore = cap.dataLayer.domains.players.rows + 1;
+  const rowsBefore = livePlayers(dir);
   assert.deepEqual(
     Object.values(naming(dir, pid)).map((n) => n >= 1),
     [true, true, true, true, true],
     'rows in all five player-audit tables name the adult',
   );
   const auditBefore = auditRows(dir);
-  const unresolvedBefore = JSON.stringify(
-    (await S.j('GET', '/capabilities')).body.dataLayer.domains.safetyAudit.unresolvedPlayerReferences,
-  );
+  const unresolvedBefore = JSON.stringify(auditRefsOf(dir).unresolved);
   assert.equal(row(dir, pid).deleted_at, null);
   assert.ok(childRows(dir, pid) >= 1, 'the media row');
   assert.equal(sessionsOf(dir, pid), 1);
@@ -351,16 +360,16 @@ await test("[cutover] a fresh boot records 0014_player_erasure last; DELETE /pla
     'a second deletion with the dead session is refused',
   );
   assert.equal(auditRows(dir), auditBefore, 'every audit row exactly as before the deletion');
-  cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.domains.players.rows, rowsBefore - 1);
-  assert.equal(cap.dataLayer.domains.players.retained, 1);
+  const refs = auditRefsOf(dir);
+  assert.equal(livePlayers(dir), rowsBefore - 1);
+  assert.equal(retainedRowsOf(dir).length, 1);
   assert.equal(
-    JSON.stringify(cap.dataLayer.domains.safetyAudit.unresolvedPlayerReferences),
+    JSON.stringify(refs.unresolved),
     unresolvedBefore,
     'the Q4 count is unchanged: the id resolves to the retained row, not to nothing',
   );
   assert.deepEqual(
-    Object.entries(cap.dataLayer.domains.safetyAudit.retainedPlayerReferences)
+    Object.entries(refs.retained)
       .filter(([, n]) => n >= 1)
       .map(([k]) => k)
       .sort(),
@@ -391,14 +400,13 @@ await test("[cutover] a fresh boot records 0014_player_erasure last; DELETE /pla
     404,
     'a second deletion: CHILD_NOT_FOUND',
   );
-  cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.domains.players.retained, 2);
+  assert.equal(retainedRowsOf(dir).length, 2);
   // SIGKILL and restart.
   const retainedBefore = JSON.stringify(retainedRowsOf(dir));
   await S.kill();
   S = await boot(dir);
   assert.equal(JSON.stringify(retainedRowsOf(dir)), retainedBefore);
-  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
+  assert.equal(retainedRowsOf(S.dir).length, 2);
   const mariaR = await orgLogin(S);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, mariaR)).status, 404);
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: childId })).status, 404);
@@ -446,7 +454,7 @@ await test("[cutover] the deletion unit's failure seams: a failure after the era
       `${rule}: the guardian still lists the child`,
     );
   }
-  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 0);
+  assert.equal(retainedRowsOf(S.dir).length, 0);
   // The retries.
   assert.equal((await S.j('DELETE', '/player/account', {}, token)).status, 200);
   assert.deepEqual(row(dir, pid), RETAINED_ROW(pid, row(dir, pid).deleted_at, '2000-01-01', 'GB'));
@@ -455,7 +463,7 @@ await test("[cutover] the deletion unit's failure seams: a failure after the era
   assert.equal((await S.j('DELETE', `/guardian/children/${childId}`, {}, gtok)).status, 200);
   assert.deepEqual(row(dir, childId), RETAINED_ROW(childId, row(dir, childId).deleted_at, '2015-05-05', 'GB'));
   assert.equal(codesOf(dir, childId), 0);
-  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
+  assert.equal(retainedRowsOf(S.dir).length, 2);
   assert.equal((await S.j('DELETE', '/player/account', {}, token)).status, 401);
   assert.equal((await S.j('DELETE', `/guardian/children/${childId}`, {}, gtok)).status, 404);
   await S.stop();
@@ -496,7 +504,7 @@ await test('[cutover] the admin backup is a copy of the database that keeps the 
   assert.deepEqual(retainedRowsOf(restored), retained, 'the retained rows, exactly');
   // Before any route reads a profile: a club's profile view is a ledger row written at once.
   assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
-  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
+  assert.equal(retainedRowsOf(S.dir).length, 2);
   const mariaR = await orgLogin(S);
   assert.equal((await S.j('GET', `/org/players/${a.pid}`, undefined, mariaR)).status, 404);
   assert.equal((await S.j('GET', `/org/players/${b.pid}`, undefined, mariaR)).status, 200);

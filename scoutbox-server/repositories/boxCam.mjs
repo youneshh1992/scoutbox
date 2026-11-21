@@ -1433,7 +1433,6 @@ export function createBoxCamRepository({ sqlite, unit = null, now = Date.now, lo
     counts() {
       return Object.fromEntries(BOX_CAM_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return BOX_CAM_RECORDS.read(sqlite);
     },

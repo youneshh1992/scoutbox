@@ -11,7 +11,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { readCases, readRoomComments, readRoomDecisions } from '../repositories/recruitmentCases.ts';
+import {
+  readCases,
+  readRoomComments,
+  readRoomDecisions,
+  retainedPlayerReferences,
+  unresolvedPlayerReferences,
+} from '../repositories/recruitmentCases.ts';
 import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;
@@ -178,6 +184,15 @@ const snap = (dir, fn) => {
   }
 };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
+/** The repository's counts of player references that resolve to no player, or to a retained one, read from the file. */
+const refsOf = (dir) => {
+  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try {
+    return { unresolved: unresolvedPlayerReferences(s), retained: retainedPlayerReferences(s) };
+  } finally {
+    s.close();
+  }
+};
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
@@ -549,20 +564,14 @@ await test("[routes] a fresh boot records 0016_recruitment_cases last; the twent
     (cases.body.cases ?? cases.body.items ?? cases.body).some((x) => x.id === KID),
     '[compat] the case listing',
   );
-  const cap = await S.j('GET', '/capabilities');
-  const dom = cap.body.dataLayer.domains.recruitmentCases;
-  assert.ok(dom, '/capabilities carries the recruitmentCases domain');
-  assert.equal(dom.mode, 'live');
-  assert.equal(dom.rows.recruitmentCases, 3);
-  assert.equal(dom.rows.roomComments, 2);
-  assert.equal(
-    dom.rows.roomDecisions,
-    q1(dir, 'SELECT count(*) AS n FROM room_decisions').n,
+  const count = (table) => q1(dir, `SELECT count(*) AS n FROM ${table}`).n;
+  assert.equal(count('recruitment_cases'), 3);
+  assert.equal(count('room_comments'), 2);
+  assert.ok(
+    count('room_decisions') >= 1,
     'the formal decision and whatever advisory recommendation the archive recorded',
   );
-  assert.ok(dom.rows.roomDecisions >= 1);
-  assert.equal(dom.rows.roomEvidenceState, 1);
-  assert.equal(dom.rows.roomSnapshots, q1(dir, 'SELECT count(*) AS n FROM room_snapshots').n);
+  assert.equal(count('room_evidence_states'), 1);
   // [compat] another club, the player, the guardian
   const rita = await orgLogin(S, 'org-harbour', 'Rita Vale', 'Head of Recruitment');
   assert.equal((await S.j('GET', `/org/rooms/${RID}`, undefined, rita)).status, 404, '[compat] another club: 404');
@@ -676,12 +685,7 @@ await test("[routes] the deletion unit tombstones the person's cases in place (p
     "the room's comment stays",
   );
   assert.ok(q1(dir, 'SELECT 1 AS one FROM case_decision_drafts WHERE case_id = ?', RID), 'the draft stays');
-  const cap = await S.j('GET', '/capabilities');
-  assert.equal(
-    cap.body.dataLayer.domains.recruitmentCases.retainedPlayerReferences.recruitmentCases,
-    1,
-    'the retained person counted',
-  );
+  assert.equal(refsOf(dir).retained.recruitmentCases, 1, 'the retained person counted');
   const again = await S.j('GET', `/org/rooms/${RID}`, undefined, maria);
   assert.equal(again.status, 200, again.text);
   assert.equal(
@@ -717,23 +721,14 @@ await test("[routes] the deletion unit tombstones the person's cases in place (p
   }
   S = await boot(restored);
   assert.ok(live(restored));
-  assert.equal(
-    (await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentCases.retainedPlayerReferences
-      .recruitmentCases,
-    1,
-    'the retained person still counted after the restore',
-  );
+  assert.equal(refsOf(restored).retained.recruitmentCases, 1, 'the retained person still counted after the restore');
   const mariaR = await orgLogin(S);
   const list = await S.j('GET', '/org/cases', undefined, mariaR);
   assert.ok(
     (list.body.cases ?? list.body.items ?? list.body).some((x) => x.id === 'case-gone'),
     'the case of a missing player is served as today',
   );
-  assert.equal(
-    (await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentCases.unresolvedPlayerReferences
-      .recruitmentCases,
-    1,
-  );
+  assert.equal(refsOf(restored).unresolved.recruitmentCases, 1);
   await S.stop();
   rm(dir, restored, bk.body.dir);
 });

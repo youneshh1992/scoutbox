@@ -2046,7 +2046,6 @@ export function createRecruitmentContactsOffersRepository(
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll(): ContactsOffersRecords | null {
       return CONTACTS_OFFERS_RECORDS.read(sqlite);
     },

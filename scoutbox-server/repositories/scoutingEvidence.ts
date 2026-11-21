@@ -1429,7 +1429,6 @@ export function createScoutingEvidenceRepository(
         SCOUTING_EVIDENCE_COLLECTIONS.map((n) => [n, (counters[n].get() as { n: number }).n]),
       ) as Record<ScoutingEvidenceCollection, number>;
     },
-    pending: () => 0,
     exportAll(): ScoutingEvidenceRecords | null {
       return SCOUTING_EVIDENCE_RECORDS.read(sqlite);
     },

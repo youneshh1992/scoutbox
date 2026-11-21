@@ -731,13 +731,6 @@ test('[repository] there is no db.* view (reading or assigning one of the four t
       assert.equal(JSON.stringify(rowsOf(s, t)), JSON.stringify(dump[t]), `the save rewrites no ${t} row`);
   });
   assert.deepEqual(L.repo.counts(), { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 });
-  assert.deepEqual(L.layer.report().domains.signingsFollowUps.rows, {
-    signingPackages: 3,
-    signings: 3,
-    followUps: 4,
-    outcomeReports: 2,
-  });
-  assert.equal(L.layer.report().domains.signingsFollowUps.pendingWrites, 0);
   L.close();
   // a restart reads the same records
   const L2 = serverOpen(d);

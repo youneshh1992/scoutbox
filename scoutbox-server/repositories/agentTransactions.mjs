@@ -1566,7 +1566,6 @@ export function createAgentTransactionsRepository({ sqlite, unit = null, now = D
     counts() {
       return Object.fromEntries(AGENT_TRANSACTIONS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return AGENT_TRANSACTIONS_RECORDS.read(sqlite);
     },

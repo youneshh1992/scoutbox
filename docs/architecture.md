@@ -160,8 +160,7 @@ are listed in [`known-issues.md`](known-issues.md#performance).
    modules. `repositories/signingsFollowUps.ts` is the simplest complete example.
 3. **Read-back for tests.** Export a `*_RECORDS` (`names`, `read`) and add the collections to `TABLE_BACKED` in
    `repositories/index.mjs`; give each new collection a writer in `scripts/dataLayerFixture.mjs`.
-4. **Reporting.** Add a `/capabilities` → `dataLayer.domains` entry (`repositories/index.mjs`).
-5. **Tests.** A `scripts/test<Domain>.mjs` suite listed in `SUITES` (`scripts/runTests.mjs`) and batteries listed in
+4. **Tests.** A `scripts/test<Domain>.mjs` suite listed in `SUITES` (`scripts/runTests.mjs`) and batteries listed in
    `BATTERIES` (`scripts/runE2E.mjs`); both runners refuse to run while a file is unlisted. `scripts/testSchema.mjs`
    checks every table is STRICT, has a primary key, and that keys and indexes name real tables.
 

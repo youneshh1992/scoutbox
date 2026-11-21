@@ -1577,7 +1577,6 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
     counts() {
       return Object.fromEntries(DEVELOPMENT_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return DEVELOPMENT_RECORDS.read(sqlite);
     },

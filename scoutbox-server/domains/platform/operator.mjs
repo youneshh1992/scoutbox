@@ -60,7 +60,7 @@ export function registerCapabilities({
           schema: dataLayer.schemaReport(),
           dataLayer: {
             ...dataLayer.report(),
-            note: "Each domain's tables and row counts. Counts are counts, never subjects.",
+            note: 'The migrations applied and the tables they made. Counts are counts, never subjects.',
           },
           integrity: {
             ...integritySummary(integrity),

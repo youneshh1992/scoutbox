@@ -91,7 +91,7 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 history), `meta` (the first installation's initialisation states, the session lifetime) and `counters` (the id
 counter, written at every mint). The schema version is the latest migration's number, reported on `/healthz`, in
 `/capabilities` → `schema` and on every response as `X-ScoutBox-Schema`. `GET /capabilities` → `dataLayer` lists
-the tables, the applied migrations and each domain's counts.
+the tables and the applied migrations.
 
 **Boot order**: `server.mjs` checks the runtime, then `wiring.mjs` opens the store → `attachDataLayer` (the table migrations, then the repositories; a
 first installation imports `buildSeed()`'s organisations, players and guardians once) → integrity report → module

@@ -1336,7 +1336,6 @@ export function createClubSetupRepository(
         number
       >;
     },
-    pending: () => 0,
     exportAll(): ClubSetupRecords | null {
       return CLUB_SETUP_RECORDS.read(sqlite);
     },

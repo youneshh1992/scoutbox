@@ -564,7 +564,6 @@ export function createDispatchesRepository(
       n(q("SELECT COUNT(*) AS n FROM dispatches WHERE status IN ('queued', 'retrying')").get()),
     count: (): number => n(q('SELECT COUNT(*) AS n FROM dispatches').get()),
     attemptCount: (): number => n(q('SELECT COUNT(*) AS n FROM dispatch_attempts').get()),
-    pending: () => 0,
     attach(): { engine: 'sqlite'; rows: number; attempts: number } {
       if (!dispatchesLive(sqlite)) throw new Error(`the dispatches repository needs ${DISPATCHES_MIGRATION} recorded`);
       const rows = repo.count();

@@ -178,14 +178,12 @@ export function createOneTimeCodesRepository({
     // An exhausted row (attempts at the limit) is as dead as an expired one: the sweep removes both.
     emailSweep: sqlite.prepare('DELETE FROM email_challenges WHERE expires_at <= ? OR attempts >= ?'),
     emailCount: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges'),
-    emailLive: sqlite.prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ? AND attempts < ?'),
     pairByHash: sqlite.prepare(`${PAIRING_SELECT} WHERE code_hash = ?`),
     pairDeleteFor: sqlite.prepare('DELETE FROM pairing_codes WHERE player_id = ?'),
     pairInsert: sqlite.prepare('INSERT INTO pairing_codes (code_hash, player_id, expires_at) VALUES (?, ?, ?)'),
     pairConsume: sqlite.prepare('DELETE FROM pairing_codes WHERE code_hash = ? AND expires_at > ?'),
     pairSweep: sqlite.prepare('DELETE FROM pairing_codes WHERE expires_at <= ?'),
     pairCount: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes'),
-    pairLive: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?'),
   };
   /** The one transactional boundary of every mutation (see the header): joined inside a unit; the caller's own transaction when a tool opened one; a transaction of its own otherwise. */
   const operation = operationOn(sqlite, unit);
@@ -224,11 +222,6 @@ export function createOneTimeCodesRepository({
       }));
     },
     counts: (): CodeCounts => ({ emailChallenges: n(stmt.emailCount.get()), pairingCodes: n(stmt.pairCount.get()) }),
-    /** Rows that are still live at `at`. */
-    outstanding: (at = now()): CodeCounts => ({
-      emailChallenges: n(stmt.emailLive.get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS)),
-      pairingCodes: n(stmt.pairLive.get(at)),
-    }),
 
     // ---------------------------------------------------------- e-mail challenges
     /** Issue (or replace) the organisation's challenge. Returns the plain code ONCE, with the expiry. Durable before it returns. */

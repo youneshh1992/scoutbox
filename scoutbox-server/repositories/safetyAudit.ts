@@ -1129,7 +1129,6 @@ export function createSafetyAuditRepository(
       return { engine: 'sqlite', ...c };
     },
     counts,
-    pending: () => 0,
     unresolvedPlayerReferences: () => unresolvedPlayerReferences(sqlite),
     /** Every collection's records, detached. */
     exportAll: (): AuditRecordSet => JSON.parse(JSON.stringify(readAll(sqlite))),

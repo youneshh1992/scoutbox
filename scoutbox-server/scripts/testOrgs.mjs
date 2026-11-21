@@ -970,8 +970,12 @@ await atest(
         '0039_retire_blob',
         '0040_match_facts',
       ]);
-      assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live');
-      assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
+      const file = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+      try {
+        assert.equal(file.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 5);
+      } finally {
+        file.close();
+      }
       assert.equal(
         cap.body.integrity.ok,
         true,

@@ -11,7 +11,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { readContacts, readOffers } from '../repositories/recruitmentContactsOffers.ts';
+import {
+  readContacts,
+  readOffers,
+  retainedPlayerReferences,
+  unresolvedPlayerReferences,
+} from '../repositories/recruitmentContactsOffers.ts';
 import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;
@@ -145,6 +150,15 @@ const snap = (dir, fn) => {
   }
 };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
+/** The repository's counts of player references that resolve to no player, or to a retained one, read from the file. */
+const refsOf = (dir) => {
+  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try {
+    return { unresolved: unresolvedPlayerReferences(s), retained: retainedPlayerReferences(s) };
+  } finally {
+    s.close();
+  }
+};
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
@@ -569,17 +583,9 @@ await test("[routes] a fresh boot records 0017_recruitment_contacts_offers; the 
     1,
     '[compat] the same clientKey replays without a second response',
   );
-  const cap = await S.j('GET', '/capabilities');
-  const dom = cap.body.dataLayer.domains.recruitmentContactsOffers;
-  assert.ok(dom, '/capabilities carries the recruitmentContactsOffers domain');
-  assert.equal(dom.mode, 'live');
-  assert.equal(dom.rows.recruitmentContacts, 2);
-  assert.equal(dom.rows.recruitmentOffers, 1);
-  assert.deepEqual(dom.unresolvedPlayerReferences, { recruitmentContacts: 0, recruitmentOffers: 0 });
-  assert.match(dom.writeMode, /^explicit/);
-  assert.equal(dom.pendingWrites, 0);
-  assert.match(dom.references, /Q8c-a/);
-  assert.match(dom.references, /Q8c-b/);
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_contacts').n, 2);
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_offers').n, 1);
+  assert.deepEqual(refsOf(dir).unresolved, { recruitmentContacts: 0, recruitmentOffers: 0 });
   // [compat] another club; the journey
   const rita = await orgLogin(S, 'org-harbour', 'Rita Vale', 'Head of Recruitment');
   assert.equal(
@@ -712,9 +718,8 @@ await test("[routes] the deletion unit redacts the person's contacts and offers 
     true,
   );
   // every reference OCCURRENCE of the retained person is counted: the contact's parent and its player recipient; the offer's parent, the issued revision's recipient snapshot, the acceptance's for-player id and its player actor
-  const cap = await S.j('GET', '/capabilities');
   assert.deepEqual(
-    cap.body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences,
+    refsOf(dir).retained,
     { recruitmentContacts: 2, recruitmentOffers: 4 },
     'the retained person counted per occurrence',
   );
@@ -757,18 +762,11 @@ await test("[routes] the deletion unit redacts the person's contacts and offers 
   });
   S = await boot(restored);
   assert.ok(live(restored));
-  assert.ok(
-    (await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences
-      .recruitmentContacts >= 1,
-  );
+  assert.ok(refsOf(restored).retained.recruitmentContacts >= 1);
   const mariaR = await orgLogin(S);
   const l = await S.j('GET', `/org/rooms/${RID}/contacts`, undefined, mariaR);
   assert.ok(JSON.stringify(l.body).includes('rct-gone'), 'the contact of a missing player is served as today');
-  assert.equal(
-    (await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.unresolvedPlayerReferences
-      .recruitmentContacts,
-    1,
-  );
+  assert.equal(refsOf(restored).unresolved.recruitmentContacts, 1);
   await S.stop();
   rm(dir, restored, bk.body.dir);
 });

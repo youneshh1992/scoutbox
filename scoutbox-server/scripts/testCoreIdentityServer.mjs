@@ -120,6 +120,11 @@ const q1 = (dir, sql, ...p) => {
     s.close();
   }
 };
+/** The live players and the guardians in the file. */
+const identityRows = (dir) => ({
+  players: qAll(dir, 'SELECT COUNT(*) AS n FROM players WHERE deleted_at IS NULL')[0].n,
+  guardians: qAll(dir, 'SELECT COUNT(*) AS n FROM guardians')[0].n,
+});
 const qAll = (dir, sql, ...p) => {
   const s = raw(dir);
   try {
@@ -214,10 +219,9 @@ await test('new installation: the seed is initialised once (never again), served
     '0040_match_facts',
   ]);
   assert.equal(cap.dataLayer.identity.initState, 'done');
-  assert.equal(cap.dataLayer.domains.players.mode, 'live');
-  assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
-  assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
-  assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
+  assert.equal(identityRows(S.dir).players, seedCounts.players);
+  assert.equal(identityRows(S.dir).guardians, seedCounts.guardians);
+  assert.equal(cap.capabilities.core_identity_storage.state, 'live');
   const signup = await S.j('POST', '/auth/player/signup', {
     name: 'Row At Once',
     dob: '2001-05-05',
@@ -247,11 +251,7 @@ await test('new installation: the seed is initialised once (never again), served
     'a restart never initialises again',
   );
   cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(
-    cap.dataLayer.domains.players.rows,
-    seedCounts.players + 1,
-    'the seed was not re-imported over the tables',
-  );
+  assert.equal(identityRows(S.dir).players, seedCounts.players + 1, 'the seed was not re-imported over the tables');
   const login = await S.j('POST', '/auth/player/login', { playerId: newId, password: 'longenough-1' });
   assert.equal(login.status, 200, JSON.stringify(login.body));
   const me = (await S.j('GET', '/player/me', undefined, login.body.token)).body;
@@ -271,7 +271,7 @@ await test('previously saved file: a database a fixture wrote (the seed in its t
   assert.doesNotMatch(S.log(), /initialised from the first installation/);
   let cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done');
-  assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
+  assert.equal(identityRows(S.dir).players, seedCounts.players);
   assert.deepEqual(identityCounts(dir), seedCounts);
   assert.equal(blobTable(dir), false);
   const token = await orgLogin(S, 'org-eastport');
@@ -282,7 +282,7 @@ await test('previously saved file: a database a fixture wrote (the seed in its t
   S = await boot(dir, await freePort());
   assert.doesNotMatch(S.log(), /initialised from the first installation/, 'the restart attaches to the tables');
   cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
+  assert.equal(identityRows(S.dir).players, seedCounts.players);
   assert.equal(
     (await S.j('GET', '/org/players/pl-adeyemi', undefined, token)).status,
     200,
@@ -296,8 +296,8 @@ await test('previously saved file: a database a fixture wrote (the seed in its t
   S = await boot(mig, await freePort());
   assert.doesNotMatch(S.log(), /initialised from the first installation/);
   cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.domains.players.rows, 5);
-  assert.equal(cap.dataLayer.domains.guardians.rows, 3);
+  assert.equal(identityRows(S.dir).players, 5);
+  assert.equal(identityRows(S.dir).guardians, 3);
   const t2 = await orgLogin(S, 'org-pro', 'Maria');
   assert.equal((await S.j('GET', '/org/players/pl-seeded', undefined, t2)).body.name, 'Seeded Adult');
   await S.stop();
@@ -312,8 +312,8 @@ await test('intentionally empty: a saved file whose players and guardians are em
     const S = await boot(dir, await freePort());
     const cap = (await S.j('GET', '/capabilities')).body;
     assert.equal(cap.dataLayer.identity.initState, 'done');
-    assert.equal(cap.dataLayer.domains.players.rows, 0);
-    assert.equal(cap.dataLayer.domains.guardians.rows, 0);
+    assert.equal(identityRows(S.dir).players, 0);
+    assert.equal(identityRows(S.dir).guardians, 0);
     const token = await orgLogin(S, 'org-eastport');
     assert.equal(
       (await S.j('GET', '/org/players/pl-adeyemi', undefined, token)).status,
@@ -338,7 +338,7 @@ await test('interrupted first installation: a database where migration 0005 reco
   }
   let S = await boot(dir, await freePort());
   assert.match(S.log(), /initialised from the first installation's records/);
-  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.rows, seedCounts.players);
+  assert.equal(identityRows(S.dir).players, seedCounts.players);
   await S.stop();
   assert.equal(q1(dir, "SELECT value FROM meta WHERE key = 'coreIdentityInit'").value, 'done');
   S = await boot(dir, await freePort());
@@ -367,9 +367,8 @@ await test('stale blobs: a players/guardians blob row put by hand into a saved f
     s.close();
   }
   const S = await boot(dir, await freePort());
-  const cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.domains.players.rows, 5);
-  assert.equal(cap.dataLayer.domains.guardians.rows, 3);
+  assert.equal(identityRows(S.dir).players, 5);
+  assert.equal(identityRows(S.dir).guardians, 3);
   const token = await orgLogin(S, 'org-pro', 'Maria');
   assert.equal(
     (await S.j('GET', '/org/players/pl-stale', undefined, token)).status,
@@ -867,8 +866,8 @@ await test('backup/restore through the real admin routes: a backup taken after c
   );
   const cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done');
-  assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players + 2);
-  assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians + 2);
+  assert.equal(identityRows(S.dir).players, seedCounts.players + 2);
+  assert.equal(identityRows(S.dir).guardians, seedCounts.guardians + 2);
   assert.deepEqual(qAll(restored, 'SELECT guardian_id, role FROM guardian_children WHERE player_id = ?', kidId), [
     { guardian_id: gs2.body.guardianId, role: 'primary' },
   ]);

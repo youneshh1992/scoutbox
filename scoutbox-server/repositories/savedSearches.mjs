@@ -167,7 +167,6 @@ export function createSavedSearchesRepository({ sqlite, unit = null, now = Date.
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll: () => SAVED_SEARCHES_RECORDS.read(sqlite),
     log,
     now,

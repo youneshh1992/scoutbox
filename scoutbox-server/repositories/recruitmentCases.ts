@@ -2949,7 +2949,6 @@ export function createRecruitmentCasesRepository(
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll(): RecruitmentCasesRecords {
       return readEvery(sqlite);
     },

@@ -547,7 +547,6 @@ test('units of work: a write joins the open unit, a read inside it sees the writ
     L.repo.ledger.append(led({ type: 'org_blocked_by_player' }));
   });
   assert.deepEqual([L.repo.blocks.has('pl-adult', 'org-pro'), L.repo.counts().ledger], [true, 1], 'committed together');
-  assert.equal(L.layer.report().domains.safetyAudit.pendingWrites, 0);
   L.close();
   rm(dir);
 });

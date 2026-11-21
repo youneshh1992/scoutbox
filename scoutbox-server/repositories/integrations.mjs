@@ -1385,7 +1385,6 @@ export function createIntegrationsRepository({ sqlite, unit = null, now = Date.n
     counts() {
       return Object.fromEntries(INTEGRATIONS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return INTEGRATIONS_RECORDS.read(sqlite);
     },

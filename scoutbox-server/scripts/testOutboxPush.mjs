@@ -297,9 +297,7 @@ test('in the server: no mirror and no db.outbox, db.pushLog or db.pushTokens (ea
   });
   assert.ok(L.layer.outbox.byId('mail-d'));
   assert.equal(L.layer.pushTokens.count(), 1);
-  const rep = L.layer.report().domains.outboxPush;
-  assert.deepEqual(rep.rows, { outbox: 2, pushLog: 0, pushTokens: 1 });
-  assert.equal(rep.pendingWrites, 0);
+  assert.deepEqual(L.layer.outboxPush.counts(), { outbox: 2, pushLog: 0, pushTokens: 1 });
   L.close();
   rm(dir);
 });

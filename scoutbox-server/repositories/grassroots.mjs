@@ -650,7 +650,6 @@ export function createGrassrootsRepository({ sqlite, unit = null, now = Date.now
     counts() {
       return Object.fromEntries(GRASSROOTS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return GRASSROOTS_RECORDS.read(sqlite);
     },

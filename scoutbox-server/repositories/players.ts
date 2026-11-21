@@ -26,7 +26,6 @@ import {
   deleteChildRows,
   readChildren,
   readChildrenFor,
-  countChildRows,
   itemRows,
   storedItem,
   type SubrecordKey,
@@ -998,7 +997,6 @@ export function createPlayers(
           | undefined
       )?.password_hash ?? null,
     /** Rows per list table (counts only), for reports. */
-    subrecordRows: () => countChildRows(st),
     /** The narrow accessors of the retained records. No route serves one. */
     retained: (id: unknown): RetainedPlayer | null => {
       const r =

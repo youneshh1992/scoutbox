@@ -533,7 +533,6 @@ await atest(
       assert.match(login.body.token, /^[0-9a-f]{48}$/);
       assert.equal((await j('GET', '/player/me', undefined, login.body.token)).status, 200);
       const cap = await j('GET', '/capabilities');
-      assert.equal(cap.body.dataLayer.domains.sessions.mode, 'live');
       assert.ok(cap.body.dataLayer.migrations.includes(SESSIONS_TABLE_MIGRATION));
       assert.ok(!JSON.stringify(cap.body).includes(login.body.token));
     } finally {
@@ -686,8 +685,14 @@ await atest(
       assert.equal(await status('/player/me', seed.sessions[0].token), 200, 'the player token works');
       assert.equal(await status('/org/notifications', seed.sessions[1].token), 200, 'the org token works');
       const cap = await (await fetch(`http://127.0.0.1:${port}/capabilities`)).json();
-      assert.equal(cap.dataLayer.domains.sessions.rows, 2);
-      assert.equal(cap.dataLayer.domains.users.rows, 1);
+      const file = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+      try {
+        assert.equal(file.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 2);
+        assert.equal(file.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
+      } finally {
+        file.close();
+      }
+      assert.ok(!JSON.stringify(cap).includes('dbjson-kola-token'), 'no token in the capability report');
       assert.ok(!log.includes('dbjson-kola-token') && !log.includes('dbjson-maria-token'), 'no token in the boot log');
       // The admin backup is a copy of the database: the sessions in their stored
       // form — hashes, never tokens — so a restore into an empty directory keeps

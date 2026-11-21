@@ -294,7 +294,7 @@ test('[repository] create and the named acts write rows at once and return fresh
   );
   assert.equal(repo.squadInvites.pendingFor(ORG.id, 'pl-adult').id, 'sqi-2');
   // the old names throw, naming the repository
-  assert.deepEqual(o.layer.report().domains.scoutingEvidence.rows, {
+  assert.deepEqual(o.layer.scoutingEvidence.counts(), {
     evidence: 1,
     coachAffiliations: 0,
     squadInvites: 2,

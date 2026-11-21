@@ -1887,7 +1887,6 @@ export function createAgentCoreRepository({
     counts() {
       return Object.fromEntries(AGENT_CORE_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return AGENT_CORE_RECORDS.read(sqlite);
     },

@@ -611,7 +611,6 @@ export function createTransitionsVouchesRepository({ sqlite, unit = null, now = 
     counts() {
       return Object.fromEntries(TRANSITIONS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return TRANSITIONS_RECORDS.read(sqlite);
     },

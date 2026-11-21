@@ -624,8 +624,8 @@ await test("privacy: the plain pairing code reaches the guardian in the mint res
       assert.equal(r.text.includes(secret), false, `a response leaked a code or hash: ${r.text.slice(0, 160)}`);
   }
   assert.ok(
-    responses.some((r) => r.status === 200 && /oneTimeCodes/.test(r.text)),
-    'capabilities reports the code tables (counts only)',
+    responses.some((r) => r.status === 200 && /"email_challenges"/.test(r.text) && /"pairing_codes"/.test(r.text)),
+    'capabilities names the code tables, and no response carries a code',
   );
   await S.stop();
   rm(dir);

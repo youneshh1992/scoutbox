@@ -597,7 +597,6 @@ export function createGroupsRepository({ sqlite, unit = null, now = Date.now, lo
     counts() {
       return Object.fromEntries(GROUPS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return GROUPS_RECORDS.read(sqlite);
     },

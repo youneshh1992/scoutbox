@@ -521,7 +521,6 @@ test('attachDataLayer: the staff are written through their repository; every tab
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', rows: 0 });
   layer.users.create({ orgId: 'o', name: 'A', role: 'Scout' });
   assert.equal(layer.users.count(), 1);
-  assert.equal(layer.report().domains.users.rows, 1);
   // Every core identity table is live and the media-deletion queue exists; there is no shadow to report.
   assert.deepEqual(
     layer.report().tables,

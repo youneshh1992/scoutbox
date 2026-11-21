@@ -398,11 +398,7 @@ test('[fixtures] Q7a: a request naming a missing player is stored and counted, n
     requests: [...fix.requests, contactRequest({ id: 'req-gone-player', playerId: 'pl-gone' })],
   });
   const L = serverOpen(d);
-  assert.equal(
-    L.layer.report().domains.recruitment.unresolvedPlayerReferences.requests,
-    1,
-    'the missing player is counted',
-  );
+  assert.equal(rec.unresolvedPlayerReferences(L.store.sqlite).requests, 1, 'the missing player is counted');
   L.close();
   rm(d);
 });
@@ -1312,15 +1308,11 @@ test("[repository] a player's stored profile figure (players.profile_signal) cou
   rm(d);
 });
 
-test('[capabilities] the live report: the named-acts write mode, no pending writes, the counts and the player counters', () => {
+test("[counts] the fixture's rows are counted, and every player reference resolves", () => {
   const d = file('caps');
   const L = serverOpen(d);
-  const r = L.layer.report().domains.recruitment;
-  assert.equal(r.mode, 'live');
-  assert.match(r.writeMode, /named acts/);
-  assert.equal(r.pendingWrites, 0);
-  assert.deepEqual(plain(r.rows), { requests: 6, trials: 2, trialReports: 1 });
-  assert.deepEqual(plain(r.unresolvedPlayerReferences), { requests: 0, trials: 0 });
+  assert.deepEqual(plain(L.repo.counts()), { requests: 6, trials: 2, trialReports: 1 });
+  assert.deepEqual(plain(rec.unresolvedPlayerReferences(L.store.sqlite)), { requests: 0, trials: 0 });
   L.close();
   rm(d);
 });

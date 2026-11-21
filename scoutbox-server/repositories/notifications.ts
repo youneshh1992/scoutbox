@@ -613,7 +613,6 @@ export function createNotificationsRepository(
     count: (): number => n(q('SELECT COUNT(*) AS n FROM notifications').get()),
     prefsCount: (): number => n(q('SELECT COUNT(*) AS n FROM notification_prefs').get()),
     counts: () => ({ notifications: repo.count(), notificationPrefs: repo.prefsCount() }),
-    pending: () => 0,
     attach(): { engine: 'sqlite'; rows: { notifications: number; notificationPrefs: number } } {
       if (!notificationsLive(sqlite))
         throw new Error(`the notifications repository needs ${NOTIFICATIONS_MIGRATION} recorded`);

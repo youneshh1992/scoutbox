@@ -6,7 +6,7 @@
 //   C mark-read: one person's feed only
 //   D acknowledgment: an action notice is acknowledged once; another person's notice is not found
 //   E preferences: non-boolean values, unknown categories and turning off the mandatory category are refused, nothing
-//     stored; a muted category creates no notice
+//     stored; a muted category creates no notice, and /capabilities counts it
 //   F a unit that fails at its real COMMIT leaves no message, no notification and no push; the retry delivers once
 //   G the delivery centre makes a notice's dispatches exactly once, however often it sweeps
 //   H a notice whose text would be too long is shortened, never refused
@@ -251,11 +251,24 @@ ok(
     prefs.categories.find((c) => c.id === 'security_account').enabled === true,
   'stored; the mandatory category stays on',
 );
+const counters = async () => (await j('GET', '/capabilities')).body.notifications;
+const suppressedBefore = (await counters()).suppressedByPreference;
 const before = msgRows().length;
 ok((await say('A message while muted.')).status === 201, 'the club writes while messages are muted');
 kFeed = await feed('player', kola);
 neg(msgRows().length === before && msgRows()[0].repeatCount === 1, 'no notice was created or counted');
+ok(
+  (await counters()).suppressedByPreference === suppressedBefore + 1,
+  'SP1 /capabilities counts the muted notice once',
+);
 ok((await put({ categories: { messages: true } })).status === 200, 'messages back on');
+ok((await say('A message once unmuted.')).status === 201, 'the club writes again');
+const after = await counters();
+neg(after.suppressedByPreference === suppressedBefore + 1, 'SP2 a notice that is delivered is not counted');
+neg(
+  Array.isArray(after.unknownTypes) && after.unknownTypes.length === 0,
+  'SP3 no notice went out with a type that has no category',
+);
 
 section('F — a failed unit leaves no notice and sends no push');
 await j('POST', '/player/notifications/read', {}, kola);

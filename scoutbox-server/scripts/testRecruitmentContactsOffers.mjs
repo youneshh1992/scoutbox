@@ -767,15 +767,11 @@ test('[wiring] the contact routes refuse to register without the cross-app integ
   );
 });
 
-test('[capabilities] the live report: explicit write mode, no pending writes, the typed tables and the player counters', () => {
+test('[counts] the typed tables are counted, and the player references that resolve to no player', () => {
   const d = file('caps', { recruitmentContacts: [draftContact(), cancelledContact()] });
   const L = serverOpen(d);
-  const r = L.layer.report().domains.recruitmentContactsOffers;
-  assert.equal(r.pendingWrites, 0);
-  assert.match(r.writeMode, /^explicit/);
-  assert.deepEqual(r.rows, { recruitmentContacts: 2, recruitmentOffers: 4 });
-  assert.deepEqual(r.unresolvedPlayerReferences, { recruitmentContacts: 1, recruitmentOffers: 2 });
-  assert.equal(Object.hasOwn(r, 'unresolvedPointerReferences'), false);
+  assert.deepEqual(L.repo.counts(), { recruitmentContacts: 2, recruitmentOffers: 4 });
+  assert.deepEqual(mod.unresolvedPlayerReferences(L.store.sqlite), { recruitmentContacts: 1, recruitmentOffers: 2 });
   L.close();
   rm(d);
 });

@@ -1749,7 +1749,6 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
     counts() {
       return Object.fromEntries(DISCOVERY_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return DISCOVERY_RECORDS.read(sqlite);
     },

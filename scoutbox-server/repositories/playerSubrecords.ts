@@ -858,13 +858,12 @@ type ListStatements = {
   insert: StatementSync;
   deleteAll: StatementSync;
   selectPlayer: StatementSync;
-  count: StatementSync;
   /** By the item's id, or by its position for a list without ids; a list of plain values has none. */
   update?: StatementSync;
 };
 /** The prepared statements of every list table, and of the clips' tags. */
 export type SubrecordStatements = Record<SubrecordKey, ListStatements> & {
-  tags: { insert: StatementSync; deleteMedia: StatementSync; selectPlayer: StatementSync; count: StatementSync };
+  tags: { insert: StatementSync; deleteMedia: StatementSync; selectPlayer: StatementSync };
 };
 
 /** Prepared statements for every table (built once per connection by the callers below). */
@@ -878,7 +877,6 @@ export function prepareSubrecordStatements(sqlite: DatabaseSync): SubrecordState
       selectPlayer: sqlite.prepare(
         `SELECT ${columnsOf(key).join(', ')} FROM ${def.table} WHERE player_id = ? ORDER BY position`,
       ),
-      count: sqlite.prepare(`SELECT COUNT(*) AS n FROM ${def.table}`),
     };
     if (!def.primitive && def.idKey)
       s.update = sqlite.prepare(
@@ -905,7 +903,6 @@ export function prepareSubrecordStatements(sqlite: DatabaseSync): SubrecordState
       selectPlayer: sqlite.prepare(
         'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position',
       ),
-      count: sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags'),
     },
   });
 }
@@ -993,12 +990,5 @@ export function readChildrenFor(sqlite: DatabaseSync, ids: readonly string[]): M
       for (const row of rows.all(id))
         placeChild(out.get(id) as PlayerLists, key, itemFromRows(key, row, tags.get(row.id)));
   }
-  return out;
-}
-/** Rows per table, for reports (counts only). */
-export function countChildRows(st: SubrecordStatements): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const key of SUBRECORD_KEYS) out[SUBRECORD_SPECS[key].table] = (st[key].count.get() as { n: number }).n;
-  out.player_media_tags = (st.tags.count.get() as { n: number }).n;
   return out;
 }

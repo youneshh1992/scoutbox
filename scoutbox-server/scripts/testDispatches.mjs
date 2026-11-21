@@ -364,7 +364,6 @@ test("in the server: no mirror and no db.dispatches (the name throws, naming the
     /FOREIGN KEY constraint failed/,
   );
   assert.equal(L.repo.byId('u-3'), null, 'nothing of the refused unit is stored');
-  assert.equal(L.layer.report().domains.dispatches.pendingWrites, 0);
   L.close();
   rm(dir);
 });

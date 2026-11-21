@@ -2247,7 +2247,6 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
     counts() {
       return Object.fromEntries(COMPLIANCE_RECORDS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return COMPLIANCE_RECORDS_RECORDS.read(sqlite);
     },

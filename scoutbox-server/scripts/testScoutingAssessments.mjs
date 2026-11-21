@@ -391,7 +391,7 @@ test("[repository] create and the named acts write rows at once and return fresh
     'a new version changes no historical report',
   );
   // the old names throw, naming the repository
-  assert.deepEqual(o.layer.report().domains.scoutingAssessments.rows, {
+  assert.deepEqual(o.layer.scoutingAssessments.counts(), {
     assessmentTemplates: 5,
     assessments: 2,
     videoSegments: 2,

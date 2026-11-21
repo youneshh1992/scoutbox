@@ -848,7 +848,6 @@ export function createPassportRepository(
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll(): PassportRecords | null {
       return PASSPORT_RECORDS.read(sqlite);
     },

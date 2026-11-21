@@ -201,7 +201,6 @@ export function createUploadSessionsRepository({ sqlite, unit = null, now = Date
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll: () => UPLOAD_SESSIONS_RECORDS.read(sqlite),
     log,
     now,

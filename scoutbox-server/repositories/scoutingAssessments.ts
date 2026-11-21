@@ -1700,7 +1700,6 @@ export function createScoutingAssessmentsRepository(
         SCOUTING_ASSESSMENTS_COLLECTIONS.map((n) => [n, (counters[n].get() as { n: number }).n]),
       ) as Record<ScoutingAssessmentsCollection, number>;
     },
-    pending: () => 0,
     exportAll(): ScoutingAssessmentsRecords | null {
       return SCOUTING_ASSESSMENTS_RECORDS.read(sqlite);
     },

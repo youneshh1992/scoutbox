@@ -674,7 +674,6 @@ export function createEnterpriseRepository({ sqlite, unit = null, now = Date.now
     counts() {
       return Object.fromEntries(ENTERPRISE_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return ENTERPRISE_RECORDS.read(sqlite);
     },

@@ -652,7 +652,6 @@ test('units of work: the threads join the open unit; a failure anywhere in it (a
   const dir = tempDir('ch-unit');
   fixtureFile(dir, { channels: [channel({ messages: [message({ id: 'm-0' })] })] });
   const L = live(dir);
-  assert.equal(L.repo.pending(), 0);
   const before = fileDump(dir);
   const unchanged = (label) => {
     assert.deepEqual(fileDump(dir), before, label);

@@ -766,8 +766,11 @@ await test("[cutover] the cutover and the save points: a fresh boot records 0013
     assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(hasBlobTable(dir), false, 'no blob table');
   const cap = (await S.j('GET', '/capabilities')).body;
-  const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {};
-  assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);
+  assert.deepEqual(
+    Object.keys(cap.dataLayer),
+    ['engine', 'migrationsApplied', 'migrationsKnown', 'migrations', 'tables', 'identity', 'mediaDeletions', 'note'],
+    "the data layer reports the migrations and tables, and no domain's own account of itself",
+  );
   // A block and its ledger row: one unit, committed before the response (read in one read transaction).
   const { pid, token: adult } = await signupAdult(S, 'Cutover Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-harbour', reason: 'synthetic' }, adult)).status, 201); // not org-eastport: its user writes the note below, and a blocked organisation reads the player as absent

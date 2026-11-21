@@ -1067,7 +1067,6 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
     counts() {
       return Object.fromEntries(COMPLIANCE_POLICIES_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return COMPLIANCE_POLICIES_RECORDS.read(sqlite);
     },

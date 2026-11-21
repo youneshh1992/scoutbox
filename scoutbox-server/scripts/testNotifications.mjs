@@ -821,12 +821,8 @@ test('boot: no mirror — db.notifications and db.notificationPrefs throw, namin
   fixtureFile(dir, { notifications: [ntf({ id: 'ntf-old' })] });
   const L = live(dir);
   assert.equal(L.repo.byId('ntf-old').id, 'ntf-old');
-  const report = JSON.stringify(L.layer.report());
-  assert.match(
-    report,
-    /"notifications":\{"mode":"live","rows":\{"notifications":1,"notificationPrefs":0\},"pendingWrites":0/,
-  );
-  assert.doesNotMatch(report, /sent a message/);
+  assert.deepEqual(L.layer.notifications.counts(), { notifications: 1, notificationPrefs: 0 });
+  assert.doesNotMatch(JSON.stringify(L.layer.report()), /sent a message/);
   L.close();
   const bad = tempDir('ntf-boot-bad');
   fixtureFile(bad);

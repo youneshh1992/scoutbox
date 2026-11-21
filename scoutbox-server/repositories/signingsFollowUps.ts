@@ -2656,7 +2656,6 @@ export function createSigningsFollowUpsRepository(
         SIGNINGS_FOLLOWUPS_TABLES_OF.map(([n]) => [n, (counters[n].get() as { n: number }).n]),
       ) as Record<SigningsCollection, number>;
     },
-    pending: () => 0,
     exportAll(): SigningsFollowUpsRecords | null {
       return SIGNINGS_FOLLOWUPS_RECORDS.read(sqlite);
     },

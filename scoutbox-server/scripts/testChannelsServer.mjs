@@ -814,9 +814,6 @@ await test("[cutover] the cutover and the save points: a fresh boot records 0012
   for (const t of ['channels', 'messages', 'message_attachments'])
     assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(hasBlobTable(dir), false, 'no blob table');
-  const cap = (await S.j('GET', '/capabilities')).body;
-  const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {};
-  assert.ok(domains.channels, `the data layer reports the channels domain (${Object.keys(domains).join(', ')})`);
   const maria = await orgLogin(S);
   let kola = await playerLogin(S, 'pl-adeyemi');
   const req = await S.j(

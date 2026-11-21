@@ -117,7 +117,6 @@ export function createReputationSeedRepository({ sqlite, unit = null, now = Date
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll: () => REPUTATION_SEED_RECORDS.read(sqlite),
     log,
     now,

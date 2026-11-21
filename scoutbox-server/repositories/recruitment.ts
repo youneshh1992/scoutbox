@@ -2443,7 +2443,6 @@ export function createRecruitmentRepository(
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll(): RecruitmentRecords | null {
       return RECRUITMENT_RECORDS.read(sqlite);
     },

@@ -2611,7 +2611,6 @@ export function createOpportunitiesCampaignsRepository(
         OPPORTUNITIES_CAMPAIGNS_TABLES.map((t) => [t, (counters[t].get() as { n: number }).n]),
       ) as Record<OpportunitiesCampaignsTable, number>;
     },
-    pending: () => 0,
     exportAll(): OpportunitiesCampaignsRecords | null {
       return OPPORTUNITIES_CAMPAIGNS_RECORDS.read(sqlite);
     },

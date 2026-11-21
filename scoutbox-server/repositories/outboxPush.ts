@@ -503,7 +503,6 @@ export function createOutboxPushRepository(
       count: () => count('push_tokens'),
     },
     counts: (): Counts => ({ outbox: count('outbox'), pushLog: count('push_log'), pushTokens: count('push_tokens') }),
-    pending: () => 0,
     attach(): { engine: 'sqlite' } & Counts {
       if (!outboxPushLive(sqlite))
         throw new Error(`the outbox/push repository needs ${OUTBOX_PUSH_MIGRATION} recorded`);

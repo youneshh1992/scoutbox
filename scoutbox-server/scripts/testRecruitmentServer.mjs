@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { readTrials } from '../repositories/recruitment.ts';
+import { readTrials, unresolvedPlayerReferences } from '../repositories/recruitment.ts';
 import { openLayer, readRecords } from './dataLayerFixture.mjs';
 
 let passed = 0;
@@ -155,6 +155,15 @@ const snap = (dir, fn) => {
   }
 };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
+/** The repository's count of player references that resolve to no player, read from the file. */
+const unresolvedOf = (dir) => {
+  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
+  try {
+    return unresolvedPlayerReferences(s);
+  } finally {
+    s.close();
+  }
+};
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
@@ -313,11 +322,8 @@ await test("[routes] a fresh boot records 0015_recruitment (followed by 0016) an
     1,
     'the derived trialReports on the profile',
   );
-  const cap = await S.j('GET', '/capabilities');
-  const dom = cap.body.dataLayer.domains.recruitment;
-  assert.equal(dom.mode, 'live');
-  assert.equal(dom.rows.requests, 1);
-  assert.equal(dom.rows.trials, 1);
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests').n, 1);
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM trials').n, 1);
   // SIGKILL right after an acceptance: the rows were committed by the route's own unit
   const b = await signupAdult(S, 'Killed Adult');
   const second = await inviteAndAccept(S, maria, b.pid, b.token, { proposedDate: '2026-11-05' });
@@ -408,8 +414,7 @@ await test('[routes] two stored open-day invitations for one player (the shape t
     (await S.j('GET', '/org/requests', undefined, mariaR)).body.items.some((r) => r.id === 'req-gone'),
     'the request of a missing player is served as today',
   );
-  const cap = await S.j('GET', '/capabilities');
-  assert.equal(cap.body.dataLayer.domains.recruitment.unresolvedPlayerReferences.requests, 1);
+  assert.equal(unresolvedOf(restored).requests, 1);
   assert.equal(
     q1(restored, "SELECT count(*) AS n FROM recruitment_requests WHERE status = 'pending' AND player_id = ?", pid).n,
     2,

@@ -844,7 +844,6 @@ export function createChannelsRepository(
     },
     count,
     counts,
-    pending: () => 0,
     attach(): { engine: 'sqlite' } & Counts {
       if (!channelsLive(sqlite)) throw new Error(`the channels repository needs ${CHANNELS_MIGRATION} recorded`);
       const c = counts();

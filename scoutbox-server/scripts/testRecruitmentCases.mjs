@@ -1030,7 +1030,6 @@ test("[repository] a unit of work: case, comment and decision writes commit toge
   assert.equal(red.room.status, 'trial_requested');
   assert.ok(red.history.length >= 6);
   assert.equal(R.counts().recruitmentCases, 4);
-  assert.equal(R.pending(), 0);
   L.close();
   rm(d);
 });

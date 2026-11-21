@@ -131,7 +131,6 @@ export function createInvoicesRepository({ sqlite, unit = null, now = Date.now, 
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll: () => INVOICES_RECORDS.read(sqlite),
     log,
     now,

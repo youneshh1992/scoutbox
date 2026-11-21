@@ -37,6 +37,14 @@ import {
 } from './coreIdentityTestFixtures.mjs';
 import { writeFixture } from './dataLayerFixture.mjs';
 
+/** The codes still live at `at`: an unexpired challenge with attempts left, an unexpired pairing code. */
+const outstanding = (sqlite, at) => ({
+  emailChallenges: sqlite
+    .prepare('SELECT COUNT(*) AS n FROM email_challenges WHERE expires_at > ? AND attempts < ?')
+    .get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).n,
+  pairingCodes: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?').get(at).n,
+});
+
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) {
@@ -201,7 +209,7 @@ test('repository: an issue returns the plain code once and stores its hash; a re
   t = NOW + PAIRING_CODE_TTL_MS;
   assert.equal(codes.peekPairingCode(p2.code), null, 'expired at exactly expires_at');
   assert.equal(codes.consumePairingCode(p2.code), null);
-  assert.deepEqual(codes.outstanding(), { emailChallenges: 1, pairingCodes: 0 });
+  assert.deepEqual(outstanding(s, t), { emailChallenges: 1, pairingCodes: 0 });
   t = NOW + EMAIL_CHALLENGE_TTL_MS;
   assert.deepEqual(codes.checkEmailChallenge('org-pro', 'BBBBBB'), { status: 'none' });
   assert.equal(codes.consumeEmailChallenge('org-pro', 'BBBBBB'), null);
@@ -666,9 +674,8 @@ test('boot: a stale code array handed in with the seed is never imported — the
     'the expired code was swept at attach',
   );
   assert.equal(layer.codes.peekPairingCode('STALE2'), null, 'the stale array was not imported');
-  const report = JSON.stringify(layer.report());
-  assert.match(report, /"oneTimeCodes":\{"mode":"live","rows":\{"emailChallenges":0,"pairingCodes":1\}/);
-  assert.doesNotMatch(report, /[0-9a-f]{64}|PAIR22/);
+  assert.deepEqual(layer.codes.counts(), { emailChallenges: 0, pairingCodes: 1 });
+  assert.doesNotMatch(JSON.stringify(layer.report()), /[0-9a-f]{64}|PAIR22/);
   store.sqlite.close();
   rm(dir);
 });
@@ -724,7 +731,7 @@ test('runtime: an exhausted row that somehow exists (planted directly) is never 
   );
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM email_challenges').get().n, 1, 'consumption deleted nothing');
   assert.deepEqual(codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
-  assert.deepEqual(codes.outstanding(), { emailChallenges: 0, pairingCodes: 0 });
+  assert.deepEqual(outstanding(s, NOW), { emailChallenges: 0, pairingCodes: 0 });
   s.close();
   const s2 = openRaw(dir);
   const codes2 = createOneTimeCodesRepository({ sqlite: s2, now: () => NOW });

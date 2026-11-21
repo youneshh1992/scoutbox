@@ -1854,7 +1854,6 @@ export function createVerificationRepository(
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll(): VerificationRecords | null {
       return VERIFICATION_RECORDS.read(sqlite);
     },

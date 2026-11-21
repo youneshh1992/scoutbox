@@ -117,7 +117,6 @@ export function createDeliveryBookkeepingRepository({ sqlite, unit = null, now =
       return { counts: counts() };
     },
     counts,
-    pending: () => 0,
     exportAll: () => DELIVERY_BOOKKEEPING_RECORDS.read(sqlite),
     log,
     now,

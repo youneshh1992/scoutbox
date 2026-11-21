@@ -1370,7 +1370,6 @@ export function createInsightCoverageRepository({ sqlite, unit = null, now = Dat
     counts() {
       return Object.fromEntries(INSIGHT_COVERAGE_COLLECTIONS.map((n) => [n, counters[n].get().n]));
     },
-    pending: () => 0,
     exportAll() {
       return INSIGHT_COVERAGE_RECORDS.read(sqlite);
     },

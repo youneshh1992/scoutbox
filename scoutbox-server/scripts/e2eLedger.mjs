@@ -35,6 +35,14 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'platform/notifications': {
+    added: [
+      {
+        checks: 4,
+        why: 'Parity beyond the batteries, slice 9: /capabilities counts a notice a preference muted, not one that is delivered, and lists no type without a category (SP1–SP3, with the second message they need)',
+      },
+    ],
+  },
   'verification/organisationsAndStaff': {
     added: [
       {
