@@ -64,6 +64,10 @@ export const NOTES = {
         checks: 4,
         why: "Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4)",
       },
+      {
+        checks: 24,
+        why: 'Parity beyond the batteries, slice 5: a profile\'s similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score',
+      },
     ],
   },
   'recruitment/contacts': {

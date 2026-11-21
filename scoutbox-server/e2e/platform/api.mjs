@@ -16,6 +16,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveStream } from '../support/liveEvents.mjs';
+import catalogue from '../support/spec/catalogue.json' with { type: 'json' };
 
 const { API, DATA_DIR } = await serverUnderTest();
 
@@ -452,6 +453,16 @@ const HARBOUR = (
 ).body.token;
 r = await j(`/org/searches/${savedYoung.id}`, { method: 'DELETE' }, bearer(HARBOUR));
 ok(r.status === 404, 'another club cannot delete it');
+// Similar players for an unverified club come only from the adults it may see (SP1–SP5 are in section 12).
+{
+  const harbourList = (await j('/org/players/pl-adeyemi/morelike', {}, bearer(HARBOUR))).body.players;
+  ok(
+    harbourList.length === 10 && !harbourList.some((p) => p.guardianManaged),
+    'SP6 an unverified club is never offered a minor',
+  );
+  r = await j('/org/players/pl-guni/morelike', {}, bearer(HARBOUR));
+  ok(r.status === 404 && r.body.error === 'PLAYER_NOT_FOUND', 'SP7 nor shown one to compare against');
+}
 
 // ---- 6. mandatory report with feedback, then minor trial via guardian slot choice
 mark();
@@ -778,6 +789,51 @@ ok(
   !gsearch.body.items.some((p) => p.guardianManaged),
   'unverified grassroots club sees no minors — same rule as everywhere',
 );
+
+// Similar players: a lead, never a verdict, drawn only from the players the club may see.
+{
+  const sorted = (xs, key) => xs.every((x, i) => i === 0 || xs[i - 1][key] >= x[key]);
+  const score = (n) => Number.isInteger(n) && n >= 0 && n <= 100;
+  const keys = (o) => Object.keys(o).join(',');
+  const profile = (await j('/org/players/pl-adeyemi', {}, bearer(EASTPORT))).body.similarPlayers;
+  ok(
+    profile.players.length === 3 &&
+      profile.players.every((s) => keys(s) === 'playerId,name,position,score' && score(s.score)) &&
+      sorted(profile.players, 'score') &&
+      !profile.players.some((s) => s.playerId === 'pl-adeyemi'),
+    'SP1 a profile names the three most similar players, best first, never the player themself',
+  );
+  const byId = new Map(catalogue.ARCHETYPES.map((a) => [a.id, a]));
+  ok(
+    profile.archetypes.length === 2 &&
+      profile.archetypes.every(
+        (a) => keys(a) === 'archetypeId,label,score' && byId.get(a.archetypeId)?.label === a.label && score(a.score),
+      ) &&
+      sorted(profile.archetypes, 'score'),
+    'SP2 and the two closest catalogue archetypes, best first',
+  );
+  const more = (await j('/org/players/pl-adeyemi/morelike', {}, bearer(EASTPORT))).body;
+  ok(
+    JSON.stringify(more.base) === JSON.stringify({ id: 'pl-adeyemi', name: 'Kola Adeyemi', position: 'ST' }) &&
+      more.players.length === 10 &&
+      sorted(more.players, 'similarity') &&
+      more.players.every((p) => score(p.similarity) && p.id !== 'pl-adeyemi'),
+    'SP3 "more like this" ranks ten players, best first, each with its similarity',
+  );
+  ok(
+    JSON.stringify(more.players.slice(0, 3).map((p) => [p.id, p.name, p.position, p.similarity])) ===
+      JSON.stringify(profile.players.map((s) => [s.playerId, s.name, s.position, s.score])),
+    "SP4 its first three are the profile's three, with the same scores",
+  );
+  const listed = (await j('/org/players/pl-guni/morelike', {}, bearer(HACKNEY))).body.players;
+  const openable = await Promise.all(
+    listed.map(async (p) => (await j(`/org/players/${p.id}`, {}, bearer(HACKNEY))).status),
+  );
+  ok(
+    listed.length > 0 && openable.every((st) => st === 200) && listed.every((p) => p.distanceKm <= 50),
+    'SP5 a Grassroots club is offered only players it may open, within its radius',
+  );
+}
 
 // Grassroots signing sets the player semi-pro (still on the platform).
 await j(
