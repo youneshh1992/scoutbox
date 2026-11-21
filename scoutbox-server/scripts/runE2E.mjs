@@ -26,6 +26,7 @@ export const BATTERIES = [
   'platform/connectedMode',
   'platform/uploads',
   'operations/clubOperations',
+  'operations/sweeps',
   'recruitment/offers',
   'recruitment/signings',
   'recruitment/decisions',

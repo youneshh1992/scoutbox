@@ -194,6 +194,14 @@ export const NOTES = {
       },
     ],
   },
+  'operations/sweeps': {
+    added: [
+      {
+        checks: 20,
+        why: "A new battery, parity beyond the batteries, slice 8: the sweeps' reminders over state moved into the past offline: the week-old application reminder, the overdue trial-feedback escalation, the completed-trial assessment reminder and the review-later reminder, each sent once over every sweep, and exposure beyond the 90-day window deleted",
+      },
+    ],
+  },
   'platform/liveDelivery': {
     added: [
       {
