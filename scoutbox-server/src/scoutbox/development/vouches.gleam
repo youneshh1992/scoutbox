@@ -396,6 +396,33 @@ pub fn withdraw(ctx: Ctx, req: Request, vouch_id: id.VouchId) -> Response {
   }
 }
 
+/// `POST /admin/vouches/:id/revoke`: the reference is revoked and its code can never be spent. Unlike a withdrawal it
+/// may be repeated, as in TypeScript.
+pub fn revoke(ctx: Ctx, req: Request, vouch_id: id.VouchId) -> Response {
+  case store.read(ctx.store, by_id(_, vouch_id)) {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "VOUCH_NOT_FOUND")
+    Ok(Some(v)) -> {
+      use _ <- http.body(req, input.nothing(), [])
+      let saved =
+        store.unit(ctx.store, fn(tx) {
+          use _ <- result.map(
+            store.run(
+              tx,
+              "UPDATE vouches SET status = 'revoked', code_hash = NULL WHERE id = ?",
+              [id.vouch_sql(v.id)],
+            ),
+          )
+          live_pings.player(tx, v.player_id)
+        })
+      case saved {
+        Ok(Nil) -> http.json(200, json.object([#("revoked", json.bool(True))]))
+        Error(failure) -> coaches.failed(failure)
+      }
+    }
+  }
+}
+
 /// `GET /admin/vouches`: every reference, newest first. Trust & Safety sees the coach's e-mail, never the code.
 pub fn admin_list(ctx: Ctx, req: Request) -> Response {
   use page <- pages.strict(req, [paging.IntKind])

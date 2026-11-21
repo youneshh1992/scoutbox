@@ -2436,6 +2436,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["vouches"] -> only(req, Get, fn() { vouches.admin_list(ctx, req) })
         ["vouches", vid, "withdraw"] ->
           only(req, Post, fn() { vouches.withdraw(ctx, req, id.vouch(vid)) })
+        ["vouches", vid, "revoke"] ->
+          only(req, Post, fn() { vouches.revoke(ctx, req, id.vouch(vid)) })
         ["drill-guidance"] ->
           only(req, Get, fn() { drill_guidance.admin_list(ctx) })
         ["sweep"] -> only(req, Post, fn() { follow_ups.admin_sweep(ctx, req) })
@@ -2675,6 +2677,8 @@ fn verification_org(
         Post -> org_admin.add_domain(ctx, req, org)
         _ -> not_found()
       }
+    ["domains", domain, "remove"] ->
+      only(req, Post, fn() { org_admin.remove_domain(ctx, req, org, domain) })
     ["domains", request_id, "confirm"] ->
       only(req, Post, fn() {
         org_admin.confirm_domain(ctx, req, org, id.domain_request(request_id))

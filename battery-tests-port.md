@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6, 5 after slice 7), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -500,6 +500,16 @@ are for surprising facts or points that later work depends on, not implementatio
       `ledger_protocols` and read back by `view`. That covers Box Cam preferences, the Combine, a verification
       decision and a root approval. Also the operations events' detail in `/admin/metrics`, removing a
       verification domain, and the admin's vouch revoke.
+      [**done**: `development/boxCam` LD0–LD8, `development/combine` LD1–LD2, `passport/passport` LD1–LD3,
+      `operations/clubOperations` LD1 and OD1–OD2, `verification/organisationsAndStaff` LD1–LD2 and DR0–DR4, and
+      `scouting/clubWorkflows` RK0–RK6; all pass on both servers, and the stored ledger rows and verification events
+      match TypeScript's.] An entry is a `ledger.Event`: each of the 17 types whose rows carry a detail has its own
+      constructor, and `Plain(t)` of one of them panics naming the constructor to use (`ledger.plain_problem`). The
+      keys each type reads back, ledger and ops alike, equal the new `spec/repositories/safetyAudit.json` snapshot.
+      A reader returns `ledger.Logged`, the row with its `ledger_protocols`. `open_trial_posted` declares a `trialId`
+      that TypeScript never writes, so neither does this. Adding a subdomain by mailbox challenge answered 500 on
+      the TypeScript server (the request and its code committed in two transactions); it is fixed there. A revoke
+      may be repeated, as in TypeScript; a withdrawal may not.
    8. The rest of the sweep: the insight sweep (review-later reminders, pruning exposure older than 90 days), the
       week-old application reminders, the trial-feedback escalation and the completed-trial assessment reminder.
       Their columns (`reminded_at`, `feedback_escalated_at`) exist; nothing writes them.

@@ -428,6 +428,55 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   }
 }
 
+/// `POST /org/verification/domains/:id/remove`: the path names the domain, as sent or normalised. A subdomain of
+/// another of the organisation's domains needs a verification admin; a root domain a root admin with MFA.
+pub fn remove_domain(
+  ctx: Ctx,
+  req: Request,
+  access: OrgAccess,
+  named: String,
+) -> Response {
+  let now = clock.now_ms()
+  let actor = core.staff_actor(access, req)
+  let normalised = claims.normalize_domain(named)
+  use tx <- act(ctx)
+  let read = store.reading(tx)
+  use mine <- result.try(records.domains_of(read, access.org.id))
+  case list.find(mine, fn(d) { d.domain == normalised || d.domain == named }) {
+    Error(Nil) -> stop(http.error(404, "DOMAIN_NOT_FOUND"))
+    Ok(d) -> {
+      let root =
+        !list.any(mine, fn(o) {
+          o.domain != d.domain && string.ends_with(d.domain, "." <> o.domain)
+        })
+      let level = case root {
+        True -> ver_level.VerificationRootAdmin
+        False -> ver_level.VerificationAdmin
+      }
+      use <- guard(read, access, level, root)
+      use _ <- result.try(
+        store.run(
+          tx,
+          "DELETE FROM org_verified_domains WHERE org_id = ? AND domain = ?",
+          [id.org_sql(access.org.id), sqlight.text(d.domain)],
+        ),
+      )
+      use _ <- result.try(core.event(
+        tx,
+        event_row.OrganisationDomainRemoved,
+        actor,
+        core.About(
+          ..core.nothing,
+          org_id: Some(access.org.id),
+          detail: records.detail([#("domain", Some(d.domain))], []),
+        ),
+        now,
+      ))
+      reply(http.json(200, json.object([#("removed", json.string(d.domain))])))
+    }
+  }
+}
+
 /// `POST /org/verification/domains/:id/confirm`: the code from the domain's mailbox.
 pub fn confirm_domain(
   ctx: Ctx,
