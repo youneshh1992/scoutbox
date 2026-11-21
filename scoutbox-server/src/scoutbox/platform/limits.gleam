@@ -61,6 +61,10 @@ pub const policy = [
   #("signing_party_completion", signing_party_completion_policy),
   #("signing_closure", signing_closure_policy),
   #("signing_safety_closure", signing_safety_closure_policy),
+  #("contact_draft", contact_draft_policy),
+  #("contact_send", contact_send_policy),
+  #("contact_external_record", contact_external_record_policy),
+  #("contact_response", contact_response_policy),
   #("trial_invite", trial_invite_policy),
   #("trial_schedule", trial_schedule_policy),
   #("trial_response", trial_response_policy),
@@ -146,6 +150,9 @@ pub type Action {
   ContactSend
   /// External contacts recorded, per organisation.
   ContactExternalRecord
+  /// Answers to a Room's Contact, per responder (the player or the guardian), so a club cannot spend a
+  /// recipient's budget.
+  ContactResponse
   /// Production CV finalizations, per player: only bounds a retry loop.
   BoxCvFinalize
   /// Production CV provider sessions begun, per player.
@@ -264,6 +271,8 @@ const contact_send_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const contact_external_record_policy = Policy(max: 60, window_ms: 3_600_000)
 
+const contact_response_policy = Policy(max: 30, window_ms: 3_600_000)
+
 const box_cv_finalize_policy = Policy(max: 80, window_ms: 3_600_000)
 
 const box_cv_session_create_policy = Policy(max: 40, window_ms: 3_600_000)
@@ -364,6 +373,7 @@ pub fn action_name(action: Action) -> String {
     ContactDraft -> "contact_draft"
     ContactSend -> "contact_send"
     ContactExternalRecord -> "contact_external_record"
+    ContactResponse -> "contact_response"
     BoxCvFinalize -> "box_cv_finalize"
     BoxCvSessionCreate -> "box_cv_session_create"
     BoxCvFrames -> "box_cv_frames"
@@ -428,6 +438,7 @@ fn action_policy(action: Action) -> Policy {
     ContactDraft -> contact_draft_policy
     ContactSend -> contact_send_policy
     ContactExternalRecord -> contact_external_record_policy
+    ContactResponse -> contact_response_policy
     BoxCvFinalize -> box_cv_finalize_policy
     BoxCvSessionCreate -> box_cv_session_create_policy
     BoxCvFrames -> box_cv_frames_policy

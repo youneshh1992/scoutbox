@@ -338,13 +338,18 @@ fn message_by_id(
   }
 }
 
-/// A clip from the player's media, attached to a message.
-pub type Clip {
+/// What a message may carry: a clip from the player's media, or one of the player's trial reports.
+pub type Attachment {
   Clip(
     media_id: id.MediaId,
     title: Option(String),
     url: Option(String),
     verified: Bool,
+  )
+  TrialReport(
+    report_id: id.TrialReportId,
+    org_name: Option(String),
+    summary: String,
   )
 }
 
@@ -354,7 +359,7 @@ pub fn append(
   channel_id: id.ChannelId,
   sender: Sender,
   text: String,
-  clip: Option(Clip),
+  attachment: Option(Attachment),
   client_msg_id: Option(String),
   at: Int,
 ) -> Result(Message, Fail(e)) {
@@ -394,17 +399,27 @@ pub fn append(
       client_msg_id:,
     ),
   ))
-  use _ <- result.try(case clip {
+  use _ <- result.try(case attachment {
     None -> Ok(Nil)
-    Some(c) ->
+    Some(Clip(media_id:, title:, url:, verified:)) ->
       attachment_row.insert(
         tx,
         attachment_row.Row(
           ..attachment_row.new(message_id: id, kind: attachment_row.Clip),
-          media_id: Some(c.media_id),
-          title: c.title,
-          url: c.url,
-          verified_clip: Some(c.verified),
+          media_id: Some(media_id),
+          title:,
+          url:,
+          verified_clip: Some(verified),
+        ),
+      )
+    Some(TrialReport(report_id:, org_name:, summary:)) ->
+      attachment_row.insert(
+        tx,
+        attachment_row.Row(
+          ..attachment_row.new(message_id: id, kind: attachment_row.TrialReport),
+          report_id: Some(id.trial_report_to_string(report_id)),
+          org_name:,
+          summary: Some(summary),
         ),
       )
   })

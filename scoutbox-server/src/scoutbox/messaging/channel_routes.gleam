@@ -7,8 +7,9 @@
 //// A send and a read receipt publish the live `messages` event once they commit; a typing ping publishes `typing`
 //// at once, since it records nothing.
 ////
-//// Not ported yet: attaching a trial report, which is always refused as not found.
 
+import gleam/float
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -19,8 +20,8 @@ import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/players
 import scoutbox/messaging/channels.{
-  type Clip, type Sender, type Side, type Thread, Clip, CounterpartySide,
-  ForAdmin, ForCounterparty, ForOrg, OrgSide, Sender,
+  type Attachment, type Sender, type Side, type Thread, Clip, CounterpartySide,
+  ForAdmin, ForCounterparty, ForOrg, OrgSide, Sender, TrialReport,
 }
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/notifications
@@ -35,6 +36,7 @@ import scoutbox/platform/store.{type Read}
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/trial_reports as report_row
 import scoutbox/rules/visibility.{type Access}
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -209,7 +211,7 @@ fn named(id: Option(String)) -> Option(String) {
 
 type Attach {
   NoAttachment
-  WithClip(Clip)
+  With(Attachment)
   AttachmentMissing(code: String)
 }
 
@@ -217,6 +219,7 @@ fn attachment(
   read: Read,
   t: Thread,
   body: MessageBody,
+  by_staff: Bool,
 ) -> Result(Attach, store.Fail(e)) {
   case named(body.attach_media_id), named(body.attach_trial_report_id) {
     None, None -> Ok(NoAttachment)
@@ -231,7 +234,7 @@ fn attachment(
         })
       case clip {
         Ok(m) ->
-          WithClip(Clip(
+          With(Clip(
             media_id: m.clip.id,
             title: Some(m.clip.title),
             url: m.clip.url,
@@ -240,8 +243,51 @@ fn attachment(
         Error(Nil) -> AttachmentMissing("MEDIA_NOT_FOUND")
       }
     }
-    // Not ported yet: attaching a trial report.
-    None, Some(_) -> Ok(AttachmentMissing("TRIAL_REPORT_NOT_FOUND"))
+    None, Some(report_id) -> {
+      // From the request body.
+      let report_id = id.trial_report(report_id)
+      // The club may attach only its own reports; the player or guardian any of the player's.
+      let staff = case by_staff {
+        True -> Some(t.row.org_id)
+        False -> None
+      }
+      use player <- result.map(players.by_id(read, t.row.player_id))
+      let report =
+        option.to_result(player, Nil)
+        |> result.try(fn(p) {
+          list.find(p.trial_reports, fn(r) {
+            r.id == report_id && { staff == None || staff == Some(r.org_id) }
+          })
+        })
+      case report {
+        Ok(r) -> With(TrialReport(r.id, r.org_name, report_summary(r)))
+        Error(Nil) -> AttachmentMissing("TRIAL_REPORT_NOT_FOUND")
+      }
+    }
+  }
+}
+
+/// channels.mjs's one-line summary, each figure printed as JavaScript prints a number.
+fn report_summary(r: report_row.Row) -> String {
+  "accel "
+  <> number_text(r.acceleration)
+  <> "/10 · "
+  <> number_text(r.sprint_speed_kmh)
+  <> " km/h · "
+  <> number_text(r.distance_km)
+  <> " km · pass "
+  <> number_text(r.pass_completion_pct)
+  <> "% · duels "
+  <> number_text(r.duel_success_pct)
+  <> "% · coach "
+  <> number_text(r.coach_rating)
+  <> "/10"
+}
+
+fn number_text(f: Float) -> String {
+  case float.floor(f) == f {
+    True -> int.to_string(float.truncate(f))
+    False -> float.to_string(f)
   }
 }
 
@@ -273,11 +319,19 @@ fn send(
               request_id: None,
             ),
           )
-          case store.read(ctx.store, attachment(_, t, body)) {
+          case
+            store.read(ctx.store, attachment(
+              _,
+              t,
+              body,
+              sender.kind == audience.OrgUser,
+            ))
+          {
             Error(failure) -> http.internal(failure)
             Ok(AttachmentMissing(code)) -> http.error(400, code)
             Ok(NoAttachment) -> post(ctx, t, sender, text, None, body)
-            Ok(WithClip(clip)) -> post(ctx, t, sender, text, Some(clip), body)
+            Ok(With(attached)) ->
+              post(ctx, t, sender, text, Some(attached), body)
           }
         }
       }
@@ -290,7 +344,7 @@ fn post(
   t: Thread,
   sender: Sender,
   text: String,
-  clip: Option(Clip),
+  attachment: Option(Attachment),
   body: MessageBody,
 ) -> Response {
   let c = t.row
@@ -312,7 +366,7 @@ fn post(
             c.id,
             sender,
             text,
-            clip,
+            attachment,
             client_msg_id,
             now,
           ))

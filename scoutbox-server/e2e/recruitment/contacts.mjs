@@ -35,6 +35,7 @@ import { freePort } from '../support/testPort.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveStream } from '../support/liveEvents.mjs';
+import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import contactSpec from '../support/spec/recruitment/lifecycle/contact.json' with { type: 'json' };
 import lifecycleErrors from '../support/spec/recruitment/lifecycle/errors.json' with { type: 'json' };
 import eventSpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
@@ -466,11 +467,17 @@ const J = {};
   // The response.
   const tomNotifsBefore = (await j('GET', '/org/notifications', undefined, tom.token)).body.length;
   markClub();
-  const respond = await j(
-    'POST',
-    `/player/requests/${J.request.id}/respond`,
-    { accept: true, message: 'Yes, happy to talk next week.' },
-    kola.token,
+  const { response: respond, drawn: kolaDrew } = await budgetsDrawn(j, () =>
+    j(
+      'POST',
+      `/player/requests/${J.request.id}/respond`,
+      { accept: true, message: 'Yes, happy to talk next week.' },
+      kola.token,
+    ),
+  );
+  ok(
+    kolaDrew.includes('contact_response:player:pl-adeyemi'),
+    "J10a an answer to a Contact draws on the responder's own contact_response budget",
   );
   ok(
     respond.status === 200 && respond.body.status === 'accepted',
@@ -773,11 +780,17 @@ section('M — the minor journey: guardian route, no direct contact, missing gua
     !mail.text.includes('U15 programme') && !mail.text.includes(SENTINEL),
     'M7c and carries no message body — it says something is waiting in ScoutBox',
   );
-  const resp = await j(
-    'POST',
-    `/guardian/requests/${gReq.id}/respond`,
-    { accept: false, message: 'Thank you, not this season.' },
-    amara.token,
+  const { response: resp, drawn: amaraDrew } = await budgetsDrawn(j, () =>
+    j(
+      'POST',
+      `/guardian/requests/${gReq.id}/respond`,
+      { accept: false, message: 'Thank you, not this season.' },
+      amara.token,
+    ),
+  );
+  ok(
+    amaraDrew.includes('contact_response:guardian:gd-amara'),
+    "M8a a guardian's answer draws on the guardian's own budget, a decline included",
   );
   ok(resp.status === 200 && resp.body.status === 'declined', 'M8 the guardian declines with a reply');
   const cAfter = (await j('GET', `/org/rooms/${RID}/contacts/${draft.body.contact.id}`, undefined, maria.token)).body
@@ -951,17 +964,16 @@ section('B — blocks: before compose, after compose, after delivery');
     "B5 after the block the club's historical record of the delivered contact remains",
   );
   const req = (await j('GET', '/player/inbox', undefined, imani.token)).body.items.find((r) => r.type === 'contact');
+  const blockedAccept = await budgetsDrawn(j, () =>
+    j('POST', `/player/requests/${req.id}/respond`, { accept: true }, imani.token),
+  );
   neg(
-    expect(
-      collect(
-        'accept after block',
-        await j('POST', `/player/requests/${req.id}/respond`, { accept: true }, imani.token),
-      ),
-      403,
-      'BLOCKED',
-      '',
-    ),
+    expect(collect('accept after block', blockedAccept.response), 403, 'BLOCKED', ''),
     "B6 accepting a blocked organisation's contact is refused 403 BLOCKED — it would open a thread",
+  );
+  neg(
+    !blockedAccept.drawn.some((k) => k.startsWith('contact_response:')),
+    'B6a a refused acceptance spends none of the answer budget',
   );
   const dec = await j('POST', `/player/requests/${req.id}/respond`, { accept: false }, imani.token);
   ok(

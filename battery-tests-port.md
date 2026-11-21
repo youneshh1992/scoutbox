@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -468,7 +468,13 @@ are for surprising facts or points that later work depends on, not implementatio
    3. Recruitment: citing a `local_test` Box Cam session when the test provider is on (trials, decisions, and the
       decision surface's `boxCam` candidates, which list none here), a Room decision's `lifecycle` record (always
       null; `decisions.lifecycle_json` renders it), the `contact_response` budget (30 answers an hour), and
-      attaching a trial report in a channel.
+      attaching a trial report in a channel. [**done**: `recruitment/trials` gained TP1–TP9, `recruitment/decisions`
+      J25c and H13b, `recruitment/contacts` J10a, M8a and B6a, and `platform/api` TR1–TR4; all pass on both servers,
+      and recruitment has no `Not ported yet:` left.] The decision surface's Box Cam candidates had never been
+      listed here, real sessions included: they are the trial's own evidence views (`trial_routes.box_cam_candidates`),
+      walked in the trials' stored order. A simulated session's link stays on the trial when the provider is turned
+      off; it only leaves the candidates and can't be cited. The answer budget is spent after the block check, so a
+      refused acceptance costs nothing. The marker on the live `requests` event was stale: the answer already pings it.
    4. Agents [**done** by the audit: only `policy_version_published` is left, in slice 2].
    5. Discovery and scouting: the similarity engine (`morelike`, and `similarPlayers`' players and archetypes),
       the film room's tags and view, captions, an assessment's lead review, the evidence-gap rule

@@ -106,10 +106,17 @@ process.on('exit', () => {
     }
   }
 });
-async function boot() {
+async function boot(extraEnv = {}) {
   const proc = spawn(...serverCommand(), {
     cwd: serverDir,
-    env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      DATA_DIR,
+      SCOUTBOX_QUIET_LOGS: '1',
+      SCOUTBOX_TEST_CLOCK: '1',
+      ...extraEnv,
+    },
     stdio: 'ignore',
   });
   children.push(proc);
@@ -3184,6 +3191,171 @@ section('Z — restart: keys, links and truth survive the process dying');
   ok(
     (await stage(J.RID, re.token)) === 'trial_completed' && (await stage(S.RID, re.token)) === 'trial_scheduled',
     'Z9 the case stages are durable',
+  );
+}
+
+// =========================================================== TP — the test provider
+section("TP — Box Cam's test provider: a simulated session is citable only while BOX_CAM_TEST_PROVIDER is on");
+{
+  // A finalised session from the test-only `local_test` provider, planted as Box Cam leaves one.
+  const SIM = { id: 'bx-trial-simulated', nonce: 'nonce-trial-simulated' };
+  const sha = (v) => createHash('sha256').update(String(v)).digest('hex');
+  const stop = async () => {
+    server.kill('SIGTERM');
+    for (let i = 0; i < 60 && server.exitCode == null; i += 1) await sleep(100);
+  };
+  await stop();
+  {
+    const at = Date.now() - 30_000;
+    const F = openFixture(DATA_DIR);
+    try {
+      F.transaction(() => {
+        F.insert('box_sessions', {
+          id: SIM.id,
+          player_id: 'pl-adeyemi',
+          drill_id: 'box-touches',
+          drill_version: 1,
+          target_type: 'repetitions',
+          target_value: 20,
+          nonce_hash: sha(SIM.nonce),
+          liveness_challenge: 'show_ball',
+          provider_id: 'local_test',
+          provider_version: 1,
+          status: 'unable_to_verify',
+          created_at: at,
+          expires_at: at + 2 * H,
+          started_at: at + 3,
+          ended_at: at + 10,
+          liveness_passed_at: at + 3,
+          last_seq: 0,
+          batches: 0,
+          session_duration_ms: 7,
+          verified_active_ms: 0,
+          verified_reps: 0,
+          target_completed: 0,
+          quality: 'insufficient',
+          interruptions_count: 0,
+          verification_state: 'unable_to_verify',
+          result_hash: sha(`${SIM.id}:result`),
+          finalized_at: at + 10,
+        });
+        F.insert('box_session_reasons', { session_id: SIM.id, ord: 0, code: 'NO_ACTIVITY_OBSERVED' });
+      });
+    } finally {
+      F.close();
+    }
+  }
+  server = await boot();
+  let lead = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+  const kolaT = await playerLogin('pl-adeyemi');
+  await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'recruitment' }, kolaT.token);
+  const link = async (boxSessionId) =>
+    j(
+      'POST',
+      `/org/rooms/${J.RID}/trials/${J.TID}/sessions/${J.SID}/evidence`,
+      { boxSessionId, expectedRev: (await trial(J.RID, J.TID, lead.token)).trial.rev },
+      lead.token,
+    );
+  const cands = async () =>
+    (await j('GET', `/org/rooms/${J.RID}/trials/${J.TID}/evidence/candidates`, undefined, lead.token)).body;
+  const surface = async () => (await j('GET', `/org/rooms/${J.RID}/decision`, undefined, lead.token)).body;
+  const cite = (id) =>
+    j(
+      'POST',
+      `/org/rooms/${J.RID}/decision/draft`,
+      { outcome: 'hold', evidenceRefs: [{ kind: 'box_cam_session', id }] },
+      lead.token,
+    );
+  const discard = (rev) => j('DELETE', `/org/rooms/${J.RID}/decision/draft`, { expectedRev: rev }, lead.token);
+  // The decision surface lists the trial's live links, each as the trial's evidence view describes it.
+  const expected = async () =>
+    (await trial(J.RID, J.TID, lead.token)).evidence
+      .filter((e) => !e.removedAt && e.session)
+      .map((e) => ({
+        id: e.session.id,
+        trialId: J.TID,
+        trialSessionId: e.trialSessionId,
+        verificationState: e.session.verificationState,
+        observation: e.observation.state,
+        observationCopy: e.observation.copy,
+        simulated: e.session.simulated,
+        provenance: e.provenance,
+      }));
+
+  const offLink = collect('simulated link, provider off', await link(SIM.id));
+  neg(
+    expect(offLink, 404, 'TRIAL_BOXCAM_INCOMPATIBLE'),
+    'TP1 with the test provider off, a simulated session is "not available", like one that does not exist',
+  );
+  neg(!(await cands()).items.some((c) => c.id === SIM.id), 'TP1b and it is no candidate');
+  const realOnly = await expected();
+  const off = await surface();
+  ok(
+    realOnly.length > 0 && JSON.stringify(off.evidence.boxCam) === JSON.stringify(realOnly),
+    "T2 the decision surface lists each Box Cam session cited on the case's trials, as the trial describes it",
+  );
+  const realId = realOnly[0].id;
+  const realDraft = await cite(realId);
+  ok(
+    realDraft.status === 201 &&
+      JSON.stringify(realDraft.body.draft.evidenceRefs) ===
+        JSON.stringify([
+          {
+            kind: 'box_cam_session',
+            id: realId,
+            meta: {
+              trialId: J.TID,
+              trialSessionId: realOnly[0].trialSessionId,
+              verificationState: realOnly[0].verificationState,
+              simulated: false,
+            },
+          },
+        ]),
+    'TP3 a decision cites a cited Box Cam session by reference, with the trial it came through',
+  );
+  await discard(realDraft.body.draft.rev);
+
+  await stop();
+  server = await boot({ BOX_CAM_TEST_PROVIDER: '1' });
+  lead = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+  const cOn = await cands();
+  ok(
+    cOn.items.some((c) => c.id === SIM.id && c.simulated === true && c.linked === false),
+    'TP4 with the test provider on, the simulated session is a candidate, labelled simulated',
+  );
+  const onLink = await link(SIM.id);
+  const simView = onLink.body?.evidence?.find((e) => e.session?.id === SIM.id);
+  ok(
+    onLink.status === 201 && simView?.session.simulated === true && simView.observation.state === 'no_cv_result',
+    'TP5 and the trial cites it, still labelled simulated',
+  );
+  const withSim = await expected();
+  const on = await surface();
+  ok(
+    withSim.some((c) => c.id === SIM.id && c.simulated === true) &&
+      JSON.stringify(on.evidence.boxCam) === JSON.stringify(withSim),
+    'TP6 the decision surface lists the simulated session beside the real ones',
+  );
+  const simDraft = await cite(SIM.id);
+  ok(
+    simDraft.status === 201 &&
+      simDraft.body.draft.evidenceRefs[0].id === SIM.id &&
+      simDraft.body.draft.evidenceRefs[0].meta.simulated === true,
+    'TP7 a decision may cite it, and the reference says it is simulated',
+  );
+  await discard(simDraft.body.draft.rev);
+
+  await stop();
+  server = await boot();
+  lead = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+  const back = await surface();
+  neg(
+    !back.evidence.boxCam.some((c) => c.id === SIM.id) && back.evidence.boxCam.length === withSim.length - 1,
+    'TP8 with the provider off again, the simulated link stays on the trial but leaves the decision surface',
+  );
+  neg(
+    expect(collect('cite simulated, provider off', await cite(SIM.id)), 400, 'DECISION_CASE_MISMATCH'),
+    'TP9 and a decision can no longer cite it',
   );
 }
 

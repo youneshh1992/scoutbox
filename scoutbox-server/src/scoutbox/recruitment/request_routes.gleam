@@ -825,8 +825,8 @@ pub fn guardian_respond(
 /// A trial invitation's chosen slot is checked before the answer is recorded, so a refused slot leaves it
 /// pending, and a case-tied invitation re-derives its recipient now (`trial_routes.accept_gate`).
 ///
-/// Not ported yet: the budget of 30 answers an hour to a request a Room's Contact sent (`contact_response`), and
-/// the live `requests` event.
+/// An answer to a request a Room's Contact sent spends the responder's `contact_response` budget, after the
+/// block check, as the TypeScript server orders them.
 fn respond(
   ctx: Ctx,
   req: Request,
@@ -850,7 +850,8 @@ fn respond(
             "BLOCKED",
             "You have blocked this organisation. Lift the block before accepting.",
           )
-        Ok(_) ->
+        Ok(_) -> {
+          use <- contact_budget(ctx, r, by)
           case r.type_, body.accept {
             request_row.Trial, True ->
               case choose_trial_slot(r, body.chosen_slot) {
@@ -880,8 +881,25 @@ fn respond(
               }
             _, _ -> answer(ctx, r, player, by, body.accept, None, reply)
           }
+        }
       }
     }
+  }
+}
+
+fn contact_budget(
+  ctx: Ctx,
+  r: requests.Request,
+  by: Responder,
+  next: fn() -> Response,
+) -> Response {
+  let owner = party.to_string(by.kind) <> ":" <> by.id
+  case
+    r.contact_id != None
+    && limits.limited(ctx.limits, limits.ContactResponse, owner, clock.now_ms())
+  {
+    True -> http.json(429, limits.limited_json(limits.ContactResponse))
+    False -> next()
   }
 }
 

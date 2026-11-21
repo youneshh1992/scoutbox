@@ -10,9 +10,8 @@
 //// completion; completion is not an assessment; an assessment is not a decision.
 ////
 //// A linked Box Cam session's observation is its latest recorded CV result, read live (Box Cam's analysis records
-//// it; it is moving to a service of its own).
-////
-//// Not ported yet: Box Cam's test provider (`BOX_CAM_TEST_PROVIDER`): a `local_test` session is never citable here.
+//// it; it is moving to a service of its own). A session from the test-only provider is citable only while
+//// `BOX_CAM_TEST_PROVIDER` is on, and is labelled simulated.
 
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
@@ -2454,6 +2453,11 @@ fn test_only(s: box_row.Row) -> Bool {
   s.provider_id == box_provider.LocalTest
 }
 
+/// A test-only session is withheld from a club unless the test provider is on.
+fn withheld(ctx: Ctx, s: box_row.Row) -> Bool {
+  test_only(s) && !ctx.config.box_cam_test_provider
+}
+
 fn withdrawn(s: box_row.Row) -> Bool {
   s.status == box_row.StatusCancelled
   || s.verification_state == Some(box_row.VerificationStateCancelled)
@@ -2463,6 +2467,44 @@ fn withdrawn(s: box_row.Row) -> Bool {
 /// Read live; never a trace, a nonce or a numeric confidence. A missing session shows as unavailable, an
 /// invalidated one as withdrawn. The link row is history either way.
 fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
+  use views <- result.map(evidence_records(rd, t))
+  list.map(views, fn(v) { v.json })
+}
+
+/// One link row as the trial's evidence route shows it, with what the decision surface lists of it.
+type EvidenceView {
+  EvidenceView(json: Json, candidate: Option(Candidate))
+}
+
+/// A live link to a session that still exists (decision.mjs `evidenceCandidates`' Box Cam entry).
+type Candidate {
+  Candidate(
+    session_id: id.BoxSessionId,
+    trial_session_id: id.TrialSessionId,
+    verification_state: Option(box_row.VerificationState),
+    observation: Observation,
+    simulated: Bool,
+  )
+}
+
+type Observation {
+  Observation(state: String, copy: String, quality: Json, experimental: Json)
+}
+
+fn plain_observation(state: String, copy: String) -> Observation {
+  Observation(state:, copy:, quality: json.null(), experimental: json.null())
+}
+
+fn observation_json(o: Observation) -> Json {
+  json.object([
+    #("state", json.string(o.state)),
+    #("copy", json.string(o.copy)),
+    #("qualityState", o.quality),
+    #("experimental", o.experimental),
+  ])
+}
+
+fn evidence_records(rd: Read, t: Trial) -> Result(List(EvidenceView), Fail(e)) {
   trial_rules.sorted_sessions(t)
   |> list.flat_map(fn(s) { list.map(s.evidence, fn(e) { #(s, e) }) })
   |> list.try_map(fn(pair) {
@@ -2490,30 +2532,25 @@ fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
       #("combineVerified", json.bool(False)),
       #("combineVerifiedBlockedBy", json.string(combine_disabled)),
     ]
-    let observation = fn(state, copy) {
-      json.object([
-        #("state", json.string(state)),
-        #("copy", json.string(copy)),
-        #("qualityState", json.null()),
-        #("experimental", json.null()),
-      ])
-    }
     case bs {
       None ->
-        json.object(
-          list.append(base, [
-            #("session", json.null()),
-            #(
-              "observation",
-              observation(
-                "unavailable",
-                "This Box Cam session is no longer available.",
+        EvidenceView(
+          json: json.object(
+            list.append(base, [
+              #("session", json.null()),
+              #(
+                "observation",
+                observation_json(plain_observation(
+                  "unavailable",
+                  "This Box Cam session is no longer available.",
+                )),
               ),
-            ),
-            #("providerVersion", json.null()),
-            #("engineVersion", json.null()),
-            #("cvPolicyVersion", json.null()),
-          ]),
+              #("providerVersion", json.null()),
+              #("engineVersion", json.null()),
+              #("cvPolicyVersion", json.null()),
+            ]),
+          ),
+          candidate: None,
         )
       Some(b) -> {
         let invalidated = withdrawn(b)
@@ -2539,37 +2576,85 @@ fn evidence_views(rd: Read, t: Trial) -> Result(List(Json), Fail(e)) {
             #("simulated", json.bool(test_only(b))),
             #("invalidated", json.bool(invalidated)),
           ])
-        json.object(
-          list.append(base, [
-            #("session", session),
-            #("observation", case invalidated, cv {
-              True, _ ->
-                observation(
-                  "evidence_withdrawn",
-                  "This Box Cam session was withdrawn after review; no observation is available.",
-                )
-              False, None ->
-                observation(
-                  "no_cv_result",
-                  "No reliable observation available for this session.",
-                )
-              False, Some(r) -> cv_observation(r)
-            }),
-            #("providerVersion", case invalidated, cv {
-              False, Some(r) -> json.int(r.provider_version)
-              _, _ -> json.int(b.provider_version)
-            }),
-            #("engineVersion", case invalidated, cv {
-              False, Some(r) -> json.int(r.engine_version)
-              _, _ -> json.null()
-            }),
-            #("cvPolicyVersion", case invalidated, cv {
-              False, Some(r) -> json.int(r.cv_policy_version)
-              _, _ -> json.null()
-            }),
-          ]),
+        let observation = case invalidated, cv {
+          True, _ ->
+            plain_observation(
+              "evidence_withdrawn",
+              "This Box Cam session was withdrawn after review; no observation is available.",
+            )
+          False, None ->
+            plain_observation(
+              "no_cv_result",
+              "No reliable observation available for this session.",
+            )
+          False, Some(r) -> cv_observation(r)
+        }
+        EvidenceView(
+          json: json.object(
+            list.append(base, [
+              #("session", session),
+              #("observation", observation_json(observation)),
+              #("providerVersion", case invalidated, cv {
+                False, Some(r) -> json.int(r.provider_version)
+                _, _ -> json.int(b.provider_version)
+              }),
+              #("engineVersion", case invalidated, cv {
+                False, Some(r) -> json.int(r.engine_version)
+                _, _ -> json.null()
+              }),
+              #("cvPolicyVersion", case invalidated, cv {
+                False, Some(r) -> json.int(r.cv_policy_version)
+                _, _ -> json.null()
+              }),
+            ]),
+          ),
+          candidate: case e.removed_at {
+            Some(_) -> None
+            None ->
+              Some(Candidate(
+                session_id: b.id,
+                trial_session_id: s.row.id,
+                verification_state: b.verification_state,
+                observation:,
+                simulated: test_only(b),
+              ))
+          },
         )
       }
+    }
+  })
+}
+
+/// The decision surface's Box Cam entries for one of the case's trials: each live link to a session that still
+/// exists, a simulated one only with `allow_simulated`. An observation is a state, never a recommendation.
+pub fn box_cam_candidates(
+  rd: Read,
+  t: Trial,
+  allow_simulated: Bool,
+) -> Result(List(Json), Fail(e)) {
+  use views <- result.map(evidence_records(rd, t))
+  list.filter_map(views, fn(v) {
+    case v.candidate {
+      Some(c) if !c.simulated || allow_simulated ->
+        Ok(
+          json.object([
+            #("id", id.box_session_json(c.session_id)),
+            #("trialId", id.trial_json(t.row.id)),
+            #("trialSessionId", id.trial_session_json(c.trial_session_id)),
+            #(
+              "verificationState",
+              json.nullable(
+                c.verification_state,
+                box_row.verification_state_to_json,
+              ),
+            ),
+            #("observation", json.string(c.observation.state)),
+            #("observationCopy", json.string(c.observation.copy)),
+            #("simulated", json.bool(c.simulated)),
+            #("provenance", json.string("box_cam_observed")),
+          ]),
+        )
+      _ -> Error(Nil)
     }
   })
 }
@@ -2615,37 +2700,28 @@ fn refusal_copy(reason: String) -> String {
   }
 }
 
-fn cv_observation(r: cv_row.Row) -> Json {
+fn cv_observation(r: cv_row.Row) -> Observation {
   let quality = json.nullable(r.oq_state, cv_row.oq_state_to_json)
   case r.outcome {
     cv_row.Accepted ->
-      json.object([
-        #("state", json.string("accepted")),
-        #("copy", json.string("This session was observed by Box Cam.")),
-        #("qualityState", quality),
-        #(
-          "experimental",
-          json.object([
-            #(
-              "status",
-              cv_row.experimental_status_to_json(r.experimental_status),
-            ),
-          ]),
-        ),
-      ])
+      Observation(
+        state: "accepted",
+        copy: "This session was observed by Box Cam.",
+        quality:,
+        experimental: json.object([
+          #("status", cv_row.experimental_status_to_json(r.experimental_status)),
+        ]),
+      )
     cv_row.Refused -> {
       let reason = option.unwrap(r.refusal_reason, "unknown")
-      json.object([
-        #("state", json.string(reason)),
-        #(
-          "copy",
-          json.string(string.trim(
-            "No reliable observation available. " <> refusal_copy(reason),
-          )),
+      Observation(
+        state: reason,
+        copy: string.trim(
+          "No reliable observation available. " <> refusal_copy(reason),
         ),
-        #("qualityState", quality),
-        #("experimental", json.null()),
-      ])
+        quality:,
+        experimental: json.null(),
+      )
     }
   }
 }
@@ -2752,7 +2828,7 @@ pub fn candidates(
       }
       let items =
         sessions
-        |> list.filter(fn(b) { !withdrawn(b) && !test_only(b) })
+        |> list.filter(fn(b) { !withdrawn(b) && !withheld(ctx, b) })
         |> list.sort(fn(x, y) {
           case int.compare(captured(y), captured(x)) {
             order.Eq ->
@@ -2980,7 +3056,7 @@ fn link_authorisation(
         #(Ok(Nil), Some(s)) if s.player_id != room.row.player_id ->
           incompatible()
         #(Ok(Nil), Some(s)) ->
-          case test_only(s), withdrawn(s), s.finalized_at {
+          case withheld(ctx, s), withdrawn(s), s.finalized_at {
             True, _, _ -> incompatible()
             _, True, _ ->
               err(

@@ -226,15 +226,15 @@ pub fn completed_at(t: Trial) -> Option(Int) {
 }
 
 /// Resolves each reference against this case's own records. Anything outside the case is
-/// `DECISION_CASE_MISMATCH`, with the same body whether the record exists elsewhere or not.
-///
-/// Not ported yet: Box Cam's test provider, so a `local_test` session is never citable here.
+/// `DECISION_CASE_MISMATCH`, with the same body whether the record exists elsewhere or not. A session from the
+/// test-only Box Cam provider is citable only with `allow_simulated` (`BOX_CAM_TEST_PROVIDER`).
 pub fn resolve_refs(
   read: Read,
   refs: List(RefShape),
   org_id: id.OrgId,
   player_id: id.PlayerId,
   case_id: id.RecruitmentCaseId,
+  allow_simulated: Bool,
 ) -> Result(Result(List(Ref), Refusal), Fail(e)) {
   use case_trials <- result.try(case_trials(read, org_id, player_id, case_id))
   list.try_fold(refs, Ok([]), fn(acc, r) {
@@ -359,32 +359,42 @@ pub fn resolve_refs(
                   [id.box_session_sql(e.box_session_id)],
                   box_row.decoder(),
                 ))
+                let simulated = fn(b: box_row.Row) {
+                  b.provider_id == box_provider.LocalTest
+                }
                 case found {
-                  [b]
-                    if b.player_id == player_id
-                    && b.provider_id != box_provider.LocalTest
-                  ->
-                    Ok(
-                      Ok([
-                        Ref(
-                          r.kind,
-                          r.id,
-                          json.object([
-                            #("trialId", id.trial_json(t.row.id)),
-                            #("trialSessionId", id.trial_session_json(s.row.id)),
-                            #(
-                              "verificationState",
-                              json.nullable(
-                                b.verification_state,
-                                box_row.verification_state_to_json,
-                              ),
+                  [b] if b.player_id == player_id ->
+                    case simulated(b) && !allow_simulated {
+                      True ->
+                        mismatch(
+                          "That Box Cam session is not available to this case.",
+                        )
+                      False ->
+                        Ok(
+                          Ok([
+                            Ref(
+                              r.kind,
+                              r.id,
+                              json.object([
+                                #("trialId", id.trial_json(t.row.id)),
+                                #(
+                                  "trialSessionId",
+                                  id.trial_session_json(s.row.id),
+                                ),
+                                #(
+                                  "verificationState",
+                                  json.nullable(
+                                    b.verification_state,
+                                    box_row.verification_state_to_json,
+                                  ),
+                                ),
+                                #("simulated", json.bool(simulated(b))),
+                              ]),
                             ),
-                            #("simulated", json.bool(False)),
+                            ..out
                           ]),
-                        ),
-                        ..out
-                      ]),
-                    )
+                        )
+                    }
                   _ ->
                     mismatch(
                       "That Box Cam session is not available to this case.",
@@ -1049,21 +1059,6 @@ pub fn refs_json(refs: List(Ref)) -> Json {
   })
 }
 
-pub fn lifecycle_json(r: decision_row.Row) -> Json {
-  case r.lifecycle_applied {
-    None -> json.null()
-    Some(applied) ->
-      json.object([
-        #("action", json.nullable(r.lifecycle_action, json.string)),
-        #("from", json.nullable(r.lifecycle_from, room_status.to_json)),
-        #("to", json.nullable(r.lifecycle_to, room_status.to_json)),
-        #("applied", json.bool(applied)),
-        #("reason", json.nullable(r.lifecycle_reason, json.string)),
-        #("at", json.nullable(r.lifecycle_at, json.int)),
-      ])
-  }
-}
-
 fn outcome_label(o: Option(DecisionOutcome)) -> Json {
   json.nullable(option.map(o, fn(o) { mapping(o).label }), json.string)
 }
@@ -1166,7 +1161,7 @@ pub fn view(d: Decision, omit_note: Bool) -> Json {
             ])
           _, _ -> json.null()
         }),
-        #("lifecycle", when_formal(lifecycle_json(r))),
+        #("lifecycle", when_formal(room_records.lifecycle_json(r))),
         #("trigger", json.nullable(r.trigger, json.string)),
         #("snapshot", case d.base.snapshot {
           Some(s) ->

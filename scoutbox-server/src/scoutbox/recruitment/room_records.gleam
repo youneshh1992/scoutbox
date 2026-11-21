@@ -20,6 +20,7 @@ import scoutbox/rows/room_evidence_states as evidence_row
 import scoutbox/rows/room_snapshot_source_refs as ref_row
 import scoutbox/rows/room_snapshots as snapshot_row
 import scoutbox/vocab/decision_outcome
+import scoutbox/vocab/room_status
 import sqlight
 
 // -------------------------------------------------------------------------------------------------------- comments
@@ -487,9 +488,27 @@ pub fn decision_json(d: Decision) -> Json {
       True -> json.nullable(d.row.outcome, decision_outcome.to_json)
       False -> json.null()
     }),
-    // Not ported yet: a formal decision's lifecycle record.
-    #("lifecycle", json.null()),
+    #("lifecycle", case formal {
+      True -> lifecycle_json(d.row)
+      False -> json.null()
+    }),
   ])
+}
+
+/// What a formal decision did to the case, as stored; null until it is recorded.
+pub fn lifecycle_json(r: decision_row.Row) -> Json {
+  case r.lifecycle_applied {
+    None -> json.null()
+    Some(applied) ->
+      json.object([
+        #("action", json.nullable(r.lifecycle_action, json.string)),
+        #("from", json.nullable(r.lifecycle_from, room_status.to_json)),
+        #("to", json.nullable(r.lifecycle_to, room_status.to_json)),
+        #("applied", json.bool(applied)),
+        #("reason", json.nullable(r.lifecycle_reason, json.string)),
+        #("at", json.nullable(r.lifecycle_at, json.int)),
+      ])
+  }
 }
 
 // --------------------------------------------------------------------------------------------- evidence reviews

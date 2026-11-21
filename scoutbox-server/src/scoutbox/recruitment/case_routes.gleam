@@ -37,9 +37,11 @@ import scoutbox/recruitment/decisions.{type Decision, type Draft}
 import scoutbox/recruitment/domain_errors
 import scoutbox/recruitment/journey
 import scoutbox/recruitment/lifecycle
+import scoutbox/recruitment/room_records
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/recruitment/trial_routes
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/delivery_fail_injections as injection_row
@@ -439,8 +441,6 @@ fn decision_permission(
 }
 
 /// `GET /org/rooms/:id/decision`.
-///
-/// Not ported yet: the Box Cam evidence candidates (the trials' Box Cam observations), which list none.
 pub fn decision(
   ctx: Ctx,
   a: OrgAccess,
@@ -466,6 +466,14 @@ pub fn decision(
         r.player_id,
         r.id,
       ))
+      // In the trials' own order, as evidenceCandidates walks them.
+      use box_cam <- result.try(
+        list.try_map(case_trials, trial_routes.box_cam_candidates(
+          read,
+          _,
+          ctx.config.box_cam_test_provider,
+        )),
+      )
       use passport <- result.map(
         store.query(
           read,
@@ -489,11 +497,11 @@ pub fn decision(
           },
         ),
       )
-      #(rows, draft, counted, blocked, player, case_trials, passport)
+      #(rows, draft, counted, blocked, player, case_trials, box_cam, passport)
     })
   case gathered {
     Error(e) -> http.internal(e)
-    Ok(#(rows, draft, counted, blocked, player, case_trials, passport)) -> {
+    Ok(#(rows, draft, counted, blocked, player, case_trials, box_cam, passport)) -> {
       let case_trials =
         list.sort(case_trials, fn(x, y) {
           int.compare(x.row.accepted_at, y.row.accepted_at)
@@ -582,7 +590,7 @@ pub fn decision(
                       ])
                     }),
                   ),
-                  #("boxCam", json.preprocessed_array([])),
+                  #("boxCam", json.preprocessed_array(list.flatten(box_cam))),
                   #("passport", json.preprocessed_array(passport)),
                   #(
                     "note",
@@ -1026,6 +1034,7 @@ fn open_draft(
               r.org_id,
               r.player_id,
               r.id,
+              ctx.config.box_cam_test_provider,
             ))
           {
             Error(response) -> response
@@ -1203,6 +1212,7 @@ pub fn edit_draft(
                         r.org_id,
                         r.player_id,
                         r.id,
+                        ctx.config.box_cam_test_provider,
                       ))
                       |> result.map(fn(x) { x |> result.map(Some) })
                     None -> Ok(Ok(None))
@@ -1489,7 +1499,10 @@ fn finalize_rows(
                     200,
                     json.object([
                       #("decision", decisions.view(prior, False)),
-                      #("lifecycle", decisions.lifecycle_json(prior.base.row)),
+                      #(
+                        "lifecycle",
+                        room_records.lifecycle_json(prior.base.row),
+                      ),
                       #("idempotent", json.bool(True)),
                     ]),
                   )
@@ -1538,6 +1551,7 @@ fn finalize_rows(
                       r.org_id,
                       r.player_id,
                       r.id,
+                      ctx.config.box_cam_test_provider,
                     ))
                   {
                     Error(response) -> response

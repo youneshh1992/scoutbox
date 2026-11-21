@@ -55,7 +55,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
-| `platform/api` | neutral | 0 → 0 | 198 | 214 |  | +16 added | yes |  |  | **done** |
+| `platform/api` | neutral | 0 → 0 | 198 | 218 |  | +20 added | yes |  |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2079 / 54 | 201 / 241 | 54 cases pending; 40 hand-port calls |
@@ -71,9 +71,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 253 | 118 | +5 added | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
-| `recruitment/decisions` | neutral | 9 → 0 | 249 | 183 | 66 |  | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
+| `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 6 / 20 | 4 / 4 | 20 cases pending; 2 TypeScript-only moves unreviewed |
@@ -87,7 +87,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 2 / 39 | 2 / 2 | 39 cases pending |
 | `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  | yes |  |  | **done** |
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
-| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
+| `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 240 |  | 26 moved, +2 added | yes |  |  | **done** |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
@@ -123,6 +123,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |
+| `platform/api` | 4 | Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4) |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
@@ -132,7 +133,10 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `recruitment/analytics` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all sixty) |
 | `recruitment/analytics` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
 | `recruitment/contacts` | 5 | Live events: the club's stream hears each contact event (created, sent, responded, recorded externally, failed) for that contact (LV1–LV5) |
+| `recruitment/contacts` | 3 | Parity beyond the batteries, slice 3: an answer to a Contact draws on the responder's own contact_response budget, the player's or the guardian's, and a refused acceptance spends none (J10a, M8a, B6a) |
+| `recruitment/decisions` | 2 | Parity beyond the batteries, slice 3: the Room projection carries a formal decision's lifecycle record, applied or not, and a recommendation none (J25c, H13b) |
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
+| `recruitment/trials` | 10 | Parity beyond the batteries, slice 3: a simulated Box Cam session is a candidate, citable on a trial and in a decision only while BOX_CAM_TEST_PROVIDER is on, and the decision surface lists the case's cited sessions (TP1–TP9) |
 | `scouting/clubWorkflows` | 2 | Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2) |
 
 ## Calls to port by hand
