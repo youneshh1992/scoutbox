@@ -134,6 +134,14 @@ export const NOTES = {
       },
     ],
   },
+  'discovery/exposureCalibrationAndCoverage': {
+    added: [
+      {
+        checks: 4,
+        why: 'Parity beyond the batteries, slice 5: the evidence-gap rule attribute_never_observed names what no submitted report observed, from the latest rubric, and is supplied once some report has (AN1–AN4)',
+      },
+    ],
+  },
   'platform/playersAndGuardians': {
     added: [
       {
