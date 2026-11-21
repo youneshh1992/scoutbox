@@ -578,6 +578,45 @@ ok(
   r.status === 200 || r.status === 400 || r.status === 403,
   'lead may also publish (allowed) — non-authors who are not leads cannot (checked below)',
 );
+// A lead's review closes a submitted report; nothing else changes it.
+r = await post(`/org/assessments/${assM}/review`, { note: 'Agreed.' }, bearer(SAM));
+ok(r.status === 403 && r.body.error === 'LEAD_REQUIRED', 'RV1 only a recruitment lead reviews an assessment');
+for (const [body, what] of [
+  [{ note: 5 }, 'a note that is not text'],
+  [{ note: 'x'.repeat(301) }, 'a note over 300 characters'],
+  [{ note: 'ok', verdict: 'sign' }, 'a field a review does not take'],
+]) {
+  r = await post(`/org/assessments/${assM}/review`, body, bearer(MARIA));
+  ok(r.status === 400, `RV2 ${what} is refused`);
+}
+r = await post(`/org/assessments/${assM}/review`, { note: ' Agreed: second look in March. ' }, bearer(MARIA));
+ok(
+  r.status === 200 &&
+    r.body.assessment.state === 'reviewed' &&
+    typeof r.body.assessment.reviewedAt === 'number' &&
+    r.body.assessment.reviewNote === ' Agreed: second look in March. ' &&
+    r.body.assessment.recommendation.verdict === 'monitor' &&
+    !('history' in r.body.assessment),
+  'RV3 the lead reviews a submitted report: reviewed, with the note as written; the report itself is unchanged',
+);
+r = await post(`/org/assessments/${assM}/review`, {}, bearer(MARIA));
+ok(r.status === 409 && r.body.error === 'NOT_SUBMITTED', 'RV4 a report is reviewed once');
+r = await post(`/org/assessments/${assS}/review`, { note: '   ' }, bearer(MARIA));
+ok(r.status === 200 && r.body.assessment.reviewNote === null, 'RV5 a blank note is no note');
+{
+  const draft = (await post('/org/assessments', { playerId: 'pl-imani', positionGroup: 'ATT' }, bearer(MARIA))).body
+    .assessment.id;
+  r = await post(`/org/assessments/${draft}/review`, {}, bearer(MARIA));
+  ok(r.status === 409 && r.body.error === 'NOT_SUBMITTED', 'RV6 a draft cannot be reviewed');
+}
+r = await post('/org/assessments/ass-none/review', {}, bearer(MARIA));
+ok(r.status === 404 && r.body.error === 'ASSESSMENT_NOT_FOUND', 'RV7 an unknown assessment is not found');
+r = await j('/org/assessments?playerId=pl-adeyemi', {}, bearer(MARIA));
+ok(
+  r.body.items.find((a) => a.id === assM)?.state === 'reviewed' &&
+    r.body.items.find((a) => a.id === assS)?.state === 'reviewed',
+  'RV8 the list shows both reports reviewed',
+);
 
 // ============================================================== video
 r = await j('/org/players/pl-adeyemi', {}, bearer(MARIA));

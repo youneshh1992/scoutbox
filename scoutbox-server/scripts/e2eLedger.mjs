@@ -48,6 +48,10 @@ export const NOTES = {
         checks: 2,
         why: 'Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2)',
       },
+      {
+        checks: 8,
+        why: "Parity beyond the batteries, slice 5: a lead's review of a submitted assessment, once, with its note as written, and the refusals (RV1–RV8)",
+      },
     ],
   },
   'platform/api': {
