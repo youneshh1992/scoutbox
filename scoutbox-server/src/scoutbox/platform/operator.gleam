@@ -9,12 +9,14 @@ import gleam/option.{None}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/config.{type Config}
 import scoutbox/platform/http
 import scoutbox/platform/live_event
 import scoutbox/platform/migrations
 import scoutbox/platform/proxy_trust
+import scoutbox/platform/request_metrics
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/vocab/position
 import wisp.{type Response}
@@ -98,15 +100,12 @@ fn state(state: String, note: String) -> Json {
 }
 
 /// `GET /capabilities`.
-///
-/// Not ported yet: the data layer's per-domain descriptions (`dataLayer.domains`, the TypeScript repositories'
-/// own account of themselves); the notification counters (`suppressedByPreference` and `unknownTypes`, though
-/// preferences are enforced).
 pub fn capabilities(ctx: Ctx) -> Response {
   case store.read(ctx.store, read_report(_, ctx)) {
     Error(failure) -> http.internal(failure)
     Ok(#(schema, data_layer)) -> {
       let dev = ctx.config.dev_logins
+      let counters = request_metrics.snapshot(ctx.request_metrics)
       http.json(
         200,
         json.object([
@@ -139,8 +138,24 @@ pub fn capabilities(ctx: Ctx) -> Response {
             "notifications",
             json.object([
               #("preferencesEnforced", json.bool(True)),
-              #("suppressedByPreference", json.int(0)),
-              #("unknownTypes", json.preprocessed_array([])),
+              #(
+                "suppressedByPreference",
+                json.int(request_metrics.counter(
+                  counters,
+                  notifications.counters_group,
+                  notifications.suppressed_counter,
+                )),
+              ),
+              #(
+                "unknownTypes",
+                json.array(
+                  request_metrics.names(
+                    counters,
+                    notifications.unknown_types_group,
+                  ),
+                  json.string,
+                ),
+              ),
               #(
                 "note",
                 json.string(
@@ -350,7 +365,7 @@ fn read_report(read: Read, ctx: Ctx) -> Result(#(Json, Json), Fail(e)) {
       #(
         "note",
         json.string(
-          "Each domain's tables and row counts. Counts are counts, never subjects.",
+          "The migrations applied and the tables they made. Counts are counts, never subjects.",
         ),
       ),
     ])

@@ -63,7 +63,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/liveDelivery` | neutral | 0 → 0 | 0 | 7 |  | +7 added | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
-| `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
+| `platform/notifications` | neutral | 0 → 0 | 52 | 56 |  | +4 added | yes |  |  | **done** |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 75 |  | +30 added | yes |  |  | **done** |
 | `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 31 / 0 | 12 / 12 | **done** |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
@@ -136,6 +136,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/api` | 24 | Parity beyond the batteries, slice 5: a profile's similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
+| `platform/notifications` | 4 | Parity beyond the batteries, slice 9: /capabilities counts a notice a preference muted, not one that is delivered, and lists no type without a category (SP1–SP3, with the second message they need) |
 | `platform/playersAndGuardians` | 23 | Parity beyond the batteries, slice 5: a club's clip views and scout tags (V1–V4, T1–T8) and a clip's caption track, set by the player and read by whoever may see the clip (C1–C11) |
 | `platform/playersAndGuardians` | 7 | Parity beyond the batteries, slice 5: the directory's text search lowers text as JavaScript does, accented and Greek letters included, never matches a minor's city, and pages by cursor (DQ1–DQ6) |
 | `platform/sessionsAndPorts` | 14 | Parity beyond the batteries, slice 9: SCOUTBOX_TRUST_PROXY in production, refused when unreadable and started with a list (P7, P8), and the client address per-address budgets key on, for each kind of setting, with the state /capabilities reports (X0–X11) |

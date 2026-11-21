@@ -134,9 +134,8 @@ Every route below is exercised by a battery, except where marked.
 | Verification | `/org/verification/email` and `/email/confirm`, `/org/verification/federation` (a Grassroots club's federation registration, for Trust & Safety), `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
-Behaviour not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`). What is left is the
-platform's: parts of the operator report. `battery-tests-port.md` (item 9) lists it by slice. Behaviour that stays out of
-scope for good (uploads, video analysis, the Expo push transport) says `Out of scope:`.
+Behaviour not ported yet would say `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`); nothing does
+now. Behaviour that stays out of scope for good (uploads, video analysis, the Expo push transport) says `Out of scope:`.
 
 ## Known differences from the TypeScript server
 
@@ -163,3 +162,8 @@ scope for good (uploads, video analysis, the Expo push transport) says `Out of s
 - A forwarded address is read as an address only in standard notation. proxy-addr also reads IPv4 written as one
   number or in hex or octal parts (`2130706433` is 127.0.0.1), so a trusted-proxy list could match such an entry
   there and not here. Proxies write standard notation.
+- `/capabilities` counts a notice a preference muted once its unit commits; the TypeScript server counts it at the
+  mute, so a muted notice in a unit that then fails is counted there and not here.
+- A notification type with no category is delivered and listed in `/capabilities`'s `unknownTypes` in every mode,
+  in code point order. The TypeScript server refuses one outside production, and lists them in the order first
+  seen.

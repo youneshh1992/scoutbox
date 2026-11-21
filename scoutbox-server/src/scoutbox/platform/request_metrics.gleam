@@ -163,6 +163,18 @@ pub fn snapshot(m: RequestMetrics) -> Snapshot {
   process.call(m.subject, 5000, Read)
 }
 
+/// The names `group` has counted, in code point order.
+pub fn names(s: Snapshot, group: String) -> List(String) {
+  dict.keys(s.counters)
+  |> list.filter_map(fn(key) {
+    case key {
+      #(g, name) if g == group -> Ok(name)
+      _ -> Error(Nil)
+    }
+  })
+  |> list.sort(string.compare)
+}
+
 /// One of `group`'s counters (0 when never counted).
 pub fn counter(s: Snapshot, group: String, name: String) -> Int {
   dict.get(s.counters, #(group, name)) |> result.unwrap(0)

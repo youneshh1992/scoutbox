@@ -15,4 +15,7 @@ pub type Effect {
   Live(event: live_event.Event)
   /// A staff member lost access: their open streams close (`rows/id` can't be imported here, so the id is text).
   CloseStreams(org_user_id: String)
+  /// One occurrence of `name` in `group`, in the process's request counters (`platform/request_metrics`), which
+  /// `/capabilities` reads without waiting for the writer. A refused act counts nothing.
+  Count(group: String, name: String)
 }

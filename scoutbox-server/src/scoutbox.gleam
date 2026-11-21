@@ -21,7 +21,7 @@ import scoutbox/operations/follow_ups
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/effect.{
-  type Effect, CloseStreams, Live, SendMail, SendPush,
+  type Effect, CloseStreams, Count, Live, SendMail, SendPush,
 }
 import scoutbox/platform/faults
 import scoutbox/platform/limits
@@ -75,8 +75,15 @@ fn boot() -> Result(Nil, String) {
   use faults <- result.try(faults.start(config.dev_logins, config.fault_rules))
   use hub <- result.try(live.start())
   use dev_mail <- result.try(dev_mail.start())
+  use request_metrics <- result.try(request_metrics.start())
   let store =
-    store.with_dispatch(store, dispatch(store, hub, dev_mail, _))
+    store.with_dispatch(store, dispatch(
+      store,
+      hub,
+      dev_mail,
+      request_metrics,
+      _,
+    ))
     |> store.with_seams(faults.should_fail(faults, _))
   use applied <- result.try(migrations.run(
     store,
@@ -99,7 +106,14 @@ fn boot() -> Result(Nil, String) {
       _,
       config.box_cam_test_provider,
     ))
-  let store = store.with_dispatch(store, dispatch(store, hub, dev_mail, _))
+  let store =
+    store.with_dispatch(store, dispatch(
+      store,
+      hub,
+      dev_mail,
+      request_metrics,
+      _,
+    ))
   use _ <- result.try(
     match_facts.start(store, config.box_cam_test_provider)
     |> result.map_error(string.inspect),
@@ -107,7 +121,6 @@ fn boot() -> Result(Nil, String) {
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))
   use limits <- result.try(limits.start())
-  use request_metrics <- result.try(request_metrics.start())
   use known <- result.try(migrations.known())
   use _ <- result.try(migrations.counter_present(store))
   use integrity <- result.try(
@@ -180,9 +193,11 @@ fn dispatch(
   store: Store,
   hub: Hub,
   dev_mail: dev_mail.Deliveries,
+  request_metrics: request_metrics.RequestMetrics,
   effect: Effect,
 ) -> Nil {
   case effect {
+    Count(group:, name:) -> request_metrics.count(request_metrics, group, name)
     Live(event:) -> live_routes.publish(store, hub, event)
     CloseStreams(org_user_id:) ->
       live.close_streams_of(hub, id.org_user(org_user_id))

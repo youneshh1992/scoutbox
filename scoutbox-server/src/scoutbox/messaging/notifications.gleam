@@ -19,7 +19,7 @@ import gleam/string
 import gleam/time/calendar
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
-import scoutbox/platform/effect.{Live, SendPush}
+import scoutbox/platform/effect.{Count, Live, SendPush}
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/zones
@@ -42,6 +42,15 @@ const home_zone = "Europe/London"
 
 pub type Notification =
   row.Row
+
+/// The request counters' group for `/capabilities`'s notification counters.
+pub const counters_group = "notifications"
+
+/// How many notices a preference muted since boot.
+pub const suppressed_counter = "suppressedByPreference"
+
+/// The types delivered without a category, one counter each, named by the type.
+pub const unknown_types_group = "notificationUnknownTypes"
 
 /// Cut to the column's limit at a character boundary, with an ellipsis.
 fn cut(text: String) -> String {
@@ -90,13 +99,21 @@ fn deliver(
   let read = store.reading(tx)
   let body = cut(text)
   let category = notification_prefs.category_of(type_, body)
+  let gated = notification_prefs.category_of(type_, text)
+  // A type with no category can't be muted by anyone; it is delivered and named in /capabilities.
+  case gated {
+    None -> store.emit(tx, Count(unknown_types_group, type_))
+    Some(_) -> Nil
+  }
   use allowed <- result.try(notification_prefs.allows(
     read,
     kind,
     audience_id,
-    notification_prefs.category_of(type_, text),
+    gated,
   ))
-  use <- guard(allowed)
+  use <- guard(allowed, fn() {
+    store.emit(tx, Count(counters_group, suppressed_counter))
+  })
   use existing <- result.try(store.one(
     read,
     "SELECT id FROM notifications WHERE audience_kind = ? AND audience_id = ? AND read = 0 AND type = ? AND occurred_at >= ? AND text = ? AND ref_id IS ? ORDER BY seq DESC LIMIT 1",
@@ -166,11 +183,12 @@ fn deliver(
 
 fn guard(
   allowed: Bool,
+  muted: fn() -> Nil,
   next: fn() -> Result(Nil, Fail(e)),
 ) -> Result(Nil, Fail(e)) {
   case allowed {
     True -> next()
-    False -> Ok(Nil)
+    False -> Ok(muted())
   }
 }
 
