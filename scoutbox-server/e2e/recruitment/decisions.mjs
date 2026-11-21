@@ -468,6 +468,7 @@ const J = {};
     'J18 FINALIZE: one formal row (progress → offer), superseding the advisory recommendation, and the case moved to offer_consideration in the same save',
   );
   J.DEC = fin.body.decision.id;
+  J.LC = fin.body.lifecycle;
   ok((await stage(J.RID)) === 'offer_consideration', 'J18b the case is at offer_consideration');
   const offersAfter = await j('GET', `/org/rooms/${J.RID}/offers`, undefined, maria.token);
   neg(
@@ -539,6 +540,18 @@ const J = {};
   ok(
     room.decision?.current?.id === J.DEC && room.decision.current.recommendation === 'offer',
     "J25b the Room projection's current decision is the formal row",
+  );
+  ok(
+    JSON.stringify(room.decision.current.lifecycle) ===
+      JSON.stringify({
+        action: 'considerOffer',
+        from: 'trial_completed',
+        to: 'offer_consideration',
+        applied: true,
+        reason: null,
+        at: J.LC.at,
+      }) && room.decision.history.filter((d) => d.kind === 'recommendation').every((d) => d.lifecycle === null),
+    "J25c the Room projection carries the formal decision's lifecycle record; a recommendation has none",
   );
   const jr = await journey(J.RID);
   ok(
@@ -721,6 +734,14 @@ section('H — hold: supersession with a reason, one chain, resume, already-ther
     'H13 a hold on a case already on hold records the decision and moves nothing (applied:false, already_there)',
   );
   J.HOLD2 = sup2.body.decision.id;
+  const held = (await j('GET', `/org/rooms/${J.RID}`, undefined, maria.token)).body.room.decision.current;
+  ok(
+    held.id === J.HOLD2 &&
+      held.lifecycle?.applied === false &&
+      held.lifecycle.reason === 'already_there' &&
+      held.lifecycle.action === 'holdCase',
+    'H13b the Room projection keeps a lifecycle record that moved nothing, with its reason',
+  );
   await lifecycle(J.RID, 'resumeCase');
 }
 

@@ -60,6 +60,10 @@ export const NOTES = {
         checks: 11,
         why: 'Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11)',
       },
+      {
+        checks: 4,
+        why: "Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4)",
+      },
     ],
   },
   'recruitment/contacts': {
@@ -67,6 +71,26 @@ export const NOTES = {
       {
         checks: 5,
         why: "Live events: the club's stream hears each contact event (created, sent, responded, recorded externally, failed) for that contact (LV1–LV5)",
+      },
+      {
+        checks: 3,
+        why: "Parity beyond the batteries, slice 3: an answer to a Contact draws on the responder's own contact_response budget, the player's or the guardian's, and a refused acceptance spends none (J10a, M8a, B6a)",
+      },
+    ],
+  },
+  'recruitment/decisions': {
+    added: [
+      {
+        checks: 2,
+        why: "Parity beyond the batteries, slice 3: the Room projection carries a formal decision's lifecycle record, applied or not, and a recommendation none (J25c, H13b)",
+      },
+    ],
+  },
+  'recruitment/trials': {
+    added: [
+      {
+        checks: 10,
+        why: "Parity beyond the batteries, slice 3: a simulated Box Cam session is a candidate, citable on a trial and in a decision only while BOX_CAM_TEST_PROVIDER is on, and the decision surface lists the case's cited sessions (TP1–TP9)",
       },
     ],
   },

@@ -479,6 +479,34 @@ ok(
   /Ruthless/.test(me.body.trialReports.find((x) => x.orgName === 'Eastport FC')?.strengthNote ?? ''),
   'feedback lands on the player profile',
 );
+{
+  // The trial's thread carries the report as an attachment: an id, the club's name and a one-line summary.
+  const report = me.body.trialReports.find((x) => x.orgName === 'Eastport FC');
+  const thread = (await j('/player/channels', {}, bearer(KOLA))).body.find((c) => c.requestId === reqId);
+  const attach = (side, token, attachTrialReportId) =>
+    j(
+      `/${side}/channels/${thread.id}/messages`,
+      { method: 'POST', body: JSON.stringify({ text: 'Your trial report.', attachTrialReportId }) },
+      bearer(token),
+    );
+  const summary = 'accel 8/10 · 33.4 km/h · 9.1 km · pass 81% · duels 63% · coach 8/10';
+  r = await attach('org', EASTPORT, report.id);
+  ok(
+    r.status === 201 &&
+      JSON.stringify(r.body.attachment) ===
+        JSON.stringify({ kind: 'trial_report', reportId: report.id, orgName: 'Eastport FC', summary }),
+    'TR1 the club attaches its trial report to the thread: its id, the club and the summary line',
+  );
+  r = await attach('player', KOLA, report.id);
+  ok(r.status === 201 && r.body.attachment?.reportId === report.id, 'TR2 the player may attach their own report');
+  r = await attach('org', EASTPORT, 'trr-nope');
+  ok(r.status === 400 && r.body.error === 'TRIAL_REPORT_NOT_FOUND', 'TR3 an unknown report is refused');
+  const seen = (await j('/player/channels', {}, bearer(KOLA))).body.find((c) => c.id === thread.id);
+  ok(
+    seen.messages.filter((m) => m.attachment?.kind === 'trial_report' && m.attachment.summary === summary).length === 2,
+    'TR4 the thread keeps both attachments as sent',
+  );
+}
 
 r = await j(
   '/org/players/pl-guni/request',
