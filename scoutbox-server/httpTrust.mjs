@@ -34,7 +34,8 @@ const validEntry = (entry) => {
   if (!family) return false;
   if (prefix === undefined) return true;
   if (!/^\d{1,3}$/.test(prefix)) return false;
-  return Number(prefix) <= (family === 4 ? 32 : 128);
+  // proxy-addr refuses a zero-length prefix, so `app.set('trust proxy', …)` would throw at boot.
+  return Number(prefix) >= 1 && Number(prefix) <= (family === 4 ? 32 : 128);
 };
 
 export function parseTrustProxy(raw) {

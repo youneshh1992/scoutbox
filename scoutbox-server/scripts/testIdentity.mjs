@@ -186,6 +186,15 @@ await test('boot: an invalid SCOUTBOX_TRUST_PROXY is fatal in production, silent
   );
   assert.equal(productionConfigProblems({ env: { SCOUTBOX_TRUST_PROXY: 'fly' }, trustWeightsTotal: 100 }).length, 0);
 });
+await test('trust proxy: a zero-length prefix is invalid, so Express is never handed one it refuses', () => {
+  assert.equal(parseTrustProxy('10.0.0.0/0').state, 'invalid');
+  assert.equal(parseTrustProxy('::/0').state, 'invalid');
+  assert.equal(parseTrustProxy('10.0.0.0/1').state, 'configured');
+  for (const value of ['10.0.0.0/1', 'loopback, 10.0.0.0/8', '::1/128']) {
+    const app = express();
+    app.set('trust proxy', parseTrustProxy(value).setting);
+  }
+});
 await test('boot: a valid hop count or an unset value raises nothing', () => {
   assert.equal(
     productionConfigProblems({ env: { ...PROD, SCOUTBOX_TRUST_PROXY: '1' }, trustWeightsTotal: 100 }).length,

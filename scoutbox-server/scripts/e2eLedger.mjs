@@ -322,6 +322,12 @@ export const NOTES = {
         why: "A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP",
       },
     ],
+    added: [
+      {
+        checks: 14,
+        why: 'Parity beyond the batteries, slice 9: SCOUTBOX_TRUST_PROXY in production, refused when unreadable and started with a list (P7, P8), and the client address per-address budgets key on, for each kind of setting, with the state /capabilities reports (X0–X11)',
+      },
+    ],
   },
   'platform/storeGuarantees': {
     moved: [

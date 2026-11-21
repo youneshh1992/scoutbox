@@ -1,6 +1,7 @@
 // What the batteries need from a server beyond its routes: the environment settings they start it with, the
-// development-only routes they call, and the test-clock header. e2e/support/CONTRACT.md documents each one, because a
-// port of the server must honour all of them; testE2ESupport fails when a battery uses one the document doesn't name.
+// development-only routes they call, the routes whose development behaviour they rely on, and the test-clock header.
+// e2e/support/CONTRACT.md documents each one, because a port of the server must honour all of them; testE2ESupport
+// fails when a battery uses one the document doesn't name.
 //
 //   node scripts/e2eContract.mjs     print each item and the batteries that use it
 import fs from 'node:fs';
@@ -35,10 +36,14 @@ export function serverHooks() {
   return { env, routes };
 }
 
+// Ordinary routes whose development behaviour the batteries rely on, which no scan of the source can tell apart from
+// the rest: the outbox shows a withheld one-time code while the process that sent it runs.
+const BEHAVIOUR_ROUTES = ['/admin/outbox'];
+
 /** Item → the battery files (relative to e2e/) that use it. */
 export function contractUsage() {
   const { env, routes } = serverHooks();
-  const items = [...env, ...routes, 'x-scoutbox-test-clock'];
+  const items = [...env, ...routes, ...BEHAVIOUR_ROUTES, 'x-scoutbox-test-clock'];
   const usage = new Map(items.map((i) => [i, []]));
   for (const f of fs
     .readdirSync(E2E_DIR, { recursive: true })

@@ -11,7 +11,9 @@
 //      handler reaches the error middleware is a check of this implementation's Express patch, in
 //      scripts/testPlatformHelpers.mjs.)
 //   P  production configuration is proved in productionHardening.mjs §48; here a
-//      real production boot is refused without its own admin key.
+//      real production boot is refused without its own admin key, or with a proxy setting it can't read.
+//   X  the client address that per-address budgets key on: the socket's, unless SCOUTBOX_TRUST_PROXY names the
+//      proxies whose X-Forwarded-For to believe.
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -442,6 +444,124 @@ section('P — production refuses to start without its own admin key');
     !p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()),
     'P6 the synthetic agent licence register is refused in production',
   );
+  const p5 = await boot(
+    {
+      NODE_ENV: 'production',
+      MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef',
+      ADMIN_KEY: 'sweep-production-admin-key-0123',
+      SCOUTBOX_TRUST_PROXY: 'fly',
+    },
+    d2,
+    await freePort(),
+  );
+  neg(
+    !p5.up && /TRUST_PROXY_INVALID/.test(p5.log()),
+    'P7 a SCOUTBOX_TRUST_PROXY that is not a hop count, true/false or a list of addresses is refused in production',
+  );
+  const P8_PORT = await freePort();
+  const p6 = await boot(
+    {
+      NODE_ENV: 'production',
+      MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef',
+      ADMIN_KEY: 'sweep-production-admin-key-0123',
+      SCOUTBOX_TRUST_PROXY: 'loopback, 10.0.0.0/8',
+    },
+    d2,
+    P8_PORT,
+  );
+  ok(p6.up, 'P8 a list of trusted proxies starts the production server');
+  if (p6.up) await stop(p6);
+}
+
+// ================================================================ X — the client address
+section('X — the client address is the socket unless SCOUTBOX_TRUST_PROXY says which proxies to believe');
+{
+  // A public share link spends `passport_share_read` under the client address, so the bucket a request draws on
+  // (GET /__rate-limits) shows the address the server settled on, without spending the budget.
+  const shareKey = async (port, forwardedFor) => {
+    const base = `http://localhost:${port}`;
+    const buckets = async () =>
+      new Map(
+        (await (await fetch(`${base}/__rate-limits`)).json()).buckets
+          .filter((b) => b.action === 'passport_share_read')
+          .map((b) => [b.key, b.spent]),
+      );
+    const before = await buckets();
+    const r = await fetch(`${base}/passport/shared/no-such-link`, {
+      headers: forwardedFor === undefined ? {} : { 'x-forwarded-for': forwardedFor },
+    });
+    const after = await buckets();
+    const drawn = [...after].filter(([k, n]) => n > (before.get(k) ?? 0)).map(([k]) => k);
+    return { status: r.status, key: drawn.length === 1 ? drawn[0] : `(${drawn.length} buckets drawn)` };
+  };
+  const SETTINGS = {
+    unset: undefined,
+    one: '1',
+    two: '2',
+    all: 'true',
+    loopback: 'loopback',
+    listed: 'loopback, 10.0.0.0/8',
+    invalid: 'fly',
+  };
+  const servers = Object.fromEntries(
+    await Promise.all(
+      Object.entries(SETTINGS).map(async ([name, value]) => {
+        const port = await freePort();
+        const s = await boot(
+          { SCOUTBOX_SEED_DEMO: '0', ...(value === undefined ? {} : { SCOUTBOX_TRUST_PROXY: value }) },
+          mkdtempSync(path.join(tmpdir(), `sbx-proxy-${name}-`)),
+          port,
+        );
+        return [name, { ...s, port }];
+      }),
+    ),
+  );
+  ok(
+    Object.values(servers).every((s) => s.up),
+    'X0 a development server starts with each setting, the invalid one included',
+  );
+  const CHAIN = '198.51.100.9, 203.0.113.7';
+  const key = (name, forwardedFor) => shareKey(servers[name].port, forwardedFor);
+  const proxyTrust = async (name) =>
+    (await (await fetch(`http://localhost:${servers[name].port}/capabilities`)).json()).capabilities.proxy_trust;
+
+  const socket = await key('unset');
+  ok(socket.status === 404 && !socket.key.startsWith('('), `X1 a request spends the share budget once (${socket.key})`);
+  neg(
+    (await key('unset', '203.0.113.7')).key === socket.key,
+    'X2 unset, a forwarded address is ignored: a client cannot choose its own address',
+  );
+  neg(
+    (await key('invalid', '203.0.113.7')).key === (await key('invalid')).key,
+    'X3 an invalid setting trusts nothing either',
+  );
+  ok((await key('one', CHAIN)).key === '203.0.113.7', 'X4 one hop: the address the trusted proxy saw connect');
+  ok((await key('two', CHAIN)).key === '198.51.100.9', 'X5 two hops: one further back along the chain');
+  ok(
+    (await key('two', '203.0.113.7')).key === '203.0.113.7',
+    'X6 more hops than the chain holds: the furthest address there is',
+  );
+  ok((await key('all', CHAIN)).key === '198.51.100.9', 'X7 true: the first address in the chain');
+  ok(
+    (await key('loopback', '198.51.100.9, 10.0.0.5')).key === '10.0.0.5',
+    'X8 a list: the walk back stops at the first address that is not a trusted proxy',
+  );
+  ok((await key('listed', '198.51.100.9, 10.0.0.5')).key === '198.51.100.9', 'X9 a subnet in the list is trusted too');
+  ok((await key('one')).key === socket.key, 'X10 a trusted proxy that forwards nothing leaves the socket address');
+  const states = {
+    unset: (await proxyTrust('unset')).state,
+    one: (await proxyTrust('one')).state,
+    listed: (await proxyTrust('listed')).state,
+    invalid: (await proxyTrust('invalid')).state,
+  };
+  ok(
+    states.unset === 'not_configured' &&
+      states.one === 'configured' &&
+      states.listed === 'configured' &&
+      states.invalid === 'invalid',
+    `X11 /capabilities reports each setting's state (${JSON.stringify(states)})`,
+  );
+  for (const s of Object.values(servers)) if (s.up) await stop(s);
 }
 
 // ================================================================ H — the test harness itself
