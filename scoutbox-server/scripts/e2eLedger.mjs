@@ -35,6 +35,30 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'verification/organisationsAndStaff': {
+    added: [
+      {
+        checks: 7,
+        why: "Parity beyond the batteries, slice 7: a decision's and a root approval's ledger detail (LD1, LD2), and removing a domain: a subdomain confirmed by its mailbox and removed, the refusals, and the root domain's MFA gate (DR0–DR4)",
+      },
+    ],
+  },
+  'operations/clubOperations': {
+    added: [
+      {
+        checks: 3,
+        why: "Parity beyond the batteries, slice 7: a level review's ledger detail (LD1), and the ops events' detail in /admin/metrics for a backup and an audit export (OD1, OD2)",
+      },
+    ],
+  },
+  'passport/passport': {
+    added: [
+      {
+        checks: 3,
+        why: 'Parity beyond the batteries, slice 7: the share rows name the share, its mode and who revoked it, and a recruitment view through a share link says so (LD1–LD3)',
+      },
+    ],
+  },
   'scouting/clubWorkflows': {
     moved: [
       {
@@ -44,6 +68,10 @@ export const NOTES = {
       },
     ],
     added: [
+      {
+        checks: 7,
+        why: 'Parity beyond the batteries, slice 7: Trust & Safety revokes a reference, pending or published: its code can never be spent, a body is refused, and the player is pinged (RK0–RK6)',
+      },
       {
         checks: 2,
         why: 'Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2)',
@@ -113,6 +141,10 @@ export const NOTES = {
   'development/boxCam': {
     added: [
       {
+        checks: 9,
+        why: 'Parity beyond the batteries, slice 7: each Box Cam ledger row carries its detail: a published challenge, an assignment and its cancellation, the privacy settings, an invalidation and a restore, a kept clip (LD0–LD8)',
+      },
+      {
         checks: 2,
         why: "Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2)",
       },
@@ -124,6 +156,10 @@ export const NOTES = {
   },
   'development/combine': {
     added: [
+      {
+        checks: 2,
+        why: "Parity beyond the batteries, slice 7: the Combine's ledger rows carry their detail: the request and its protocols, and each completed attempt's protocol and state (LD1, LD2)",
+      },
       {
         checks: 1,
         why: "Live events: the player's stream hears their development evidence change for the session and the attempt (LV1)",

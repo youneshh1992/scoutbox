@@ -1176,6 +1176,67 @@ section("the development plan, the club's drill list, and keeping a clip");
   ok(ledger.length === 1 && ledger[0].org_id === null, "KC13 keeping a clip is a row in the player's ledger");
 }
 
+section("the ledger's detail: each Box Cam row names what it is about");
+{
+  const published = await j(
+    'POST',
+    '/org/box-cam/challenges',
+    { title: 'Ledger week', drillId: 'box-juggles', metric: 'active_minutes', targetTotal: 60, days: 7 },
+    maria.token,
+  );
+  ok(published.status === 201, 'LD0 a club publishes a challenge');
+  const clubRows = (await j('GET', '/org/ledger', undefined, maria.token)).body.items;
+  const challengeRow = clubRows.find((l) => l.type === 'box_challenge_published');
+  ok(
+    JSON.stringify(challengeRow?.detail) ===
+      JSON.stringify({ challengeId: published.body.challenge.id, drillId: 'box-juggles' }),
+    'LD1 a published challenge names the challenge and its drill',
+  );
+  const mine = (await j('GET', '/player/export', undefined, kola.token)).body.ledgerEvents;
+  const of = (type) => mine.filter((l) => l.type === type);
+  ok(
+    of('box_assignment_created').some(
+      (l) =>
+        JSON.stringify(l.detail) ===
+        JSON.stringify({ drillId: 'box-wall', target: { type: 'repetitions', value: 150 } }),
+    ) && of('box_assignment_created').every((l) => l.orgId === 'org-eastport'),
+    'LD2 an assignment names its drill and target',
+  );
+  ok(
+    JSON.stringify(of('box_assignment_cancelled').map((l) => l.detail)) === JSON.stringify([{ assignmentId }]),
+    'LD3 a cancellation names the assignment',
+  );
+  ok(
+    JSON.stringify(of('box_prefs_changed').map((l) => l.detail)) ===
+      JSON.stringify([{ by: 'player', share: 'recruitment', retainClips: false }]),
+    'LD4 a change of the privacy settings records who made it and what they now are',
+  );
+  const invalidated = of('box_result_invalidated');
+  ok(
+    invalidated.length === 1 &&
+      JSON.stringify(Object.keys(invalidated[0].detail)) === JSON.stringify(['sessionId', 'disputeId', 'outcome']) &&
+      invalidated[0].detail.sessionId === b1SessionId &&
+      invalidated[0].detail.outcome === 'invalidated',
+    'LD5 an invalidation names the session, the dispute and the outcome',
+  );
+  ok(
+    JSON.stringify(of('box_result_restored').map((l) => l.detail)) ===
+      JSON.stringify([{ sessionId: b1SessionId, reason: 'Reviewed again — original result was correct.' }]),
+    'LD6 a restore names the session and why',
+  );
+  const clipRows = of('box_clip_saved');
+  ok(
+    clipRows.length === 1 &&
+      JSON.stringify(Object.keys(clipRows[0].detail)) === JSON.stringify(['sessionId', 'mediaId']) &&
+      clipRows[0].orgId === null,
+    'LD7 a kept clip names the session and the media item',
+  );
+  ok(
+    mine.filter((l) => l.type.startsWith('box_')).every((l) => l.detail),
+    'LD8 every Box Cam row in the ledger carries its detail',
+  );
+}
+
 section('metrics — privacy-safe counters, no PII');
 {
   const m = await j('GET', '/admin/metrics', undefined, null, A);

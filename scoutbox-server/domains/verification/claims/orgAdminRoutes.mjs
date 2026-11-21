@@ -71,7 +71,8 @@ export function registerOrgAdminRoutes(ctx) {
       if (!reasons.includes('DOMAIN_OWNERSHIP_AMBIGUOUS')) reasons.push('DOMAIN_OWNERSHIP_AMBIGUOUS');
     }
     const id = nextId('vdom');
-    const r = unit(() => {
+    // The request and its confirmation code commit together: one act, one unit of work.
+    const { r, secret } = unit(() => {
       const created = verification.domainRequests.create({
         id,
         orgId: req.org.id,
@@ -90,10 +91,14 @@ export function registerOrgAdminRoutes(ctx) {
         { orgId: req.org.id, after: { domain, status: highRisk ? 'requires_human_review' : 'email_challenge' } },
         req,
       );
-      return created;
+      return {
+        r: created,
+        secret: challengeOk
+          ? mintToken({ purpose: 'domain_email', email: challengeEmail, orgId: req.org.id, refId: created.id })
+          : null,
+      };
     });
-    if (challengeOk) {
-      const secret = mintToken({ purpose: 'domain_email', email: challengeEmail, orgId: req.org.id, refId: r.id });
+    if (secret) {
       await mailer.send({
         to: challengeEmail,
         subject: `Confirm ${domain} for ${req.org.name} on ScoutBox`,
