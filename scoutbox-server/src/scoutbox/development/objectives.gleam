@@ -203,7 +203,7 @@ fn by_id(
 }
 
 /// The player's objectives, oldest first.
-fn for_player(
+pub fn for_player(
   read: Read,
   pid: id.PlayerId,
 ) -> Result(List(Objective), Fail(e)) {

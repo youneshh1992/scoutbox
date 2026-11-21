@@ -43,7 +43,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
-| `development/boxCam` | neutral | 3 → 0 | 150 | 112 | 40 | +2 added | yes | 40 / 0 |  | **done** |
+| `development/boxCam` | neutral | 3 → 0 | 150 | 137 | 40 | +27 added | yes | 40 / 0 |  | **done** |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
 | `development/combine` | neutral | 2 → 0 | 92 | 73 | 20 | +1 added | yes | 22 / 0 |  | **done** |
@@ -116,6 +116,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `agents/compliance` | 1 | Live events: publishing a policy version pings every stream, naming nothing (LV1) |
 | `agents/crossApp` | 1 | Live events: the club's stream hears a contact routed to the agent, by the agent's id only (LV1) |
 | `development/boxCam` | 2 | Live events: the player's stream hears their development evidence change for each session and a completed challenge (LV1, LV2) |
+| `development/boxCam` | 25 | Parity beyond the batteries, slice 6: the development plan for the player and a guardian (DP0–DP7), the club's drill list (DL1–DL3), and keeping a clip (KC1–KC13) |
 | `development/combine` | 1 | Live events: the player's stream hears their development evidence change for the session and the attempt (LV1) |
 | `development/hub` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all seventy-six) |
 | `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |

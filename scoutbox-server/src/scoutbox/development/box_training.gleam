@@ -3,10 +3,7 @@
 ////
 //// Assignments and challenges don't widen access: every club act passes the standing gates (the visibility rule
 //// with the agency wall and the grassroots radius, blocks, verified, not suspended). Agencies cannot assign Box
-//// Training or publish a challenge.
-////
-//// Not ported yet: the development plan (`/box-cam/development-plan`) and the club's drill list
-//// (`GET /org/box-cam/drills`).
+//// Training or publish a challenge. The development plan is `box_plan`.
 
 import gleam/dynamic/decode
 import gleam/float

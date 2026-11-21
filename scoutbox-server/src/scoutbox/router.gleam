@@ -21,6 +21,7 @@ import scoutbox/agents/transaction_routes
 import scoutbox/agents/transaction_ts_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/benchmarks
+import scoutbox/development/box_plan
 import scoutbox/development/box_prefs
 import scoutbox/development/box_session_routes
 import scoutbox/development/box_training
@@ -650,6 +651,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { squad_invites.invite(ctx, req, org) })
         ["players", id, "evidence-gaps"] ->
           only(req, Get, fn() { evidence_gaps.gaps(ctx, org, id.player(id)) })
+        ["box-cam", "drills"] ->
+          only(req, Get, fn() { box_session_routes.org_drills() })
         ["box-cam", "assignments"] ->
           case req.method {
             Get -> box_training.org_assignments(ctx, req, org)
@@ -1343,6 +1346,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { box_session_routes.drills(ctx) })
         ["box-cam", "dashboard"] ->
           only(req, Get, fn() { box_session_routes.dashboard(ctx, player) })
+        ["box-cam", "development-plan"] ->
+          only(req, Get, fn() { box_plan.player_plan(ctx, player) })
         ["box-cam", "sessions"] ->
           case req.method {
             Get -> box_session_routes.list(ctx, player)
@@ -1362,6 +1367,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               "complete" -> box_session_routes.complete(ctx, req, player, sid)
               "cancel" -> box_session_routes.cancel(ctx, req, player, sid)
               "note" -> box_session_routes.note(ctx, req, player, sid)
+              "clip" -> box_session_routes.clip(ctx, req, player, sid)
               "dispute" -> box_training.player_dispute(ctx, req, player, sid)
               _ -> not_found()
             }
@@ -1859,6 +1865,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", cid, "box-cam", "sessions"] ->
           only(req, Get, fn() {
             box_session_routes.child_list(ctx, guardian, id.player(cid))
+          })
+        ["children", cid, "box-cam", "development-plan"] ->
+          only(req, Get, fn() {
+            box_plan.child_plan(ctx, guardian, id.player(cid))
           })
         ["children", cid, "box-cam", "dashboard"] ->
           only(req, Get, fn() {

@@ -5,8 +5,10 @@
 //// naming a result, a state or a provenance is refused as an unknown field. An uploaded video can never become
 //// `box_cam_observed`.
 ////
-//// Not ported yet: keeping a clip (`/box-cam/sessions/:id/clip`, which tags an existing `/player/media` row and
-//// uploads nothing), and the player_development_evidence_changed live event.
+//// Keeping a clip tags one of the player's existing `/player/media` items as Box Cam captured; Box Cam itself never
+//// receives session video.
+////
+//// Not ported yet: the `box_clip_saved` ledger row's detail (the session and the media item).
 
 import gleam/float
 import gleam/int
@@ -17,6 +19,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/development/box_cam_rules as rules
+import scoutbox/development/box_prefs
 import scoutbox/development/box_sessions.{type Session}
 import scoutbox/development/box_training
 import scoutbox/development/combine
@@ -38,12 +41,16 @@ import scoutbox/rows/box_challenge_entries as entry_row
 import scoutbox/rows/box_session_observations as obs_row
 import scoutbox/rows/box_sessions as row
 import scoutbox/rows/id
+import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/player_media as media_row
 import scoutbox/safety/audit
+import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/vocab/audience
 import scoutbox/vocab/box_provider
 import scoutbox/vocab/box_quality
 import scoutbox/vocab/box_target_type
+import sqlight
 import wisp.{type Request, type Response}
 
 fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
@@ -132,6 +139,14 @@ fn setup_json(s: rules.Setup) -> Json {
 }
 
 /// `GET /player/box-cam/drills`: the drills, and the providers this environment offers.
+/// `GET /org/box-cam/drills`: the drills alone; a club is told nothing about the observation providers.
+pub fn org_drills() -> Response {
+  http.json(
+    200,
+    json.object([#("drills", json.array(rules.drills, drill_json))]),
+  )
+}
+
 pub fn drills(ctx: Ctx) -> Response {
   let providers =
     list.filter(rules.providers, fn(p) {
@@ -1144,6 +1159,122 @@ pub fn note(
       }
     Ok(None) -> http.error(404, "SESSION_NOT_FOUND")
   }
+}
+
+/// `POST /player/box-cam/sessions/:id/clip`: keep one of the player's own media items as this finished session's
+/// clip. A minor keeps one only when the guardian allows it. Its visibility stays the media item's own.
+pub fn clip(
+  ctx: Ctx,
+  req: Request,
+  p: PlayerAccess,
+  sid: id.BoxSessionId,
+) -> Response {
+  use media_id <- http.body(
+    req,
+    {
+      use media_id <- input.field("mediaId", input.nullish(input.id()))
+      input.done(media_id)
+    },
+    [],
+  )
+  let pid = p.player.row.id
+  let now = clock.now_ms()
+  store.read(ctx.store, fn(read) {
+    use found <- result.try(box_sessions.own(read, pid, sid) |> storage)
+    use retains <- result.map(box_prefs.retains_clips(read, pid) |> storage)
+    #(found, retains)
+  })
+  |> fn(r) {
+    case r {
+      Error(e) -> http.internal(e)
+      Ok(#(Some(s), retains)) ->
+        case box_sessions.is_terminal(s.row.status) {
+          False -> http.error(404, "SESSION_NOT_FOUND")
+          True ->
+            case players.is_adult(p.player, now) || retains {
+              False ->
+                http.json(
+                  403,
+                  json.object([
+                    #("error", json.string("GUARDIAN_CONTROLLED")),
+                    #(
+                      "message",
+                      json.string(
+                        "Your parent/guardian controls whether Box Clips from home training are kept.",
+                      ),
+                    ),
+                  ]),
+                )
+              True ->
+                case
+                  list.find(p.player.media, fn(m) {
+                    Some(id.media_to_string(m.clip.id)) == media_id
+                  })
+                {
+                  Error(Nil) -> http.error(404, "MEDIA_NOT_FOUND")
+                  Ok(m) -> keep_clip(ctx, pid, sid, m.clip.id, now)
+                }
+            }
+        }
+      Ok(#(None, _)) -> http.error(404, "SESSION_NOT_FOUND")
+    }
+  }
+}
+
+fn keep_clip(
+  ctx: Ctx,
+  pid: id.PlayerId,
+  sid: id.BoxSessionId,
+  media: id.MediaId,
+  now: Int,
+) -> Response {
+  store.unit(ctx.store, fn(tx) {
+    use _ <- result.try(
+      store.run(
+        tx,
+        "UPDATE player_media SET captured_by = ?, box_session_id = ? WHERE id = ? AND player_id = ?",
+        [
+          sqlight.text(media_row.captured_by_to_string(media_row.BoxCam)),
+          id.box_session_sql(sid),
+          id.media_sql(media),
+          id.player_sql(pid),
+        ],
+      )
+      |> storage,
+    )
+    use _ <- result.try(box_sessions.attach_clip(tx, sid, media) |> storage)
+    use _ <- result.try(
+      ledger.append(
+        tx,
+        ledger.Entry(
+          entry_type: ledger_row.BoxClipSaved,
+          player_id: Some(pid),
+          org_id: None,
+          org_name: None,
+          user_id: None,
+          actor_name: None,
+        ),
+        now,
+      )
+      |> storage,
+    )
+    own(store.reading(tx), pid, sid)
+    |> result.map(fn(s) {
+      http.json(
+        200,
+        json.object([
+          #("session", box_sessions.view(s, False)),
+          #(
+            "note",
+            json.string(
+              "Clip kept with your media. Saving a clip never makes it public — its visibility follows your existing media privacy.",
+            ),
+          ),
+        ]),
+      )
+    })
+  })
+  |> room_routes.answer
 }
 
 fn list_json(

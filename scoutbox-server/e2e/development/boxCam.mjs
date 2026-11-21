@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveStream } from '../support/liveEvents.mjs';
+import { readRows } from '../support/sqlRows.mjs';
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -297,6 +298,7 @@ let assignmentId;
   );
 }
 
+let b6SessionId;
 section('B6 — guardian + minor: club gets results, never home footage');
 {
   const assign = await j(
@@ -328,6 +330,7 @@ section('B6 — guardian + minor: club gets results, never home footage');
     ],
   );
   ok(r.done.body.session.verificationState === 'verified', 'B6: minor completes the assignment (Box Cam Verified)');
+  b6SessionId = r.done.body.session.id;
   const coach = await j('GET', '/org/box-cam/assignments?playerId=pl-guni', undefined, maria.token);
   const row = coach.body.items.find((x) => x.id === assign.body.assignment.id);
   ok(row.lastResult && row.lastResult.verifiedActiveMs === 10 * MIN, 'B6: coach sees the result summary');
@@ -957,6 +960,220 @@ section('junk refused naming the field, never coerced; lists that grow page by c
     r.status === 400 && r.body.field === 'all' && r.body.allowed?.includes('1'),
     'IN8 the dispute queue filter is 0 or 1',
   );
+}
+
+section("the development plan, the club's drill list, and keeping a clip");
+{
+  // DP: a club's development objective, the Box Training set against it, and the recorded activity, in one read.
+  const opened = await j(
+    'POST',
+    '/org/assessments',
+    { playerId: 'pl-adeyemi', positionGroup: 'ATT', context: { fixture: 'Box Cam plan', viewing: 'live' } },
+    maria.token,
+  );
+  const assessmentId = opened.body.assessment.id;
+  await j(
+    'PUT',
+    `/org/assessments/${assessmentId}`,
+    {
+      ratings: [
+        { attrId: 'finishing', notObserved: true },
+        { attrId: 'movement', notObserved: true },
+        { attrId: 'first_touch', rating: 3, confidence: 'medium' },
+        { attrId: 'pressing', notObserved: true },
+      ],
+      recommendation: { verdict: 'monitor', reasons: 'One viewing.' },
+    },
+    maria.token,
+  );
+  const submitted = await j('POST', `/org/assessments/${assessmentId}/submit`, {}, maria.token);
+  const published = await j(
+    'POST',
+    `/org/assessments/${assessmentId}/publish-feedback`,
+    { text: 'Work on your first touch under pressure.' },
+    maria.token,
+  );
+  const feedback = (await j('GET', '/player/feedback', undefined, kola.token)).body.items.find(
+    (f) => f.id === assessmentId,
+  );
+  const objective = await j(
+    'POST',
+    '/player/objectives',
+    { feedbackId: feedback?.id, objectives: [{ text: 'Cushion the first touch' }, { text: 'Open the body' }] },
+    kola.token,
+  );
+  ok(
+    submitted.status === 200 && published.status === 200 && objective.status === 201,
+    'DP0 the player agrees an objective from feedback the club published',
+  );
+  const objectiveId = objective.body.objective.id;
+  const set = await j(
+    'POST',
+    '/org/box-cam/assignments',
+    { playerId: 'pl-adeyemi', drillId: 'box-touches', target: { type: 'duration', value: 5 * MIN }, objectiveId },
+    maria.token,
+  );
+  ok(
+    set.status === 201 && set.body.assignment.objectiveId === objectiveId,
+    'DP0b the club sets Box Training against it',
+  );
+  const plan = await j('GET', '/player/box-cam/development-plan', undefined, kola.token);
+  ok(
+    JSON.stringify(Object.keys(plan.body)) === JSON.stringify(['objectives', 'assignments', 'activity', 'note']) &&
+      plan.body.note.startsWith('Completing sessions never automatically marks'),
+    'DP1 the plan: objectives, assignments, activity and a note that sessions close no objective',
+  );
+  const o = plan.body.objectives.find((x) => x.id === objectiveId);
+  ok(
+    o &&
+      JSON.stringify(Object.keys(o)) ===
+        JSON.stringify(['id', 'orgId', 'orgName', 'status', 'createdAt', 'objectives', 'assignments']) &&
+      o.orgId === 'org-eastport' &&
+      o.orgName === 'Eastport FC' &&
+      JSON.stringify(o.objectives) === JSON.stringify(['Cushion the first touch', 'Open the body']) &&
+      o.assignments.length === 1 &&
+      o.assignments[0].id === set.body.assignment.id,
+    "DP2 an objective names its club, its items' text, and the Box Training set against it",
+  );
+  const own = (await j('GET', '/player/box-cam/assignments', undefined, kola.token)).body.items;
+  ok(
+    JSON.stringify(plan.body.assignments) === JSON.stringify(own.filter((a) => a.state !== 'cancelled')) &&
+      plan.body.assignments.some((a) => a.id === set.body.assignment.id) &&
+      !plan.body.assignments.some((a) => a.id === assignmentId),
+    "DP3 the plan's assignments are the player's own views, the cancelled one left out",
+  );
+  const passport = await j('GET', '/player/football-passport', undefined, kola.token);
+  ok(
+    JSON.stringify(plan.body.activity) === JSON.stringify(passport.body.developmentActivity) &&
+      plan.body.activity.days === 30 &&
+      plan.body.activity.boxSessions > 0,
+    "DP4 the plan's activity is the last 30 days the Passport shows",
+  );
+  const guniPlan = await j('GET', '/player/box-cam/development-plan', undefined, guni.token);
+  const childPlan = await j('GET', '/guardian/children/pl-guni/box-cam/development-plan', undefined, amara.token);
+  ok(
+    childPlan.status === 200 &&
+      JSON.stringify(childPlan.body) === JSON.stringify(guniPlan.body) &&
+      childPlan.body.assignments.length > 0,
+    "DP5 a guardian reads the child's plan as the child does",
+  );
+  const unrelated = await j('GET', '/guardian/children/pl-adeyemi/box-cam/development-plan', undefined, amara.token);
+  neg(unrelated.status === 404 && unrelated.body.error === 'CHILD_NOT_FOUND', "DP6 not another player's plan");
+  neg(
+    (await j('GET', '/player/box-cam/development-plan', undefined, maria.token)).status === 401,
+    'DP7 a club has no route to the player plan',
+  );
+
+  // DL: the club's drill list is the player's, without the providers.
+  const clubDrills = await j('GET', '/org/box-cam/drills', undefined, maria.token);
+  const playerDrills = await j('GET', '/player/box-cam/drills', undefined, kola.token);
+  ok(
+    clubDrills.status === 200 &&
+      JSON.stringify(Object.keys(clubDrills.body)) === JSON.stringify(['drills']) &&
+      JSON.stringify(clubDrills.body.drills) === JSON.stringify(playerDrills.body.drills) &&
+      clubDrills.body.drills.length > 0,
+    "DL1 a club lists the player's drills, and nothing about the providers",
+  );
+  ok(
+    JSON.stringify(Object.keys(clubDrills.body.drills[0])) ===
+      JSON.stringify([
+        'id',
+        'version',
+        'title',
+        'category',
+        'summary',
+        'targetTypes',
+        'verificationCapabilities',
+        'repSupport',
+        'repSupportNote',
+        'setup',
+        'safetyNotes',
+        'restGuidance',
+        'ageAppropriateness',
+      ]),
+    'DL2 a drill as a club reads it',
+  );
+  ok(
+    (await j('GET', '/org/box-cam/drills', undefined, alex.token)).status === 200,
+    'DL3 an agency can read the drill list too',
+  );
+
+  // KC: keeping a clip tags one of the player's own media as Box Cam captured; nothing is uploaded or made public.
+  const kept = await runSession(kola.token, { drillId: 'box-control', target: { type: 'duration', value: 5 * MIN } }, [
+    { seq: 1, type: 'presence_interval', fromMs: 0, toMs: 6 * MIN, quality: 'good' },
+    { seq: 2, type: 'ball_interval', fromMs: 0, toMs: 6 * MIN },
+    { seq: 3, type: 'active_interval', fromMs: 0, toMs: 5 * MIN, quality: 'good' },
+  ]);
+  const sid = kept.done.body.session.id;
+  // A media link is signed afresh on every read, so it is compared without its signature.
+  const media = async () =>
+    (await j('GET', '/player/me', undefined, kola.token)).body.media.map((m) => ({
+      ...m,
+      url: m.url === null ? null : m.url.split('?')[0],
+    }));
+  const before = await media();
+  const mid = before[0].id;
+  const clip = (session, body, token = kola.token) =>
+    j('POST', `/player/box-cam/sessions/${session}/clip`, body, token);
+  let r = await clip(sid, { mediaId: 7 });
+  neg(r.status === 400 && r.body.field === 'mediaId' && r.body.problem === 'not_text', 'KC1 the media id is text');
+  r = await clip(sid, { mediaId: mid, sessionId: sid });
+  neg(r.status === 400 && r.body.field === 'sessionId' && r.body.problem === 'unknown_field', 'KC2 nothing else');
+  const open = await j(
+    'POST',
+    '/player/box-cam/sessions',
+    { drillId: 'box-control', target: { type: 'duration', value: 5 * MIN }, provider: 'local_test' },
+    kola.token,
+  );
+  r = await clip(open.body.session.id, { mediaId: mid });
+  neg(r.status === 404 && r.body.error === 'SESSION_NOT_FOUND', 'KC3 an unfinished session keeps no clip');
+  r = await clip('boxs-none', { mediaId: mid });
+  neg(r.status === 404 && r.body.error === 'SESSION_NOT_FOUND', 'KC4 an unknown session');
+  r = await clip(sid, { mediaId: mid }, guni.token);
+  neg(r.status === 404 && r.body.error === 'SESSION_NOT_FOUND', "KC5 not another player's session");
+  r = await clip(sid, { mediaId: 'media-none' });
+  neg(r.status === 404 && r.body.error === 'MEDIA_NOT_FOUND', 'KC6 an unknown media item');
+  r = await clip(sid, {});
+  neg(r.status === 404 && r.body.error === 'MEDIA_NOT_FOUND', 'KC7 no media item named');
+  r = await clip(b6SessionId, { mediaId: mid }, guni.token);
+  neg(
+    r.status === 403 && r.body.error === 'GUARDIAN_CONTROLLED' && r.body.message.includes('parent/guardian'),
+    'KC8 a minor keeps no clip until the guardian allows it',
+  );
+  await j('PATCH', '/guardian/children/pl-guni/box-cam/prefs', { retainClips: true }, amara.token);
+  r = await clip(b6SessionId, { mediaId: mid }, guni.token);
+  neg(
+    r.status === 404 && r.body.error === 'MEDIA_NOT_FOUND',
+    "KC9 once allowed, a minor still can't name another player's media",
+  );
+  const unchanged = JSON.stringify(await media()) === JSON.stringify(before);
+  r = await clip(sid, { mediaId: mid });
+  ok(
+    unchanged &&
+      r.status === 200 &&
+      JSON.stringify(Object.keys(r.body)) === JSON.stringify(['session', 'note']) &&
+      JSON.stringify(r.body.session) ===
+        JSON.stringify((await j('GET', `/player/box-cam/sessions/${sid}`, undefined, kola.token)).body.session) &&
+      r.body.note.includes('never makes it public'),
+    'KC10 kept: the session as the player reads it, and a note that keeping a clip never makes it public',
+  );
+  const after = await media();
+  ok(
+    JSON.stringify(after[0]) ===
+      JSON.stringify({
+        ...Object.fromEntries(Object.entries(before[0]).filter(([k]) => k !== 'tags')),
+        capturedBy: 'box_cam',
+        boxSessionId: sid,
+        tags: before[0].tags,
+      }) && JSON.stringify(after.slice(1)) === JSON.stringify(before.slice(1)),
+    'KC11 the media item is marked Box Cam captured, by this session, and nothing else changes',
+  );
+  const R = readRows(DATA_DIR);
+  const stored = R.row('box_sessions', { id: sid });
+  const ledger = R.rows('ledger', { type: 'box_clip_saved', player_id: 'pl-adeyemi' });
+  R.close();
+  ok(stored.clip_media_id === mid, 'KC12 the session keeps the clip');
+  ok(ledger.length === 1 && ledger[0].org_id === null, "KC13 keeping a clip is a row in the player's ledger");
 }
 
 section('metrics — privacy-safe counters, no PII');

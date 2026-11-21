@@ -415,7 +415,7 @@ are for surprising facts or points that later work depends on, not implementatio
    into a TypeScript battery (or a rules suite), pass them there and sync, so the behaviour is specified on both
    servers, then port it here. A domain is done when `grep "Not ported yet:"` finds nothing in it and it answers no
    501. Uploads and video analysis stay out of scope (see Out of scope). Slices 3 to 9 are independent of each other.
-   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5), 5 re-tagged `Out of scope:`]. Each marker was checked
+   0. Audit the markers [**done**: 66 `Not ported yet:` left (65 after slice 1, 39 after slice 2's first part, 26 after its second, 19 after slice 3, 13 after slice 5, 12 after slice 6), 5 re-tagged `Out of scope:`]. Each marker was checked
       against both trees. 12 were stale and went: the whole agents domain bar one live event, a Room's evidence
       gate and vacancy, a request's Contact, the decision draft, the verification tokens. Others now name only what
       is left (`season` filing and the safety console's claim mirror are ported, their live events aren't). Four
@@ -491,6 +491,11 @@ are for surprising facts or points that later work depends on, not implementatio
       since esqlite can't take an SQL function written here. The two markers left in these domains are sweeps
       (slice 8).
    6. Development: the Box Cam development plan (player and guardian), the club's drill list, and keeping a clip.
+      [**done**: `development/boxCam` gained DP0–DP7, DL1–DL3 and KC1–KC13; all pass on both servers, and the probe's
+      responses answer as TypeScript's do.] The plan (`development/box_plan`) reads the Passport's own Box Cam sources,
+      so its activity is the Passport's by construction. A club's drill list is the player's without the providers.
+      Keeping a clip checks the body, then the session, then a minor's `retainClips`, then the media item, as
+      TypeScript does. The development domain's only markers left are ledger details (slice 7).
    7. The ledger, verification and safety: a detail on `ledger.Entry`, written to the `detail_*` columns and
       `ledger_protocols` and read back by `view`. That covers Box Cam preferences, the Combine, a verification
       decision and a root approval. Also the operations events' detail in `/admin/metrics`, removing a

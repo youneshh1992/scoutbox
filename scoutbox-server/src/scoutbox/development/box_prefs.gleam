@@ -44,6 +44,14 @@ fn prefs_for(read: Read, player_id: id.PlayerId) -> Result(row.Row, Fail(e)) {
   }
 }
 
+/// Whether a player's Box Clips may be kept (a guardian's choice for a child).
+pub fn retains_clips(
+  read: Read,
+  player_id: id.PlayerId,
+) -> Result(Bool, Fail(e)) {
+  prefs_for(read, player_id) |> result.map(fn(r) { r.retain_clips })
+}
+
 fn view(r: row.Row) -> Json {
   json.object([
     #(

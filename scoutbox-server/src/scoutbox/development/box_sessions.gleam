@@ -431,6 +431,21 @@ pub fn set_note(
   guarded_update(tx, "note = ?", [sqlight.text(note)], session, finished_sql)
 }
 
+/// The player's kept clip of a finished session: one of their own media items.
+pub fn attach_clip(
+  tx: Tx,
+  session: id.BoxSessionId,
+  media: id.MediaId,
+) -> Result(Nil, Fail(e)) {
+  guarded_update(
+    tx,
+    "clip_media_id = ?",
+    [sqlight.text(id.media_to_string(media))],
+    session,
+    finished_sql,
+  )
+}
+
 // ---------------------------------------------------------------------------------------------- finalizing
 
 /// What `finalize` works out from the accepted stream.
