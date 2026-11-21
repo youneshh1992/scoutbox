@@ -38,6 +38,7 @@ import scoutbox/safety/moderate
 import scoutbox/verification/vouch_view
 import scoutbox/vocab/availability
 import scoutbox/vocab/playing_level
+import sqlight
 import wisp.{type Request, type Response}
 
 const fresh_start = "Fresh Start"
@@ -1113,6 +1114,69 @@ pub fn complete_drill(
           ])
         },
       )
+    }
+  }
+}
+
+/// `POST /player/media/:id/captions`: a WebVTT caption track for one of the player's own clips, stored as sent.
+pub fn captions(
+  ctx: Ctx,
+  req: Request,
+  p: PlayerAccess,
+  media_id: String,
+) -> Response {
+  // The path names the clip.
+  let mid = id.media(media_id)
+  case list.find(p.player.media, fn(m) { m.clip.id == mid }) {
+    Error(Nil) -> http.error(404, "MEDIA_NOT_FOUND")
+    Ok(m) -> {
+      let shape = {
+        use vtt <- input.field("vtt", input.nullish(input.text(100_000_000)))
+        input.done(option.unwrap(vtt, ""))
+      }
+      use vtt <- http.body(req, shape, [])
+      case
+        string.starts_with(string.trim(vtt), "WEBVTT"),
+        input.utf16_length(vtt) > 200_000
+      {
+        False, _ ->
+          http.error_message(
+            400,
+            "VTT_REQUIRED",
+            "Captions are a WebVTT track (starts with \"WEBVTT\").",
+          )
+        True, True -> http.error(413, "CAPTIONS_TOO_LARGE")
+        True, False -> {
+          let saved =
+            store.unit(ctx.store, fn(tx) {
+              live_pings.player(tx, p.player.row.id)
+              store.run(
+                tx,
+                "UPDATE player_media SET captions = ? WHERE id = ?",
+                [
+                  sqlight.text(vtt),
+                  id.media_sql(m.clip.id),
+                ],
+              )
+            })
+          case saved {
+            Error(failure) -> http.internal(failure)
+            Ok(Nil) ->
+              http.json(
+                200,
+                json.object([
+                  #(
+                    "media",
+                    json.object([
+                      #("id", id.media_json(m.clip.id)),
+                      #("captions", json.bool(True)),
+                    ]),
+                  ),
+                ]),
+              )
+          }
+        }
+      }
     }
   }
 }

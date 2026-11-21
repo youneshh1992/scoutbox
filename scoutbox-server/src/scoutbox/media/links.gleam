@@ -272,3 +272,50 @@ fn deletion_queued(read: Read, media_id: String) -> Result(Bool, Fail(e)) {
   )
   |> result.map(result.is_ok)
 }
+
+/// `GET /media/:id/captions`: a clip's caption track, by the same live rule as the media itself, for the bearer of
+/// a session (operations/followUps.mjs). An unknown clip is not found before anyone is asked who they are.
+pub fn captions(ctx: Ctx, req: Request, media_id: String) -> Response {
+  let now = clock.now_ms()
+  // The path names the clip.
+  let mid = id.media(media_id)
+  let found =
+    store.read(ctx.store, fn(read) {
+      use track <- result.try(store.one(
+        read,
+        "SELECT m.captions FROM player_media m JOIN players p ON p.id = m.player_id WHERE m.id = ? AND p.deleted_at IS NULL",
+        [id.media_sql(mid)],
+        decode.at([0], decode.optional(decode.string)),
+      ))
+      case track {
+        Error(Nil) -> Ok(None)
+        Ok(track) -> {
+          use session <- result.try(case http.bearer(req) {
+            Ok(token) ->
+              sessions.by_token(read, token, now, ctx.config.session_ttl_ms)
+            Error(Nil) -> Ok(None)
+          })
+          use entitled <- result.map(case session {
+            None -> Ok(False)
+            Some(session) -> may_access(read, session, mid, now)
+          })
+          Some(#(track, entitled))
+        }
+      }
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "MEDIA_NOT_FOUND")
+    Ok(Some(#(_, False))) -> http.error(401, "MEDIA_AUTH_REQUIRED")
+    Ok(Some(#(None, True))) | Ok(Some(#(Some(""), True))) ->
+      http.error_message(
+        404,
+        "NO_CAPTIONS",
+        "This video has no caption track yet.",
+      )
+    Ok(Some(#(Some(vtt), True))) ->
+      wisp.response(200)
+      |> wisp.set_header("content-type", "text/vtt; charset=utf-8")
+      |> wisp.set_body(wisp.Text(vtt))
+  }
+}

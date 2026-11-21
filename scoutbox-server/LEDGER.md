@@ -63,7 +63,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/liveDelivery` | neutral | 0 → 0 | 0 | 7 |  | +7 added | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
-| `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
+| `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 68 |  | +23 added | yes |  |  | **done** |
 | `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  | yes | 31 / 0 | 12 / 12 | **done** |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved | yes |  |  | **done** |
@@ -127,6 +127,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/api` | 24 | Parity beyond the batteries, slice 5: a profile's similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
+| `platform/playersAndGuardians` | 23 | Parity beyond the batteries, slice 5: a club's clip views and scout tags (V1–V4, T1–T8) and a clip's caption track, set by the player and read by whoever may see the clip (C1–C11) |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |

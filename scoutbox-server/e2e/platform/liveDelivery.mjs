@@ -242,6 +242,22 @@ await delivered(
   () => j('POST', '/org/players/pl-adeyemi/notes', { text: 'Live delivery note.' }, maria),
   KOLA,
 );
+const kolaClip = (await j('GET', '/player/me', undefined, kola)).body.media[0].id;
+await delivered(
+  'C14a a club views a clip',
+  () => j('POST', `/org/players/pl-adeyemi/media/${kolaClip}/view`, {}, maria),
+  KOLA,
+);
+await delivered(
+  'C14b a club tags a clip',
+  () => j('POST', `/org/players/pl-adeyemi/media/${kolaClip}/tags`, { tags: ['pace'] }, maria),
+  KOLA,
+);
+await delivered(
+  "C14c the player sets a clip's captions",
+  () => j('POST', `/player/media/${kolaClip}/captions`, { vtt: 'WEBVTT\n\n00:00.000 --> 00:01.000\nGo.' }, kola),
+  KOLA,
+);
 await delivered(
   "C15 the guardian shares a child's medical record",
   () => j('POST', '/guardian/children/pl-guni/medical/share', { shared: true }, amara),

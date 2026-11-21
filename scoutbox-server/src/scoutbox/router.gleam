@@ -34,6 +34,7 @@ import scoutbox/development/objectives
 import scoutbox/development/open_days
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
+import scoutbox/discovery/clip_routes
 import scoutbox/discovery/directory
 import scoutbox/discovery/insights
 import scoutbox/discovery/matching_routes
@@ -170,6 +171,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["orgs", "directory"] ->
       only(req, Get, fn() { club_directory.directory(ctx, req) })
     ["media", id] -> only(req, Get, fn() { links.serve(ctx, req, id) })
+    ["media", id, "captions"] ->
+      only(req, Get, fn() { links.captions(ctx, req, id) })
     ["events"] -> only(req, Get, fn() { live_routes.connect(ctx, req) })
     ["events", "ticket"] ->
       only(req, Post, fn() { live_routes.ticket(ctx, req) })
@@ -867,6 +870,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { directory.directory(ctx, req, org) })
         ["filmroom"] ->
           only(req, Get, fn() { directory.film_room(ctx, req, org) })
+        ["tags"] -> only(req, Get, fn() { clip_routes.tags(ctx) })
+        ["players", pid, "media", mid, "view"] ->
+          only(req, Post, fn() {
+            clip_routes.view(ctx, req, org, id.player(pid), id.media(mid))
+          })
+        ["players", pid, "media", mid, "tags"] ->
+          only(req, Post, fn() {
+            clip_routes.tag(ctx, req, org, id.player(pid), id.media(mid))
+          })
         ["fixtures"] ->
           only(req, Get, fn() { directory.fixtures(ctx, req, org) })
         ["ledger"] ->
@@ -1667,6 +1679,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["drills", did, "complete"] ->
           only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
         ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
+        ["media", mid, "captions"] ->
+          only(req, Post, fn() { record.captions(ctx, req, player, mid) })
         ["medical", "records"] ->
           only(req, Post, fn() { record.medical_record(ctx, req, player) })
         ["badges"] -> only(req, Post, fn() { record.badges(ctx, req, player) })
