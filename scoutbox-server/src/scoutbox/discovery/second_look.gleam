@@ -56,13 +56,19 @@ pub fn count(tx: Tx, name: String) -> Result(Nil, Fail(e)) {
   metrics.count(tx, "secondLook", name)
 }
 
-/// The `secondLook` group of `/admin/metrics`, with the two policies' versions.
+/// The `secondLook` group of `/admin/metrics`, with the two policies' versions, then the counters the group holds
+/// for matching and the watchlists (`count_matching`), each from the first time it is counted.
 pub fn metrics_json(tx: Tx) -> Result(Json, Fail(e)) {
-  use fields <- result.map(metrics.fields(tx, "secondLook", metric_names))
+  use fields <- result.try(metrics.fields(tx, "secondLook", metric_names))
+  use later <- result.map(metrics.fields_beyond(tx, "secondLook", metric_names))
   json.object(
-    list.append(fields, [
-      #("policyVersion", json.int(rules.policy_version)),
-      #("coveragePolicyVersion", json.int(1)),
+    list.flatten([
+      fields,
+      [
+        #("policyVersion", json.int(rules.policy_version)),
+        #("coveragePolicyVersion", json.int(1)),
+      ],
+      later,
     ]),
   )
 }

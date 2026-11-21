@@ -554,6 +554,12 @@ fn reconcile(
           case seen {
             Ok(_) -> Ok(Nil)
             Error(Nil) -> {
+              use _ <- result.try(
+                matching_routes.count(tx, case transition {
+                  event_row.Entered -> "watchlist_player_entered"
+                  event_row.Left -> "watchlist_player_left"
+                }),
+              )
               use eid <- result.try(id.next_watchlist_event(tx))
               event_row.insert(
                 tx,
@@ -615,12 +621,13 @@ fn reconcile(
           }
         }
       })
-      Ok(Derived(
+      use _ <- result.map(matching_routes.count(tx, "watchlist_reconciled"))
+      Derived(
         criteria: c,
         blocked:,
         total: list.length(current),
         evaluated_at: Some(at),
-      ))
+      )
     }
   }
 }
@@ -1005,6 +1012,9 @@ pub fn create(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             )
           })
           |> room_routes.storage,
+        )
+        use _ <- result.try(
+          matching_routes.count(tx, "watchlist_created") |> room_routes.storage,
         )
         use _ <- result.try(
           changed(tx, r, live_event.WatchlistCreated) |> room_routes.storage,
@@ -1514,6 +1524,10 @@ pub fn room(ctx: Ctx, req: Request, a: OrgAccess, wid: String) -> Response {
           now,
           ctx.config.box_cam_test_provider,
         ))
+        use _ <- result.try(
+          matching_routes.count(tx, "watchlist_player_to_room")
+          |> room_routes.storage,
+        )
         // Re-adding a player who already has a Room is idempotent and is not an event.
         use _ <- result.map(case created.existed {
           True -> Ok(Nil)

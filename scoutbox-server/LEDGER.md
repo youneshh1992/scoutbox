@@ -50,7 +50,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 90 |  | +4 added | yes |  |  | **done** |
-| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
+| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 87 | 73 | +8 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 161 | 54 |  | yes | 68 / 0 | 3 / 3 | **done** |
@@ -122,6 +122,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `discovery/exposureCalibrationAndCoverage` | 4 | Parity beyond the batteries, slice 5: the evidence-gap rule attribute_never_observed names what no submitted report observed, from the latest rubric, and is supplied once some report has (AN1–AN4) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
+| `discovery/matchingAndWatchlists` | 6 | Parity beyond the batteries, slice 5: /admin/metrics counts match queries, watchlists created and reconciled, players entering and leaving, and Room bridge calls, after the policy versions, for the process only (MC1–MC6) |
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |
 | `platform/api` | 4 | Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4) |

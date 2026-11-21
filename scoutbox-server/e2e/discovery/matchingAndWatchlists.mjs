@@ -979,6 +979,47 @@ section('§22b — matching answers its own question, and nothing in it is a sco
   abuse(34, admin.status === 404, `there is no admin route to a club's watchlists (${admin.status})`);
 }
 
+section('§22c — /admin/metrics counts matching, and names nothing');
+{
+  const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin' };
+  const group = async () => (await j('GET', '/admin/metrics', undefined, undefined, ADMIN)).body.secondLook;
+  const n = (g, k) => g[k] ?? 0;
+  const g0 = await group();
+  await j('POST', '/org/matching', ANY_AGE, maria.token);
+  const g1 = await group();
+  ok(n(g1, 'matching_query_run') === n(g0, 'matching_query_run') + 1, 'MC1 a match query counts once');
+  const wl = (await j('POST', '/org/watchlists', { name: 'Counted', mode: 'snapshot', criteria: CDM }, maria.token))
+    .body.watchlist;
+  const g2 = await group();
+  ok(n(g2, 'watchlist_created') === n(g1, 'watchlist_created') + 1, 'MC2 a watchlist created counts once');
+  const members = (await j('GET', `/org/watchlists/${wl.id}`, undefined, maria.token)).body.items;
+  const g3 = await group();
+  ok(
+    members.length > 0 &&
+      n(g3, 'watchlist_reconciled') === n(g2, 'watchlist_reconciled') + 1 &&
+      n(g3, 'watchlist_player_entered') === n(g2, 'watchlist_player_entered') + members.length &&
+      n(g3, 'watchlist_player_left') === n(g2, 'watchlist_player_left'),
+    'MC3 reading a watchlist reconciles it once, counting each player who entered',
+  );
+  await j('POST', `/org/watchlists/${wl.id}/room`, { playerId: members[0].playerId }, maria.token);
+  await j('POST', `/org/watchlists/${wl.id}/room`, { playerId: members[0].playerId }, maria.token);
+  const g4 = await group();
+  ok(
+    n(g4, 'watchlist_player_to_room') === n(g3, 'watchlist_player_to_room') + 2,
+    'MC4 each Room bridge call counts, the repeat that found the Room included',
+  );
+  const keys = Object.keys(g4);
+  const at = keys.indexOf('coveragePolicyVersion');
+  ok(
+    at > 0 &&
+      ['matching_query_run', 'watchlist_created', 'watchlist_reconciled', 'watchlist_player_to_room'].every(
+        (k) => keys.indexOf(k) > at,
+      ) &&
+      Object.values(g4).every((v) => Number.isInteger(v)),
+    "MC5 the matching counters follow the group's policy versions, and every value is a count",
+  );
+}
+
 section('§23 — a restart changes nothing about what a watchlist means');
 {
   const before = (await j('GET', '/org/watchlists', undefined, maria.token)).body;
@@ -991,6 +1032,12 @@ section('§23 — a restart changes nothing about what a watchlist means');
   const maria2 = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   const after = (await j('GET', '/org/watchlists', undefined, maria2.token)).body;
   ok(after.total === before.total, 'every watchlist survives the restart');
+  const counters = (
+    await j('GET', '/admin/metrics', undefined, undefined, {
+      'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin',
+    })
+  ).body.secondLook;
+  ok(!('matching_query_run' in counters), "MC6 the counters are the process's: a restart starts them again");
   const afterDetail = (await j('GET', `/org/watchlists/${beforeDetail.watchlist.id}`, undefined, maria2.token)).body;
   ok(
     JSON.stringify(afterDetail.items.map((i) => i.playerId)) ===

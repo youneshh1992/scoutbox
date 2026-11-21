@@ -3,7 +3,8 @@
 //// query starts from the players the organisation may see, so no criterion is ever evaluated against a player the
 //// club may not know exists, including through a count.
 ////
-//// Not ported yet: the matching metrics (`matching_query_run` and the watchlist counters of /admin/metrics).
+//// Each act counts itself in the `secondLook` group of `/admin/metrics`, as the TypeScript server's discovery counters
+//// do (`count`): counts only, naming nothing.
 
 import gleam/json.{type Json}
 import gleam/list
@@ -23,8 +24,9 @@ import scoutbox/platform/input
 import scoutbox/platform/json_text
 import scoutbox/platform/keyset
 import scoutbox/platform/limits
+import scoutbox/platform/metrics
 import scoutbox/platform/paging
-import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
 import scoutbox/vocab/trust_band
 import wisp.{type Request, type Response}
@@ -357,7 +359,17 @@ pub fn run(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
       }
     })
   case answer {
+    Ok(resp) if resp.status == 200 ->
+      case store.unit(ctx.store, count(_, "matching_query_run")) {
+        Ok(Nil) -> resp
+        Error(e) -> http.internal(e)
+      }
     Ok(resp) -> resp
     Error(e) -> http.internal(e)
   }
+}
+
+/// One more of a matching or watchlist counter in `/admin/metrics`' `secondLook` group.
+pub fn count(tx: Tx, name: String) -> Result(Nil, Fail(e)) {
+  metrics.count(tx, "secondLook", name)
 }

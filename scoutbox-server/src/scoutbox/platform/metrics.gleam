@@ -58,3 +58,31 @@ pub fn fields(
     #(name, json.int(list.key_find(rows, name) |> result.unwrap(0)))
   })
 }
+
+/// `group`'s counters other than `names`, in the order each was first counted: the TypeScript server adds such a
+/// counter to its group the first time it counts it.
+pub fn fields_beyond(
+  tx: Tx,
+  group: String,
+  names: List(String),
+) -> Result(List(#(String, Json)), Fail(e)) {
+  use _ <- result.try(store.exec(tx, table))
+  use rows <- result.map(
+    store.query(
+      store.reading(tx),
+      "SELECT name, n FROM process_metrics WHERE grp = ? ORDER BY rowid",
+      [sqlight.text(group)],
+      {
+        use name <- decode.field(0, decode.string)
+        use n <- decode.field(1, decode.int)
+        decode.success(#(name, n))
+      },
+    ),
+  )
+  list.filter_map(rows, fn(r) {
+    case list.contains(names, r.0) {
+      True -> Error(Nil)
+      False -> Ok(#(r.0, json.int(r.1)))
+    }
+  })
+}
