@@ -9,6 +9,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/discovery/similarity
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players.{type Player}
 import scoutbox/insight/review_queue
@@ -25,6 +26,7 @@ import scoutbox/rules/visibility.{type Access}
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/vocab/org_type
+import scoutbox/vocab/position
 import wisp.{type Request, type Response}
 
 const note_max = 2000
@@ -96,9 +98,21 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
       case append(ctx, a, p, ledger_row.View, now) {
         Error(failure) -> http.internal(failure)
         Ok(_) ->
-          case store.read(ctx.store, audit.notes_for(_, a.org.id, p.row.id)) {
+          case
+            store.read(ctx.store, fn(read) {
+              use notes <- result.try(audit.notes_for(read, a.org.id, p.row.id))
+              use similar <- result.map(similarity.most_similar(
+                read,
+                p.row,
+                a.org,
+                3,
+                now,
+              ))
+              #(notes, similar)
+            })
+          {
             Error(failure) -> http.internal(failure)
-            Ok(notes) -> {
+            Ok(#(notes, similar)) -> {
               use <- exposed(ctx, a, p.row.id)
               http.json(
                 200,
@@ -114,9 +128,38 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
                             "Statistical similarity — a lead, not a verdict.",
                           ),
                         ),
-                        // Not ported yet: "more like this" and the archetypes are the similarity engine.
-                        #("players", json.preprocessed_array([])),
-                        #("archetypes", json.preprocessed_array([])),
+                        #(
+                          "players",
+                          json.array(similar, fn(s: similarity.Similar) {
+                            json.object([
+                              #("playerId", id.player_json(s.id)),
+                              #("name", json.string(s.name)),
+                              #(
+                                "position",
+                                json.nullable(s.position, position.to_json),
+                              ),
+                              #("score", json.int(s.score)),
+                            ])
+                          }),
+                        ),
+                        #(
+                          "archetypes",
+                          json.array(
+                            similarity.closest_archetypes(
+                              similarity.of_row(p.row),
+                              2,
+                              now,
+                            ),
+                            fn(pair) {
+                              let #(arch, score) = pair
+                              json.object([
+                                #("archetypeId", json.string(arch.id)),
+                                #("label", json.string(arch.label)),
+                                #("score", json.int(score)),
+                              ])
+                            },
+                          ),
+                        ),
                       ]),
                     ),
                   ]),
@@ -218,18 +261,68 @@ pub fn mark(
   }
 }
 
-/// `GET /org/players/:id/morelike`: a player the club may not see, or who blocked it, is absent. Not ported yet: the
-/// ranking itself (the similarity score over the players the club can see).
+/// `GET /org/players/:id/morelike`: the ten players the club may see who are most like this one, each as the club
+/// sees them with its similarity. A player the club may not see, or who blocked it, is absent.
 pub fn more_like(ctx: Ctx, a: OrgAccess, id: id.PlayerId) -> Response {
-  use _, access <- with_player(ctx, a, id, clock.now_ms())
+  let now = clock.now_ms()
+  use p, access <- with_player(ctx, a, id, now)
   case access.blocked || !access.visible {
     True -> not_found()
-    False ->
-      http.error_message(
-        501,
-        "NOT_PORTED",
-        "Similar players are not supported by this server yet.",
-      )
+    False -> {
+      let found =
+        store.read(ctx.store, fn(read) {
+          use top <- result.try(similarity.most_similar(
+            read,
+            p.row,
+            a.org,
+            10,
+            now,
+          ))
+          use rows <- result.map(players.for_org_many(
+            read,
+            list.map(top, fn(s) { s.id }),
+            a.org,
+            now,
+          ))
+          #(top, rows)
+        })
+      case found {
+        Error(failure) -> http.internal(failure)
+        Ok(#(top, rows)) -> {
+          let ranked =
+            list.filter_map(top, fn(s) {
+              use #(full, acc) <- result.try(
+                list.find(rows, fn(r) { { r.0 }.row.id == s.id }),
+              )
+              case acc.visible && !acc.blocked {
+                False -> Error(Nil)
+                True ->
+                  Ok(
+                    json.object(
+                      list.append(players.org_fields(full, a.org, acc, now), [
+                        #("similarity", json.int(s.score)),
+                      ]),
+                    ),
+                  )
+              }
+            })
+          http.json(
+            200,
+            json.object([
+              #(
+                "base",
+                json.object([
+                  #("id", id.player_json(p.row.id)),
+                  #("name", json.string(p.row.name)),
+                  #("position", json.nullable(p.row.position, position.to_json)),
+                ]),
+              ),
+              #("players", json.preprocessed_array(ranked)),
+            ]),
+          )
+        }
+      }
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import scoutbox/development/combine_rules
 import scoutbox/development/cv_stub
 import scoutbox/development/drill_guidance
 import scoutbox/development/hub_rules
+import scoutbox/discovery/similarity
 import scoutbox/messaging/notification_prefs
 import scoutbox/passport/passport_rules
 import scoutbox/passport/trust_rules
@@ -33,6 +34,7 @@ import scoutbox/rows/combine_attempts as attempt_row
 import scoutbox/vocab/box_provider
 import scoutbox/vocab/box_target_type
 import scoutbox/vocab/capture_context
+import scoutbox/vocab/foot
 import scoutbox/vocab/notification_category
 import scoutbox/vocab/position
 import simplifile
@@ -731,4 +733,57 @@ pub fn trust_policy_test() {
   assert trust_spec("TRUST_SCORE_POLICY_VERSION", decode.int)
     == trust_rules.policy_version
   assert trust_spec("TRUST_DISCLAIMER", decode.string) == trust_rules.disclaimer
+}
+
+pub fn archetypes_test() {
+  let archetype = {
+    use id <- decode.field("id", decode.string)
+    use label <- decode.field("label", decode.string)
+    use position <- decode.field("position", decode.string)
+    use foot <- decode.field("foot", decode.string)
+    use dob <- decode.field("dob", decode.string)
+    use height <- decode.field("heightCm", decode.int)
+    use weight <- decode.field("weightKg", decode.int)
+    use apps <- decode.subfield(["stats", "appearances"], decode.int)
+    use goals <- decode.subfield(["stats", "goals"], decode.int)
+    use assists <- decode.subfield(["stats", "assists"], decode.int)
+    decode.success(#(
+      id,
+      label,
+      position,
+      foot,
+      dob,
+      height,
+      weight,
+      #(apps, goals, assists),
+    ))
+  }
+  let snapshot =
+    snapshot(
+      "catalogue.json",
+      decode.at(["ARCHETYPES"], decode.list(archetype)),
+    )
+  let declared =
+    list.map(similarity.archetypes(), fn(a) {
+      let p = a.profile
+      let assert Some(pos) = p.position
+      let assert Some(f) = p.foot
+      let assert #(Some(h), Some(w)) = #(p.height_cm, p.weight_kg)
+      let assert #(Some(apps), Some(goals), Some(assists)) = #(
+        p.appearances,
+        p.goals,
+        p.assists,
+      )
+      #(
+        a.id,
+        a.label,
+        position.to_string(pos),
+        foot.to_string(f),
+        p.birth_date,
+        h,
+        w,
+        #(apps, goals, assists),
+      )
+    })
+  assert declared == snapshot
 }

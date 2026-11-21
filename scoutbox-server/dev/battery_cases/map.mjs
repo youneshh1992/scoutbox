@@ -646,6 +646,36 @@ const triggerType = vocab('scoutbox/rows/second_look_items', 'trigger_type_pairs
 const briefStatus = vocab('scoutbox/vocab/brief_status');
 const playingLevel = vocab('scoutbox/vocab/playing_level');
 const position_ = vocab('scoutbox/vocab/position');
+
+const SIMILARITY = 'scoutbox/discovery/similarity';
+const foot_ = vocab('scoutbox/vocab/foot');
+/** A PlayingProfile (a player or a catalogue archetype) as `similarity.Profile`; an archetype's id and label aren't read. */
+const playingProfile = record({
+  module: SIMILARITY,
+  constructor: 'Profile',
+  fields: {
+    position: ['position', (v, ctx) => option(position_)(v, ctx)],
+    foot: ['foot', (v, ctx) => option(foot_)(v, ctx)],
+    dob: ['birth_date', string],
+    heightCm: ['height_cm', (v, ctx) => option(int)(v, ctx)],
+    weightKg: ['weight_kg', (v, ctx) => option(int)(v, ctx)],
+    stats: (v, ctx) => [
+      ['appearances', option(int)(v?.appearances, ctx)],
+      ['goals', option(int)(v?.goals, ctx)],
+      ['assists', option(int)(v?.assists, ctx)],
+    ],
+  },
+  ignore: ['id', 'label'],
+  defaults: {
+    position: 'None',
+    foot: 'None',
+    height_cm: 'None',
+    weight_kg: 'None',
+    appearances: 'None',
+    goals: 'None',
+    assists: 'None',
+  },
+});
 const band = vocab('scoutbox/vocab/trust_band');
 const briefFoot = vocab('scoutbox/rows/recruitment_briefs', 'foot_pairs');
 
@@ -2872,6 +2902,15 @@ const instant = (v, ctx) =>
 
 const AGE_MAP = {
   ['domain.ts#adultAgeFor']: plainIn(AGE)('adult_age_for', [string], int),
+  ['domain.ts#similarityScore']: {
+    module: SIMILARITY,
+    now: true,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(SIMILARITY)}.score(${playingProfile(c.args[0], ctx)}, ${playingProfile(c.args[1], ctx)}, ${ctx.now})`,
+        int(c.result),
+      ),
+  },
   ['domain.ts#ageOn']: {
     module: AGE,
     now: true,

@@ -1874,6 +1874,18 @@
     ]
   },
   {
+    "battery": "platform/api",
+    "functions": [
+      {
+        "function": "domain.ts#similarityScore",
+        "calls": 22,
+        "cases": 22,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "platform/contracts",
     "functions": [
       {
