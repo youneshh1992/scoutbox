@@ -371,6 +371,60 @@ section('missing-evidence engine');
   );
 }
 
+// An attribute no submitted report observed is a gap, named from the latest report's rubric.
+section('missing evidence: an attribute never observed');
+{
+  const report = async (ratings) => {
+    const a = (await j('POST', '/org/assessments', { playerId: 'pl-kim', positionGroup: 'ATT' }, maria.token)).body
+      .assessment;
+    await j(
+      'PUT',
+      `/org/assessments/${a.id}`,
+      { ratings, recommendation: { verdict: 'monitor', reasons: 'Synthetic.' } },
+      maria.token,
+    );
+    const done = await j('POST', `/org/assessments/${a.id}/submit`, {}, maria.token);
+    return done.body.assessment;
+  };
+  const gap = async () =>
+    (await j('GET', '/org/players/pl-kim/evidence-gaps', undefined, maria.token)).body.items.find(
+      (x) => x.ruleId === 'attribute_never_observed',
+    );
+  const labels = (a, except) => a.attributesSnapshot.filter((x) => !except.includes(x.id)).map((x) => x.label);
+  ok(!(await gap()), 'AN1 no submitted report, no gap');
+  const a1 = await report([
+    { attrId: 'finishing', rating: 4, confidence: 'high' },
+    { attrId: 'movement', notObserved: true },
+  ]);
+  const g1 = await gap();
+  ok(
+    g1?.status === 'suggested' &&
+      JSON.stringify(g1.records) === JSON.stringify([a1.id]) &&
+      g1.explanation ===
+        `No evidence yet of: ${labels(a1, ['finishing']).join(', ')} — every submitted report marked them “not observed”.` &&
+      g1.action === 'Plan an observation that covers the unobserved attribute.',
+    'AN2 every attribute the report did not observe is named, in the rubric order, citing the report',
+  );
+  const others = a1.attributesSnapshot.map((x) => x.id).filter((id) => !['finishing', 'movement'].includes(id));
+  const a2 = await report([
+    { attrId: 'movement', rating: 3, confidence: 'medium' },
+    ...others.slice(1).map((attrId) => ({ attrId, rating: 3, confidence: 'low' })),
+  ]);
+  const g2 = await gap();
+  ok(
+    JSON.stringify(g2?.records) === JSON.stringify([a1.id, a2.id]) &&
+      g2.explanation ===
+        `No evidence yet of: ${labels(a2, ['finishing', 'movement', ...others.slice(1)]).join(', ')} — every submitted report marked it “not observed”.`,
+    'AN3 a second report narrows the gap to what neither observed, and cites both',
+  );
+  await report([{ attrId: others[0], rating: 2, confidence: 'low' }]);
+  const g3 = await gap();
+  ok(
+    g3?.id === g1.id && g3.status === 'supplied' && JSON.stringify(g3.records) === JSON.stringify(g2.records),
+    'AN4 once some report has observed every attribute, the gap is supplied, keeping what it last cited',
+  );
+}
+
 // ================================================================ coverage
 section('coverage planning');
 {

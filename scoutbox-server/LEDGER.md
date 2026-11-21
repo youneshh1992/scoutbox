@@ -49,7 +49,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/combine` | neutral | 2 → 0 | 92 | 73 | 20 | +1 added | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
 | `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
-| `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 86 |  |  | yes |  |  | **done** |
+| `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 90 |  | +4 added | yes |  |  | **done** |
 | `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 81 | 73 | +2 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 241 | 32 |  | yes | 33 / 0 |  | **done** |
@@ -119,6 +119,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `development/combine` | 1 | Live events: the player's stream hears their development evidence change for the session and the attempt (LV1) |
 | `development/hub` | 1 | the rules suite checks that its numbered cases ran, as the battery does for the ones it keeps (the battery's check covered all seventy-six) |
 | `development/hub` | 1 | the rules suite defines its own N helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines N counts one |
+| `discovery/exposureCalibrationAndCoverage` | 4 | Parity beyond the batteries, slice 5: the evidence-gap rule attribute_never_observed names what no submitted report observed, from the latest rubric, and is supplied once some report has (AN1–AN4) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite checks that the abuse cases it lists ran, as the battery does for the rest (the battery's check covered all sixty) |
 | `discovery/matchingAndWatchlists` | 1 | the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one |
 | `platform/api` | 5 | Parity beyond the batteries, slice 1: the seed's attendance is dated from its own clock (SD1), a legacy signing answers the record it built with the whole first ledger row (LS1, LS2), and the player's export carries their threads and insights (EX1, EX2) |

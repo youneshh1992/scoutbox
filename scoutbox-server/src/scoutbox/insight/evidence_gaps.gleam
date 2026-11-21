@@ -5,8 +5,6 @@
 ////
 //// `assessment_disagreement` never fires, as in TypeScript, which reads a rating's `value` where the field is
 //// `rating`, so the spread is always NaN.
-////
-//// Not ported yet: `attribute_never_observed`, which reads the latest report's rubric and every report's ratings.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -14,6 +12,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players.{type Player}
@@ -152,6 +151,7 @@ fn rule_hits(
         False -> None
       }
   }
+  use never_observed <- result.try(never_observed(read, org, p))
   use submitted <- result.map(
     store.query(
       read,
@@ -183,7 +183,76 @@ fn rule_hits(
   }
   // `uncorroborated_claims` looks for evidence records whose `tier` is self-reported, but a record's tier is its
   // `verification.status`, so the TypeScript rule never fires; this keeps that behaviour.
-  option.values([footage, single, stale])
+  option.values([footage, single, never_observed, stale])
+}
+
+/// The attributes of the latest submitted report's rubric that no submitted report observed, citing every
+/// submitted report.
+fn never_observed(
+  read: Read,
+  org: orgs.Row,
+  p: Player,
+) -> Result(Option(Hit), Fail(e)) {
+  let mine = [id.org_sql(org.id), id.player_sql(p.row.id)]
+  use submitted <- result.try(
+    store.query(
+      read,
+      "SELECT id, template_id, template_version FROM assessments WHERE org_id = ? AND player_id = ? AND state <> 'draft' ORDER BY rowid",
+      mine,
+      {
+        use a <- decode.field(0, decode.string)
+        use template <- decode.field(1, decode.string)
+        use version <- decode.field(2, decode.int)
+        decode.success(#(a, template, version))
+      },
+    ),
+  )
+  case list.last(submitted) {
+    Error(Nil) -> Ok(None)
+    Ok(#(_, template, version)) -> {
+      use rubric <- result.try(
+        store.query(
+          read,
+          "SELECT attr_id, label FROM assessment_template_attributes WHERE template_id = ? AND template_version = ? ORDER BY position",
+          [sqlight.text(template), sqlight.int(version)],
+          {
+            use attr <- decode.field(0, decode.string)
+            use label <- decode.field(1, decode.string)
+            decode.success(#(attr, label))
+          },
+        ),
+      )
+      use observed <- result.map(store.query(
+        read,
+        "SELECT DISTINCT r.attr_id FROM assessment_ratings r JOIN assessments a ON a.id = r.assessment_id WHERE a.org_id = ? AND a.player_id = ? AND a.state <> 'draft' AND r.not_observed = 0",
+        mine,
+        decode.at([0], decode.string),
+      ))
+      case
+        list.filter_map(rubric, fn(x) {
+          case list.contains(observed, x.0) {
+            True -> Error(Nil)
+            False -> Ok(x.1)
+          }
+        })
+      {
+        [] -> None
+        gaps ->
+          Some(Hit(
+            row.AttributeNeverObserved,
+            list.map(submitted, fn(a) { a.0 }),
+            "No evidence yet of: "
+              <> string.join(gaps, ", ")
+              <> " — every submitted report marked "
+              <> case gaps {
+              [_] -> "it"
+              _ -> "them"
+            }
+              <> " “not observed”.",
+          ))
+      }
+    }
+  }
 }
 
 /// Bounds a hit to what the store holds, so a player with hundreds of clips does not fail the read.

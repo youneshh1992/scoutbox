@@ -161,6 +161,5 @@ scope for good (uploads, video analysis, the Expo push transport) says `Out of s
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
-- The missing-evidence rule `attribute_never_observed` is not ported (`Not ported yet:`).
 - A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
   COMMIT. Either way a completion that rolls back issues none.
