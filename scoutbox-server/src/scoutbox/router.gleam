@@ -744,6 +744,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             assessments.submit(ctx, org, id.assessment(aid))
           })
+        ["assessments", aid, "review"] ->
+          only(req, Post, fn() {
+            assessments.review(ctx, req, org, id.assessment(aid))
+          })
         ["assessments", aid, "publish-feedback"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)

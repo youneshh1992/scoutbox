@@ -8,9 +8,8 @@
 //// fixed at creation, needing a role in its Recruitment Room.
 ////
 //// A lead publishes a template's next version; the author or a lead publishes feedback from a submitted assessment,
-//// once, which is the only way anything in an assessment reaches the player or their guardian.
-////
-//// Not ported yet: a lead's review (`POST /org/assessments/:id/review`).
+//// once, which is the only way anything in an assessment reaches the player or their guardian. A lead reviews a
+//// submitted assessment once, with an optional note; the report itself is unchanged.
 
 import gleam/dynamic/decode
 import gleam/float
@@ -1353,6 +1352,66 @@ pub fn submit(ctx: Ctx, a: OrgAccess, aid: id.AssessmentId) -> Response {
       |> room_routes.answer
     }
     True, _, _, _ -> http.error(409, "ALREADY_SUBMITTED")
+  }
+}
+
+/// `POST /org/assessments/:id/review`.
+pub fn review(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  aid: id.AssessmentId,
+) -> Response {
+  use req <- http.rerun_on_stale(req)
+  use <- access.require_lead(a)
+  use x <- own(ctx, a, aid)
+  case x.row.state {
+    row.Submitted -> {
+      let shape = {
+        use note <- input.field("note", input.nullish(input.text(300)))
+        input.done(note)
+      }
+      use note <- http.body(req, shape, [])
+      // A blank note is none; any other is kept as written.
+      let note = case input.filled(note) {
+        None -> None
+        Some(_) -> note
+      }
+      let now = clock.now_ms()
+      store.unit(ctx.store, fn(tx) {
+        use touched <- result.try(
+          store.write(
+            tx,
+            "UPDATE assessments SET state = 'reviewed', reviewed_at = ?, review_note = ? WHERE id = ? AND state = 'submitted' RETURNING id",
+            [
+              sqlight.int(now),
+              sqlight.nullable(sqlight.text, note),
+              id.assessment_sql(x.row.id),
+            ],
+            decode.at([0], decode.string),
+          )
+          |> room_routes.storage,
+        )
+        use <-
+          fn(next) {
+            case touched {
+              [_] -> next()
+              _ -> store.stale("the assessment was reviewed meanwhile")
+            }
+          }
+        use _ <- result.try(
+          history(tx, x.row.id, a, "reviewed", now) |> room_routes.storage,
+        )
+        use stored <- result.map(
+          by_id(store.reading(tx), x.row.id)
+          |> room_routes.storage,
+        )
+        let assert Some(stored) = stored as "a reviewed assessment reads back"
+        one(200, stored)
+      })
+      |> room_routes.answer
+    }
+    _ -> http.error(409, "NOT_SUBMITTED")
   }
 }
 

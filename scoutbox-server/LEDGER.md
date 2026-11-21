@@ -89,7 +89,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
-| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 240 |  | 26 moved, +2 added | yes |  |  | **done** |
+| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 248 |  | 26 moved, +10 added | yes |  |  | **done** |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
 
@@ -140,6 +140,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
 | `recruitment/trials` | 10 | Parity beyond the batteries, slice 3: a simulated Box Cam session is a candidate, citable on a trial and in a decision only while BOX_CAM_TEST_PROVIDER is on, and the decision surface lists the case's cited sessions (TP1–TP9) |
 | `scouting/clubWorkflows` | 2 | Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2) |
+| `scouting/clubWorkflows` | 8 | Parity beyond the batteries, slice 5: a lead's review of a submitted assessment, once, with its note as written, and the refusals (RV1–RV8) |
 
 ## Calls to port by hand
 
