@@ -220,7 +220,7 @@ fn directory_page(
     }
     // The text search matches the name or the country, and the city of an adult only (a minor's city is never
     // shown to a club, so it is never matched), lowered as JavaScript lowers text; SQLite's lower() is ASCII only,
-    // so the search runs over every admitted player past the cursor, in order.
+    // so the search runs over every admitted player past the cursor, in order (docs/known-issues.md).
     Some(q) -> {
       let needle = js_text.lower(q)
       let query =

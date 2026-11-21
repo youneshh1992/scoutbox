@@ -156,6 +156,36 @@ but typing too. Until 2026-11-20 this server honoured `replayPolicy`.
 **Fix.** Keep only `replay` events in the log, on both servers. A client sees no difference beyond fewer stale
 nudges after a reconnect, since every event is only a cue to refetch.
 
+## A directory text search reads every player the club can see
+
+Found 2026-11-21 while porting the directory search. Accepted for now; it should be fixed before the player table
+grows.
+
+**What it is.** The TypeScript server matches a search against the lowered name, country and city in SQL, through a
+function it adds to SQLite (`lower_js`, JavaScript's `toLowerCase`, accented letters included). SQLite's own `lower()`
+lowers A–Z only, and esqlite gives no way to add an SQL function written in Gleam or Erlang. So `directory_page`
+(`scoutbox-server/src/scoutbox/discovery/directory.gleam`) runs the directory's query without the text condition and
+without a row limit, decodes every admitted player past the cursor, and matches each one in Gleam with
+`platform/js_text.lower`. Results, order and cursors match TypeScript's (120 searches compared).
+
+**The cost.** For a pro club the admitted players are nearly the whole `players` table, read and decoded on every
+search, and again from each next page's cursor. TypeScript scans the table too, since no index helps `instr`, but its
+scan stays inside SQLite and stops after `limit + 1` matches. This server reads past that point. A common search term
+therefore costs a whole-table read here where it costs a short scan there. With the seed's handful of players nobody
+notices; with tens of thousands it would mean slow searches and a burst of memory on every request.
+
+**The fix to aim for.** Register a deterministic `lower_js` scalar function on each connection from C, in the esqlite
+patch (`vendor/esqlite.patch`), backed by a Unicode lowercase table generated at build time (OTP's or the Unicode
+Character Database's), with JavaScript's Final_Sigma rule. The query can then be TypeScript's, filtered and limited in
+SQL. The same function would let the foot criterion (matching, watchlists, Nobody Missed) use `lower_js` as
+TypeScript does instead of `lower()`. Every stored foot is ASCII today, so that case is harmless. Test the C function
+against Node's `toLowerCase`, as `test/scoutbox/platform/js_text_test.gleam` tests `js_text.lower`.
+
+**Until then.** A cheaper stopgap is to scan in batches of a few hundred by the keyset cursor and stop at
+`limit + 1` matches. That brings the common case back in line with TypeScript, though a rare term still reads the
+whole table. A pre-filter with SQLite's `lower()` isn't safe: JavaScript lowers "İ" to "i" plus a combining dot,
+and the Kelvin sign to "k", so it would drop rows that should match.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package
