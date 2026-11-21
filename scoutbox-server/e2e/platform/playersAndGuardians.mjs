@@ -8,6 +8,8 @@
 //   C the co-guardian: created with its links to the children in one unit; the primary's coGuardians list is worked
 //     out from it; a duplicate e-mail (in any case) is 409; the co-guardian sees the children
 //   D the admin guardians list pages by cursor; junk paging is refused
+//   E a clip's views and scout tags from a club that may see the player, and its caption track: set by the player,
+//     read by whoever may see the clip
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -341,6 +343,118 @@ section('D — the admin guardians list pages by cursor');
     'an allowlist: no hash',
   );
   neg((await j('GET', '/admin/guardians?limit=abc', undefined, null, ADMIN)).status === 400, 'junk paging');
+}
+
+section("E — a clip's views, scout tags and captions");
+{
+  const kola = await login('/auth/player/login', { playerId: 'pl-adeyemi' });
+  const maria = await login('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Scout' });
+  const hackney = await login('/auth/org/login', {
+    orgId: 'org-hackneymarsh',
+    scoutName: 'Dee Mensah',
+    role: 'Manager',
+    platform: 'grassroots',
+  });
+  const mine = async () => (await j('GET', '/player/me', undefined, kola)).body.media;
+  const MID = (await mine())[0].id;
+  const clip = (pid, mid, what) => `/org/players/${pid}/media/${mid}/${what}`;
+
+  ok(
+    (await j('POST', clip('pl-adeyemi', MID, 'view'), {}, maria)).body?.views === 1 &&
+      (await j('POST', clip('pl-adeyemi', MID, 'view'), undefined, maria)).body?.views === 2 &&
+      (await mine())[0].views === 2,
+    'V1 each club view counts once, and the player sees the count',
+  );
+  neg(
+    (await j('POST', clip('pl-adeyemi', MID, 'view'), { views: 9 }, maria)).status === 400,
+    'V2 a view takes no body',
+  );
+  const ghost = await j('POST', clip('pl-adeyemi', 'media-none', 'view'), {}, maria);
+  neg(ghost.status === 404 && ghost.body.error === 'MEDIA_NOT_FOUND', 'V3 an unknown clip is not found');
+  const unseen = await j('POST', clip('pl-adeyemi', MID, 'view'), {}, hackney);
+  neg(
+    unseen.status === 404 && unseen.body.error === 'NOT_FOUND' && (await mine())[0].views === 2,
+    'V4 a club that may not see the player cannot count a view',
+  );
+
+  const tags = await j('GET', '/org/tags', undefined, maria);
+  ok(tags.status === 200 && tags.body.length === 12 && tags.body[0] === 'first_touch', 'T1 the twelve scout tags');
+  const t1 = await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: ['pace', 'finishing'] }, maria);
+  const t2 = await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: ['finishing', 'vision'] }, maria);
+  ok(
+    JSON.stringify(t1.body) === JSON.stringify({ tags: { pace: 1, finishing: 1 } }) &&
+      JSON.stringify(t2.body) === JSON.stringify({ tags: { pace: 1, finishing: 2, vision: 1 } }),
+    'T2 tags are counted, never attributed; a new one goes after the others',
+  );
+  ok(
+    JSON.stringify((await mine())[0].tags) === JSON.stringify(t2.body.tags),
+    'T3 the player sees the same counts, in the same order',
+  );
+  const ledger = (await j('GET', '/org/ledger', undefined, maria)).body.items;
+  ok(
+    ledger.filter((e) => e.type === 'clip_tagged' && e.playerId === 'pl-adeyemi').length === 2,
+    "T4 each tagging is a row in the club's ledger",
+  );
+  const none = await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: [] }, maria);
+  neg(
+    none.status === 400 && none.body.error === 'TAGS_REQUIRED' && none.body.allowed.length === 12,
+    'T5 no tags is refused, with the tags allowed',
+  );
+  const unknown = await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: ['pace', 'flair'] }, maria);
+  neg(
+    unknown.status === 400 &&
+      unknown.body.error === 'UNKNOWN_TAGS' &&
+      JSON.stringify(unknown.body.invalid) === '["flair"]' &&
+      unknown.body.allowed.length === 12,
+    'T6 a tag outside the list is refused, naming it',
+  );
+  neg(
+    (await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: ['pace', 'pace'] }, maria)).status === 400 &&
+      (await j('POST', clip('pl-adeyemi', MID, 'tags'), { tags: 'pace' }, maria)).status === 400,
+    'T7 a tag named twice, or tags not sent as a list, are refused',
+  );
+  ok(
+    JSON.stringify((await mine())[0].tags) === JSON.stringify(t2.body.tags),
+    'T8 and none of the refusals counted anything',
+  );
+
+  const VTT = 'WEBVTT\n\n00:00.000 --> 00:04.000\nCoach: two cones, thirty metres.';
+  const set = await j('POST', `/player/media/${MID}/captions`, { vtt: `  ${VTT}` }, kola);
+  ok(
+    set.status === 200 && JSON.stringify(set.body) === JSON.stringify({ media: { id: MID, captions: true } }),
+    'C1 the player sets a WebVTT caption track',
+  );
+  const notVtt = await j('POST', `/player/media/${MID}/captions`, { vtt: 'Just words.' }, kola);
+  neg(notVtt.status === 400 && notVtt.body.error === 'VTT_REQUIRED', 'C2 a track that is not WebVTT is refused');
+  const big = await j('POST', `/player/media/${MID}/captions`, { vtt: `WEBVTT\n${'x'.repeat(200_000)}` }, kola);
+  neg(big.status === 413 && big.body.error === 'CAPTIONS_TOO_LARGE', 'C3 a track over 200,000 characters is refused');
+  neg(
+    (await j('POST', '/player/media/media-none/captions', { vtt: VTT }, kola)).body?.error === 'MEDIA_NOT_FOUND',
+    "C4 only the player's own clip",
+  );
+  const read = async (mid, token) => {
+    const r = await fetch(`${API}/media/${mid}/captions`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    const text = await r.text();
+    return { status: r.status, type: r.headers.get('content-type') ?? '', text };
+  };
+  const byClub = await read(MID, maria);
+  ok(
+    byClub.status === 200 && byClub.type.includes('text/vtt') && byClub.text === `  ${VTT}`,
+    'C5 a club that may see the player reads the track as sent, as text/vtt',
+  );
+  ok((await read(MID, kola)).status === 200, 'C6 and so does the player');
+  neg((await read(MID)).status === 401, 'C7 an anonymous read is refused');
+  neg((await read(MID, hackney)).status === 401, 'C8 so is a club that may not see the player');
+  neg((await read(MID, amara)).status === 401, "C9 and a guardian who is not the player's");
+  const guniMid = (await j('GET', '/org/players/pl-guni', undefined, maria)).body.media[0].id;
+  const noTrack = await read(guniMid, amara);
+  ok(
+    noTrack.status === 404 && JSON.parse(noTrack.text).error === 'NO_CAPTIONS',
+    "C10 a guardian reads their child's clips; one without a track says so",
+  );
+  neg(JSON.parse((await read('media-none', maria)).text).error === 'MEDIA_NOT_FOUND', 'C11 an unknown clip');
 }
 
 console.log(`\nplayers and guardians: ${passed} checks passed (${negatives} negative)`);

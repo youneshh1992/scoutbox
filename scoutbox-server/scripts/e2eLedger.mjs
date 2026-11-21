@@ -130,6 +130,14 @@ export const NOTES = {
       },
     ],
   },
+  'platform/playersAndGuardians': {
+    added: [
+      {
+        checks: 23,
+        why: "Parity beyond the batteries, slice 5: a club's clip views and scout tags (V1–V4, T1–T8) and a clip's caption track, set by the player and read by whoever may see the clip (C1–C11)",
+      },
+    ],
+  },
   'platform/liveDelivery': {
     added: [
       {
