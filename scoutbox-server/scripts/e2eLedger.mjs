@@ -215,6 +215,10 @@ export const NOTES = {
         checks: 1,
         why: "the rules suite defines its own abuse helper; the counter scores a block-bodied helper's one neg as a check and its calls as none, so each file that defines it counts one",
       },
+      {
+        checks: 6,
+        why: 'Parity beyond the batteries, slice 5: /admin/metrics counts match queries, watchlists created and reconciled, players entering and leaving, and Room bridge calls, after the policy versions, for the process only (MC1–MC6)',
+      },
     ],
   },
   'development/hub': {
