@@ -148,6 +148,10 @@ export const NOTES = {
         checks: 23,
         why: "Parity beyond the batteries, slice 5: a club's clip views and scout tags (V1–V4, T1–T8) and a clip's caption track, set by the player and read by whoever may see the clip (C1–C11)",
       },
+      {
+        checks: 7,
+        why: "Parity beyond the batteries, slice 5: the directory's text search lowers text as JavaScript does, accented and Greek letters included, never matches a minor's city, and pages by cursor (DQ1–DQ6)",
+      },
     ],
   },
   'platform/liveDelivery': {
