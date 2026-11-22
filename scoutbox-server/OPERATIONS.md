@@ -144,7 +144,6 @@ the named variable switches the adapter. Production refuses `ONFIDO_API_TOKEN`, 
 - `GET /capabilities` (unauthenticated) reports capability states and `dataLayer`. It
   never includes keys, hostnames or connection strings.
 - `GET /admin/metrics` reports per-process counters and backlogs since boot.
-  `GET /admin/data-layer` gives data-layer detail.
 - **Logs.** Each request writes one JSON line `{t,id,m,p,s,ms}`. The correlation id comes
   from an inbound `X-Request-Id` or is generated, and is echoed back. Tokens, auth
   headers, bodies and e-mail addresses are never logged.

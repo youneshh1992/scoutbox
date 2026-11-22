@@ -108,6 +108,10 @@ export const NOTES = {
         checks: 24,
         why: 'Parity beyond the batteries, slice 5: a profile\'s similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score',
       },
+      {
+        checks: 7,
+        why: "Parity beyond the batteries, slice 10: the club home dashboard's recruitment counts (RC1), reputation's seeded and live rows (RP1, RP2), a child's insights as their guardian reads them (DG0) and the guardian's weekly digest (DG1–DG3)",
+      },
     ],
   },
   'recruitment/contacts': {

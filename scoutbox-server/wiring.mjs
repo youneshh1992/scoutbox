@@ -780,7 +780,6 @@ setInterval(tick, SWEEP_MS).unref();
 // ------------------------------------------------- the Trust & Safety console
 createSafetyConsole({
   adminRouter,
-  dataLayerReport: (opts) => dataLayer.report(opts),
   storeEngine: store.engine,
   unit,
   notify,

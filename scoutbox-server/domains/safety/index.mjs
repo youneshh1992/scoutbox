@@ -57,7 +57,6 @@ export function createSafetyConsole(deps) {
       'createSafetyConsole',
       needs('createSafetyConsole', deps, [
         'adminRouter',
-        'dataLayerReport',
         'storeEngine',
         'unit',
         'notify',

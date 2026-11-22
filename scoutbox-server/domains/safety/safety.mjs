@@ -177,7 +177,6 @@ export function registerReporting({
 
 export function registerSafetyConsole({
   adminRouter,
-  dataLayerReport,
   storeEngine,
   unit,
   notify,
@@ -217,9 +216,6 @@ export function registerSafetyConsole({
     }
     res.json(read(page));
   };
-
-  // Row-level detail; the public /capabilities carries only counts and statuses.
-  adminRouter.get('/data-layer', (_req, res) => res.json(dataLayerReport({ details: true })));
 
   adminRouter.get('/overview', (_req, res) => {
     res.json({

@@ -577,7 +577,7 @@ export function attachDataLayer({
       reputationSeed: reputationSeedBoot,
       deliveryBookkeeping: deliveryBookkeepingBoot,
     },
-    /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
+    /** Counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       identity: { initState: identity.initState() },
