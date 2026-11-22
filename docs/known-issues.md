@@ -186,6 +186,32 @@ against Node's `toLowerCase`, as `test/scoutbox/platform/js_text_test.gleam` tes
 whole table. A pre-filter with SQLite's `lower()` isn't safe: JavaScript lowers "İ" to "i" plus a combining dot,
 and the Kelvin sign to "k", so it would drop rows that should match.
 
+## Reputation shows every club the whole ledger's activity, players' names included
+
+Found 2026-11-22 while porting `/org/reputation`. Ported as the TypeScript server behaves.
+
+**What it is.** `GET /org/reputation` (TypeScript's `domains/recruitment/ledger.mjs`) answers any club's staff with a
+`live` row for every actor name and organisation name pair on the whole ledger (`countsByActor`), not only its own.
+Each row gives that pair's counts of profile views, contact requests, trial requests and reports, and signings.
+Any club can therefore see how many players each rival club's scouts have viewed, contacted, trialled and signed.
+
+The rows aren't limited to staff, either. Every ledger type opens a row, and some rows name someone who isn't
+staff: a message records its sender, so a player who messages a club appears as a "scout" of that club, with all
+counts zero. After a `platform/api` run against the TypeScript server, the live rows include
+`Kola Adeyemi · Eastport FC` (a player's message), `system · ScoutBox` and `open day` beside the scouts. The same would
+show a minor's name, or a guardian's, once they message a club. That tells every club that the player is talking to
+that one.
+
+**Where it is in the port.** `request_routes.reputation` and `ledger.counts_by_actor`
+(`scoutbox-server/src/scoutbox/recruitment/request_routes.gleam`, `safety/ledger.gleam`) read the whole ledger and
+open a row for every type, as TypeScript does. `platform/api` RP2 specifies that behaviour.
+
+**Fix.** Decide what reputation is meant to show, then change both servers and RP2 together. The likely answer is
+the club's own scouts only (`org_id` = the caller's), counting only staff acts (`user_id IS NOT NULL`). If rivals'
+track records are meant to be visible, still drop every row with no staff member, and confirm with the Founder that
+clubs may see each other's activity counts. The club and grassroots portals read the endpoint (`getReputation`), so
+check what their screens assume first.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package
