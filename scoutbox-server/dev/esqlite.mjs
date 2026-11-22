@@ -6,8 +6,8 @@
 //
 // Why: stock esqlite runs `step` on a dirty I/O scheduler, and its fetchall calls `step` once per row, so every
 // row pays two scheduler switches and every reader contends for the dirty schedulers' one run queue. The patch adds
-// `fetchall` (all rows in one call, on a normal scheduler) and `fetchall_dirty` (the same on a dirty one, for long
-// statements); `platform/store` chooses between them per statement. Measurements and reasoning: the TypeScript
+// `fetchmany` (a batch of rows in one call, on a normal scheduler, within a time budget) and `fetchmany_dirty` (the
+// same on a dirty one, for slow steps); `platform/store` chooses between them per batch. Measurements and reasoning: the TypeScript
 // tree's `.claude/plans/gleam-migration-evaluation.md`, "Read speed, and the decision".
 //
 // esqlite's source isn't committed (its SQLite amalgamation alone is 9 MB): an upgrade is a new pin and checksum

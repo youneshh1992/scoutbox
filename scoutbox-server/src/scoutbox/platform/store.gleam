@@ -11,8 +11,8 @@
 ////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit. A read on
 ////   a pooled connection runs the same way, so a crashing read never takes its reader down.
 //// - Queries go through `scoutbox_store_ffi`, not sqlight's `query`: each connection's statements are prepared once
-////   and kept, and run on a normal scheduler unless one has taken over a millisecond (see that module, and
-////   `vendor/esqlite.patch`). Statements without parameters (`exec`: BEGIN, COMMIT, migrations) go through sqlight,
+////   and kept, and fetched in short batches on a normal scheduler unless a batch met a step slower than a
+////   millisecond (see that module, and `vendor/esqlite.patch`). Statements without parameters (`exec`: BEGIN, COMMIT, migrations) go through sqlight,
 ////   on a dirty scheduler, so a COMMIT's fsync never holds a normal one.
 
 import exception
@@ -327,8 +327,8 @@ fn run_query(
   })
 }
 
-/// For tests: whether `sql` now runs on a dirty scheduler on this read's connection, having once taken over a
-/// millisecond on a normal one.
+/// For tests: whether `sql` now runs on a dirty scheduler on this read's connection, its last batch having met a
+/// step slower than a millisecond.
 pub fn runs_dirty(read: Read, sql: String) -> Bool {
   ffi_runs_dirty(read.cache, read.conn, sql)
 }

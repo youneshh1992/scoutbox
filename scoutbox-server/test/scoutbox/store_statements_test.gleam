@@ -110,6 +110,46 @@ pub fn a_statement_that_ran_long_moves_to_the_dirty_scheduler_test() {
   assert long == True
 }
 
+pub fn a_statement_with_many_quick_rows_stays_on_a_normal_scheduler_test() {
+  // Many batches, each a short call: the run as a whole takes far longer than a millisecond, but no step does.
+  let many =
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200000) SELECT i FROM n"
+  let s = bare_store()
+  let #(rows, dirty) =
+    store.read(s, fn(read) {
+      let assert Ok(rows) =
+        store.query(read, many, [], decode.at([0], decode.int))
+      #(rows, store.runs_dirty(read, many))
+    })
+  assert list.length(rows) == 200_000
+  assert list.first(rows) == Ok(1)
+  assert list.last(rows) == Ok(200_000)
+  assert int.sum(rows) == 200_000 * 200_001 / 2
+  assert dirty == False
+}
+
+pub fn a_statement_whose_steps_turn_quick_moves_back_to_a_normal_scheduler_test() {
+  // One row, produced after counting to the argument: slow for a million, quick for ten.
+  let counted =
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) SELECT count(*) FROM n"
+  let s = bare_store()
+  let modes =
+    store.read(s, fn(read) {
+      list.map([1_000_000, 10, 1_000_000], fn(upto) {
+        let assert Ok([n]) =
+          store.query(
+            read,
+            counted,
+            [sqlight.int(upto)],
+            decode.at([0], decode.int),
+          )
+        assert n == upto
+        store.runs_dirty(read, counted)
+      })
+    })
+  assert modes == [True, False, True]
+}
+
 pub fn reads_carry_on_while_a_unit_runs_a_long_statement_test() {
   let s = bare_store()
   let long_write = fn() {

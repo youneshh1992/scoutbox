@@ -71,11 +71,12 @@ required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake pro
   tests in `test/scoutbox/battery/verification/`.
 - `vendor/esqlite.patch`: our change to esqlite, the NIF under sqlight. `npm run esqlite` (`dev/esqlite.mjs`)
   fetches the pinned Hex tarball, checks it, applies the patch and compiles the NIF into `vendor/esqlite/` (not
-  committed), which `gleam.toml` takes as a path dependency in place of the Hex copy. The patch adds `fetchall`
-  (every row in one call, on a normal scheduler) and `fetchall_dirty`; `platform/scoutbox_store_ffi.erl` caches
-  each connection's statements and runs one on the dirty scheduler once it has taken over a millisecond. Stock
-  esqlite runs every row's `step` on the dirty schedulers, which made reads several times slower than Node and
-  stopped them scaling. An upgrade is a new pin and checksum in `dev/esqlite.mjs` and the patch reapplied.
+  committed), which `gleam.toml` takes as a path dependency in place of the Hex copy. The patch adds `fetchmany`
+  (as many rows as it can step in half a millisecond, in one call on a normal scheduler) and `fetchmany_dirty`;
+  `platform/scoutbox_store_ffi.erl` caches each connection's statements, fetches in batches until a statement is
+  done, and runs a statement's next batch on the dirty scheduler while its batches meet a step slower than a
+  millisecond. Stock esqlite runs every row's `step` on the dirty schedulers, which made reads several times slower
+  than Node and stopped them scaling; building a large result in one dirty call stopped large reads scaling too. An upgrade is a new pin and checksum in `dev/esqlite.mjs` and the patch reapplied.
 - `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
   seed, dumped by `dev/seed_sql.mjs`.
 - `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,

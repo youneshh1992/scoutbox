@@ -1,31 +1,43 @@
 diff -ruN a/c_src/esqlite3_nif.c b/c_src/esqlite3_nif.c
 --- a/c_src/esqlite3_nif.c
 +++ b/c_src/esqlite3_nif.c
-@@ -915,7 +915,58 @@
+@@ -915,7 +915,83 @@
      return make_sqlite3_error_tuple(env, rc);
  }
  
 +/*
-+ * Steps the statement to its end and returns every row as a tuple, in order: one NIF call per query, where
-+ * fetchall in esqlite3.erl makes one call to step per row. On a normal scheduler that is the difference between
-+ * about 2 and 9 microseconds for a point lookup; fetchall_dirty is the same function on a dirty I/O scheduler,
-+ * for statements that run long. Returns {ok, Rows} or {error, Code}; SQLITE_BUSY is an error like any other,
-+ * never waited on or retried here. The statement is reset afterwards whatever happened, so it can be bound and
-+ * run again, and its error stays on the connection for error_info.
++ * Steps the statement and returns its rows as tuples, in order, until it is done or this call has stepped for
++ * `budget` microseconds: one NIF call per batch of rows, where fetchall in esqlite3.erl makes one call to step per
++ * row. Returns {done, Rows, Micros} when the statement finished (it is then reset, so it can be bound and run
++ * again), {more, Rows, Micros} when the budget ran out first (the statement is left where it stopped, and the next
++ * call carries on from there), or {error, Code} (reset; the error stays on the connection for error_info).
++ * SQLITE_BUSY is an error like any other, never waited on or retried here. Micros is the time this call spent
++ * stepping and building rows, not counting any wait for a scheduler, so the caller can tell a slow step (one row
++ * that took long to produce) from a scheduler queue.
++ *
++ * fetchmany runs on a normal scheduler, which keeps its own allocator: rows built there scale with the number of
++ * schedulers, where building them on a dirty scheduler contends for a shared one. fetchmany_dirty is the same
++ * function on a dirty I/O scheduler, for a statement whose single step can take longer than a normal scheduler
++ * should be held.
 + */
  static ERL_NIF_TERM
-+esqlite_fetchall(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
++esqlite_fetchmany(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 +{
 +    esqlite3_stmt *stmt;
 +    ERL_NIF_TERM rows, result;
 +    ERL_NIF_TERM *cells;
++    ErlNifSInt64 budget, started, elapsed;
 +    int rc;
 +
-+    if(argc != 1) {
++    if(argc != 2) {
 +        return enif_make_badarg(env);
 +    }
 +
 +    if(!enif_get_resource(env, argv[0], esqlite3_stmt_type, (void **) &stmt)) {
++        return enif_make_badarg(env);
++    }
++
++    if(!enif_get_int64(env, argv[1], &budget)) {
 +        return enif_make_badarg(env);
 +    }
 +
@@ -38,14 +50,27 @@ diff -ruN a/c_src/esqlite3_nif.c b/c_src/esqlite3_nif.c
 +        return make_error_tuple(env, "no_memory");
 +    }
 +
++    started = enif_monotonic_time(ERL_NIF_USEC);
++    elapsed = 0;
 +    rows = enif_make_list(env, 0);
 +    while((rc = sqlite3_step(stmt->statement)) == SQLITE_ROW) {
 +        for(int i = 0; i < stmt->column_count; i++) {
 +            cells[i] = make_cell(env, stmt->statement, i);
 +        }
 +        rows = enif_make_list_cell(env, enif_make_tuple_from_array(env, cells, stmt->column_count), rows);
++        elapsed = enif_monotonic_time(ERL_NIF_USEC) - started;
++        if(elapsed >= budget) {
++            break;
++        }
 +    }
 +    enif_free(cells);
++    elapsed = enif_monotonic_time(ERL_NIF_USEC) - started;
++
++    if(rc == SQLITE_ROW) {
++        enif_make_reverse_list(env, rows, &result);
++        return enif_make_tuple3(env, make_atom(env, "more"), result, enif_make_int64(env, elapsed));
++    }
++
 +    sqlite3_reset(stmt->statement);
 +
 +    if(rc != SQLITE_DONE) {
@@ -53,19 +78,19 @@ diff -ruN a/c_src/esqlite3_nif.c b/c_src/esqlite3_nif.c
 +    }
 +
 +    enif_make_reverse_list(env, rows, &result);
-+    return make_ok_tuple(env, result);
++    return enif_make_tuple3(env, make_atom(env, "done"), result, enif_make_int64(env, elapsed));
 +}
 +
 +static ERL_NIF_TERM
  esqlite_reset(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
  {
      esqlite3_stmt *stmt;
-@@ -1327,6 +1378,8 @@
+@@ -1327,6 +1403,8 @@
      {"bind_parameter_index", 2, esqlite_bind_parameter_index},
  
      {"step", 1, esqlite_step, ERL_NIF_DIRTY_JOB_IO_BOUND},
-+    {"fetchall", 1, esqlite_fetchall},
-+    {"fetchall_dirty", 1, esqlite_fetchall, ERL_NIF_DIRTY_JOB_IO_BOUND},
++    {"fetchmany", 2, esqlite_fetchmany},
++    {"fetchmany_dirty", 2, esqlite_fetchmany, ERL_NIF_DIRTY_JOB_IO_BOUND},
      {"reset", 1, esqlite_reset},
  
      {"interrupt", 1, esqlite_interrupt, ERL_NIF_DIRTY_JOB_IO_BOUND},
@@ -76,31 +101,33 @@ diff -ruN a/src/esqlite3_nif.erl b/src/esqlite3_nif.erl
      bind_parameter_index/2,
  
      step/1,
-+    fetchall/1,
-+    fetchall_dirty/1,
++    fetchmany/2,
++    fetchmany_dirty/2,
  
      reset/1,
  
-@@ -221,6 +223,22 @@
+@@ -221,6 +223,24 @@
        Statement :: esqlite3_stmt_ref(),
        StepResult :: row() | '$done' | error().
  step(_Statement) ->
 +    erlang:nif_error(nif_library_not_loaded).
 +
-+%% @doc Step the statement to its end and return all its rows as tuples, in one call, on a normal scheduler.
-+%% For statements that finish well within a millisecond; use fetchall_dirty for long ones. The statement is
-+%% reset afterwards.
-+-spec fetchall(Statement) -> FetchallResult when
++%% @doc Step the statement and return its rows as tuples, in order, until it is done or this call has stepped for
++%% Budget microseconds, on a normal scheduler. {done, Rows, Micros}: finished, and reset. {more, Rows, Micros}: the
++%% budget ran out, and the next call carries on. Micros is the time spent stepping, without any scheduler wait.
++-spec fetchmany(Statement, Budget) -> FetchmanyResult when
 +      Statement :: esqlite3_stmt_ref(),
-+      FetchallResult :: {ok, [tuple()]} | error().
-+fetchall(_Statement) ->
++      Budget :: non_neg_integer(),
++      FetchmanyResult :: {done | more, [tuple()], non_neg_integer()} | error().
++fetchmany(_Statement, _Budget) ->
 +    erlang:nif_error(nif_library_not_loaded).
 +
-+%% @doc fetchall/1 on a dirty I/O scheduler.
-+-spec fetchall_dirty(Statement) -> FetchallResult when
++%% @doc fetchmany/2 on a dirty I/O scheduler, for a statement whose single step can take long.
++-spec fetchmany_dirty(Statement, Budget) -> FetchmanyResult when
 +      Statement :: esqlite3_stmt_ref(),
-+      FetchallResult :: {ok, [tuple()]} | error().
-+fetchall_dirty(_Statement) ->
++      Budget :: non_neg_integer(),
++      FetchmanyResult :: {done | more, [tuple()], non_neg_integer()} | error().
++fetchmany_dirty(_Statement, _Budget) ->
      erlang:nif_error(nif_library_not_loaded).
  
  -spec reset(Statement) -> ResetResult when

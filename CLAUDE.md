@@ -31,8 +31,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - esqlite is patched (`vendor/esqlite.patch`, built by `npm run esqlite`). After a fresh clone or a change to the
     patch, run it before any `gleam` command; `npm run e2e` runs it itself. Don't edit `vendor/esqlite/`: it is
     rebuilt from the patch.
-  - A statement through the store runs on a normal scheduler until it takes over 1 ms. Known long work (a full
-    scan, a sweep over every row) pays that once per connection; it is never wrong, only briefly slow for others.
+  - A statement through the store is fetched in batches of half a millisecond on a normal scheduler, however many
+    rows it returns. A batch that met a single step slower than 1 ms (an aggregate over a large table) moves the
+    statement to the dirty scheduler until a batch is quick again; that first slow step is never wrong, only
+    briefly slow for others.
   - `gleam dev` (the generator) compiles `src/` first, so code that uses a name the generator has not written yet
     blocks the run that would write it. Regenerate before using a new column or table.
   - A panicking `npm run codegen` (an id column it can't decide, say) has already deleted `src/scoutbox/rows` and
