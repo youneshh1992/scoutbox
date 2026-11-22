@@ -47,22 +47,15 @@ pub fn of_row(r: player_row.Row) -> Profile {
   )
 }
 
-const position_groups = [
-  ["GK"],
-  ["CB", "RB", "LB", "RWB", "LWB"],
-  ["CDM", "CM", "CAM"],
-  ["RW", "LW", "ST", "CF"],
-]
-
-/// The index of the group `p` is in, if any.
+/// The index of the group `p` is in (domain.ts `POSITION_GROUPS`): the keeper, the back line, midfield, attack.
 fn group_of(p: Option(Position)) -> Option(Int) {
-  use p <- option.then(p)
-  let p = position.to_string(p)
-  position_groups
-  |> list.index_map(fn(g, i) { #(g, i) })
-  |> list.find(fn(pair) { list.contains(pair.0, p) })
-  |> option.from_result
-  |> option.map(fn(pair) { pair.1 })
+  use p <- option.map(p)
+  case p {
+    position.GK -> 0
+    position.CB | position.RB | position.LB | position.RWB | position.LWB -> 1
+    position.CDM | position.CM | position.CAM -> 2
+    position.RW | position.LW | position.ST | position.CF -> 3
+  }
 }
 
 /// Goals and assists a game; no appearances count as one.

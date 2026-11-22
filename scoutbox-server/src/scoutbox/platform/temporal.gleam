@@ -509,27 +509,39 @@ fn year_outside(min: Int, max: Int) -> String {
   "year outside " <> int.to_string(min) <> "–" <> int.to_string(max)
 }
 
-/// `DDDD<a>DD<b>DD<c>` exactly, all digits: the three numbers.
+/// `DDDD<a>DD<b>DD<c>` exactly, all ASCII digits: the three numbers. It reads the bytes: text that is ten
+/// digits and separators as graphemes is the same ten bytes, and anything else matches neither shape.
 fn digits_of(
   s: String,
   a: String,
   b: String,
   c: String,
 ) -> Result(#(Int, Int, Int), Nil) {
-  case string.to_graphemes(s) {
-    [y1, y2, y3, y4, sa, m1, m2, sb, d1, d2] if sa == a && sb == b && c == "" ->
-      three(y1 <> y2 <> y3 <> y4, m1 <> m2, d1 <> d2)
-    [h1, h2, sa, m1, m2] if sa == a && b == "" -> three(h1 <> h2, m1 <> m2, "0")
+  case <<s:utf8>> {
+    <<y1, y2, y3, y4, sa, m1, m2, sb, d1, d2>> if c == "" -> {
+      use <- all_or_nothing(<<sa>> == <<a:utf8>> && <<sb>> == <<b:utf8>>)
+      use y <- result.try(number([y1, y2, y3, y4], 0))
+      use m <- result.try(number([m1, m2], 0))
+      use d <- result.map(number([d1, d2], 0))
+      #(y, m, d)
+    }
+    <<h1, h2, sa, m1, m2>> if b == "" && c == "" -> {
+      use <- all_or_nothing(<<sa>> == <<a:utf8>>)
+      use h <- result.try(number([h1, h2], 0))
+      use m <- result.map(number([m1, m2], 0))
+      #(h, m, 0)
+    }
     _ -> Error(Nil)
   }
 }
 
-fn three(a: String, b: String, c: String) -> Result(#(Int, Int, Int), Nil) {
-  use <- all_or_nothing(all_digits(a <> b <> c))
-  use x <- result.try(int.parse(a))
-  use y <- result.try(int.parse(b))
-  use z <- result.map(int.parse(c))
-  #(x, y, z)
+/// ASCII digit bytes as the number they write.
+fn number(bytes: List(Int), acc: Int) -> Result(Int, Nil) {
+  case bytes {
+    [] -> Ok(acc)
+    [b, ..rest] if b >= 48 && b <= 57 -> number(rest, acc * 10 + b - 48)
+    _ -> Error(Nil)
+  }
 }
 
 fn all_digits(s: String) -> Bool {
