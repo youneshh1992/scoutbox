@@ -2,6 +2,7 @@
 //// archetypes and "more like this": a lead for a scout, never a verdict, and drawn only from the players the club
 //// may see.
 
+import gleam/dynamic/decode
 import gleam/float
 import gleam/int
 import gleam/list
@@ -52,17 +53,15 @@ const position_groups = [
   ["RW", "LW", "ST", "CF"],
 ]
 
-fn same_group(a: Option(Position), b: Option(Position)) -> Bool {
-  case a, b {
-    Some(a), Some(b) -> {
-      let a = position.to_string(a)
-      let b = position.to_string(b)
-      list.any(position_groups, fn(g) {
-        list.contains(g, a) && list.contains(g, b)
-      })
-    }
-    _, _ -> False
-  }
+/// The index of the group `p` is in, if any.
+fn group_of(p: Option(Position)) -> Option(Int) {
+  use p <- option.then(p)
+  let p = position.to_string(p)
+  position_groups
+  |> list.index_map(fn(g, i) { #(g, i) })
+  |> list.find(fn(pair) { list.contains(pair.0, p) })
+  |> option.from_result
+  |> option.map(fn(pair) { pair.1 })
 }
 
 /// Goals and assists a game; no appearances count as one.
@@ -79,41 +78,60 @@ fn output_per_90(p: Profile) -> Float {
 /// output and 15 for build. Ages are taken at `now`. A stored birth date is always a day, so an age is always
 /// known here; an unknown one would earn nothing for age.
 pub fn score(a: Profile, b: Profile, now: Int) -> Int {
-  let position = case
-    a.position == b.position,
-    same_group(a.position, b.position)
-  {
-    True, _ -> 35.0
-    False, True -> 18.0
-    False, False -> 0.0
+  score_aged(aged(a, now), aged(b, now))
+}
+
+/// What `score` reads of a profile, worked out once: a scan scores one base against every candidate, so the base's
+/// age, group and output are not worked out again for each.
+type Aged {
+  Aged(
+    position: Option(Position),
+    group: Option(Int),
+    foot: Option(Foot),
+    age: Option(Int),
+    output: Float,
+    height: Float,
+    weight: Float,
+  )
+}
+
+fn aged(p: Profile, now: Int) -> Aged {
+  Aged(
+    position: p.position,
+    group: group_of(p.position),
+    foot: p.foot,
+    age: age.age_on(p.birth_date, now),
+    output: output_per_90(p),
+    height: int.to_float(option.unwrap(p.height_cm, 180)),
+    weight: int.to_float(option.unwrap(p.weight_kg, 75)),
+  )
+}
+
+fn score_aged(a: Aged, b: Aged) -> Int {
+  let position = case a.position == b.position, a.group, b.group {
+    True, _, _ -> 35.0
+    False, Some(x), Some(y) if x == y -> 18.0
+    False, _, _ -> 0.0
   }
   let foot = case a.foot == b.foot {
     True -> 10.0
     False -> 0.0
   }
-  let age_part = case
-    age.age_on(a.birth_date, now),
-    age.age_on(b.birth_date, now)
-  {
+  let age_part = case a.age, b.age {
     Some(x), Some(y) ->
       float.max(0.0, 15.0 -. int.to_float(int.absolute_value(x - y) * 3))
     _, _ -> 0.0
   }
   let output =
-    float.max(
-      0.0,
-      25.0 -. float.absolute_value(output_per_90(a) -. output_per_90(b)) *. 25.0,
-    )
-  let height = fn(p: Profile) { int.to_float(option.unwrap(p.height_cm, 180)) }
-  let weight = fn(p: Profile) { int.to_float(option.unwrap(p.weight_kg, 75)) }
+    float.max(0.0, 25.0 -. float.absolute_value(a.output -. b.output) *. 25.0)
   let build =
     float.max(
       0.0,
       15.0
         -. {
-        float.absolute_value(height(a) -. height(b))
+        float.absolute_value(a.height -. b.height)
         /. 2.0
-        +. float.absolute_value(weight(a) -. weight(b))
+        +. float.absolute_value(a.weight -. b.weight)
         /. 3.0
       },
     )
@@ -219,8 +237,9 @@ pub fn closest_archetypes(
   k: Int,
   now: Int,
 ) -> List(#(Archetype, Int)) {
+  let me = aged(p, now)
   archetypes()
-  |> list.map(fn(a) { #(a, score(p, a.profile, now)) })
+  |> list.map(fn(a) { #(a, score_aged(me, aged(a.profile, now))) })
   |> best_first
   |> list.take(k)
 }
@@ -231,7 +250,8 @@ pub type Similar {
 }
 
 /// The `k` players `org` may see who are most like `base`, best first; a tie keeps creation order. The base, a
-/// removed player and a player who blocked the club are never candidates.
+/// removed player and a player who blocked the club are never candidates. Ranked over light rows, the columns the
+/// score and the answer read (search.mjs `mostSimilar` over `scanLight`), keeping only the best `k` as it goes.
 pub fn most_similar(
   read: Read,
   base: player_row.Row,
@@ -239,12 +259,12 @@ pub fn most_similar(
   k: Int,
   now: Int,
 ) -> Result(List(Similar), Fail(e)) {
-  let me = of_row(base)
+  let me = aged(of_row(base), now)
   let query =
     sql.concat([
       sql.text(
-        "SELECT "
-        <> player_row.qualified("p")
+        "SELECT p.id, p.name, p.position, p.foot, p.birth_date, p.height_cm, p.weight_kg, p.stats_appearances,"
+        <> " p.stats_goals, p.stats_assists"
         <> " FROM players p WHERE p.deleted_at IS NULL AND p.id <> ",
       ),
       sql.arg(id.player_sql(base.id)),
@@ -258,16 +278,65 @@ pub fn most_similar(
     read,
     query.sql,
     query.args,
-    player_row.decoder(),
+    candidate_decoder(),
   ))
   rows
-  |> list.map(fn(r) {
-    let s = score(me, of_row(r), now)
-    #(Similar(r.id, r.name, r.position, s), s)
+  |> list.fold([], fn(best, c: #(Similar, Profile)) {
+    let #(similar, profile) = c
+    keep_best(
+      best,
+      Similar(..similar, score: score_aged(me, aged(profile, now))),
+      k,
+    )
   })
-  |> best_first
-  |> list.take(k)
-  |> list.map(fn(pair) { pair.0 })
+  |> list.reverse
+}
+
+/// A light row: the answer's fields (its score still 0) and the profile it is scored on.
+fn candidate_decoder() -> decode.Decoder(#(Similar, Profile)) {
+  use id <- decode.field(0, id.player_decoder())
+  use name <- decode.field(1, decode.string)
+  use position <- decode.field(2, decode.optional(position.decoder()))
+  use foot <- decode.field(3, decode.optional(foot.decoder()))
+  use birth_date <- decode.field(4, decode.string)
+  use height_cm <- decode.field(5, decode.optional(decode.int))
+  use weight_kg <- decode.field(6, decode.optional(decode.int))
+  use appearances <- decode.field(7, decode.optional(decode.int))
+  use goals <- decode.field(8, decode.optional(decode.int))
+  use assists <- decode.field(9, decode.optional(decode.int))
+  decode.success(#(
+    Similar(id:, name:, position:, score: 0),
+    Profile(
+      position:,
+      foot:,
+      birth_date:,
+      height_cm:,
+      weight_kg:,
+      appearances:,
+      goals:,
+      assists:,
+    ),
+  ))
+}
+
+/// `best` holds at most `k`, worst first. A candidate joins only with a strictly higher score than the worst kept
+/// once `k` are kept, and goes in after every kept one with its score, so an equal earlier candidate stays ahead.
+fn keep_best(best: List(Similar), c: Similar, k: Int) -> List(Similar) {
+  case list.length(best) >= k, best {
+    _, _ if k <= 0 -> []
+    True, [worst, ..] if c.score <= worst.score -> best
+    True, [_, ..rest] -> insert_worst_first(rest, c)
+    _, _ -> insert_worst_first(best, c)
+  }
+}
+
+/// Puts `c` into a worst-first list just before the first entry it doesn't beat: past every lower score, and below
+/// any equal one, which came earlier.
+fn insert_worst_first(best: List(Similar), c: Similar) -> List(Similar) {
+  case best {
+    [e, ..rest] if e.score < c.score -> [e, ..insert_worst_first(rest, c)]
+    _ -> [c, ..best]
+  }
 }
 
 /// Highest score first, equals in the order they came.
