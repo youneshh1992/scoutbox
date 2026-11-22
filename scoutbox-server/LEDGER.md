@@ -56,7 +56,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `operations/sweeps` | neutral | 0 → 0 | 0 | 20 |  | +20 added | yes |  |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 164 | 54 | +3 added | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
-| `platform/api` | neutral | 0 → 0 | 198 | 225 | 17 | +44 added | yes | 22 / 0 |  | **done** |
+| `platform/api` | neutral | 0 → 0 | 198 | 232 | 17 | +51 added | yes | 22 / 0 |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2079 / 54 | 201 / 241 | 54 cases pending; 40 hand-port calls |
@@ -134,6 +134,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/api` | 11 | Live events: the acts this battery already sets up (a trial report, a legacy signing, the domain and federation checks, aging-up, an urgent report, a coach reference, a match day, an open-day outcome, a release, a friendly answer) send their catalogue ping (LV1–LV11) |
 | `platform/api` | 4 | Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4) |
 | `platform/api` | 24 | Parity beyond the batteries, slice 5: a profile's similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score |
+| `platform/api` | 7 | Parity beyond the batteries, slice 10: the club home dashboard's recruitment counts (RC1), reputation's seeded and live rows (RP1, RP2), a child's insights as their guardian reads them (DG0) and the guardian's weekly digest (DG1–DG3) |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
 | `platform/notifications` | 4 | Parity beyond the batteries, slice 9: /capabilities counts a notice a preference muted, not one that is delivered, and lists no type without a category (SP1–SP3, with the second message they need) |

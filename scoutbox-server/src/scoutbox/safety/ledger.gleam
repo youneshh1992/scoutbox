@@ -487,6 +487,25 @@ pub fn top_actors_for_org(
   )
 }
 
+/// The whole ledger's events counted per actor name, organisation name and type, each group in the order of its first
+/// event (TypeScript's `countsByActor`; reputation reads every club's, as there).
+pub fn counts_by_actor(
+  read: Read,
+) -> Result(List(#(Option(String), Option(String), String, Int)), Fail(e)) {
+  store.query(
+    read,
+    "SELECT actor_name, org_name, type, COUNT(*) AS n FROM ledger GROUP BY actor_name, org_name, type ORDER BY MIN(seq)",
+    [],
+    {
+      use actor <- decode.field(0, decode.optional(decode.string))
+      use org <- decode.field(1, decode.optional(decode.string))
+      use type_ <- decode.field(2, decode.string)
+      use n <- decode.field(3, decode.int)
+      decode.success(#(actor, org, type_, n))
+    },
+  )
+}
+
 /// A ledger row as the organisation, the player or the guardian reads it. Its detail holds the keys its type
 /// carries whose columns are set, in `detail_keys` order, or is null when none are (TypeScript's `decodeDetail`).
 pub fn view(logged: Logged) -> Json {

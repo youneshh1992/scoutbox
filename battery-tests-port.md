@@ -534,6 +534,20 @@ are for surprising facts or points that later work depends on, not implementatio
       refused by proxy-addr, so the TypeScript server crashed at boot; it is invalid on both servers now. A muted
       notice and a type with no category are counted through the request counters (`effect.Count`, after COMMIT), so
       `/capabilities` reads them without waiting for the writer.
+   10. The routes the marker audit missed. Its route diff matched path segments, so a TypeScript route whose segments
+      all appear somewhere in the router read as routed. `/org/recruitment-counts` and `/org/reputation` (the club
+      and grassroots home dashboards), `/guardian/digest`, and `/guardian/children/:id/insights`, which the digest
+      check reads; `/admin/data-layer` repeated `/capabilities`' `dataLayer`, and no client read it, so it was removed
+      from TypeScript. [**done**: `platform/api` gained RC1, RP1–RP2 and DG0–DG3; all pass on both servers.]
+      Reputation's live rows come from the whole ledger, every club's, as in TypeScript, and are keyed by the two
+      names joined as text, so a missing name reads `null`. The digest reads the wall clock, as TypeScript does, so
+      the battery can't plant rows older than a week: its window is checked only against rows from this run.
+   11. The rest of the unrouted routes. `dev/route_probe.mjs` boots both servers,
+      sends every route the TypeScript tree registers with the matching role's session, and lists those where this
+      router answers its generic 404 and TypeScript doesn't. Beyond uploads it found, all called by an app:
+      `GET /player/feed`, `/player/cv`, `/player/drills`; `GET`/`POST /guardian/prefs`;
+      `GET /guardian/children/:id/opportunity-board`; `POST /guardian/children/:id/first-team-seeker`;
+      `GET /org/plan`; `GET /admin/invoices`, `/admin/coaches`; `POST /admin/verification/cases/:id/assign`.
 10. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible

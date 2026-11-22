@@ -5,6 +5,7 @@
 //// request goes to the guardian, never the child.
 
 import gleam/bool
+import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
@@ -22,6 +23,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/json_text
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
 import scoutbox/platform/live_pings
@@ -39,6 +41,7 @@ import scoutbox/recruitment/trials
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/recruitment_requests as request_row
+import scoutbox/rows/reputation_seed as seed_row
 import scoutbox/rows/trials as trial_row
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -543,6 +546,127 @@ pub fn org_ledger(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
 }
 
 /// `GET /org/funnel`: every figure counted from recorded events.
+/// `GET /org/recruitment-counts`: the home dashboard's recruitment figures.
+pub fn recruitment_counts(ctx: Ctx, a: OrgAccess) -> Response {
+  let id = a.org.id
+  let found =
+    store.read(ctx.store, fn(read) {
+      use pending <- result.try(requests.count_for_org(
+        read,
+        id,
+        Some(request_row.Pending),
+      ))
+      use awaiting <- result.try(trials.count_for_org(
+        read,
+        id,
+        Some(trial_row.AwaitingReport),
+      ))
+      use all <- result.map(trials.count_for_org(read, id, None))
+      json.object([
+        #("requestsPending", json.int(pending)),
+        #("trialsAwaitingReport", json.int(awaiting)),
+        #("trials", json.int(all)),
+      ])
+    })
+  case found {
+    Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+type Reputation {
+  Reputation(
+    scout_name: Option(String),
+    org_name: Option(String),
+    views: Int,
+    contacts: Int,
+    trials: Int,
+    signings: Int,
+  )
+}
+
+/// `GET /org/reputation`: the seeded track records beside live rows from the whole ledger. A live row is keyed as
+/// TypeScript keys it, by the two names joined as text, so a missing name reads `null`; every type opens a row and
+/// five of them count.
+pub fn reputation(ctx: Ctx) -> Response {
+  let found =
+    store.read(ctx.store, fn(read) {
+      use seeded <- result.try(store.query(
+        read,
+        "SELECT " <> seed_row.columns <> " FROM reputation_seed ORDER BY rowid",
+        [],
+        seed_row.decoder(),
+      ))
+      use groups <- result.map(ledger.counts_by_actor(read))
+      #(seeded, live_reputation(groups))
+    })
+  case found {
+    Ok(#(seeded, live)) ->
+      http.json(
+        200,
+        json.object([
+          #(
+            "seeded",
+            json.array(seeded, fn(s: seed_row.Row) {
+              json.object([
+                #("scoutName", json.string(s.scout_name)),
+                #("orgName", json.string(s.org_name)),
+                #("discoveries", json.int(s.discoveries)),
+                #("successRatePct", json.int(s.success_rate_pct)),
+                #("avgResaleMultiple", json_text.number(s.avg_resale_multiple)),
+                #("seeded", json.bool(True)),
+              ])
+            }),
+          ),
+          #(
+            "live",
+            json.array(live, fn(r: Reputation) {
+              json.object([
+                #("scoutName", json.nullable(r.scout_name, json.string)),
+                #("orgName", json.nullable(r.org_name, json.string)),
+                #("views", json.int(r.views)),
+                #("contacts", json.int(r.contacts)),
+                #("trials", json.int(r.trials)),
+                #("signings", json.int(r.signings)),
+                #("seeded", json.bool(False)),
+              ])
+            }),
+          ),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+fn live_reputation(
+  groups: List(#(Option(String), Option(String), String, Int)),
+) -> List(Reputation) {
+  let name = option.unwrap(_, "null")
+  let #(order, rows) =
+    list.fold(groups, #([], dict.new()), fn(acc, g) {
+      let #(order, rows) = acc
+      let #(actor, org, type_, n) = g
+      let key = name(actor) <> "|" <> name(org)
+      let #(order, current) = case dict.get(rows, key) {
+        Ok(r) -> #(order, r)
+        Error(Nil) -> #([key, ..order], Reputation(actor, org, 0, 0, 0, 0))
+      }
+      let next = case type_ {
+        "view" -> Reputation(..current, views: current.views + n)
+        "contact_request" ->
+          Reputation(..current, contacts: current.contacts + n)
+        "trial_request" | "trial_report" ->
+          Reputation(..current, trials: current.trials + n)
+        "signing" -> Reputation(..current, signings: current.signings + n)
+        _ -> current
+      }
+      #(order, dict.insert(rows, key, next))
+    })
+  order
+  |> list.reverse
+  |> list.filter_map(dict.get(rows, _))
+}
+
 pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
   let id = a.org.id
   let found =

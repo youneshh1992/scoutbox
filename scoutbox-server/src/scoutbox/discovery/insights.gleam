@@ -7,7 +7,9 @@ import gleam/list
 import gleam/option.{type Option}
 import gleam/string
 import scoutbox/app.{type Ctx}
+import scoutbox/development/record_routes as record
 import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store.{type Fail, type Read}
@@ -112,6 +114,20 @@ fn bool_int(b: Bool) -> Int {
   }
 }
 
+/// A player's views and shortlists this week, as `for_player`'s `thisWeek` counts them.
+pub fn this_week(
+  read: Read,
+  player_id: id.PlayerId,
+  now: Int,
+) -> Result(#(Int, Int), Fail(e)) {
+  use events <- result_map(events(read, player_id))
+  let weekly = list.filter(events, fn(e) { e.at >= now - week_ms })
+  let count = fn(kind) {
+    list.count(weekly, fn(e) { string.starts_with(e.kind, kind) })
+  }
+  #(count("view"), count("shortlist"))
+}
+
 pub fn for_player(
   read: Read,
   player_id: id.PlayerId,
@@ -162,6 +178,15 @@ pub fn for_player(
       }),
     ),
   ])
+}
+
+/// `GET /guardian/children/:id/insights`: the same view of the guardian's own child.
+pub fn child(ctx: Ctx, g: Guardian, child_id: id.PlayerId) -> Response {
+  use child <- record.own_child(ctx, g, child_id)
+  case store.read(ctx.store, for_player(_, child.row.id, clock.now_ms())) {
+    Ok(body) -> http.json(200, body)
+    Error(e) -> http.internal(e)
+  }
 }
 
 pub fn show(ctx: Ctx, p: PlayerAccess) -> Response {

@@ -601,6 +601,7 @@ pub const tables = [
   "regulatory_reviews",
   "reports",
   "representation_agreements",
+  "reputation_seed",
   "request_trial_slots",
   "review_later",
   "room_comment_mentions",

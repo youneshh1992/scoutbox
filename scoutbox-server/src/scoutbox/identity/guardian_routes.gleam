@@ -1,11 +1,13 @@
 //// A guardian's account: sign-in, their record, their children and the log of everything about them.
 
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/development/record_routes as record
+import scoutbox/discovery/insights
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/idv
 import scoutbox/identity/pairing
@@ -22,7 +24,9 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/secrets
 import scoutbox/platform/store
+import scoutbox/recruitment/requests
 import scoutbox/rows/id
+import scoutbox/rules/journey
 import scoutbox/safety/ledger
 import wisp.{type Request, type Response}
 
@@ -269,6 +273,58 @@ pub fn children(ctx: Ctx, g: Guardian) -> Response {
   case store.read(ctx.store, players.by_ids(_, g.child_ids)) {
     Ok(kids) ->
       http.json(200, json.array(kids, players.guardian_child_view(_, now)))
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /guardian/digest`: each child's week. Like TypeScript's, it reads the wall clock, not a test clock.
+pub fn digest(ctx: Ctx, g: Guardian) -> Response {
+  let now = clock.now_ms()
+  let week = now - 7 * 24 * 3600 * 1000
+  let found =
+    store.read(ctx.store, fn(read) {
+      use kids <- result.try(players.by_ids(read, g.child_ids))
+      list.try_map(kids, fn(c) {
+        let pid = c.row.id
+        use #(views, shortlists) <- result.try(insights.this_week(
+          read,
+          pid,
+          now,
+        ))
+        use reqs <- result.map(requests.for_player(read, pid))
+        json.object([
+          #("id", id.player_json(pid)),
+          #("name", json.string(c.row.name)),
+          #("views", json.int(views)),
+          #("shortlists", json.int(shortlists)),
+          #("streak", json.int(journey.streak(c.activity_log, now))),
+          #("weeklyGoal", journey.weekly_goal(c.activity_log, now)),
+          #(
+            "newRequests",
+            json.int(list.count(reqs, fn(r) { r.created_at >= week })),
+          ),
+          #(
+            "activityThisWeek",
+            json.int(list.count(c.activity_log, fn(ts) { ts >= week })),
+          ),
+        ])
+      })
+    })
+  case found {
+    Ok(children) ->
+      http.json(
+        200,
+        json.object([
+          #("generatedAt", json.string(clock.iso(now))),
+          #("children", json.preprocessed_array(children)),
+          #(
+            "note",
+            json.string(
+              "Only verified clubs can see your children, and every action above is on the ledger.",
+            ),
+          ),
+        ]),
+      )
     Error(failure) -> http.internal(failure)
   }
 }

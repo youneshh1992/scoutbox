@@ -16,6 +16,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveStream } from '../support/liveEvents.mjs';
+import { readRows } from '../support/sqlRows.mjs';
 import catalogue from '../support/spec/catalogue.json' with { type: 'json' };
 
 const { API, DATA_DIR } = await serverUnderTest();
@@ -637,6 +638,82 @@ ok(
   stage('requests') >= 3 && stage('trials') >= 2 && stage('signings') >= 1,
   'funnel computes real stage counts from the ledger',
 );
+{
+  // A request still waiting on its answer, so the pending count isn't vacuous; Imani declines it after.
+  const pending = await j(
+    '/org/players/pl-imani/request',
+    { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'A conversation about next season.' }) },
+    bearer(EASTPORT),
+  );
+  const R = readRows(DATA_DIR);
+  const counts = await j('/org/recruitment-counts', {}, bearer(EASTPORT));
+  const expected = {
+    requestsPending: R.count('recruitment_requests', { org_id: 'org-eastport', status: 'pending' }),
+    trialsAwaitingReport: R.count('trials', { org_id: 'org-eastport', status: 'awaiting_report' }),
+    trials: R.count('trials', { org_id: 'org-eastport' }),
+  };
+  ok(
+    pending.status === 201 &&
+      counts.status === 200 &&
+      JSON.stringify(counts.body) === JSON.stringify(expected) &&
+      expected.requestsPending >= 1 &&
+      expected.trialsAwaitingReport >= 1 &&
+      expected.trials > expected.trialsAwaitingReport,
+    "RC1 the home dashboard's recruitment counts are the club's pending requests, trials awaiting a report and trials",
+  );
+  const reputation = await j('/org/reputation', {}, bearer(EASTPORT));
+  const seeded = R.rows('reputation_seed', {}, { order: 'rowid' }).map((s) => ({
+    scoutName: s.scout_name,
+    orgName: s.org_name,
+    discoveries: s.discoveries,
+    successRatePct: s.success_rate_pct,
+    avgResaleMultiple: s.avg_resale_multiple,
+    seeded: true,
+  }));
+  ok(
+    reputation.status === 200 &&
+      JSON.stringify(Object.keys(reputation.body)) === JSON.stringify(['seeded', 'live']) &&
+      seeded.length > 0 &&
+      JSON.stringify(reputation.body.seeded) === JSON.stringify(seeded),
+    'RP1 reputation lists the seeded track records as stored, marked seeded',
+  );
+  // One row per scout and club, in the order each first acted; every ledger type opens a row, five of them count.
+  const live = new Map();
+  const groups = R.sql
+    .prepare(
+      'SELECT actor_name, org_name, type, COUNT(*) AS n, MIN(seq) AS first FROM ledger GROUP BY actor_name, org_name, type ORDER BY first',
+    )
+    .all();
+  for (const g of groups) {
+    const key = `${g.actor_name}|${g.org_name}`;
+    if (!live.has(key))
+      live.set(key, {
+        scoutName: g.actor_name,
+        orgName: g.org_name,
+        views: 0,
+        contacts: 0,
+        trials: 0,
+        signings: 0,
+        seeded: false,
+      });
+    const row = live.get(key);
+    if (g.type === 'view') row.views += g.n;
+    if (g.type === 'contact_request') row.contacts += g.n;
+    if (g.type === 'trial_request' || g.type === 'trial_report') row.trials += g.n;
+    if (g.type === 'signing') row.signings += g.n;
+  }
+  ok(
+    JSON.stringify(reputation.body.live) === JSON.stringify([...live.values()]) &&
+      reputation.body.live.some((l) => l.orgName === 'Eastport FC' && l.signings >= 1),
+    "RP2 reputation's live rows count every scout's views, contacts, trials and signings across the whole ledger",
+  );
+  R.close();
+  await j(
+    `/player/requests/${pending.body.requestId}/respond`,
+    { method: 'POST', body: JSON.stringify({ accept: false }) },
+    bearer(IMANI),
+  );
+}
 
 // ---- 9. club email-domain verification
 r = await j(
@@ -679,6 +756,74 @@ ok(
 );
 r = await j('/guardian/export', {}, bearer(AMARA));
 ok(r.body.guardian?.id === 'gd-amara' && r.body.guardian.password === undefined, 'guardian export is sanitized');
+{
+  const own = await j('/guardian/children/pl-guni/insights', {}, bearer(AMARA));
+  const self = await j('/player/insights', {}, bearer(GUNI));
+  const other = await j('/guardian/children/pl-adeyemi/insights', {}, bearer(AMARA));
+  ok(
+    own.status === 200 &&
+      JSON.stringify(own.body) === JSON.stringify(self.body) &&
+      other.status === 404 &&
+      other.body.error === 'CHILD_NOT_FOUND',
+    "DG0 a guardian reads their own child's insights as the child does, and no one else's",
+  );
+}
+{
+  const digest = await j('/guardian/digest', {}, bearer(AMARA));
+  const guardian = (await j('/guardian/me', {}, bearer(AMARA))).body;
+  const week = Date.now() - 7 * 24 * 3600 * 1000;
+  const R = readRows(DATA_DIR);
+  const expected = [];
+  for (const id of guardian.childIds) {
+    const insights = (await j(`/guardian/children/${id}/insights`, {}, bearer(AMARA))).body;
+    const player = R.row('players', { id });
+    if (!player || player.deleted_at != null) continue;
+    expected.push({
+      id,
+      name: player.name,
+      views: insights.thisWeek.views,
+      shortlists: insights.thisWeek.shortlists,
+      newRequests: R.rows('recruitment_requests', { player_id: id }).filter((q) => q.created_at >= week).length,
+      activityThisWeek: R.rows('player_activity_log', { player_id: id }).filter((a) => a.occurred_at >= week).length,
+    });
+  }
+  R.close();
+  const kids = digest.body.children ?? [];
+  ok(
+    digest.status === 200 &&
+      JSON.stringify(Object.keys(digest.body)) === JSON.stringify(['generatedAt', 'children', 'note']) &&
+      Math.abs(Date.parse(digest.body.generatedAt) - Date.now()) < 60_000 &&
+      digest.body.note === 'Only verified clubs can see your children, and every action above is on the ledger.',
+    "DG1 the guardian's weekly digest is dated now and says who can see the children",
+  );
+  ok(
+    kids.length === expected.length &&
+      kids.some((k) => k.id === 'pl-guni') &&
+      kids.every(
+        (k, i) =>
+          JSON.stringify(Object.keys(k)) ===
+            JSON.stringify([
+              'id',
+              'name',
+              'views',
+              'shortlists',
+              'streak',
+              'weeklyGoal',
+              'newRequests',
+              'activityThisWeek',
+            ]) && JSON.stringify({ ...k, streak: undefined, weeklyGoal: undefined }) === JSON.stringify(expected[i]),
+      ),
+    "DG2 each child's week, in the guardian's order: views and shortlists as their insights count them, new requests and activity",
+  );
+  const guniMe = (await j('/player/me', {}, bearer(GUNI))).body;
+  const guni = kids.find((k) => k.id === 'pl-guni');
+  ok(
+    guni?.newRequests >= 1 &&
+      guni.streak === guniMe.streak &&
+      JSON.stringify(guni.weeklyGoal) === JSON.stringify(guniMe.weeklyGoal),
+    "DG3 a child's streak and weekly goal in the digest are the child's own",
+  );
+}
 r = await j('/player/account', { method: 'DELETE' }, bearer(GUNI));
 ok(r.status === 403 && r.body.error === 'GUARDIAN_MANAGED', 'minor cannot self-delete');
 r = await j('/player/account', { method: 'DELETE' }, bearer(newPlayerToken));

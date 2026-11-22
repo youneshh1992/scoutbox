@@ -891,6 +891,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["ledger"] ->
           only(req, Get, fn() { request_routes.org_ledger(ctx, req, org) })
         ["funnel"] -> only(req, Get, fn() { request_routes.funnel(ctx, org) })
+        ["recruitment-counts"] ->
+          only(req, Get, fn() { request_routes.recruitment_counts(ctx, org) })
+        ["reputation"] ->
+          only(req, Get, fn() { request_routes.reputation(ctx) })
         ["report"] ->
           only(req, Post, fn() { report_routes.org_report(ctx, req, org) })
         ["reports"] ->
@@ -2184,6 +2188,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["log"] ->
           only(req, Get, fn() { guardian_routes.log(ctx, req, guardian) })
+        ["digest"] ->
+          only(req, Get, fn() { guardian_routes.digest(ctx, guardian) })
+        ["children", cid, "insights"] ->
+          only(req, Get, fn() { insights.child(ctx, guardian, id.player(cid)) })
         ["report"] ->
           only(req, Post, fn() {
             report_routes.guardian_report(ctx, req, guardian)
