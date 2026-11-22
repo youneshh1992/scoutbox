@@ -27,7 +27,7 @@ const week_ms = 604_800_000
 
 const month_ms = 2_592_000_000
 
-type Event {
+pub type Event {
   Event(
     kind: String,
     org_name: Option(String),
@@ -126,6 +126,22 @@ pub fn this_week(
     list.count(weekly, fn(e) { string.starts_with(e.kind, kind) })
   }
   #(count("view"), count("shortlist"))
+}
+
+/// What the player's feed reads (development/record.mjs `/feed`): this week's views and shortlists, and the
+/// latest `n` events, newest first.
+pub fn for_feed(
+  read: Read,
+  player_id: id.PlayerId,
+  now: Int,
+  n: Int,
+) -> Result(#(Int, Int, List(Event)), Fail(e)) {
+  use events <- result_map(events(read, player_id))
+  let weekly = list.filter(events, fn(e) { e.at >= now - week_ms })
+  let count = fn(kind) {
+    list.count(weekly, fn(e) { string.starts_with(e.kind, kind) })
+  }
+  #(count("view"), count("shortlist"), list.reverse(events) |> list.take(n))
 }
 
 pub fn for_player(

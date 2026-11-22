@@ -395,6 +395,36 @@ ok(
   r.body.evidence.verification.status === 'club_assessed',
   'after revocation the same person only earns club_assessed — current privilege gone, history intact',
 );
+{
+  const all = await j('/admin/coaches?limit=200', {}, admin);
+  const club = (await j('/org/coaches', {}, bearer(HACK))).body;
+  const byId = new Map(all.body.items.map((a) => [a.id, a]));
+  ok(
+    all.status === 200 &&
+      JSON.stringify(Object.keys(all.body)) === JSON.stringify(['total', 'limit', 'offset', 'items']) &&
+      all.body.total === all.body.items.length &&
+      all.body.limit === 200 &&
+      all.body.offset === 0 &&
+      club.length >= 1 &&
+      club.every((a) => JSON.stringify(byId.get(a.id)) === JSON.stringify(a)) &&
+      byId.get(affId)?.status === 'revoked' &&
+      byId.get(affId).current === false &&
+      all.body.items.every((a, i, xs) => i === 0 || xs[i - 1].createdAt >= a.createdAt),
+    "CO1 Trust & Safety lists every club's coach affiliations, newest first, each as its club sees it",
+  );
+  const second = await j('/admin/coaches?limit=1&offset=1', {}, admin);
+  const zero = await j('/admin/coaches?limit=0', {}, admin);
+  const extra = await j('/admin/coaches?orgId=org-hackney', {}, admin);
+  ok(
+    second.body.total === all.body.total &&
+      JSON.stringify(second.body.items) === JSON.stringify(all.body.items.slice(1, 2)) &&
+      zero.status === 400 &&
+      zero.body.error === 'PAGE_LIMIT_INVALID' &&
+      extra.status === 400 &&
+      extra.body.field === 'orgId',
+    'CO2 the list pages by offset, and refuses a page size or parameter it does not take',
+  );
+}
 // reference w/ conflict + withdrawal
 r = await post(
   '/player/vouches/request',

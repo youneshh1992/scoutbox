@@ -1240,6 +1240,49 @@ pub fn request_info(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
   }
 }
 
+const reviewer_max = 60
+
+/// `POST /admin/verification/cases/:id/assign`: the case is given to a reviewer, or to the team when none is named.
+/// Only the assignment changes; the claim's status and `updatedAt` stay.
+pub fn assign(ctx: Ctx, req: Request, claim_id: id.ClaimId) -> Response {
+  let shape = {
+    use reviewer <- input.field(
+      "reviewer",
+      input.nullish(input.text(reviewer_max)),
+    )
+    input.done(reviewer)
+  }
+  let body = http.parse_body(req, shape, [])
+  let now = clock.now_ms()
+  use tx <- act(ctx)
+  use found <- result.try(records.claim(store.reading(tx), claim_id))
+  case found, body {
+    None, _ -> stop(http.error(404, "CASE_NOT_FOUND"))
+    _, Error(response) -> stop(response)
+    Some(c), Ok(reviewer) -> {
+      let assigned = option.unwrap(input.filled(reviewer), "Trust & Safety")
+      use _ <- result.try(
+        store.run(tx, "UPDATE ver_claims SET assigned_to = ? WHERE id = ?", [
+          sqlight.text(assigned),
+          id.claim_sql(c.id),
+        ]),
+      )
+      use _ <- result.try(core.event(
+        tx,
+        event_row.ReviewAssigned,
+        core.system_actor(None),
+        core.About(
+          ..core.nothing,
+          claim_id: Some(c.id),
+          detail: records.detail([], [#("reviewer", Some(assigned))]),
+        ),
+        now,
+      ))
+      reply(http.json(200, json.object([#("assigned", json.string(assigned))])))
+    }
+  }
+}
+
 /// `POST /admin/verification/claims/:id/suspend` and `…/revoke`. Effective badges change at once; the audit
 /// trail stays.
 pub fn suspend_or_revoke(

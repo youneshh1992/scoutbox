@@ -54,6 +54,23 @@ pub const plans = [
   ),
 ]
 
+/// The plan an organisation's `plan` column names; the column allows only these.
+pub fn plan(name: String) -> Plan {
+  let assert Ok(p) = list.find(plans, fn(p) { p.name == name })
+    as "an organisation's plan is one of the catalogue's"
+  p
+}
+
+pub fn plan_json(p: Plan) -> Json {
+  json.object([
+    #("name", json.string(p.name)),
+    #("pricePerMonthGBP", json.int(p.price_per_month_gbp)),
+    #("seats", json.int(p.seats)),
+    #("attributionWindowMonths", json.int(p.attribution_window_months)),
+    #("antiCircumvention", json.string(p.anti_circumvention)),
+  ])
+}
+
 /// `GET /meta`.
 pub fn meta() -> Response {
   http.json(
@@ -72,23 +89,7 @@ pub fn meta() -> Response {
       ),
       #(
         "plans",
-        json.object(
-          list.map(plans, fn(p) {
-            #(
-              p.name,
-              json.object([
-                #("name", json.string(p.name)),
-                #("pricePerMonthGBP", json.int(p.price_per_month_gbp)),
-                #("seats", json.int(p.seats)),
-                #(
-                  "attributionWindowMonths",
-                  json.int(p.attribution_window_months),
-                ),
-                #("antiCircumvention", json.string(p.anti_circumvention)),
-              ]),
-            )
-          }),
-        ),
+        json.object(list.map(plans, fn(p) { #(p.name, plan_json(p)) })),
       ),
       #("positions", json.array(position.pairs, fn(p) { json.string(p.0) })),
     ]),

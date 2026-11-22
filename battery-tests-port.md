@@ -548,6 +548,13 @@ are for surprising facts or points that later work depends on, not implementatio
       `GET /player/feed`, `/player/cv`, `/player/drills`; `GET`/`POST /guardian/prefs`;
       `GET /guardian/children/:id/opportunity-board`; `POST /guardian/children/:id/first-team-seeker`;
       `GET /org/plan`; `GET /admin/invoices`, `/admin/coaches`; `POST /admin/verification/cases/:id/assign`.
+      [**done**: `platform/api` gained UR1–UR13, `verification/organisationsAndStaff` AS1–AS3 and
+      `scouting/clubWorkflows` CO1–CO2; all pass on both servers, and the route probe now finds only the uploads
+      routes.] The feed, the CV and the drill library are `development/record_reads`, read from the player's record
+      and the Discovery Ledger. The drill table now carries its benchmarks, and `PLANS` is snapshotted
+      (`spec/catalogue.json`), with a test that `operator.plans` equals it. A guardian's prefs share the player's
+      body and merge: a null `schoolHoursMute` keeps the stored one on both servers, so once set it never returns
+      to unset. A case's assignment changes only `assigned_to`, not the claim's `updatedAt`, as in TypeScript.
 10. **A performance sweep, after every battery passes.** Don't let it hold up the port. The server calls
    `list.length`, `list.unique`, `list.contains` and friends on lists all over, including on hot paths and inside
    loops, where each is a linear walk. Add a small library that does these operations in the fastest way possible

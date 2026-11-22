@@ -295,6 +295,43 @@ let tomIdentityClaim;
     q.body.humanReview.some((x) => x.id === tomIdentityClaim),
     'T&S queue received the prepared identity case',
   );
+  {
+    const assign = (body, id = tomIdentityClaim) => j('POST', `/admin/verification/cases/${id}/assign`, body, null, A);
+    const named = await assign({ reviewer: 'Priya Nair' });
+    const kase = await j('GET', `/admin/verification/cases/${tomIdentityClaim}`, undefined, null, A);
+    const event = kase.body.events.filter((e) => e.type === 'review.assigned').at(-1);
+    ok(
+      named.status === 200 &&
+        JSON.stringify(named.body) === JSON.stringify({ assigned: 'Priya Nair' }) &&
+        kase.body.row.assignedTo === 'Priya Nair' &&
+        kase.body.claim.metadata.assignedTo === 'Priya Nair' &&
+        kase.body.claim.status === 'requires_human_review' &&
+        event?.detail === 'reviewer: Priya Nair' &&
+        event.actorKind === 'system',
+      'AS1 T&S assigns a case to a named reviewer: the claim records it and the log says so',
+    );
+    const team = await assign({ reviewer: '  ' });
+    const after = await j('GET', '/admin/verification/queue', undefined, null, A);
+    ok(
+      team.body.assigned === 'Trust & Safety' &&
+        after.body.humanReview.find((x) => x.id === tomIdentityClaim)?.assignedTo === 'Trust & Safety',
+      'AS2 a case assigned to no one in particular is the Trust & Safety team’s',
+    );
+    const missing = await assign({}, 'vclm-nope');
+    const extra = await assign({ reviewer: 'Priya Nair', status: 'verified' });
+    const long = await assign({ reviewer: 'P'.repeat(61) });
+    const unauth = await j('POST', `/admin/verification/cases/${tomIdentityClaim}/assign`, {}, null);
+    ok(
+      missing.status === 404 &&
+        missing.body.error === 'CASE_NOT_FOUND' &&
+        extra.status === 400 &&
+        extra.body.field === 'status' &&
+        long.status === 400 &&
+        long.body.field === 'reviewer' &&
+        unauth.status === 401,
+      'AS3 an assignment names a case that exists, takes only a reviewer of at most 60 characters, and needs T&S',
+    );
+  }
   r = await j(
     'POST',
     `/admin/verification/claims/${tomIdentityClaim}/approve`,

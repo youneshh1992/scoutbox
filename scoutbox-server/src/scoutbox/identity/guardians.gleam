@@ -309,6 +309,38 @@ pub fn idv_view(q: idv_row.Row) -> Json {
   ])
 }
 
+/// The guardian's notification preferences, read back after the write.
+pub fn set_prefs(
+  tx: Tx,
+  id: id.GuardianId,
+  p: players.Prefs,
+) -> Result(Option(Guardian), Fail(e)) {
+  use _ <- result.try(
+    store.run(
+      tx,
+      "UPDATE guardians SET prefs_quiet_start = ?, prefs_quiet_end = ?, prefs_school_hours_mute = ?, prefs_timezone = ? WHERE id = ?",
+      [
+        sqlight.nullable(sqlight.text, p.quiet_start),
+        sqlight.nullable(sqlight.text, p.quiet_end),
+        sqlight.nullable(sqlight.bool, p.school_hours_mute),
+        sqlight.nullable(sqlight.text, p.timezone),
+        id.guardian_sql(id),
+      ],
+    ),
+  )
+  by_id(store.reading(tx), id)
+}
+
+pub fn prefs_of(g: Guardian) -> players.Prefs {
+  let r = g.row
+  players.Prefs(
+    r.prefs_quiet_start,
+    r.prefs_quiet_end,
+    r.prefs_school_hours_mute,
+    r.prefs_timezone,
+  )
+}
+
 /// The e-mail code matched: verified, and the code's hash goes.
 pub fn verify_email(tx: Tx, id: id.GuardianId) -> Result(Nil, Fail(e)) {
   store.run(

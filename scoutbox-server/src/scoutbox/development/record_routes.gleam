@@ -121,16 +121,30 @@ pub fn first_team_seeker(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
       )
     _ -> {
       use <- access.guardian_managed_only(p)
-      use on <- http.body(req, enabled_shape("enabled"), [])
-      act(
-        ctx,
-        players.set_switch(_, p.player.row.id, players.FirstTeamSeeker, on),
-        fn(s) {
-          json.object([#("firstTeamSeeker", json.bool(s.row.first_team_seeker))])
-        },
-      )
+      set_seeker(ctx, req, p.player)
     }
   }
+}
+
+/// `POST /guardian/children/:id/first-team-seeker`: the guardian sets it for a grassroots child.
+pub fn child_first_team_seeker(
+  ctx: Ctx,
+  req: Request,
+  g: Guardian,
+  id: id.PlayerId,
+) -> Response {
+  use child <- own_child(ctx, g, id)
+  case child.row.level {
+    playing_level.Pro -> http.error(403, "GRASSROOTS_ONLY")
+    _ -> set_seeker(ctx, req, child)
+  }
+}
+
+fn set_seeker(ctx: Ctx, req: Request, p: Player) -> Response {
+  use on <- http.body(req, enabled_shape("enabled"), [])
+  act(ctx, players.set_switch(_, p.row.id, players.FirstTeamSeeker, on), fn(s) {
+    json.object([#("firstTeamSeeker", json.bool(s.row.first_team_seeker))])
+  })
 }
 
 /// `POST /player/academyplus`: the Fresh Start badge comes and goes with it.
@@ -452,6 +466,38 @@ const prefs_note =
 
 /// `POST /player/prefs`. An absent field keeps its value; null or empty clears it.
 pub fn prefs(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  use body <- prefs_body(req)
+  quiet_act(
+    ctx,
+    players.set_prefs(
+      _,
+      p.player.row.id,
+      merge_prefs(players.prefs(p.player), body),
+    ),
+    fn(s) { prefs_view(players.prefs(s)) },
+  )
+}
+
+/// `POST /guardian/prefs`: as the player's.
+pub fn guardian_prefs(ctx: Ctx, req: Request, g: Guardian) -> Response {
+  use body <- prefs_body(req)
+  let saved =
+    store.unit(ctx.store, fn(tx) {
+      guardians.set_prefs(
+        tx,
+        g.row.id,
+        merge_prefs(guardians.prefs_of(g), body),
+      )
+    })
+  case saved {
+    Ok(Some(stored)) -> http.json(200, prefs_view(guardians.prefs_of(stored)))
+    Ok(None) -> http.error(404, "GUARDIAN_NOT_FOUND")
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// The body of either prefs write, refused when its time zone is not one.
+fn prefs_body(req: Request, next: fn(PrefsInput) -> Response) -> Response {
   let time_or_blank = fn(v) {
     case input.text(5)(v) {
       Ok("") -> Ok("")
@@ -474,16 +520,8 @@ pub fn prefs(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
     ))
   }
   use body <- http.body(req, shape, [])
-  let blank_is_none = fn(v: Option(String)) {
-    case v {
-      Some("") -> None
-      other -> other
-    }
-  }
-  let zone =
-    option.then(body.timezone, fn(z) { blank_is_none(z) |> option.map(Some) })
-  case zone {
-    Some(Some(z)) ->
+  case body.timezone {
+    Some(Some(z)) if z != "" ->
       case zones.parse(z) {
         Error(Nil) ->
           http.error_message(
@@ -491,14 +529,14 @@ pub fn prefs(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
             "TIMEZONE_INVALID",
             "timezone must be an IANA time zone name, for example Europe/London.",
           )
-        Ok(_) -> save_prefs(ctx, p.player, body)
+        Ok(_) -> next(body)
       }
-    _ -> save_prefs(ctx, p.player, body)
+    _ -> next(body)
   }
 }
 
-fn save_prefs(ctx: Ctx, p: Player, body: PrefsInput) -> Response {
-  let was = players.prefs(p)
+/// A null mute keeps the stored one, as TypeScript's `??` reads it: once set, it can't return to unset.
+fn merge_prefs(was: players.Prefs, body: PrefsInput) -> players.Prefs {
   let pick = fn(sent: Option(Option(String)), old: Option(String)) {
     case sent {
       None -> old
@@ -506,33 +544,36 @@ fn save_prefs(ctx: Ctx, p: Player, body: PrefsInput) -> Response {
       Some(v) -> v
     }
   }
-  let next =
-    players.Prefs(
-      quiet_start: pick(body.quiet_start, was.quiet_start),
-      quiet_end: pick(body.quiet_end, was.quiet_end),
-      school_hours_mute: case body.school_hours_mute {
-        None | Some(None) -> was.school_hours_mute
-        Some(v) -> v
-      },
-      timezone: pick(body.timezone, was.timezone),
-    )
-  quiet_act(ctx, players.set_prefs(_, p.row.id, next), prefs_view)
+  players.Prefs(
+    quiet_start: pick(body.quiet_start, was.quiet_start),
+    quiet_end: pick(body.quiet_end, was.quiet_end),
+    school_hours_mute: case body.school_hours_mute {
+      None | Some(None) -> was.school_hours_mute
+      Some(v) -> v
+    },
+    timezone: pick(body.timezone, was.timezone),
+  )
 }
 
 /// `GET /player/prefs`.
 pub fn show_prefs(p: PlayerAccess) -> Response {
-  http.json(200, prefs_view(p.player))
+  http.json(200, prefs_view(players.prefs(p.player)))
 }
 
-fn prefs_view(p: Player) -> json.Json {
+/// `GET /guardian/prefs`.
+pub fn show_guardian_prefs(g: Guardian) -> Response {
+  http.json(200, prefs_view(guardians.prefs_of(g)))
+}
+
+fn prefs_view(p: players.Prefs) -> json.Json {
   json.object([
     #(
       "prefs",
       players.prefs_json(
-        p.row.prefs_quiet_start,
-        p.row.prefs_quiet_end,
-        p.row.prefs_school_hours_mute,
-        p.row.prefs_timezone,
+        p.quiet_start,
+        p.quiet_end,
+        p.school_hours_mute,
+        p.timezone,
       ),
     ),
     #("note", json.string(prefs_note)),

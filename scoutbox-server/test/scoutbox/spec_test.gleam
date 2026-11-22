@@ -5,6 +5,7 @@
 import gleam/dict
 import gleam/dynamic
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -24,6 +25,7 @@ import scoutbox/passport/passport_rules
 import scoutbox/passport/trust_rules
 import scoutbox/platform/json_text
 import scoutbox/platform/limits.{Policy}
+import scoutbox/platform/operator.{Plan}
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/analytics/cohorts
 import scoutbox/recruitment/analytics/funnels
@@ -292,7 +294,7 @@ pub fn drill_library_test() {
   assert dict.from_list(drill_guidance.recording) == snapshot_recording
 }
 
-/// The drill library's names, metrics, units and directions, drill by drill in order.
+/// The drill library's names, metrics, units, benchmarks and directions, drill by drill in order.
 pub fn drill_details_test() {
   let drills =
     snapshot(
@@ -304,8 +306,19 @@ pub fn drill_details_test() {
           use name <- decode.field("name", decode.string)
           use metric <- decode.field("metric", decode.string)
           use unit <- decode.field("unit", decode.string)
+          use benchmark <- decode.field(
+            "benchmark",
+            decode.one_of(decode.float, [decode.map(decode.int, int.to_float)]),
+          )
           use lower_is_better <- decode.field("lowerIsBetter", decode.bool)
-          decode.success(Drill(id:, name:, metric:, unit:, lower_is_better:))
+          decode.success(Drill(
+            id:,
+            name:,
+            metric:,
+            unit:,
+            benchmark:,
+            lower_is_better:,
+          ))
         }),
       ),
     )
@@ -733,6 +746,33 @@ pub fn trust_policy_test() {
   assert trust_spec("TRUST_SCORE_POLICY_VERSION", decode.int)
     == trust_rules.policy_version
   assert trust_spec("TRUST_DISCLAIMER", decode.string) == trust_rules.disclaimer
+}
+
+/// The billing plans (catalogue.mjs PLANS), each in order.
+pub fn plans_test() {
+  let plan = {
+    use name <- decode.field("name", decode.string)
+    use price <- decode.field("pricePerMonthGBP", decode.int)
+    use seats <- decode.field("seats", decode.int)
+    use months <- decode.field("attributionWindowMonths", decode.int)
+    use terms <- decode.field("antiCircumvention", decode.string)
+    decode.success(Plan(name, price, seats, months, terms))
+  }
+  let snapshot =
+    snapshot(
+      "catalogue.json",
+      decode.at(["PLANS"], decode.dict(decode.string, plan)),
+    )
+  assert dict.from_list(list.map(operator.plans, fn(p) { #(p.name, p) }))
+    == snapshot
+  let assert Ok(text) = simplifile.read("e2e/support/spec/catalogue.json")
+  let names = list.map(operator.plans, fn(p) { "\"" <> p.name <> "\": {" })
+  let positions =
+    list.map(names, fn(n) {
+      let assert [before, ..] = string.split(text, n)
+      string.length(before)
+    })
+  assert positions == list.sort(positions, int.compare)
 }
 
 pub fn archetypes_test() {

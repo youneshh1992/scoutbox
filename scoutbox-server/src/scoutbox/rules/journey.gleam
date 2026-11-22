@@ -65,6 +65,11 @@ pub fn weekly_goal(activity: List(Int), now: Int) -> Json {
 
 /// At most three things that would raise the profile signal.
 pub fn next_actions(p: Player) -> Json {
+  json.preprocessed_array(next_action_list(p))
+}
+
+/// `next_actions`, as a list: the feed suggests the first.
+pub fn next_action_list(p: Player) -> List(Json) {
   let media = list.length(p.media)
   let action = fn(id, label, gain) {
     json.object([
@@ -106,7 +111,6 @@ pub fn next_actions(p: Player) -> Json {
   ]
   |> option.values
   |> list.take(3)
-  |> json.preprocessed_array
 }
 
 /// The grassroots journey; none for a pro-level player, who has moved past it.

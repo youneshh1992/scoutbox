@@ -343,6 +343,34 @@ pub fn page(read: Read, limit: Int, offset: Int) -> Result(Json, Fail(e)) {
   ])
 }
 
+/// `GET /admin/coaches`: every club's affiliations, by offset (`?limit=&offset=`).
+pub fn admin_page(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use limit <- input.field(
+      "limit",
+      input.optional(input.whole_number_text(1, 200)),
+    )
+    use offset <- input.field(
+      "offset",
+      input.optional(input.whole_number_text(0, 9_007_199_254_740_991)),
+    )
+    input.done(#(limit, offset))
+  }
+  use #(limit, offset) <- http.query(req, shape, [
+    #("limit", "PAGE_LIMIT_INVALID"),
+  ])
+  case
+    store.read(ctx.store, page(
+      _,
+      option.unwrap(limit, 50),
+      option.unwrap(offset, 0),
+    ))
+  {
+    Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
 /// A unit's failure as a route answers it: a lost race runs the route again.
 pub fn failed(e: store.UnitError(a)) -> Response {
   case e {

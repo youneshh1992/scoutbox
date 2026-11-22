@@ -56,7 +56,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `operations/sweeps` | neutral | 0 → 0 | 0 | 20 |  | +20 added | yes |  |  | **done** |
 | `passport/passport` | neutral | 1 → 0 | 215 | 164 | 54 | +3 added | yes | 68 / 0 | 3 / 3 | **done** |
 | `passport/trustScore` | neutral | 2 → 0 | 148 | 68 | 80 |  | yes | 65 / 0 | 4 / 4 | **done** |
-| `platform/api` | neutral | 0 → 0 | 198 | 232 | 17 | +51 added | yes | 22 / 0 |  | **done** |
+| `platform/api` | neutral | 0 → 0 | 198 | 245 | 17 | +64 added | yes | 22 / 0 |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 51 / 0 | 5 / 5 | **done** |
 | `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2079 / 54 | 201 / 241 | 54 cases pending; 40 hand-port calls |
@@ -90,8 +90,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
-| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 255 |  | 26 moved, +17 added | yes |  |  | **done** |
-| `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 191 | 47 | +7 added | yes | 45 / 0 | 10 / 10 | **done** |
+| `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 257 |  | 26 moved, +19 added | yes |  |  | **done** |
+| `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 194 | 47 | +10 added | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
 
 ## Checks moved to TypeScript unit suites
@@ -135,6 +135,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/api` | 4 | Parity beyond the batteries, slice 3: a trial report attached to the trial's thread, by the club and by the player, and an unknown one refused (TR1–TR4) |
 | `platform/api` | 24 | Parity beyond the batteries, slice 5: a profile's similar players and archetypes and "more like this", drawn only from the players the club may see (SP1–SP7), and a new rules suite of 17 checks of the similarity score |
 | `platform/api` | 7 | Parity beyond the batteries, slice 10: the club home dashboard's recruitment counts (RC1), reputation's seeded and live rows (RP1, RP2), a child's insights as their guardian reads them (DG0) and the guardian's weekly digest (DG1–DG3) |
+| `platform/api` | 13 | Parity beyond the batteries, slice 11: Trust & Safety's invoice list (UR1, UR2), a club's plan (UR3), the player's feed, CV and drill library (UR4–UR7), a guardian's notification preferences (UR8–UR10), a child's opportunity board (UR11) and first-team-seeker switch (UR12, UR13) |
 | `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/liveDelivery` | 7 | A new battery (57 checks when it runs; the ledger counts its 7 calls of ok and neg): who an event reaches (the club it names, the subject rule, every stream for a catalogue ping), a removed staff member's stream closing, every simple act that sends a catalogue ping, the domain events naming a player, and a club plan's events |
 | `platform/notifications` | 4 | Parity beyond the batteries, slice 9: /capabilities counts a notice a preference muted, not one that is delivered, and lists no type without a category (SP1–SP3, with the second message they need) |
@@ -155,7 +156,9 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `scouting/clubWorkflows` | 7 | Parity beyond the batteries, slice 7: Trust & Safety revokes a reference, pending or published: its code can never be spent, a body is refused, and the player is pinged (RK0–RK6) |
 | `scouting/clubWorkflows` | 2 | Live events: a withdrawn reference pings the player, and published feedback reaches the clubs that see the player by the subject rule (LV1, LV2) |
 | `scouting/clubWorkflows` | 8 | Parity beyond the batteries, slice 5: a lead's review of a submitted assessment, once, with its note as written, and the refusals (RV1–RV8) |
+| `scouting/clubWorkflows` | 2 | Parity beyond the batteries, slice 11: Trust & Safety's list of every club's coach affiliations, and its paging (CO1, CO2) |
 | `verification/organisationsAndStaff` | 7 | Parity beyond the batteries, slice 7: a decision's and a root approval's ledger detail (LD1, LD2), and removing a domain: a subdomain confirmed by its mailbox and removed, the refusals, and the root domain's MFA gate (DR0–DR4) |
+| `verification/organisationsAndStaff` | 3 | Parity beyond the batteries, slice 11: Trust & Safety assigns a case to a named reviewer or to the team, and the refusals (AS1–AS3) |
 
 ## Calls to port by hand
 

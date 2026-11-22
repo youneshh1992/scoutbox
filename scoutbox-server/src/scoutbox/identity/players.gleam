@@ -707,7 +707,7 @@ fn org_attendance_json(a: attendance_row.Row) -> Json {
   )
 }
 
-fn timeline_json(t: timeline_row.Row) -> Json {
+pub fn timeline_json(t: timeline_row.Row) -> Json {
   json.object([#("year", json.string(t.year)), #("event", json.string(t.event))])
 }
 

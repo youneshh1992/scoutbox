@@ -29,17 +29,19 @@ pub type Drill {
     name: String,
     metric: String,
     unit: String,
+    benchmark: Float,
     lower_is_better: Bool,
   )
 }
 
-/// The drill library (record.mjs `DRILLS`, without its benchmarks; spec_test proves they agree).
+/// The drill library (record.mjs `DRILLS`; spec_test proves they agree).
 pub const drills = [
   Drill(
     "drill-sprint-ladder",
     "Sprint ladder — 6×30m",
     "best 30m time",
     "s",
+    4.2,
     True,
   ),
   Drill(
@@ -47,6 +49,7 @@ pub const drills = [
     "Passing gates — both feet",
     "gates hit of 20",
     "/20",
+    14.0,
     False,
   ),
   Drill(
@@ -54,6 +57,7 @@ pub const drills = [
     "Shooting arc — 20 finishes",
     "on-target finishes",
     "/20",
+    12.0,
     False,
   ),
   Drill(
@@ -61,6 +65,7 @@ pub const drills = [
     "First touch — wall rebounds",
     "touches in 60s",
     "",
+    45.0,
     False,
   ),
 ]

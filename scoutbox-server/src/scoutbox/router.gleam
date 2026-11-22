@@ -33,6 +33,7 @@ import scoutbox/development/grassroots_journey
 import scoutbox/development/hub_routes
 import scoutbox/development/objectives
 import scoutbox/development/open_days
+import scoutbox/development/record_reads
 import scoutbox/development/record_routes as record
 import scoutbox/development/vouches
 import scoutbox/discovery/clip_routes
@@ -514,6 +515,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { second_look.reopen_room(ctx, req, org, sid) })
         ["invoices"] ->
           only(req, Get, fn() { invoices.org_page(ctx, req, org.org.id) })
+        ["plan"] -> only(req, Get, fn() { invoices.plan(org) })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
         ["transitions", tid, "pack"] ->
@@ -1690,6 +1692,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["stats"] -> only(req, Post, fn() { record.stats(ctx, req, player) })
         ["location"] ->
           only(req, Post, fn() { record.location(ctx, req, player) })
+        ["feed"] -> only(req, Get, fn() { record_reads.feed(ctx, player) })
+        ["cv"] -> only(req, Get, fn() { record_reads.cv(player) })
+        ["drills"] -> only(req, Get, fn() { record_reads.drills(player) })
         ["drills", did, "complete"] ->
           only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
         ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
@@ -2053,9 +2058,23 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             case_routes.guardian_journeys(ctx, req, guardian, id.player(cid))
           })
+        ["children", cid, "opportunity-board"] ->
+          only(req, Get, fn() {
+            board_routes.child_board(ctx, req, guardian, id.player(cid))
+          })
+        ["children", cid, "first-team-seeker"] ->
+          only(req, Post, fn() {
+            record.child_first_team_seeker(ctx, req, guardian, id.player(cid))
+          })
         ["children", id, "references"] ->
           only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
+        ["prefs"] ->
+          case req.method {
+            Get -> record.show_guardian_prefs(guardian)
+            _ ->
+              only(req, Post, fn() { record.guardian_prefs(ctx, req, guardian) })
+          }
         ["export"] ->
           only(req, Get, fn() { player_routes.guardian_export(ctx, guardian) })
         ["verify-id"] ->
@@ -2482,6 +2501,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
+        ["invoices"] -> only(req, Get, fn() { invoices.admin_page(ctx, req) })
+        ["coaches"] -> only(req, Get, fn() { coaches.admin_page(ctx, req) })
         ["groups"] ->
           case req.method {
             Get -> group_routes.admin_page(ctx, req)
@@ -2546,6 +2567,8 @@ fn verification_admin(ctx: Ctx, req: Request, path: List(String)) -> Response {
     ["queue"] -> only(req, Get, fn() { review.queue(ctx, req) })
     ["cases", id] ->
       only(req, Get, fn() { review.case_view(ctx, id.claim(id)) })
+    ["cases", id, "assign"] ->
+      only(req, Post, fn() { review.assign(ctx, req, id.claim(id)) })
     ["evidence", evidence_id] ->
       only(req, Get, fn() {
         review.admin_evidence(ctx, req, id.evidence(evidence_id))

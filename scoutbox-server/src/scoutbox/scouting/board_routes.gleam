@@ -1,17 +1,20 @@
-//// `GET /player/opportunity-board` (domains/scouting/journeys.mjs): the player's board, paged by (deadline, id)
-//// after the per-player visibility filter.
+//// `GET /player/opportunity-board` and the guardian's view of a child's (domains/scouting/journeys.mjs): the
+//// player's board, paged by (deadline, id) after the per-player visibility filter.
 
 import gleam/json
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/guardians.{type Guardian}
+import scoutbox/identity/players.{type Player}
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/paging
 import scoutbox/platform/store
+import scoutbox/rows/id
 import scoutbox/scouting/opportunity_board
 import wisp.{type Request, type Response}
 
@@ -27,6 +30,51 @@ fn compare(a: #(String, String), b: #(String, String)) -> order.Order {
 }
 
 pub fn player_board(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  use items, next <- board(ctx, req, p.player)
+  json.object([
+    #("items", items),
+    #("nextCursor", json.nullable(next, json.string)),
+    #("minor", json.bool(p.minor)),
+    #("note", case p.minor {
+      True ->
+        json.string(
+          "Applications for under-18s are made by your parent/guardian.",
+        )
+      False -> json.null()
+    }),
+  ])
+}
+
+/// `GET /guardian/children/:id/opportunity-board`: the child's board, as the child reads it, without the note.
+pub fn child_board(
+  ctx: Ctx,
+  req: Request,
+  g: Guardian,
+  child_id: id.PlayerId,
+) -> Response {
+  case list.contains(g.child_ids, child_id) {
+    False -> http.error(403, "NOT_YOUR_CHILD")
+    True ->
+      case store.read(ctx.store, players.by_id(_, child_id)) {
+        Error(failure) -> http.internal(failure)
+        Ok(None) -> http.error(404, "PLAYER_NOT_FOUND")
+        Ok(Some(child)) -> {
+          use items, next <- board(ctx, req, child)
+          json.object([
+            #("items", items),
+            #("nextCursor", json.nullable(next, json.string)),
+          ])
+        }
+      }
+  }
+}
+
+fn board(
+  ctx: Ctx,
+  req: Request,
+  player: Player,
+  view: fn(json.Json, Option(String)) -> json.Json,
+) -> Response {
   use q <- http.query(req, paging.query_shape(), [])
   case paging.read(q, [paging.TextKind, paging.TextKind]) {
     Error(e) -> {
@@ -37,7 +85,7 @@ pub fn player_board(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
       let now = clock.now_ms()
       case
         store.read(ctx.store, fn(r) {
-          opportunity_board.for_player(r, p.player, now)
+          opportunity_board.for_player(r, player, now)
         })
       {
         Error(failure) -> http.internal(failure)
@@ -55,23 +103,12 @@ pub fn player_board(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
             })
           http.json(
             200,
-            json.object([
-              #(
-                "items",
-                json.array(items, fn(x) {
-                  json.object(opportunity_board.fields(x))
-                }),
-              ),
-              #("nextCursor", json.nullable(next, json.string)),
-              #("minor", json.bool(p.minor)),
-              #("note", case p.minor {
-                True ->
-                  json.string(
-                    "Applications for under-18s are made by your parent/guardian.",
-                  )
-                False -> json.null()
+            view(
+              json.array(items, fn(x) {
+                json.object(opportunity_board.fields(x))
               }),
-            ]),
+              next,
+            ),
           )
         }
       }
