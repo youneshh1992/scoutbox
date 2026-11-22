@@ -130,14 +130,14 @@ fn read_report(read: Read, a: OrgAccess, now: Int) -> Result(Json, Fail(e)) {
       [org_id, sqlight.int(since)],
     ),
   )
-  // Every submitted assessment in the window counts towards the total; one whose player has no readable birth
-  // date counts in no quarter.
+  // Every submitted assessment in the window counts towards the total; one whose player is gone (deleted, so the
+  // join finds none) counts in no quarter.
   use births <- result.try(store.query(
     read,
     "SELECT p.birth_date FROM assessments a LEFT JOIN players p ON p.id = a.player_id AND p.deleted_at IS NULL
      WHERE a.org_id = ? AND a.state <> 'draft' AND a.created_at >= ? ORDER BY a.rowid",
     [org_id, sqlight.int(since)],
-    decode.at([0], decode.optional(decode.string)),
+    decode.at([0], decode.optional(temporal.day_decoder())),
   ))
   use not_yet_reviewed <- result.map(review_queue.not_yet_reviewed(read, a, now))
   let impressions = seen("impression")
@@ -226,10 +226,9 @@ fn read_report(read: Read, a: OrgAccess, now: Int) -> Result(Json, Fail(e)) {
   ])
 }
 
-/// The quarter of a birth date's calendar month, when it is a real day.
-fn quarter(birth: option.Option(String)) -> Result(Int, Nil) {
-  use day <- result.try(option.to_result(birth, Nil))
-  use day <- result.map(temporal.parse_day(day) |> result.replace_error(Nil))
+/// The quarter of a birth date's calendar month, when the player is there.
+fn quarter(birth: option.Option(temporal.Day)) -> Result(Int, Nil) {
+  use day <- result.map(option.to_result(birth, Nil))
   { temporal.day_month(day) - 1 } / 3 + 1
 }
 

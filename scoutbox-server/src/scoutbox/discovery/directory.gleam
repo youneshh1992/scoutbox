@@ -236,7 +236,7 @@ fn directory_page(
           use name <- decode.field(1, decode.string)
           use country <- decode.field(2, decode.string)
           use city <- decode.field(3, decode.optional(decode.string))
-          use dob <- decode.field(4, decode.string)
+          use dob <- decode.field(4, temporal.day_decoder())
           use keys <- decode.then(keyset.keys_decoder(5, order))
           let found = fn(text) { string.contains(js_text.lower(text), needle) }
           let matches =
@@ -418,7 +418,7 @@ fn clip_json(
             json.string,
           ),
         ),
-        #("age", json.nullable(age.age_on(r.birth_date, now), json.int)),
+        #("age", json.int(age.age_on(r.birth_date, now))),
         #("trustScore", json.int(players.profile_signal(p))),
         #("academyPlus", json.bool(r.academy_plus)),
         #("guardianManaged", json.bool(!players.is_adult(p, now))),
@@ -528,10 +528,7 @@ pub fn fixtures(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                       json.string,
                     ),
                   ),
-                  #(
-                    "age",
-                    json.nullable(age.age_on(p.birth_date, now), json.int),
-                  ),
+                  #("age", json.int(age.age_on(p.birth_date, now))),
                   #("trustScore", json.int(p.profile_signal)),
                 ])
               }),

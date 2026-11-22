@@ -19,6 +19,7 @@ import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/json_text
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/rows/id
 import scoutbox/rows/player_activity_log as activity_row
 import scoutbox/rows/player_attendance as attendance_row
@@ -466,7 +467,7 @@ pub fn stats(r: row.Row) -> Option(Stats) {
 pub type NewPlayer {
   NewPlayer(
     name: String,
-    dob: String,
+    dob: Day,
     country: String,
     city: Option(String),
     position: Option(positions.Position),
@@ -844,7 +845,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
   [
     #("id", id.player_json(r.id)),
     #("name", json.string(r.name)),
-    #("dob", json.string(r.birth_date)),
+    #("dob", temporal.day_json(r.birth_date)),
     #("country", json.string(r.country)),
     #("city", opt_string(r.city)),
     #("position", opt_string(option.map(r.position, positions.to_string))),
@@ -894,7 +895,7 @@ pub fn self_view(p: Player) -> Json {
   json.object(self_fields(p))
 }
 
-pub fn age_now(p: Player, now: Int) -> Option(Int) {
+pub fn age_now(p: Player, now: Int) -> Int {
   age.age_on(p.row.birth_date, now)
 }
 
@@ -903,7 +904,7 @@ pub fn season_history_json(p: Player) -> Json {
 }
 
 fn age_json(p: Player, now: Int) -> Json {
-  json.nullable(age.age_on(p.row.birth_date, now), json.int)
+  json.int(age.age_on(p.row.birth_date, now))
 }
 
 /// A guardian's view of their child: the child's own record and the derived figures.

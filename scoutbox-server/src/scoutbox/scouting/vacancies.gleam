@@ -374,7 +374,7 @@ fn met_if(ok: Bool) -> Verdict {
 fn evaluate(
   c: Criterion,
   p: Player,
-  age_now: Option(Int),
+  age_now: Int,
   corroborated: fn() -> Bool,
 ) -> #(Verdict, String) {
   let src = fn(field) { "profile field: " <> field }
@@ -389,17 +389,13 @@ fn evaluate(
       }),
       src("position"),
     )
-    criterion_row.Minage | criterion_row.Maxage ->
-      case age_now {
-        None -> #(Unknown, "age unavailable in this view")
-        Some(years) -> #(
-          met_if(case c.key == criterion_row.Minage {
-            True -> years >= number(v)
-            False -> years <= number(v)
-          }),
-          src("age"),
-        )
-      }
+    criterion_row.Minage | criterion_row.Maxage -> #(
+      met_if(case c.key == criterion_row.Minage {
+        True -> age_now >= number(v)
+        False -> age_now <= number(v)
+      }),
+      src("age"),
+    )
     criterion_row.Foot ->
       case r.foot {
         None -> #(Unknown, "foot not recorded")
@@ -618,7 +614,7 @@ fn candidate(
           #("playerId", id.player_json(p.row.id)),
           #("name", json.string(p.row.name)),
           #("position", json.nullable(p.row.position, positions.to_json)),
-          #("age", json.nullable(age_now, json.int)),
+          #("age", json.int(age_now)),
           #("required", judged_json(required)),
           #("preferred", judged_json(preferred)),
           #("requiredMet", json.int(count(required, Met))),

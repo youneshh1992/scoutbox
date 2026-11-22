@@ -28,7 +28,7 @@ import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/live_pings
 import scoutbox/platform/store
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/recruitment/notification_targets
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
@@ -175,7 +175,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                 "DOB_INVALID",
                 "Enter a date of birth as YYYY-MM-DD.",
               )
-            _, Ok(_) ->
+            _, Ok(dob) ->
               case age.is_adult(dob, country, now) {
                 True ->
                   http.error_message(
@@ -258,7 +258,7 @@ pub fn signup(ctx: Ctx, req: Request) -> Response {
             "DOB_INVALID",
             "Enter a date of birth as YYYY-MM-DD.",
           )
-        _, _, password ->
+        _, Ok(dob), password ->
           case password {
             None -> password_required()
             Some(password) ->
@@ -306,7 +306,7 @@ fn create(
   ctx: Ctx,
   body: Signup,
   name: String,
-  dob: String,
+  dob: Day,
   country: String,
   password_hash: String,
   now: Int,

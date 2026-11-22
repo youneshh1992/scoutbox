@@ -16,6 +16,7 @@ import gleam/result
 import gleam/string
 import gleam/time/calendar
 import scoutbox/platform/zones.{type Zone}
+import sqlight
 
 pub const year_min = 1900
 
@@ -87,6 +88,21 @@ pub fn day_text(d: Day) -> String {
 
 pub fn day_json(d: Day) -> Json {
   json.string(day_text(d))
+}
+
+/// A stored day: `YYYY-MM-DD` text that is a real day of any year. Its writer checked the column's own
+/// bounds, so the reader only refuses text that is no day at all, which fails the read.
+pub fn day_decoder() -> decode.Decoder(Day) {
+  use s <- decode.then(decode.string)
+  case parse_day_between(s, 0, 9999) {
+    Ok(d) -> decode.success(d)
+    Error(_) -> decode.failure(Day(1970, 1, 1), "a YYYY-MM-DD day")
+  }
+}
+
+/// The day bound as its `YYYY-MM-DD` text.
+pub fn day_sql(d: Day) -> sqlight.Value {
+  sqlight.text(day_text(d))
 }
 
 /// The day's first instant, 00:00 UTC.

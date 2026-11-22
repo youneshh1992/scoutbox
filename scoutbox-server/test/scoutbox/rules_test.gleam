@@ -6,6 +6,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/moderation_flags
@@ -166,12 +167,19 @@ pub fn visibility_agrees_with_domain_ts_test() {
   assert list.take(wrong, 5) == []
 }
 
-/// The Gleam form of adulthood agrees with the SQL form the visibility rule uses.
+/// The Gleam form of adulthood agrees with the SQL form the visibility rule uses, over every case whose birth
+/// date is a day (a stored one always is).
 pub fn adulthood_in_gleam_agrees_with_sql_test() {
   use conn <- sqlight.with_connection(":memory:")
   let #(all, _) = cases()
+  let days =
+    list.filter_map(all, fn(c) {
+      temporal.parse_day(c.dob) |> result.map(fn(birth) { #(c, birth) })
+    })
+  assert list.length(days) > 5000
   let wrong =
-    list.filter(all, fn(c) {
+    list.filter(days, fn(pair) {
+      let #(c, birth) = pair
       let rule = age.adult_sql("p.birth_date", "p.country", c.now)
       let assert Ok([adult]) =
         sqlight.query(
@@ -182,7 +190,7 @@ pub fn adulthood_in_gleam_agrees_with_sql_test() {
           list.append(rule.args, [sqlight.text(c.dob), sqlight.text(c.country)]),
           decode.at([0], sqlight.decode_bool()),
         )
-      adult != age.is_adult(c.dob, c.country, c.now)
+      adult != age.is_adult(birth, c.country, c.now)
     })
   assert wrong == []
 }

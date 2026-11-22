@@ -656,7 +656,7 @@ const playingProfile = record({
   fields: {
     position: ['position', (v, ctx) => option(position_)(v, ctx)],
     foot: ['foot', (v, ctx) => option(foot_)(v, ctx)],
-    dob: ['birth_date', string],
+    dob: ['birth_date', day],
     heightCm: ['height_cm', (v, ctx) => option(int)(v, ctx)],
     weightKg: ['weight_kg', (v, ctx) => option(int)(v, ctx)],
     stats: (v, ctx) => [
@@ -2915,7 +2915,7 @@ const AGE_MAP = {
     module: AGE,
     now: true,
     test: (c, ctx) =>
-      eq(`${ctx.use(AGE)}.age_on(${string(c.args[0])}, ${instant(c.args[1], ctx)})`, option(int)(c.result, ctx)),
+      eq(`${ctx.use(AGE)}.age_on(${day(c.args[0], ctx)}, ${instant(c.args[1], ctx)})`, int(c.result)),
   },
   ['domain.ts#isAdult']: {
     module: AGE,
@@ -2923,7 +2923,7 @@ const AGE_MAP = {
     test: (c, ctx) => {
       const { dob, country } = c.args[0] ?? {};
       return eq(
-        `${ctx.use(AGE)}.is_adult(${string(dob)}, ${string(country)}, ${instant(c.args[1], ctx)})`,
+        `${ctx.use(AGE)}.is_adult(${day(dob, ctx)}, ${string(country)}, ${instant(c.args[1], ctx)})`,
         bool(c.result),
       );
     },
@@ -3050,10 +3050,10 @@ const TEMPORAL_MAP = {
     module: TEMPORAL,
     test: (c, ctx) => eq(`${ctx.use(TEMPORAL)}.day_text(${ctx.use(TEMPORAL)}.day_of(${int(c.args[0])}))`, string(c.result)),
   },
-  // A birth date the rule reads is stored text: age_on reads it, and has no age for text that isn't a day.
+  // A stored birth date is a Day (players.birth_date is decoded as one): text that isn't a day is never asked.
   ['temporal.ts#ageOnMs']: {
     module: AGE,
-    test: (c, ctx) => eq(`${ctx.use(AGE)}.age_on(${string(c.args[0])}, ${int(c.args[1])})`, option(int)(c.result, ctx)),
+    test: (c, ctx) => eq(`${ctx.use(AGE)}.age_on(${day(c.args[0], ctx)}, ${int(c.args[1])})`, int(c.result)),
   },
   ['temporal.ts#parseDobStrict']: {
     module: AGE,
@@ -3520,6 +3520,7 @@ export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
+  ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',
   ...Object.fromEntries(
     [
       'temporal.ts#parseStrictDateOnly',
@@ -3531,7 +3532,6 @@ export const HAND_PORTED = {
       'temporal.ts#isDayWithin',
       'temporal.ts#validateIanaZone',
       'temporal.ts#parseLocalDateTimeWithZone',
-      'domain.ts#isAdult',
       'domain.ts#trialReportDueAt',
       'domains/recruitment/lifecycle/contact.mjs#cooldownFor',
     ].map((f) => [f, 'test/scoutbox/platform/temporal_test.gleam']),

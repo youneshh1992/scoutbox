@@ -1,13 +1,16 @@
 //// Ages and adulthood (domain.ts `ageOn`, `isAdult`, `adultAgeFor`; temporal.ts `ageOnMs`, `parseDobStrict`).
 ////
-//// A date of birth is a calendar day, `YYYY-MM-DD`, read in UTC. Someone turns N at 00:00 UTC on their birthday;
-//// a 29 February birthday counts on 1 March in other years. That rule is exactly "the birth date, as text, is
-//// at most today's date N years ago, as text", so adulthood is one string comparison against a cutoff, the
-//// same in Gleam (`is_adult`) and in SQL (`adult_sql`). An unreadable date of birth is never adult.
+//// A date of birth is a calendar day, read in UTC. Someone turns N at 00:00 UTC on their birthday; a 29 February
+//// birthday counts on 1 March in other years. That rule is exactly "the birth date is at most today's date N
+//// years ago", compared as (year, month, day), so adulthood is one comparison against a cutoff: over the day's
+//// parts in Gleam (`is_adult`), over its `YYYY-MM-DD` text in SQL (`adult_sql`).
+////
+//// A player's stored date of birth is a `Day` (`players.birth_date` is decoded as one), so these rules never
+//// parse. TypeScript's `ageOn` and `isAdult` also take text that is no day (NaN, never adult); here it can't be
+//// stored: `parse_dob` refuses it at every write, and a row holding one fails its read.
 
 import gleam/int
 import gleam/list
-import gleam/option.{type Option}
 import gleam/order
 import gleam/result
 import gleam/string
@@ -37,7 +40,10 @@ pub type DobProblem {
 /// A date of birth a profile may hold (parseDobStrict): a real day, not in the future, not over 120 years ago.
 pub fn parse_dob(s: String, now_ms: Int) -> Result(Day, DobProblem) {
   use birth <- result.try(temporal.parse_day(s) |> result.map_error(DobNotADay))
-  case temporal.day_start(birth) > now_ms, on(birth, now_ms) > max_age_years {
+  case
+    temporal.day_start(birth) > now_ms,
+    age_on(birth, now_ms) > max_age_years
+  {
     True, _ -> Error(InTheFuture)
     _, True -> Error(ImplausiblyOld)
     False, False -> Ok(birth)
@@ -77,8 +83,8 @@ pub fn years_on(birth: Day, today: Day) -> Int {
   }
 }
 
-/// Completed years at an instant (temporal.ts `ageOnMs`).
-pub fn on(birth: Day, now_ms: Int) -> Int {
+/// Completed years at an instant (domain.ts `ageOn`, temporal.ts `ageOnMs`).
+pub fn age_on(birth: Day, now_ms: Int) -> Int {
   years_on(birth, temporal.day_of(now_ms))
 }
 
@@ -89,21 +95,18 @@ fn compare_pair(a: #(Int, Int), b: #(Int, Int)) -> order.Order {
   }
 }
 
-/// A stored date of birth's age at an instant (domain.ts `ageOn`), or `None` when it cannot be read.
-pub fn age_on(dob: String, now_ms: Int) -> Option(Int) {
-  temporal.parse_day(dob)
-  |> option.from_result
-  |> option.map(on(_, now_ms))
-}
-
-/// Adult only when the age is known and reaches the country's threshold.
-pub fn is_adult(dob: String, country: String, now_ms: Int) -> Bool {
-  case temporal.parse_day(dob) {
-    Error(_) -> False
-    Ok(_) ->
-      string.compare(
-        dob,
-        born_by(temporal.day_of(now_ms), adult_age_for(country)),
+/// Adult when the age reaches the country's threshold (domain.ts `isAdult`): born no later than today's date
+/// that many years ago. The cutoff need not be a day (29 February less a year), so it is compared by parts.
+pub fn is_adult(birth: Day, country: String, now_ms: Int) -> Bool {
+  let today = temporal.day_of(now_ms)
+  let cutoff_year = temporal.day_year(today) - adult_age_for(country)
+  case int.compare(temporal.day_year(birth), cutoff_year) {
+    order.Lt -> True
+    order.Gt -> False
+    order.Eq ->
+      compare_pair(
+        #(temporal.day_month(birth), temporal.day_of_month(birth)),
+        #(temporal.day_month(today), temporal.day_of_month(today)),
       )
       != order.Gt
   }

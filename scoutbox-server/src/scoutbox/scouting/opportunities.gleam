@@ -294,15 +294,15 @@ pub fn reasons(
   now: Int,
 ) -> List(String) {
   let age = age.age_on(p.row.birth_date, now)
-  let below = case e.min_age, age {
-    Some(m), Some(a) if a >= m -> []
-    Some(m), _ -> ["minimum age " <> int.to_string(m)]
-    None, _ -> []
+  let below = case e.min_age {
+    Some(m) if age >= m -> []
+    Some(m) -> ["minimum age " <> int.to_string(m)]
+    None -> []
   }
-  let above = case e.max_age, age {
-    Some(m), Some(a) if a <= m -> []
-    Some(m), _ -> ["maximum age " <> int.to_string(m)]
-    None, _ -> []
+  let above = case e.max_age {
+    Some(m) if age <= m -> []
+    Some(m) -> ["maximum age " <> int.to_string(m)]
+    None -> []
   }
   let level = case e.max_level, p.row.level {
     Some(playing_level.SemiPro), playing_level.Pro -> ["amateur/semi-pro only"]

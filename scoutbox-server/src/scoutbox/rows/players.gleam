@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
+import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/vocab/availability
 import scoutbox/vocab/foot
@@ -92,7 +93,7 @@ pub type Row {
   Row(
     id: id.PlayerId,
     name: String,
-    birth_date: String,
+    birth_date: temporal.Day,
     country: String,
     city: Option(String),
     position: Option(position.Position),
@@ -139,7 +140,7 @@ pub type Row {
 pub fn new(
   id id: id.PlayerId,
   name name: String,
-  birth_date birth_date: String,
+  birth_date birth_date: temporal.Day,
   country country: String,
   profile_signal profile_signal: Int,
 ) -> Row {
@@ -193,7 +194,7 @@ pub fn new(
 pub fn decoder() -> decode.Decoder(Row) {
   use id <- decode.field(0, id.player_decoder())
   use name <- decode.field(1, decode.string)
-  use birth_date <- decode.field(2, decode.string)
+  use birth_date <- decode.field(2, temporal.day_decoder())
   use country <- decode.field(3, decode.string)
   use city <- decode.field(4, decode.optional(decode.string))
   use position <- decode.field(5, decode.optional(position.decoder()))
@@ -293,7 +294,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
   [
     id.player_sql(row.id),
     sqlight.text(row.name),
-    sqlight.text(row.birth_date),
+    temporal.day_sql(row.birth_date),
     sqlight.text(row.country),
     sqlight.nullable(sqlight.text, row.city),
     sqlight.nullable(

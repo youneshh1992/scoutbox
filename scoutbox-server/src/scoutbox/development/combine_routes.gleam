@@ -423,7 +423,7 @@ pub fn card(ctx: Ctx, p: PlayerAccess) -> Response {
         json.object([
           #("id", id.player_json(player.row.id)),
           #("name", json.string(player.row.name)),
-          #("age", json.nullable(players.age_now(player, now), json.int)),
+          #("age", json.int(players.age_now(player, now))),
           #("position", json.nullable(player.row.position, position.to_json)),
         ]),
       ),

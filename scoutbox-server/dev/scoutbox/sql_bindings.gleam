@@ -154,6 +154,10 @@ fn column(
           |> result.map(fn(n) { Column(IdKind(n), nullable) })
         Ok("scoutbox/vocab/" <> _ as m) ->
           Ok(Column(EnumKind(m, name), nullable))
+        // A typed day column (codegen `TypedColumn`) holds `YYYY-MM-DD` text; a cutoff that isn't a day (a
+        // birth date compared with `age.born_by`) is bound as text too.
+        Ok("scoutbox/platform/temporal") if name == "Day" ->
+          Ok(Column(TextKind, nullable))
         _ -> Error(Nil)
       }
     _ -> Error(Nil)

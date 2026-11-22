@@ -565,7 +565,16 @@ are for surprising facts or points that later work depends on, not implementatio
     `calendar.Date`, or an opaque `BirthDate`), through a column override in the generated row decoder, so no rule
     can be handed a malformed one. `adult_sql` can keep comparing text: a `YYYY-MM-DD` day sorts as dates do.
     Country stays text: it is free text of 1 to 40 characters on both servers, and a closed type would first need
-    the TypeScript server to take a code list.
+    the TypeScript server to take a code list. [**done**, ahead of item 10: all 55 batteries pass.] The generator
+    takes `typed_columns` (`codegen.TypedColumn`), and `players.birth_date` is a `temporal.Day`, read with
+    `temporal.day_decoder()` by the row module and by every hand-written SELECT of it. A stored value that isn't a
+    day fails the read: every writer has checked it with `parse_dob`. `age_on` returns an `Int` and `is_adult`
+    compares the day's parts, so neither parses. TypeScript's calls over text that isn't a day (NaN, never adult)
+    are hand-port calls now, answered by `rules/age_test` (the decoder and `parse_dob` refuse each), and an
+    "age unknown" branch in vacancies, opportunities and the similarity score is gone. One `dev/perf.mjs` run
+    each: the org player view at 32 clients went from 376 to 335 ms p50 (519 to 435 ms p95), and the directory
+    and report resolution 5–8% faster; one at a time the player view is still about 50 ms, so the parsing was not
+    most of it.
 
 The date rules are mapped (`platform/temporal`, `rules/age`, the trial and contact rules): a new date rule is a
 function over `Day`, `Zone` and millisecond instants, and its cases go in `TEMPORAL_MAP`'s neighbours in

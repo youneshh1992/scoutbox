@@ -10,7 +10,7 @@ import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import scoutbox/codegen.{Ided, RefersTo, Shared, Untyped}
+import scoutbox/codegen.{Ided, RefersTo, Shared, TypedColumn, Untyped}
 import scoutbox/sql_check
 import scoutbox/sql_source
 import simplifile
@@ -887,6 +887,18 @@ pub const ided = [
   Ided("group_grants", "GroupGrant", Some("gnt")),
 ]
 
+/// TEXT columns read into a typed value. See `codegen.TypedColumn`.
+pub const typed_columns = [
+  // Every writer reads it with `age.parse_dob`; the schema checks only its length.
+  TypedColumn(
+    "players.birth_date",
+    "scoutbox/platform/temporal",
+    "Day",
+    "day_decoder()",
+    "day_sql",
+  ),
+]
+
 /// Id columns no foreign key types. See `codegen.IdColumn`.
 pub const id_columns = [
   // No foreign key on purpose (player ids carry none); the deletion unit revokes a child's codes.
@@ -1643,11 +1655,14 @@ fn generate(out: String) -> Nil {
     simplifile.delete_all([out <> "/scoutbox/rows", out <> "/scoutbox/vocab"])
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/rows")
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/vocab")
-  list.each(codegen.generate(schema, shared, tables, ided:, id_columns:), fn(g) {
-    let path = out <> "/" <> g.module <> ".gleam"
-    let assert Ok(_) = simplifile.write(path, g.source)
-    io.println("wrote " <> path)
-  })
+  list.each(
+    codegen.generate(schema, shared, tables, ided:, id_columns:, typed_columns:),
+    fn(g) {
+      let path = out <> "/" <> g.module <> ".gleam"
+      let assert Ok(_) = simplifile.write(path, g.source)
+      io.println("wrote " <> path)
+    },
+  )
 }
 
 fn check_sql(verbose: Bool) -> Nil {

@@ -48,6 +48,19 @@ pub type IdColumn {
   Untyped(column: String, reason: String)
 }
 
+/// A TEXT column read into a typed value rather than a `String`: `module`'s type `type_name`, decoded with
+/// `module.decoder` and bound with `module.sql`. `column` is `table.column`. The decoder refuses text that isn't
+/// one, so a stored value that isn't fails the read.
+pub type TypedColumn {
+  TypedColumn(
+    column: String,
+    module: String,
+    type_name: String,
+    decoder: String,
+    sql: String,
+  )
+}
+
 pub type Generated {
   Generated(module: String, source: String)
 }
@@ -63,6 +76,8 @@ type Kind {
   SharedKind(Shared)
   /// An id of a table declared `Ided`.
   IdKind(Ided)
+  /// A column declared in `typed_columns`.
+  TypedKind(TypedColumn)
 }
 
 type Column {
@@ -87,6 +102,7 @@ pub fn generate(
   tables wanted: List(String),
   ided ided: List(Ided),
   id_columns id_columns: List(IdColumn),
+  typed_columns typed_columns: List(TypedColumn),
 ) -> List(Generated) {
   use conn <- sqlight.with_connection(":memory:")
   let assert Ok(_) = sqlight.exec(schema, conn)
@@ -108,7 +124,7 @@ pub fn generate(
   let tables = list.filter(tables, fn(t) { list.contains(wanted, t.0) })
   let described =
     list.map(tables, fn(t) {
-      #(t.0, describe(conn, t.0, t.1, shared, ided, id_columns))
+      #(t.0, describe(conn, t.0, t.1, shared, ided, id_columns, typed_columns))
     })
   let used =
     described
@@ -120,6 +136,26 @@ pub fn generate(
       }
     })
     |> set.from_list
+  let typed_used =
+    described
+    |> list.flat_map(fn(t) { t.1 })
+    |> list.filter_map(fn(c) {
+      case c.kind {
+        TypedKind(t) -> Ok(t.column)
+        _ -> Error(Nil)
+      }
+    })
+  case
+    list.find(typed_columns, fn(t) { !list.contains(typed_used, t.column) })
+  {
+    Ok(unused) ->
+      panic as {
+        "typed column "
+        <> unused.column
+        <> " is not a column of a generated table"
+      }
+    Error(Nil) -> Nil
+  }
   case list.find(shared, fn(s) { !set.contains(used, s.name) }) {
     Ok(unused) ->
       panic as {
@@ -151,6 +187,7 @@ fn describe(
   shared: List(Shared),
   ided: List(Ided),
   id_columns: List(IdColumn),
+  typed_columns: List(TypedColumn),
 ) -> List(Column) {
   let checks = in_checks(sql)
   let assert Ok(foreign) =
@@ -204,6 +241,15 @@ fn describe(
       _, "REAL" -> Real
       _, other ->
         panic as { table <> "." <> name <> ": no mapping for " <> other }
+    }
+    let here = table <> "." <> name
+    let kind = case list.find(typed_columns, fn(t) { t.column == here }), kind {
+      Ok(t), Text -> TypedKind(t)
+      Ok(_), _ ->
+        panic as {
+          here <> " is declared typed, but only a plain TEXT column can be"
+        }
+      Error(Nil), _ -> kind
     }
     // An INTEGER PRIMARY KEY is the rowid: SQLite numbers it. Generated columns (hidden 2 and 3) can't be
     // written. STRICT makes PRIMARY KEY columns NOT NULL.
@@ -530,6 +576,15 @@ fn render_table(table: String, columns: List(Column)) -> String {
     })
     |> list.unique
     |> list.sort(string.compare)
+  let typed_modules =
+    list.filter_map(columns, fn(c) {
+      case c.kind {
+        TypedKind(t) -> Ok(t.module)
+        _ -> Error(Nil)
+      }
+    })
+    |> list.unique
+    |> list.sort(string.compare)
   let has_new = list.any(columns, fn(c) { c.automatic })
   let written = list.filter(columns, fn(c) { !c.automatic })
   let names = list.map(columns, fn(c) { c.name })
@@ -566,6 +621,7 @@ fn render_table(table: String, columns: List(Column)) -> String {
         False -> ["scoutbox/platform/store.{type Fail, type Tx}"]
       },
       list.map(shared_modules, fn(m) { "scoutbox/vocab/" <> m }),
+      typed_modules,
       ["sqlight"],
     ])
   string.concat([
@@ -734,6 +790,7 @@ fn gleam_type(c: Column) -> String {
     Local(type_name, _) -> type_name
     SharedKind(s) -> snake(s.name) <> "." <> s.name
     IdKind(i) -> "id." <> i.name <> "Id"
+    TypedKind(t) -> alias(t.module) <> "." <> t.type_name
   }
   case c.nullable {
     True -> "Option(" <> base <> ")"
@@ -750,6 +807,7 @@ fn decoder_of(c: Column) -> String {
     Local(type_name, _) -> snake(type_name) <> "_decoder()"
     SharedKind(s) -> snake(s.name) <> ".decoder()"
     IdKind(i) -> "id." <> snake(i.name) <> "_decoder()"
+    TypedKind(t) -> alias(t.module) <> "." <> t.decoder
   }
   case c.nullable {
     True -> "decode.optional(" <> base <> ")"
@@ -766,6 +824,7 @@ fn value_of(c: Column) -> String {
   }
   let encoder = case c.kind, to_text {
     IdKind(i), _ -> "id." <> snake(i.name) <> "_sql"
+    TypedKind(t), _ -> alias(t.module) <> "." <> t.sql
     _, Some(f) -> "fn(v) { sqlight.text(" <> f <> "(v)) }"
     Text, None -> "sqlight.text"
     Integer, None -> "sqlight.int"
@@ -777,6 +836,11 @@ fn value_of(c: Column) -> String {
     False, Some(f) -> "sqlight.text(" <> f <> "(" <> value <> "))"
     False, None -> encoder <> "(" <> value <> ")"
   }
+}
+
+/// The name a module is referred to by: the last segment of its path.
+fn alias(module: String) -> String {
+  string.split(module, "/") |> list.last |> result.unwrap(module)
 }
 
 fn is_id(kind: Kind) -> Bool {

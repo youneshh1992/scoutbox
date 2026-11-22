@@ -414,7 +414,7 @@ pub fn list_for_org(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                     #(
                       "age",
                       json.nullable(
-                        option.then(view, players.age_now(_, now)),
+                        option.map(view, players.age_now(_, now)),
                         json.int,
                       ),
                     ),

@@ -462,7 +462,7 @@ pub fn list_rooms(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
             player: option.map(srcs, fn(s) {
               room_rules.SummaryPlayer(
                 position: option.map(s.player.row.position, positions.to_string),
-                age: players.age_now(s.player, now),
+                age: Some(players.age_now(s.player, now)),
                 current_club: None,
               )
             }),

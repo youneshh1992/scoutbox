@@ -20,6 +20,7 @@ import scoutbox/passport/passport_rules.{
   type Full, type History, type Prefs, type SigningRow, type SquadSource,
 } as rules
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/trial_rules
 import scoutbox/recruitment/trials
 import scoutbox/rows/applications as application_row
@@ -773,7 +774,7 @@ pub fn assemble(
       id: pid,
       name: p.row.name,
       // UTC, so the answer around a birthday does not depend on the server's zone.
-      age: age.age_on(p.row.birth_date, now),
+      age: Some(age.age_on(p.row.birth_date, now)),
       minor: !players.is_adult(p, now),
       position:,
       city: p.row.city,
@@ -823,7 +824,7 @@ pub fn assemble(
         rules.temporal_conflicts(
           timeline,
           history.rows,
-          Some(p.row.birth_date),
+          Some(temporal.day_text(p.row.birth_date)),
           now,
         )
     },

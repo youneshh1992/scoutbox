@@ -16,12 +16,18 @@
         "calls": 13,
         "cases": 0,
         "handPort": {
-          "Gleam's types can't hold its arguments: cannot print [] as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print {} as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print undefined as a String": 8
+          "Gleam's types can't hold its arguments: cannot print \"\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2010-02-30\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2011-04-31\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2023-02-29\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"not-a-date\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 2
         },
         "status": "generated"
       },
@@ -1907,8 +1913,10 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"garbage\" as a Day": 1
+        },
         "status": "generated"
       },
       {
@@ -2048,14 +2056,22 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 21,
-        "cases": 13,
+        "cases": 5,
         "handPort": {
           "args[].dob is NaN": 1,
-          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print 20100101 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print null as a String": 2,
-          "Gleam's types can't hold its arguments: cannot print undefined as a String": 2
+          "Gleam's types can't hold its arguments: cannot print \"02/03/2010\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2010-02-30\" as a Day": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2011-04-31\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2019-02-29\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2023-00-10\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2023-01-00\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2023-01-32\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2023-13-01\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 20100101 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 2,
+          "Gleam's types can't hold its arguments: cannot print undefined as a Day": 1
         },
         "status": "generated"
       },
@@ -3302,12 +3318,16 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 10,
-        "cases": 6,
+        "cases": 2,
         "handPort": {
-          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print 12 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+          "Gleam's types can't hold its arguments: cannot print \"\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-02-31\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"NaN\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"not-a-date\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 12 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 1
         },
         "status": "generated"
       },
@@ -3505,13 +3525,17 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 11,
-        "cases": 6,
+        "cases": 2,
         "handPort": {
           "args[].dob is NaN": 1,
-          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+          "Gleam's types can't hold its arguments: cannot print \"\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"0000-00-00\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-02-30\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a Day": 1
         },
         "status": "generated"
       },
@@ -3713,14 +3737,18 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 19,
-        "cases": 13,
+        "cases": 9,
         "handPort": {
           "args[].dob is NaN": 1,
-          "Gleam's types can't hold its arguments: cannot print 0 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print 19900101 as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print false as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+          "Gleam's types can't hold its arguments: cannot print \"\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"0000-00-00\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-02-30\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print 19900101 as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print false as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a Day": 1
         },
         "status": "generated"
       },
@@ -4128,10 +4156,11 @@
       {
         "function": "domain.ts#isAdult",
         "calls": 4,
-        "cases": 2,
+        "cases": 1,
         "handPort": {
-          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
-          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+          "Gleam's types can't hold its arguments: cannot print \"not-a-date\" as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Day": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a Day": 1
         },
         "status": "generated"
       },

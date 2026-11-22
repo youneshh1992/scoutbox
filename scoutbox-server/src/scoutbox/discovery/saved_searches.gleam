@@ -381,8 +381,7 @@ fn matches(p: Player, org: orgs.Org, s: row.Row, now: Int) -> Bool {
     False -> ""
   }
   let academy_plus = r.academy_plus && !orgs.is_grassroots(org)
-  // TypeScript compares a missing age as 0.
-  let age = option.unwrap(age.age_on(r.birth_date, now), 0)
+  let age = age.age_on(r.birth_date, now)
   let q_ok = case s.q {
     None -> True
     Some(q) -> {

@@ -40,6 +40,7 @@ pub fn edge_cases_test() {
       tables: ["trials"],
       ided: [Ided("trials", "Trial", None)],
       id_columns: [],
+      typed_columns: [],
     )
   birdie.snap(party, title: "a shared vocabulary")
   birdie.snap(trials, title: "a table with every column shape")
@@ -50,7 +51,14 @@ pub fn prelude_named_vocabulary_test() {
   let schema =
     "CREATE TABLE codes (list TEXT NOT NULL CHECK (list IN ('a', 'b'))) STRICT;"
   let assert [_, Generated(_, source)] =
-    codegen.generate(schema, [], tables: ["codes"], ided: [], id_columns: [])
+    codegen.generate(
+      schema,
+      [],
+      tables: ["codes"],
+      ided: [],
+      id_columns: [],
+      typed_columns: [],
+    )
   assert string.contains(source, "pub type ListValue {")
   assert !string.contains(source, "pub type List {")
 }
@@ -61,7 +69,14 @@ pub fn prelude_named_value_test() {
   let schema =
     "CREATE TABLE codes (outcome TEXT NOT NULL CHECK (outcome IN ('ok', 'error', 'none', 'late'))) STRICT;"
   let assert [_, Generated(_, source)] =
-    codegen.generate(schema, [], tables: ["codes"], ided: [], id_columns: [])
+    codegen.generate(
+      schema,
+      [],
+      tables: ["codes"],
+      ided: [],
+      id_columns: [],
+      typed_columns: [],
+    )
   assert string.contains(source, "#(\"error\", OutcomeError)")
   assert string.contains(source, "#(\"ok\", OutcomeOk)")
   assert string.contains(source, "#(\"none\", OutcomeNone)")
@@ -77,7 +92,14 @@ pub fn several_lists_in_one_check_test() {
   code TEXT NOT NULL CHECK ((kind = 'a' AND code IN ('NO_SOURCE', 'GK', 'LICENCE')) OR (kind = 'b' AND code IN ('SELF_CHECK')))
 ) STRICT;"
   let assert [_, Generated(_, source)] =
-    codegen.generate(schema, [], tables: ["codes"], ided: [], id_columns: [])
+    codegen.generate(
+      schema,
+      [],
+      tables: ["codes"],
+      ided: [],
+      id_columns: [],
+      typed_columns: [],
+    )
   assert string.contains(source, "#(\"NO_SOURCE\", NoSource)")
   assert string.contains(source, "#(\"GK\", GK)")
   assert string.contains(source, "#(\"LICENCE\", Licence)")
@@ -95,6 +117,7 @@ pub fn unused_shared_vocabulary_test() {
         tables: ["t"],
         ided: [Ided("t", "T", None)],
         id_columns: [],
+        typed_columns: [],
       )
     })
 }
@@ -108,6 +131,7 @@ pub fn orgs_module_test() {
       scoutbox_dev.tables,
       ided: scoutbox_dev.ided,
       id_columns: scoutbox_dev.id_columns,
+      typed_columns: scoutbox_dev.typed_columns,
     )
     |> list.find(fn(g) { g.module == "scoutbox/rows/orgs" })
   birdie.snap(source, title: "the orgs row module")
@@ -140,6 +164,7 @@ fn generate_ids(
     tables: ["clubs", "trials"],
     ided:,
     id_columns:,
+    typed_columns: [],
   )
 }
 
@@ -177,4 +202,48 @@ pub fn a_key_to_an_untyped_table_is_refused_test() {
         Untyped("subject_id", "test"),
       ])
     })
+}
+
+/// A column declared typed is held, read and bound as its type; one that matches no column is refused.
+pub fn typed_column_test() {
+  let schema = "CREATE TABLE people (born TEXT NOT NULL, died TEXT) STRICT;"
+  let typed = fn(column) {
+    codegen.TypedColumn(
+      column:,
+      module: "scoutbox/platform/temporal",
+      type_name: "Day",
+      decoder: "day_decoder()",
+      sql: "day_sql",
+    )
+  }
+  let assert [_, Generated(_, source)] =
+    codegen.generate(
+      schema,
+      [],
+      tables: ["people"],
+      ided: [],
+      id_columns: [],
+      typed_columns: [typed("people.born"), typed("people.died")],
+    )
+  assert string.contains(source, "import scoutbox/platform/temporal\n")
+  assert string.contains(source, "born: temporal.Day,")
+  assert string.contains(source, "died: Option(temporal.Day),")
+  assert string.contains(source, "decode.field(0, temporal.day_decoder())")
+  assert string.contains(
+    source,
+    "decode.field(1, decode.optional(temporal.day_decoder()))",
+  )
+  assert string.contains(source, "temporal.day_sql(row.born)")
+  assert string.contains(source, "sqlight.nullable(temporal.day_sql, row.died)")
+  assert exception_of(fn() {
+      codegen.generate(
+        schema,
+        [],
+        tables: ["people"],
+        ided: [],
+        id_columns: [],
+        typed_columns: [typed("people.age")],
+      )
+    })
+    == Error(Nil)
 }

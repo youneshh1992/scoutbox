@@ -4,6 +4,7 @@
 //// is ever handed one. NaN and ±Infinity can't be written in JSON at all.
 
 import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -15,7 +16,6 @@ import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/id
 import scoutbox/rows/recruitment_contacts
-import scoutbox/rules/age
 
 /// The values the suite hands isExpiredAt, isEffectiveAt, isOrderedInterval and isActiveAt as unreadable instants.
 const unreadable_instants = [
@@ -69,12 +69,16 @@ pub fn a_zone_is_a_name_the_table_knows_test() {
     == Ok("Asia/Kolkata")
 }
 
-/// ageOn and isAdult over a birth date that isn't a day: no age, never adult.
-pub fn an_unreadable_birth_date_has_no_age_test() {
-  assert age.age_on("garbage", 0) == None
-  assert age.age_on("", 0) == None
-  assert !age.is_adult("", "GB", 1_790_164_800_000)
-  assert !age.is_adult("20100101", "GB", 1_790_164_800_000)
+/// ageOn and isAdult over a birth date that isn't a day: TypeScript gives no age (NaN) and never an adult. Here
+/// such text is no `Day`, so neither rule can be asked: a stored one fails its read (more in rules/age_test).
+pub fn a_birth_date_that_isnt_a_day_fails_its_read_test() {
+  list.each(["garbage", "", "20100101"], fn(text) {
+    assert decode.run(dynamic.string(text), temporal.day_decoder())
+      |> result.is_error
+  })
+  assert decode.run(dynamic.string("2010-01-01"), temporal.day_decoder())
+    |> result.map(temporal.day_text)
+    == Ok("2010-01-01")
 }
 
 /// A day's text survives JSON as itself.

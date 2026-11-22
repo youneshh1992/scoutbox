@@ -12,6 +12,7 @@ import gleam/result
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/rows/id
 import scoutbox/rows/players as player_row
 import scoutbox/rules/age
@@ -24,7 +25,7 @@ pub type Profile {
   Profile(
     position: Option(Position),
     foot: Option(Foot),
-    birth_date: String,
+    birth_date: Day,
     height_cm: Option(Int),
     weight_kg: Option(Int),
     appearances: Option(Int),
@@ -88,7 +89,7 @@ type Aged {
     position: Option(Position),
     group: Option(Int),
     foot: Option(Foot),
-    age: Option(Int),
+    age: Int,
     output: Float,
     height: Float,
     weight: Float,
@@ -117,11 +118,8 @@ fn score_aged(a: Aged, b: Aged) -> Int {
     True -> 10.0
     False -> 0.0
   }
-  let age_part = case a.age, b.age {
-    Some(x), Some(y) ->
-      float.max(0.0, 15.0 -. int.to_float(int.absolute_value(x - y) * 3))
-    _, _ -> 0.0
-  }
+  let age_part =
+    float.max(0.0, 15.0 -. int.to_float(int.absolute_value(a.age - b.age) * 3))
   let output =
     float.max(0.0, 25.0 -. float.absolute_value(a.output -. b.output) *. 25.0)
   let build =
@@ -136,6 +134,13 @@ fn score_aged(a: Aged, b: Aged) -> Int {
       },
     )
   float.round(float.min(position +. foot +. age_part +. output +. build, 100.0))
+}
+
+/// A catalogue archetype's birth date, written as a literal below.
+fn catalogue_day(text: String) -> Day {
+  let assert Ok(d) = temporal.parse_day(text)
+    as "an archetype's birth date is a day"
+  d
 }
 
 /// A catalogue archetype (catalogue.mjs `ARCHETYPES`), scored like a player.
@@ -160,7 +165,7 @@ fn archetype(
     profile: Profile(
       position: Some(position),
       foot: Some(foot),
-      birth_date:,
+      birth_date: catalogue_day(birth_date),
       height_cm: Some(height_cm),
       weight_kg: Some(weight_kg),
       appearances: Some(30),
@@ -298,7 +303,7 @@ fn candidate_decoder() -> decode.Decoder(#(Similar, Profile)) {
   use name <- decode.field(1, decode.string)
   use position <- decode.field(2, decode.optional(position.decoder()))
   use foot <- decode.field(3, decode.optional(foot.decoder()))
-  use birth_date <- decode.field(4, decode.string)
+  use birth_date <- decode.field(4, temporal.day_decoder())
   use height_cm <- decode.field(5, decode.optional(decode.int))
   use weight_kg <- decode.field(6, decode.optional(decode.int))
   use appearances <- decode.field(7, decode.optional(decode.int))

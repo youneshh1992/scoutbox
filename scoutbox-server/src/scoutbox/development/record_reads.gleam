@@ -125,7 +125,7 @@ pub fn cv(p: PlayerAccess) -> Response {
         "player",
         json.object([
           #("name", json.string(r.name)),
-          #("age", json.nullable(players.age_now(player, now), json.int)),
+          #("age", json.int(players.age_now(player, now))),
           #("country", json.string(r.country)),
           #("position", self_field(player, "position")),
           #("foot", self_field(player, "foot")),

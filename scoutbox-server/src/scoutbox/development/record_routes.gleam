@@ -86,7 +86,7 @@ pub fn me(p: PlayerAccess) -> Response {
     200,
     json.object(
       list.append(players.self_fields(player), [
-        #("age", json.nullable(players.age_now(player, now), json.int)),
+        #("age", json.int(players.age_now(player, now))),
         #("trustScore", json.int(score)),
         #("trust", players.trust_breakdown(player)),
         #("tier", json.string(journey.tier(score))),

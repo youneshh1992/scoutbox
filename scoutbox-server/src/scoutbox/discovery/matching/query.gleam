@@ -18,7 +18,7 @@ import scoutbox/platform/keyset.{Asc, Desc, OrderKey}
 import scoutbox/platform/paging.{IntKind, TextKind}
 import scoutbox/platform/sql.{type Fragment}
 import scoutbox/platform/store.{type Fail, type Read}
-import scoutbox/platform/temporal
+import scoutbox/platform/temporal.{type Day}
 import scoutbox/rows/id
 import scoutbox/rules/age
 import scoutbox/rules/visibility
@@ -127,7 +127,7 @@ pub opaque type FactRow {
   FactRow(
     player_id: id.PlayerId,
     name: String,
-    birth_date: String,
+    birth_date: Day,
     level: Option(PlayingLevel),
     foot: Option(String),
     position: Option(String),
@@ -143,7 +143,7 @@ pub opaque type FactRow {
 fn fact_row_decoder() -> decode.Decoder(FactRow) {
   use player_id <- decode.field(0, id.player_decoder())
   use name <- decode.field(1, decode.string)
-  use birth_date <- decode.field(2, decode.string)
+  use birth_date <- decode.field(2, temporal.day_decoder())
   use level <- decode.field(3, decode.optional(playing_level.decoder()))
   use foot <- decode.field(4, decode.optional(decode.string))
   use position <- decode.field(5, decode.optional(decode.string))
@@ -270,7 +270,7 @@ pub fn facts_of(
     Facts(
       player_id: r.player_id,
       name: r.name,
-      age: age.age_on(r.birth_date, now),
+      age: Some(age.age_on(r.birth_date, now)),
       position: r.position,
       secondary: of(secondary, r.player_id),
       level: r.level,

@@ -78,20 +78,17 @@ fn exists(
   |> result.map(fn(rows) { rows != [] })
 }
 
-/// The first instant at which the player is an adult (rules/age `is_adult`), or None when the birth date is not a
-/// day. Their birthday N years on, for the first N at which `is_adult` holds; a day either side covers 29 February.
+/// The first instant at which the player is an adult (rules/age `is_adult`), or None when that is over 25 years
+/// on. Their birthday N years on, for the first N at which `is_adult` holds; a day either side covers 29 February.
 pub fn adulthood_at(p: Player) -> Option(Int) {
-  case temporal.parse_day(p.row.birth_date) {
-    Error(_) -> None
-    Ok(d) ->
-      first_adult_birthday(
-        p,
-        temporal.day_year(d),
-        temporal.day_month(d),
-        temporal.day_of_month(d),
-        0,
-      )
-  }
+  let d = p.row.birth_date
+  first_adult_birthday(
+    p,
+    temporal.day_year(d),
+    temporal.day_month(d),
+    temporal.day_of_month(d),
+    0,
+  )
 }
 
 fn first_adult_birthday(

@@ -69,6 +69,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   Every column named `id` or `*_id` must be typed by a foreign key or decided in `id_columns` (`RefersTo` or
   `Untyped` with its reason), or `npm run codegen` refuses it. Polymorphic pairs (`subject_kind` + `subject_id`,
   `audience_*`, `ref_id`, `by_*`) stay `String` for now.
+- A plain TEXT column can be decoded into a typed value by declaring it in `typed_columns`
+  (`dev/scoutbox_dev.gleam`, `codegen.TypedColumn`): `players.birth_date` is a `temporal.Day`. A hand-written
+  SELECT of such a column decodes it the same way (`temporal.day_decoder()`), and a stored value that isn't one
+  fails the read: every writer has already checked it.
 - The match facts (`player_match_facts`, read by Nobody Missed) are a projection the migration's triggers mark dirty
   and `discovery/match_facts.drain` re-derives inside every unit, just before COMMIT (`store.with_before_commit`,
   installed at boot). A new input to the facts needs a trigger in the TypeScript migration, not a call from the act.

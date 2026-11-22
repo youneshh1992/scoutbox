@@ -61,7 +61,7 @@ fn new_players(
       use pid <- decode.field(0, decode.string)
       use name <- decode.field(1, decode.string)
       use position <- decode.field(2, decode.optional(decode.string))
-      use dob <- decode.field(3, decode.string)
+      use dob <- decode.field(3, temporal.day_decoder())
       use country <- decode.field(4, decode.string)
       use created <- decode.field(5, decode.int)
       decode.success(
@@ -71,7 +71,7 @@ fn new_players(
           #("playerId", json.string(pid)),
           #("playerName", json.string(name)),
           #("position", json.nullable(position, json.string)),
-          #("age", json.nullable(age.age_on(dob, now), json.int)),
+          #("age", json.int(age.age_on(dob, now))),
           #("guardianManaged", json.bool(!age.is_adult(dob, country, now))),
         ]),
       )

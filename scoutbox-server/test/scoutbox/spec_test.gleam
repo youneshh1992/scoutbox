@@ -26,6 +26,7 @@ import scoutbox/passport/trust_rules
 import scoutbox/platform/json_text
 import scoutbox/platform/limits.{Policy}
 import scoutbox/platform/operator.{Plan}
+import scoutbox/platform/temporal
 import scoutbox/recruitment/analytics
 import scoutbox/recruitment/analytics/cohorts
 import scoutbox/recruitment/analytics/funnels
@@ -819,7 +820,7 @@ pub fn archetypes_test() {
         a.label,
         position.to_string(pos),
         foot.to_string(f),
-        p.birth_date,
+        temporal.day_text(p.birth_date),
         h,
         w,
         #(apps, goals, assists),
