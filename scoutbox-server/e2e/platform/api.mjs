@@ -18,6 +18,7 @@ import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveStream } from '../support/liveEvents.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import catalogue from '../support/spec/catalogue.json' with { type: 'json' };
+import record from '../support/spec/development/record.json' with { type: 'json' };
 
 const { API, DATA_DIR } = await serverUnderTest();
 
@@ -632,6 +633,58 @@ ok(
   invoices.body.items.some((i) => i.signingId === r.body.signing.id && i.amount > 0),
   'success-fee invoice issued through the billing adapter',
 );
+{
+  const R = readRows(DATA_DIR);
+  const stored = R.rows('invoices', {}, { order: 'rowid DESC' });
+  const eastport = R.row('orgs', { id: 'org-eastport' });
+  R.close();
+  const all = await j('/admin/invoices?limit=100', {}, admin);
+  ok(
+    all.status === 200 &&
+      stored.length >= 1 &&
+      JSON.stringify(all.body.items.map((i) => i.id)) === JSON.stringify(stored.map((i) => i.id)) &&
+      all.body.nextCursor === null &&
+      JSON.stringify(all.body.items.filter((i) => i.orgId === 'org-eastport')) === JSON.stringify(invoices.body.items),
+    "UR1 Trust & Safety's invoice list is every club's, newest first, each as the club sees it",
+  );
+  const first = await j('/admin/invoices?limit=1', {}, admin);
+  const rest = await j(
+    `/admin/invoices?limit=100&cursor=${encodeURIComponent(first.body.nextCursor ?? '')}`,
+    {},
+    admin,
+  );
+  const extra = await j('/admin/invoices?orgId=org-eastport', {}, admin);
+  ok(
+    (stored.length === 1 || typeof first.body.nextCursor === 'string') &&
+      JSON.stringify([...first.body.items, ...(stored.length === 1 ? [] : rest.body.items)]) ===
+        JSON.stringify(all.body.items) &&
+      extra.status === 400 &&
+      extra.body.field === 'orgId',
+    'UR2 the invoice list pages by cursor and refuses a parameter it does not take',
+  );
+  const plan = await j('/org/plan', {}, bearer(EASTPORT));
+  const terms = catalogue.PLANS[eastport.plan];
+  ok(
+    plan.status === 200 &&
+      JSON.stringify(plan.body) ===
+        JSON.stringify({
+          org: {
+            id: eastport.id,
+            name: eastport.name,
+            type: eastport.type,
+            trustedPartner: eastport.trusted_partner === 1,
+          },
+          plan: terms,
+          compliance: {
+            attributionWindowMonths: terms.attributionWindowMonths,
+            antiCircumvention: terms.antiCircumvention,
+            feeProtection:
+              'Discovery attribution is evidenced by the append-only ledger and Proof Packs. Fees attach to the first qualifying interaction inside the window.',
+          },
+        }),
+    "UR3 a club's plan view is its plan's terms from the catalogue",
+  );
+}
 let funnel = await j('/org/funnel', {}, bearer(EASTPORT));
 const stage = (k) => funnel.body.stages.find((s) => s.key === k)?.count ?? -1;
 ok(
@@ -822,6 +875,233 @@ ok(r.body.guardian?.id === 'gd-amara' && r.body.guardian.password === undefined,
       guni.streak === guniMe.streak &&
       JSON.stringify(guni.weeklyGoal) === JSON.stringify(guniMe.weeklyGoal),
     "DG3 a child's streak and weekly goal in the digest are the child's own",
+  );
+}
+{
+  // The feed, the CV and the drills are read from the player's own record and insights. Two of Kola's clips share
+  // a tag, so the feed sums it across clips.
+  const scoutTags = (await j('/org/tags', {}, bearer(EASTPORT))).body;
+  const clips = (await j('/player/me', {}, bearer(KOLA))).body.media;
+  const tag = (clip, tags) =>
+    j(
+      `/org/players/pl-adeyemi/media/${clip.id}/tags`,
+      { method: 'POST', body: JSON.stringify({ tags }) },
+      bearer(EASTPORT),
+    );
+  const tagged1 = await tag(clips[0], [scoutTags[0], scoutTags[1]]);
+  const tagged2 = await tag(clips[1] ?? clips[0], [scoutTags[1]]);
+  const feed = await j('/player/feed', {}, bearer(KOLA));
+  const me = (await j('/player/me', {}, bearer(KOLA))).body;
+  const insights = (await j('/player/insights', {}, bearer(KOLA))).body;
+  const top = me.media.reduce((best, m) => (best === null || (m.views ?? 0) > (best.views ?? 0) ? m : best), null);
+  const [weekly, ...rest] = feed.body;
+  ok(
+    feed.status === 200 &&
+      weekly?.type === 'weekly_report' &&
+      Math.abs(weekly.ts - Date.now()) < 60_000 &&
+      JSON.stringify(weekly.report) ===
+        JSON.stringify({
+          views: insights.thisWeek.views,
+          shortlists: insights.thisWeek.shortlists,
+          streak: me.streak,
+          weeklyGoal: me.weeklyGoal,
+          topClip: top ? { title: top.title, views: top.views ?? 0, verified: !!top.verifiedClip } : null,
+          suggestion: me.nextActions[0] ?? null,
+        }),
+    "UR4 the player's feed opens with the week's report: their insights, streak, goal, most-viewed clip and next step",
+  );
+  const noticed = {};
+  for (const m of me.media) for (const [tag, n] of Object.entries(m.tags ?? {})) noticed[tag] = (noticed[tag] ?? 0) + n;
+  const events = insights.recent
+    .slice(0, 8)
+    .map((e) => ({ type: 'scouting_event', ts: e.ts, orgName: e.orgName, eventType: e.type }));
+  const tagged = rest.slice(events.length);
+  ok(
+    tagged1.status === 200 &&
+      tagged2.status === 200 &&
+      noticed[scoutTags[1]] === 2 &&
+      events.length >= 1 &&
+      JSON.stringify(rest.slice(0, events.length)) === JSON.stringify(events) &&
+      (Object.keys(noticed).length
+        ? tagged.length === 1 &&
+          tagged[0].type === 'scouts_noticed' &&
+          tagged[0].ts < weekly.ts &&
+          JSON.stringify(tagged[0].tags) === JSON.stringify(noticed)
+        : tagged.length === 0),
+    "UR5 then the eight latest scouting events, and the tags scouts gave the player's clips, summed",
+  );
+  const cv = await j('/player/cv', {}, bearer(KOLA));
+  const expected = {
+    player: {
+      name: me.name,
+      age: me.age,
+      country: me.country,
+      position: me.position,
+      foot: me.foot,
+      heightCm: me.heightCm,
+      weightKg: me.weightKg,
+      identityVerified: me.identityVerified,
+    },
+    trust: { score: me.trustScore, tier: me.tier, breakdown: me.trust },
+    seasonStats: me.stats,
+    verifiedAttendance: me.attendance.map((a) => ({ fixture: a.fixture, venue: a.venue, date: a.date })),
+    verifiedClips: me.media.filter((m) => m.verifiedClip).map((m) => ({ title: m.title, uploadedAt: m.uploadedAt })),
+    trialReports: me.trialReports.map((t) => ({
+      orgName: t.orgName,
+      filedAt: t.filedAt,
+      acceleration: t.acceleration,
+      sprintSpeedKmh: t.sprintSpeedKmh,
+      distanceKm: t.distanceKm,
+      passCompletionPct: t.passCompletionPct,
+      duelSuccessPct: t.duelSuccessPct,
+      coachRating: t.coachRating,
+    })),
+    combine: me.drillResults,
+    timeline: me.timeline,
+    note: 'Generated by ScoutBox. Attendance is GPS+device verified; trial reports are filed by clubs; trust is never purchasable.',
+  };
+  const { generatedAt, ...body } = cv.body;
+  ok(
+    cv.status === 200 &&
+      Math.abs(Date.parse(generatedAt) - Date.now()) < 60_000 &&
+      JSON.stringify(Object.keys(cv.body)[0]) === '"generatedAt"' &&
+      JSON.stringify(body) === JSON.stringify(expected) &&
+      me.attendance.length >= 1 &&
+      me.trialReports.length >= 1,
+    "UR6 the player's CV is their record, trust and verified evidence, dated now",
+  );
+}
+{
+  // Two results for one drill: the best is the lower time, whichever came first.
+  const drill = (id, value) =>
+    j(`/player/drills/${id}/complete`, { method: 'POST', body: JSON.stringify({ value }) }, bearer(newPlayerToken));
+  await drill('drill-sprint-ladder', 4.6);
+  await drill('drill-sprint-ladder', 4.3);
+  await drill('drill-passing-gates', 11);
+  await drill('drill-passing-gates', 15);
+  const drills = await j('/player/drills', {}, bearer(newPlayerToken));
+  const me = (await j('/player/me', {}, bearer(newPlayerToken))).body;
+  const expected = record.DRILLS.map((d) => ({
+    ...d,
+    completed: me.drills.includes(d.id),
+    best:
+      me.drillResults
+        .filter((x) => x.drillId === d.id)
+        .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
+  }));
+  ok(
+    drills.status === 200 &&
+      JSON.stringify(drills.body) === JSON.stringify(expected) &&
+      drills.body[0].best?.value === 4.3 &&
+      drills.body[1].best?.value === 15 &&
+      drills.body[2].completed === false &&
+      drills.body[2].best === null,
+    "UR7 the drill library carries the player's completion and best result of each",
+  );
+}
+{
+  const R = () => readRows(DATA_DIR);
+  const prefsOf = () => {
+    const db = R();
+    const g = db.row('guardians', { id: 'gd-amara' });
+    db.close();
+    return [g.prefs_quiet_start, g.prefs_quiet_end, g.prefs_school_hours_mute, g.prefs_timezone];
+  };
+  const post = (body) => j('/guardian/prefs', { method: 'POST', body: JSON.stringify(body) }, bearer(AMARA));
+  const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
+  const set = await post({ quietStart: '21:30', quietEnd: '07:00', timezone: 'Europe/London' });
+  const read = await j('/guardian/prefs', {}, bearer(AMARA));
+  const me = (await j('/guardian/me', {}, bearer(AMARA))).body;
+  ok(
+    set.status === 200 &&
+      JSON.stringify(set.body) ===
+        JSON.stringify({
+          prefs: { quietStart: '21:30', quietEnd: '07:00', schoolHoursMute: null, timezone: 'Europe/London' },
+          note,
+        }) &&
+      JSON.stringify(read.body) === JSON.stringify(set.body) &&
+      JSON.stringify(me.notificationPrefs) === JSON.stringify(set.body.prefs) &&
+      JSON.stringify(prefsOf()) === JSON.stringify(['21:30', '07:00', null, 'Europe/London']),
+    "UR8 a guardian's quiet hours are stored on the guardian and read back",
+  );
+  const kept = await post({ schoolHoursMute: true });
+  const zone = await post({ timezone: 'Mars/Olympus' });
+  ok(
+    kept.body.prefs?.quietStart === '21:30' &&
+      kept.body.prefs.schoolHoursMute === true &&
+      zone.status === 400 &&
+      zone.body.error === 'TIMEZONE_INVALID' &&
+      JSON.stringify(prefsOf()) === JSON.stringify(['21:30', '07:00', 1, 'Europe/London']),
+    'UR9 a field left out keeps its value, and a time zone that is not one is refused',
+  );
+  const cleared = await post({ quietStart: null, quietEnd: '', schoolHoursMute: null, timezone: null });
+  const again = await post({ schoolHoursMute: false });
+  const cleared2 = await post({ schoolHoursMute: null });
+  ok(
+    cleared.body.prefs?.schoolHoursMute === true &&
+      again.body.prefs?.schoolHoursMute === false &&
+      JSON.stringify(cleared2.body) ===
+        JSON.stringify({ prefs: { quietStart: null, quietEnd: null, schoolHoursMute: false, timezone: null }, note }),
+    'UR10 null or empty clears a time, but a null mute keeps the one stored',
+  );
+}
+{
+  const own = await j('/guardian/children/pl-guni/opportunity-board', {}, bearer(AMARA));
+  const self = await j('/player/opportunity-board', {}, bearer(GUNI));
+  const { minor, note, ...board } = self.body;
+  const one = await j('/guardian/children/pl-guni/opportunity-board?limit=1', {}, bearer(AMARA));
+  const other = await j('/guardian/children/pl-adeyemi/opportunity-board', {}, bearer(AMARA));
+  const junk = await j('/guardian/children/pl-guni/opportunity-board?cursor=junk', {}, bearer(AMARA));
+  ok(
+    own.status === 200 &&
+      minor === true &&
+      JSON.stringify(own.body) === JSON.stringify(board) &&
+      JSON.stringify(one.body.items) === JSON.stringify(board.items.slice(0, 1)) &&
+      board.items.length > 1 === (typeof one.body.nextCursor === 'string') &&
+      other.status === 403 &&
+      other.body.error === 'NOT_YOUR_CHILD' &&
+      junk.status === 400,
+    "UR11 a guardian reads their own child's opportunity board as the child does, paged, and no one else's",
+  );
+}
+{
+  const AMARA_LIVE = await liveStream(
+    API,
+    (method, p, body, token) =>
+      j(p, { method, body: body === undefined ? undefined : JSON.stringify(body) }, token ? bearer(token) : {}),
+    AMARA,
+  );
+  const seeker = (body, who = 'pl-guni') =>
+    j(`/guardian/children/${who}/first-team-seeker`, { method: 'POST', body: JSON.stringify(body) }, bearer(AMARA));
+  const stored = () => {
+    const db = readRows(DATA_DIR);
+    const p = db.row('players', { id: 'pl-guni' });
+    db.close();
+    return p.first_team_seeker;
+  };
+  const from = AMARA_LIVE.frames().length;
+  const on = await seeker({ enabled: true });
+  const ping = await AMARA_LIVE.waitFor((f) => f.event === 'players' && f.playerId === 'pl-guni', from);
+  const child = (await j('/player/me', {}, bearer(GUNI))).body;
+  ok(
+    on.status === 200 &&
+      JSON.stringify(on.body) === JSON.stringify({ firstTeamSeeker: true }) &&
+      child.firstTeamSeeker === true &&
+      stored() === 1 &&
+      !!ping,
+    "UR12 a guardian puts their grassroots child forward as a first-team seeker, and the child's catalogue is pinged",
+  );
+  const missing = await seeker({});
+  const other = await seeker({ enabled: true }, 'pl-adeyemi');
+  const off = await seeker({ enabled: false });
+  ok(
+    missing.status === 400 &&
+      missing.body.field === 'enabled' &&
+      other.status === 404 &&
+      other.body.error === 'CHILD_NOT_FOUND' &&
+      off.body.firstTeamSeeker === false &&
+      stored() === 0,
+    "UR13 the switch must be sent, only for the guardian's own child, and turns off again",
   );
 }
 r = await j('/player/account', { method: 'DELETE' }, bearer(GUNI));

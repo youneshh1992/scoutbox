@@ -49,6 +49,10 @@ export const NOTES = {
         checks: 7,
         why: "Parity beyond the batteries, slice 7: a decision's and a root approval's ledger detail (LD1, LD2), and removing a domain: a subdomain confirmed by its mailbox and removed, the refusals, and the root domain's MFA gate (DR0–DR4)",
       },
+      {
+        checks: 3,
+        why: 'Parity beyond the batteries, slice 11: Trust & Safety assigns a case to a named reviewer or to the team, and the refusals (AS1–AS3)',
+      },
     ],
   },
   'operations/clubOperations': {
@@ -88,6 +92,10 @@ export const NOTES = {
         checks: 8,
         why: "Parity beyond the batteries, slice 5: a lead's review of a submitted assessment, once, with its note as written, and the refusals (RV1–RV8)",
       },
+      {
+        checks: 2,
+        why: "Parity beyond the batteries, slice 11: Trust & Safety's list of every club's coach affiliations, and its paging (CO1, CO2)",
+      },
     ],
   },
   'platform/api': {
@@ -111,6 +119,10 @@ export const NOTES = {
       {
         checks: 7,
         why: "Parity beyond the batteries, slice 10: the club home dashboard's recruitment counts (RC1), reputation's seeded and live rows (RP1, RP2), a child's insights as their guardian reads them (DG0) and the guardian's weekly digest (DG1–DG3)",
+      },
+      {
+        checks: 13,
+        why: "Parity beyond the batteries, slice 11: Trust & Safety's invoice list (UR1, UR2), a club's plan (UR3), the player's feed, CV and drill library (UR4–UR7), a guardian's notification preferences (UR8–UR10), a child's opportunity board (UR11) and first-team-seeker switch (UR12, UR13)",
       },
     ],
   },
