@@ -8,14 +8,17 @@
 ////   (so a slow provider never holds the writer), and a refused or crashed unit sends none. Nothing has to pass
 ////   them up, so nothing can drop one. A `Read` has no collector: a read cannot ask for an effect.
 //// - Each unit runs in a fresh process the writer monitors. If the work crashes (a `panic`, a failed
-////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit.
+////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit. A read on
+////   a pooled connection runs the same way, so a crashing read never takes its reader down.
 //// - Queries go through `scoutbox_store_ffi`, not sqlight's `query`: each connection's statements are prepared once
 ////   and kept, and run on a normal scheduler unless one has taken over a millisecond (see that module, and
 ////   `vendor/esqlite.patch`). Statements without parameters (`exec`: BEGIN, COMMIT, migrations) go through sqlight,
 ////   on a dirty scheduler, so a COMMIT's fsync never holds a normal one.
 
+import exception
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode.{type Decoder}
+import gleam/erlang/atom
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/int
 import gleam/list
@@ -23,6 +26,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/time/timestamp
 import scoutbox/platform/effect.{type Effect}
 import simplifile
 import sqlight
@@ -95,7 +99,7 @@ pub opaque type Store {
   Store(
     writer: Subject(Job),
     writer_pid: Pid,
-    readers: List(Subject(Job)),
+    readers: Subject(PoolMessage),
     dispatch: fn(Effect) -> Nil,
     timeout: Int,
     /// The development fault layer's `internal:<step>` rules: whether a named step fails now.
@@ -107,6 +111,79 @@ pub opaque type Store {
 
 type Job {
   Job(run: fn(sqlight.Connection, Cache) -> Nil)
+}
+
+/// The read-only connections share one queue: a job goes to the next reader that is free, so one slow read never
+/// holds others up behind it while another reader sits idle. A job carries the moment its caller stops waiting
+/// (`deadline`, ms since the epoch); one still queued then is dropped, never run, so an overloaded pool doesn't
+/// spend itself on answers nobody will read.
+type PoolMessage {
+  Submit(job: Job, deadline: Int)
+  /// A reader finished its job (or just started) and can take the next.
+  Free(reader: Subject(Job))
+}
+
+type Pool {
+  Pool(
+    idle: List(Subject(Job)),
+    /// The waiting jobs, oldest first: `front`, then `back` reversed.
+    front: List(#(Job, Int)),
+    back: List(#(Job, Int)),
+  )
+}
+
+fn start_pool() -> Result(Subject(PoolMessage), String) {
+  actor.new(Pool(idle: [], front: [], back: []))
+  |> actor.on_message(fn(pool, message) {
+    case message {
+      Submit(job:, deadline:) ->
+        case pool.idle {
+          [reader, ..idle] -> {
+            process.send(reader, job)
+            actor.continue(Pool(..pool, idle:))
+          }
+          [] ->
+            actor.continue(Pool(..pool, back: [#(job, deadline), ..pool.back]))
+        }
+      Free(reader) ->
+        case next_live(pool, now_ms()) {
+          Ok(#(job, pool)) -> {
+            process.send(reader, job)
+            actor.continue(pool)
+          }
+          Error(pool) ->
+            actor.continue(Pool(..pool, idle: [reader, ..pool.idle]))
+        }
+    }
+  })
+  |> actor.start
+  |> result.map(fn(started) { started.data })
+  |> result.map_error(string.inspect)
+}
+
+/// The oldest waiting job whose caller is still waiting; the expired ones before it are dropped.
+fn next_live(pool: Pool, now: Int) -> Result(#(Job, Pool), Pool) {
+  case pool.front, pool.back {
+    [], [] -> Error(pool)
+    [], back ->
+      next_live(Pool(..pool, front: list.reverse(back), back: []), now)
+    [#(job, deadline), ..front], _ ->
+      case deadline > now {
+        True -> Ok(#(job, Pool(..pool, front:)))
+        False -> next_live(Pool(..pool, front:), now)
+      }
+  }
+}
+
+fn now_ms() -> Int {
+  let #(seconds, nanoseconds) =
+    timestamp.system_time() |> timestamp.to_unix_seconds_and_nanoseconds
+  seconds * 1000 + nanoseconds / 1_000_000
+}
+
+/// Runs `job` on the next free reader, or drops it if none is free before `timeout_ms` from now.
+fn submit(store: Store, job: Job, timeout_ms: Int) -> Nil {
+  process.send(store.readers, Submit(job:, deadline: now_ms() + timeout_ms))
 }
 
 /// Opens the database file at `path`: one writer and `readers` read-only connections. `dispatch` sends an effect
@@ -121,22 +198,28 @@ pub fn open(
     "file:" <> path,
     5000,
     None,
+    None,
   ))
-  use readers <- result.try(
+  use pool <- result.try(start_pool())
+  use _ <- result.try(
     list.repeat(Nil, readers)
     |> list.try_map(fn(_) {
       // A reader never waits for a lock inside SQLite: on a normal scheduler that would hold the scheduler. It
       // answers BUSY at once and the query retries in Erlang. With one writer and WAL, readers meet a lock only
       // in edge cases (recovery after a crash). The writer waits only in BEGIN and COMMIT, on a dirty scheduler.
-      start_connection("file:" <> path <> "?mode=ro", 0, Some(cache))
-      |> result.map(fn(started) { started.1 })
+      start_connection(
+        "file:" <> path <> "?mode=ro",
+        0,
+        Some(cache),
+        Some(pool),
+      )
     }),
   )
   Ok(
     Store(
       writer:,
       writer_pid:,
-      readers:,
+      readers: pool,
       dispatch:,
       timeout: 5000,
       should_fail: fn(_) { False },
@@ -160,12 +243,20 @@ pub fn with_before_commit(
   Store(..store, before_commit: hook)
 }
 
-/// A connection in its own process. With no `cache`, the process makes one and owns it.
+/// A connection in its own process. With no `cache`, the process makes one and owns it. A reader of a `pool` tells
+/// the pool it is free once it starts and after every job.
 fn start_connection(
   uri: String,
   busy_timeout_ms: Int,
   cache: Option(Cache),
+  pool: Option(Subject(PoolMessage)),
 ) -> Result(#(Pid, Subject(Job), Cache), String) {
+  let free = fn(subject) {
+    case pool {
+      Some(pool) -> process.send(pool, Free(subject))
+      None -> Nil
+    }
+  }
   actor.new_with_initialiser(5000, fn(subject) {
     use conn <- result.try(
       sqlight.open(uri) |> result.map_error(string.inspect),
@@ -180,12 +271,14 @@ fn start_connection(
       |> result.map_error(string.inspect),
     )
     let cache = option.lazy_unwrap(cache, new_cache)
-    actor.initialised(#(conn, cache))
+    free(subject)
+    actor.initialised(#(conn, cache, subject))
     |> actor.returning(#(subject, cache))
     |> Ok
   })
   |> actor.on_message(fn(state, job: Job) {
     job.run(state.0, state.1)
+    free(state.2)
     actor.continue(state)
   })
   |> actor.start
@@ -324,14 +417,22 @@ fn supervise_unit(
   before_commit: fn(Tx) -> Result(Nil, sqlight.Error),
   work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(#(a, List(Effect)), UnitError(e)) {
+  case
+    isolated(fn() { run_unit(conn, cache, should_fail, before_commit, work) })
+  {
+    Ok(result) -> result
+    Error(reason) -> {
+      let _ = sqlight.exec("ROLLBACK", conn)
+      Error(Crashed(reason))
+    }
+  }
+}
+
+/// Runs `f` in a fresh process and waits for it: `Error` with the reason when it crashes, so the connection's own
+/// process (the writer, or a reader) carries on. A crash is not caught; the process dies and is seen to.
+fn isolated(f: fn() -> a) -> Result(a, String) {
   let done = process.new_subject()
-  let pid =
-    process.spawn_unlinked(fn() {
-      process.send(
-        done,
-        run_unit(conn, cache, should_fail, before_commit, work),
-      )
-    })
+  let pid = process.spawn_unlinked(fn() { process.send(done, f()) })
   let monitor = process.monitor(pid)
   let outcome =
     process.new_selector()
@@ -341,13 +442,7 @@ fn supervise_unit(
     })
     |> process.selector_receive_forever
   process.demonitor_process(monitor)
-  case outcome {
-    Ok(result) -> result
-    Error(reason) -> {
-      let _ = sqlight.exec("ROLLBACK", conn)
-      Error(Crashed(reason))
-    }
-  }
+  outcome
 }
 
 fn run_unit(
@@ -410,18 +505,54 @@ fn drain(effects: Subject(Effect), acc: List(Effect)) -> List(Effect) {
   }
 }
 
+/// The message of the crash a read raises when no reader answered in time (`is_overloaded`).
+const overloaded = "store overloaded: no reader answered in time"
+
 /// Runs `f` on a read-only connection. It sees the last commit and cannot write.
+///
+/// When the readers are too busy to answer within the store's timeout, the read crashes with `overloaded`, which
+/// the router answers as a retryable 503 (`is_overloaded`): every caller would answer the same, and the request
+/// can only give up. If `f` crashes, the read crashes in the caller's process too, and the reader carries on.
 pub fn read(store: Store, f: fn(Read) -> a) -> a {
-  let index = int.random(list.length(store.readers))
-  let assert Ok(reader) = store.readers |> list.drop(index) |> list.first
   let reply = process.new_subject()
+  let deadline = now_ms() + store.timeout
   process.send(
-    reader,
-    Job(fn(conn, cache) { process.send(reply, f(Read(conn, cache))) }),
+    store.readers,
+    Submit(
+      job: Job(fn(conn, cache) {
+        let answer = isolated(fn() { f(Read(conn, cache)) })
+        // A caller that stopped waiting would only find the answer in its mailbox later, as a stray message.
+        case now_ms() < deadline {
+          True -> process.send(reply, answer)
+          False -> Nil
+        }
+      }),
+      deadline:,
+    ),
   )
-  let assert Ok(value) = process.receive(reply, store.timeout)
-    as "a read did not answer in time"
-  value
+  case process.receive(reply, int.max(0, deadline - now_ms())) {
+    Ok(Ok(value)) -> value
+    Ok(Error(reason)) -> panic as { "a read crashed: " <> reason }
+    Error(Nil) -> panic as overloaded
+  }
+}
+
+/// Whether `crash` is a read that no reader answered in time: the server is overloaded, not broken.
+pub fn is_overloaded(crash: exception.Exception) -> Bool {
+  case crash {
+    exception.Errored(detail) ->
+      decode.run(
+        detail,
+        decode.field(atom.create("message"), decode.string, decode.success),
+      )
+      == Ok(overloaded)
+    _ -> False
+  }
+}
+
+/// The same store with units and reads waiting `ms` for an answer (5 s by default). For tests.
+pub fn with_timeout(store: Store, ms: Int) -> Store {
+  Store(..store, timeout: ms)
 }
 
 /// Writes a consistent copy of the whole database, as last committed, to a new file at `file` (VACUUM INTO): the
@@ -437,11 +568,9 @@ pub fn copy_to(
     Ok(False) -> Ok(Nil)
     _ -> Error("copy_to: " <> file <> " already exists")
   })
-  let index = int.random(list.length(store.readers))
-  let assert Ok(reader) = store.readers |> list.drop(index) |> list.first
   let reply = process.new_subject()
-  process.send(
-    reader,
+  submit(
+    store,
     Job(fn(conn, _) {
       process.send(
         reply,
@@ -455,6 +584,7 @@ pub fn copy_to(
           |> result.map_error(fn(e) { e.message }),
       )
     }),
+    timeout_ms,
   )
   case process.receive(reply, timeout_ms) {
     Ok(r) -> r

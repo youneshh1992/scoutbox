@@ -105,6 +105,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   it again from the top so it answers from the new state.
 - Expected failures are values: `store.refuse(e)` rolls the unit back. Map one act's refusals into another's
   with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
+- Crashes are not control flow. `exception.rescue` appears once, in the router's `rescue`: a crash becomes a 500,
+  or a retryable 503 when `store.is_overloaded` says no reader answered in time. That overloaded read is the one
+  panic that signals a condition; don't add another, return a `Result`. Work that may crash runs in a monitored
+  process (`store`'s `isolated`, as units and pooled reads do), never under a rescue.
 - Request input is read with `platform/input` shapes. It is valid as sent or refused in the shared refusal
   format; never coerce.
   A vocabulary's accepted values come from its generated `pairs` (`input.one_of(v.pairs)`, or

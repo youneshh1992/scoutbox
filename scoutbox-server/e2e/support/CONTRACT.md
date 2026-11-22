@@ -73,6 +73,11 @@ Synthetic stand-ins for outside services, development only. None of them makes a
 | `/__faults` | `GET` lists the rules with how often each was reached (`{ rules: [{ kind, pattern, arg, hits }] }`). `POST { rules }` replaces them, in the same syntax, and returns `{ ok: true, rules }`, or 400 `FAULT_RULE_INVALID`. Development only. |
 | `/__rate-limits` | `GET` lists the live rate-limit buckets as `{ buckets: [{ action, key, spent }] }`, so a battery can see which budget a request drew on without exhausting it. Development only. |
 
+## Under load
+
+A server may refuse a request it can't serve in time with 503 `SERVER_BUSY`, retryable, with a `Retry-After`; nothing
+was written, so a retry is safe. The TypeScript server queues instead and never answers it, and no battery expects it.
+
 ## Time
 
 | Setting or header | Meaning |

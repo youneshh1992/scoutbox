@@ -119,6 +119,17 @@ pub fn rerun(req: Request) -> Bool {
   request.get_header(req, rerun_header) == Ok("1")
 }
 
+/// The server was too busy to answer in time (`store.is_overloaded`): a 503 the client may retry in a moment. Nothing
+/// was written, so a retry is safe. The TypeScript server queues instead and never answers this (CONTRACT.md).
+pub fn busy() -> Response {
+  error_message(
+    503,
+    "SERVER_BUSY",
+    "The server is busy — try again in a moment.",
+  )
+  |> response.set_header("retry-after", "1")
+}
+
 /// A 500 with fixed text; the detail goes to the log, never to the client.
 pub fn internal(detail: a) -> Response {
   wisp.log_error("internal error: " <> string.inspect(detail))

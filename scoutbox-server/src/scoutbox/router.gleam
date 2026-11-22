@@ -3059,11 +3059,16 @@ fn fault(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
   }
 }
 
-/// A crash in a handler is a 500 with fixed text; the detail goes to the log.
+/// A crash in a handler is a 500 with fixed text; the detail goes to the log. A read the store's readers were too
+/// busy to answer in time is no fault of the request: a retryable 503 (`store.is_overloaded`).
 fn rescue(handler: fn() -> Response) -> Response {
   case exception.rescue(handler) {
     Ok(response) -> response
-    Error(crash) -> contract.internal(crash)
+    Error(crash) ->
+      case store.is_overloaded(crash) {
+        True -> contract.busy()
+        False -> contract.internal(crash)
+      }
   }
 }
 
