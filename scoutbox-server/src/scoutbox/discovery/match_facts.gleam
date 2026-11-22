@@ -8,6 +8,7 @@
 //// a claim lapses, an agreement starts or ends, the player comes of age); `sweep` marks those rows, and its own
 //// COMMIT re-derives them. `start` re-derives every row when the policy key changed.
 
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/float
 import gleam/int
@@ -339,9 +340,10 @@ fn drain_batches(
     [] -> Ok(Nil)
     _ -> {
       use found <- result.try(players.by_ids(read, ids))
+      let found = dict.from_list(list.map(found, fn(p) { #(p.row.id, p) }))
       use _ <- result.try(
         list.try_each(ids, fn(pid) {
-          case list.find(found, fn(p) { p.row.id == pid }) {
+          case dict.get(found, pid) {
             Ok(p) -> {
               use facts <- result.try(build(read, p, now, allow_simulated))
               write(tx, pid, Some(facts))
