@@ -67,6 +67,21 @@ The recordings are frozen in `scoutbox-server/dev/battery_cases/recordings.json.
 320 KB), so this step no longer has to finish before the TypeScript server is deleted. `npm run cases:record`
 records them again while the tree exists.
 
+A rule over a small finite domain is proved over its whole matrix rather than call by call (`dev/battery_cases/
+matrices.mjs`, status `matrix`). The lifecycle validator is the first: `canTransitionRecruitmentCase` and
+`availableActions` are proved by `test/scoutbox/recruitment/lifecycle_matrix_test.gleam`.
+
+**Left for later in this step:**
+
+- **The lifecycle's evidence calls go with `createEvidenceProvider`.** 21 of `canTransitionRecruitmentCase`'s calls
+  pass the TypeScript fixture provider (`createEvidenceProvider` over plain records: lifecycle H1, H5 and the
+  inbound-to-signed sweep; contacts' draft and delivered contact; decisions P15–P19 and the rest of its sweep; offers
+  A82–A85; offersAdversarial R-p11). They test which records count as evidence, which here is the SQL in
+  `case_lifecycle.evidence`. Port them with `createEvidenceProvider`'s own probes as one store-backed
+  `evidence_test.gleam` that seeds contacts, decisions, Offers and signings. Then add `canTransitionRecruitmentCase`
+  to `HAND_PORTED`: its other hand-port calls are done (the 15 Gleam's types can't hold are in
+  `case_lifecycle_test.gleam`, and the 3 whose provider always says yes are rows of the matrix).
+
 ## 4. Stop depending on the TypeScript tree
 
 These read `../scoutbox/scoutbox-server`, so they stop working when it is deleted:
