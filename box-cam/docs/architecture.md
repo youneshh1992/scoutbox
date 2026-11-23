@@ -1,7 +1,8 @@
 # Architecture
 
 How the CV app and the ScoutBox API divide the work. This started as a survey written on 16 Nov 2026 alongside the
-Gleam port. The transport question it left open is now decided: **direct upload**.
+Gleam port. The transport question it left open is now decided: **the phone uploads to object storage**, and
+recordings never pass through the API.
 
 ## The split
 
@@ -13,7 +14,7 @@ Gleam port. The transport question it left open is now decided: **direct upload*
   - the Combine eligibility gate and its validation records, which are release configuration
 
   It decides what a result **means**.
-- **The CV app** owns pixels only. Frames go in; an observation result or a typed refusal comes out. It stores
+- **The CV app** owns pixels only. A recording goes in; an observation result or a typed refusal comes out. It stores
   nothing durable, knows no players, and makes no Passport or Combine decisions. It reports the engine, policy and
   freeze versions behind each result, so the API can check them against the validation record.
 
@@ -25,47 +26,62 @@ Gleam port. The transport question it left open is now decided: **direct upload*
    - the session id
    - the protocol's `id@version`
    - the expected engine, policy and freeze versions
-   - an expiry and a frame and byte budget
+   - an expiry, and a byte and duration budget
+   - the recording formats the protocol accepts (see [Recording formats](#recording-formats))
 
-   The API answers with a short-lived **job token**, signed by the API, and the CV app's address.
-3. The phone sends frames **directly to the CV app** with that token. The rules for the token:
-   - It locates one job and authorises nothing else.
-   - It expires.
-   - It carries the budget, so the CV app can enforce it without calling the API.
-4. Finalize goes through the API. The API asks the CV app to close the job, which is single-shot and idempotent
-   per job id. The API receives the result (counts, refusal reason, quality, versions) and records it in one unit
-   of work together with the session's verification state.
+   The API answers with a short-lived **signed upload URL** for one object key that names the job. The URL is
+   bound to the declared size, type and SHA-256. This is the same upload flow as every other file the API takes.
+3. The phone records the attempt and uploads it **straight to object storage** with that URL. The recording never
+   passes through the API. The URL locates one object and authorises nothing else, and it expires.
+4. Finalize goes through the API. The API checks the object (size, type, checksum) and hands the job to the CV
+   app with a short-lived signed read URL and the job's parameters. The CV app returns the result (counts,
+   refusal reason, quality, versions), either in its answer or by posting a signed result back to the API. The API
+   records it in one unit of work together with the session's verification state.
 
-   Alternatively, the CV app posts the signed result back to the API. Either way, a retry keyed by job id returns
-   the same result and never mints a second one.
-5. The CV app drops all job state on finalize, cancel or expiry.
+   Finalize is single-shot and idempotent per job id: a retry returns the same result and never mints a second
+   one.
+5. The recording is deleted when the job is finalized, cancelled or expires. The API deletes the object after it
+   records the result, through the same deletion queue as other media, which retries on failure. A lifecycle rule
+   on the Box Cam prefix deletes anything left behind within 24 hours. The CV app drops all job state at the same
+   points.
+
+### Recording formats
+
+The contract pins each format the CV app accepts, and a protocol names the ones it allows. A format might be
+minimised frames, like the old grey 320×240, or a video rendered on the device by object tracking. Such a video
+can carry more resolution while showing only silhouettes of the player and the ball. Each format is a privacy
+decision as well as a technical one (see [`privacy.md`](privacy.md)): it shows no more of the player or their home
+than counting needs.
 
 ## What moves from the API to the CV app
 
-With frames off the API, the API's standing gates no longer protect frame ingest. These are auth, rate limits,
-origin checks and the 20 transport-security checks in [`contract.md`](contract.md). The CV app must provide
-them:
+The API's standing gates (auth, rate limits, origin checks) still guard `begin`, the upload URL and finalize. They
+no longer see the bytes. The CV app is the first thing to interpret a recording, so it must provide the checks on
+the payload. [`contract.md`](contract.md) maps the 20 transport-security checks to each side.
 
-- **Token:** check the signature and expiry, bind the token to one job, and refuse once the job is finalized or
+- **Job:** accept work only from the API, one job per job id, and refuse a job id that has been finalized or
   cancelled.
-- **Ordering:** sequence numbers are strictly increasing, and duplicate frames are refused.
-- **Payload:** size, dimensions and encoding are checked before anything interprets the bytes. A measurement-shaped
-  field is refused by name.
-- **Budget:** a bounded queue, a batch cap and a per-job rate limit.
-- **Timing:** server-side timestamps, or client time checked against arrival (see
+- **Payload:** check the format, size, dimensions, duration and encoding before anything interprets the bytes, and
+  refuse a format the contract doesn't pin. A measurement-shaped field in the recording's metadata is refused by
+  name.
+- **Ordering:** frame timestamps inside the recording are strictly increasing, and duplicate frames are refused.
+- **Budget:** byte, duration and frame caps, and a bounded job queue.
+- **Timing:** the recording's timeline is produced on the phone. The CV app declares how it checks it (see
   [`lessons.md`](lessons.md)).
-- **Retention:** no frame is ever written to disk or logs.
+- **Retention:** read the recording only through its signed URL, and never write it, or a frame of it, to disk or
+  logs.
 
-The API's `begin` still enforces session ownership, the nonce, liveness and protocol support before it issues a
-token. The Gleam server's stub (`cv_stub.gleam`) already runs those checks before answering 503, so `begin` is
-where the token gets issued.
+The API's `begin` still enforces session ownership, the nonce, liveness and protocol support before it issues the
+upload URL. The Gleam server's stub (`cv_stub.gleam`) already runs those checks before answering 503, so `begin`
+is where the URL gets issued.
 
 ## Contract to pin first
 
-- **The frame envelope:** format, size limits, sequence numbers, timing. Fix the `atMs` mismatch here, once, and
-  share one definition between the Player app and the CV app.
-- **The job token:** its claims, signing key ownership, rotation, and its lifetime relative to the 60 s protocol
-  window.
+- **The recording formats:** each format's encoding, size and duration limits, frame timing and metadata. Fix the
+  `atMs` mismatch here, once, and share one definition between the Player app and the CV app.
+- **The job hand-over:** how the API authenticates to the CV app, the job's parameters, the lifetime of the upload
+  and read URLs relative to the 60 s protocol window, and whether the result comes back in the answer or as a
+  signed callback.
 - **The result shape and the refusal enumeration**, from [`contract.md`](contract.md).
 - **The version triple** (engine, policy, freeze) on every result.
 - **The conformance suite:** the synthetic fixtures, families, stress suite and holdout (see
@@ -86,15 +102,17 @@ where the token gets issued.
   - Real YOLO is AGPL and stays excluded. Even OpenCV's HOG people detector ships pretrained weights.
 - **Determinism:** pin the build, run single-threaded and disable IPP/OpenCL in the measuring path, or move to
   tolerances and say so in the policy version.
-- **Input size:** 320×240 grey leaves the ball a few pixels wide at 2.5–3 m. Direct upload makes more resolution
-  affordable for the API, but not free for the phone's bandwidth or for privacy.
+- **Input size:** 320×240 grey leaves the ball a few pixels wide at 2.5–3 m. Uploading to object storage makes
+  more resolution affordable for the API, but not free for the phone's bandwidth or for privacy. A silhouette video
+  rendered on the device (see [Recording formats](#recording-formats)) is one way to gain resolution without
+  showing more of the player.
 
 ## Next steps, in order
 
 1. Raise the self-attested `box_cam_observed` problem with the Founder (see [`lessons.md`](lessons.md)). It
    decides how non-CV sessions are labelled.
-2. Pin the job, token and frame contract above, and fix the `atMs` envelope bug in the contract, not in both
-   apps.
+2. Pin the job, upload and recording-format contract above, and fix the `atMs` envelope bug in the contract, not
+   in both apps.
 3. Build the CV app:
    - OpenCV pre-processing
    - the three-layer split: detect, then track in ball diameters relative to the player, then the protocol
@@ -102,8 +120,8 @@ where the token gets issued.
    - the refusal-first quality gate
 
    It must pass the synthetic conformance suite.
-4. Replace the Gleam server's `cv_stub` with job creation and token issue at `begin`, and recording of the result
-   at finalize.
+4. Replace the Gleam server's `cv_stub` with job creation and the upload URL at `begin`, and the hand-over to the
+   CV app and recording of the result at finalize.
 5. Start the real-world data work now, per [`validation.md`](validation.md):
    - a consent process, adult-only capture and annotation
    - at least 200 valid attempts, 0 false verifications, at least 95% within tolerance and at most 20% refusals

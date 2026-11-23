@@ -22,10 +22,12 @@ no code yet.
 
 ## Decided
 
-- The phone talks to the CV app directly, with a short-lived token the API issues. Frames don't pass through
-  the API. See [`docs/architecture.md`](docs/architecture.md).
-- The CV app handles pixels only. Frames go in; an observation or a typed refusal comes out. It stores nothing
-  durable, knows no players, and makes no Passport or Combine decisions.
+- Recordings never pass through the API. The phone uploads a recording of the attempt to object storage
+  (Cloudflare R2) with a short-lived signed URL the API issues at `cv/begin`. The CV app is told where it is, and
+  the recording is deleted when the job ends. See [`docs/architecture.md`](docs/architecture.md) and
+  [`docs/privacy.md`](docs/privacy.md).
+- The CV app handles pixels only. A recording goes in; an observation or a typed refusal comes out. It stores
+  nothing durable, knows no players, and makes no Passport or Combine decisions.
 
 ## Contents
 

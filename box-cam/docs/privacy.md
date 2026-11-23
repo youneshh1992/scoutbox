@@ -4,16 +4,23 @@ Many Box Cam users are minors. These rules were settled in the old implementatio
 (`docs/product/passport-development.md`, `docs/decisions.md`, and [`validation.md`](validation.md) §11–§12), and
 they bind the rebuild.
 
-## Frames
+## Recordings and frames
 
-- **Frames are never persisted or logged.** They are analysed and dropped. A test must prove it for the database,
-  logs and files: the old `boxCamCvProvider` battery §37/§92 did.
+- **A recording is held only in object storage, and only for as long as its job.** The phone uploads it with a
+  signed URL for one job's key. It is deleted when the job is finalized, cancelled or expires, and a lifecycle rule
+  deletes anything left behind within 24 hours. It is never written to the database, the logs, or either app's
+  disk, and the CV app reads it only through a short-lived signed URL.
+- Tests must prove it: the object is gone after finalize, cancel and expiry, and no frame reached the database,
+  logs or files. The old `boxCamCvProvider` battery §37/§92 proved the last part, when frames were never stored at
+  all.
 - A result holds no frame content and nothing derived from one pixel-wise. It holds only counts, presence,
   durations and timestamps, with a trace of at most 256 events.
 - All of the CV app's job state is dropped on finalize, cancel or expiry. The app stores nothing durable and knows
   no players.
-- Keep frames minimal. The old format was grey, at most 320×240. A higher resolution or colour is a privacy
-  decision, not just a technical one.
+- **A recording shows no more than counting needs.** The old format was grey, at most 320×240. A format may carry
+  more resolution if it shows less: for example a video rendered on the device by object tracking that shows only
+  silhouettes of the player and the ball, with no face or surroundings. Each format, and any change to resolution,
+  colour or what is visible, is a privacy decision recorded in the contract, not just a technical one.
 
 ## Never inferred
 

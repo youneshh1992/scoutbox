@@ -1,9 +1,9 @@
 # The API ↔ CV contract
 
 This page describes the contract **as the old server had it**. Frames came through the API, which ran the engine
-in-process. The new design sends frames from the phone directly to the CV app (see
-[`architecture.md`](architecture.md)), so the transport changes. The result, the refusal vocabulary, the version
-triple and the security properties carry over.
+in-process. In the new design the phone uploads a recording to object storage and the CV app reads it from there
+(see [`architecture.md`](architecture.md)), so the transport changes. The result, the refusal vocabulary, the
+version triple and the security properties carry over.
 
 The source files are at the tag `box-cam-ts-final`, under `scoutbox-server/domains/development/boxcam/cv/`:
 `routes.mjs`, `provider.mjs`, `frames.mjs` and `policy.mjs`.
@@ -174,8 +174,14 @@ variable could open the gate.
 
 ## Security properties the old batteries proved
 
-These checks were in `boxCamCvProvider.mjs` §85 at the tag. They are requirements for whichever side receives
-frames, and with direct upload that is now the CV app.
+These checks were in `boxCamCvProvider.mjs` §85 at the tag. They remain requirements, now split between two
+sides:
+
+- **The API**, when it issues the upload URL and hands over the job: 1–6, 13 (as a rate limit on `begin`),
+  15–19.
+- **The CV app**, when it reads the recording: 7–12 (sequence and ordering apply to the frames inside it), 14 (its
+  job queue), and 15–18 (it refuses an expired, closed or reused job id).
+- **Both:** 20.
 
 1. An unauthenticated frame is rejected.
 2. Another player can't send frames to the session.
@@ -200,7 +206,8 @@ frames, and with direct upload that is now the CV app.
 
 The same batteries also checked these:
 
-- No raw frame is persisted anywhere: not in the database, logs or files.
+- No raw frame is persisted anywhere: not in the database, logs or files. With recordings in object storage, this
+  becomes the retention rule in [`privacy.md`](privacy.md).
 - A provider crash, an engine exception, an overflow or a restart leaves no half-written result.
 - The expensive endpoints are rate-limited.
 - Concurrent sessions are isolated, and a pooled tracker never leaks state between sessions.

@@ -43,8 +43,10 @@ The documented rule was "client timestamps are never used", but the engine ran o
 (`frames.mjs:71`). The server recorded `clientClockAnomalies` and still used the client's timeline. A tampered
 clock can stretch or compress a window.
 
-With direct upload, the CV app should timestamp frames on arrival or check client time against the arrival
-cadence. It must declare in the contract which one it does.
+A recording uploaded whole has no arrival cadence to check, so its timeline is produced on the phone. The CV
+app must declare in the contract how it checks that timeline: for example against the recording's duration and
+frame count, and the upload's timing relative to `cv/begin`. Native capture (see
+[`architecture.md`](architecture.md)) makes a tampered timeline harder to produce.
 
 ## The app and the server disagreed on the frame envelope
 
