@@ -8,14 +8,17 @@
 ////   plain arrays. Here the context is built from `Sources`, whose `visible` map is what the closures answered;
 ////   the organisation scope is the SQL read's (`context.read`), which the battery checks over HTTP (N34, N35).
 ////   A note, a rationale or an actor's name has no field in any source record, so it can't reach a payload.
+//// - `journeyEvidenceFunnel` reads such a context too (journeyAdversarial T7): here it is built from `Sources`.
 
 import gleam/dict
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import scoutbox/battery/base
 import scoutbox/recruitment/analytics/context.{Decision, Entry, Filters, Sources}
 import scoutbox/recruitment/analytics/dashboard
+import scoutbox/recruitment/analytics/funnels
 import scoutbox/recruitment/analytics/metrics
 import scoutbox/rows/id
 
@@ -256,5 +259,89 @@ pub fn a_hidden_player_is_counted_but_never_named_test() {
   assert has(
     build(sources([]), no_filters(), None),
     "\"total\":{\"n\":1,\"value\":1,\"empty\":false,\"suppressed\":false}",
+  )
+}
+
+// ------------------------------------------------------------------ the evidence funnel by case
+
+/// journeyAdversarial T7: a player's first case, archived, and their second, open. An assessment counts for the case
+/// it belongs to: the one open when it was written, or the one whose Trial it was written in.
+fn t7(assessment: context.Assessment, trials: List(context.Trial)) -> String {
+  let player = id.player("pl-t7")
+  let at = fn(n) { now - n * day }
+  let case_room = fn(case_id, created_at, status, history) {
+    context.room(
+      id: id.recruitment_case(case_id),
+      player_id: player,
+      created_at:,
+      status:,
+      priority: "normal",
+      source_context: "search",
+      history:,
+    )
+  }
+  let rooms = [
+    case_room("case-t7-a", at(20), "archived", [
+      entry(at(19), "room_status_changed", "watching", "under_review"),
+      entry(at(10), "room_status_changed", "under_review", "archived"),
+    ]),
+    case_room("case-t7-b", at(5), "under_review", [
+      entry(at(4), "room_status_changed", "watching", "under_review"),
+    ]),
+  ]
+  let s =
+    Sources(
+      ..sources([]),
+      rooms:,
+      decisions: [],
+      trials:,
+      assessments: [assessment],
+      visible: dict.from_list([#(player, "Player")]),
+    )
+  // The suite's window, as it passes it: wider than a request may ask for.
+  let w =
+    metrics.Window(
+      preset: "custom",
+      from: base.day("1970-01-01"),
+      to: base.day("2999-12-31"),
+      days: 376_199,
+    )
+  funnels.journey_evidence_funnel(context.build(s, w, now, no_filters()))
+  |> json.to_string
+}
+
+fn submitted(submitted_at: Int, trial_id) -> context.Assessment {
+  context.Assessment(
+    player_id: id.player("pl-t7"),
+    draft: False,
+    trial_id:,
+    created_at: submitted_at,
+    submitted_at: Some(submitted_at),
+  )
+}
+
+pub fn an_assessment_counts_for_the_case_it_belongs_to_test() {
+  let assessed_once = "{\"stage\":\"assessed\",\"value\":1,"
+  // Written while the first case was open: the first case's, not the second's.
+  let open = t7(submitted(now - 15 * day, None), [])
+  assert has(open, assessed_once)
+  // Written after the first case ended: the second case's.
+  assert has(t7(submitted(now - 3 * day, None), []), assessed_once)
+  // Written in the first case's Trial: the first case's, whenever it was written.
+  let trial =
+    context.Trial(
+      id: id.trial("trial-t7"),
+      case_id: Some(id.recruitment_case("case-t7-a")),
+      status: "awaiting_report",
+      accepted_at: now - 18 * day,
+      confirmed_at: None,
+      completion_state: None,
+      completion_at: None,
+      report_due_at: None,
+      subject_removed_at: None,
+    )
+  assert has(
+    t7(submitted(now - 3 * day, Some("trial-t7")), [trial]),
+    assessed_once,
   )
 }

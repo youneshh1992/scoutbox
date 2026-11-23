@@ -15,7 +15,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/contacts
-import scoutbox/recruitment/journey
+import scoutbox/recruitment/journey_model
 import scoutbox/recruitment/offers
 import scoutbox/recruitment/requests
 import scoutbox/recruitment/signing_packages
@@ -332,7 +332,7 @@ fn signing(
       let current =
         siblings
         |> list.filter(fn(x) { x.row.org_id == p.row.org_id })
-        |> journey.current_signing(now)
+        |> journey_model.current_signing(now)
         |> option.unwrap(p)
       case kind {
         audience.OrgUser ->

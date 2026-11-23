@@ -3292,93 +3292,105 @@
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor",
         "calls": 9,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"\" as a value of scoutbox/vocab/room_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/vocab/room_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"SIGNED\" as a value of scoutbox/vocab/room_status.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an assessment has no column for updatedAt": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer",
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor",
         "calls": 251,
-        "cases": 147,
-        "handPort": {},
-        "status": "pending"
+        "cases": 146,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"nonsense\" as a RoomStatus": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#playerNextActionFor",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored signing package always has currentRevisionId": 1,
+          "Gleam's types can't hold its arguments: cannot print \"SIGNED\" as a value of scoutbox/vocab/room_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1
+        },
+        "status": "generated"
       }
     ]
   },
@@ -3404,51 +3416,55 @@
       {
         "function": "domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the funnel reads a reporting context, which context.build makes from Sources; the calls are ported over Sources": 3
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"BOGUS\" as a value of scoutbox/rows/signing_packages.status_pairs": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase",
         "calls": 3,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",

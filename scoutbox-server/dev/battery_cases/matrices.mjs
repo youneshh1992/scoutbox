@@ -89,6 +89,100 @@ function canContactAction([contact, action, context = {}]) {
   return CONTACT.answers[`${contact.status} ${action} ${context.role ?? 'none'}`];
 }
 
+// ------------------------------------------------------------------------------------------- the next action
+
+const NEXT = JSON.parse(readFileSync(new URL('../../test/fixtures/next_action_matrix.json', import.meta.url)));
+const NEXT_TEST = 'test/scoutbox/recruitment/next_action_matrix_test.gleam';
+const LIVE_SIGNING = ['DRAFT', 'READY', 'IN_PROGRESS'];
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const valueAt = (dim, value, what) => {
+  const i = NEXT.values[dim].findIndex((v) => same(v, value));
+  if (i < 0) cannot(`cannot print ${JSON.stringify(value)} as ${what}`);
+  return i;
+};
+/** The id a record has, which the fixture's own id stands for in the answer. */
+const idOf = (record, what) => {
+  if (typeof record?.id !== 'string') cannot(`${what} without an id`);
+  return record.id;
+};
+
+// What the projector hands nextActionFor besides the facts: the player's standing, which the journey shows
+// elsewhere. The Gleam facts have no place for any of it, so it can't change the answer.
+const NEXT_IGNORED = ['trustScore', 'trust', 'matchScore', 'match', 'player', 'onWatchlist', 'watchlists', 'boxCam', 'cv', 'combine'];
+
+/**
+ * A call's row: each record reduced to its class as the rule reads it (the package's effective status as
+ * signing.mjs#effectiveStatus reads it, its current revision's parties), and the facts the status doesn't read
+ * left at none, which the fixture's sweeps show changes nothing. The fixture's ids are then replaced by the call's.
+ */
+function nextActionFor([p]) {
+  only(p, ['status', 'role', 'now', 'blocked', 'subjectRemoved', 'assessed', 'decision', 'contact', 'trial', 'trialRequest', 'offer', 'signing', 'signingRow', ...NEXT_IGNORED], "nextActionFor's facts");
+  const status = at(NEXT.statuses, p.status, 'a RoomStatus');
+  const role = at(NEXT.roles, p.role ?? null, 'a RoomRole');
+  if (typeof p.now !== 'number') cannot('nextActionFor without a clock');
+  const now = p.now;
+  const ids = {};
+  const fact = {
+    assessed: () => valueAt('assessed', !!p.assessed, 'assessed'),
+    decision: () => {
+      if (!p.decision) return 0;
+      ids['rdc-m'] = idOf(p.decision, 'a decision');
+      return 1;
+    },
+    contact: () => {
+      if (!p.contact) return 0;
+      ids['rct-m'] = idOf(p.contact, 'a contact');
+      return valueAt('contact', p.contact.status, 'a contact status');
+    },
+    trial: () => {
+      if (!p.trial) return 0;
+      ids['trl-m'] = idOf(p.trial, 'a trial');
+      const sessions = p.trial.schedule?.sessions ?? [];
+      const last = sessions.reduce((m, x) => Math.max(m, Number(x?.endsAt) || 0), 0);
+      return valueAt('trial', last === 0 ? 'no_sessions' : last < now ? 'ended' : last === now ? 'ends_now' : 'later', 'a trial');
+    },
+    request: () => {
+      if (!p.trialRequest) return 0;
+      ids['rrq-m'] = idOf(p.trialRequest, 'a trial request');
+      return 1;
+    },
+    offer: () => {
+      if (!p.offer) return 0;
+      ids['rof-m'] = idOf(p.offer.offer, 'an Offer');
+      if (p.offer.revision) ids['rrev-m'] = idOf(p.offer.revision, 'a revision');
+      return valueAt('offer', [p.offer.status ?? null, p.offer.liveStatus ?? null, !!p.offer.revision], 'an Offer');
+    },
+    signing: () => {
+      const s = p.signing;
+      if (!s) return 0;
+      ids['spk-m'] = idOf(s, 'a signing package');
+      const exp = s.expiresAt;
+      const effective = LIVE_SIGNING.includes(s.status) && Number.isFinite(exp) && now >= exp ? 'EXPIRED' : s.status;
+      const rev = (s.revisions ?? []).find((r) => r?.id === s.currentRevisionId);
+      const parties = Array.isArray(rev?.requiredParties) ? rev.requiredParties : [];
+      const pending = (club) => parties.some((x) => (x?.partyType === 'CLUB_SIGNATORY') === club && x.status === 'PENDING');
+      const done = s.completion?.signingId ?? null;
+      if (done !== null) ids['sg-m'] = done;
+      return valueAt('signing', [effective, pending(true), pending(false), done !== null], 'a signing package');
+    },
+    signingRow: () => {
+      if (!p.signingRow) return 0;
+      ids['sg-row-m'] = idOf(p.signingRow, 'a signing row');
+      return 1;
+    },
+  };
+  const reads = NEXT.reads[p.status];
+  const row = NEXT.dims.map((d) => (reads.includes(d) ? fact[d]() : 0));
+  const found = NEXT.pick.find((r) => r[0] === status && same(r.slice(1, -1), row));
+  if (!found) throw new Error(`next_action_matrix has no row for ${p.status} ${row}`);
+  const { code, resources } = JSON.parse(NEXT.results[found.at(-1)]);
+  const codeAt = NEXT.codes.indexOf(code);
+  const fin = NEXT.finish.find((r) => same(r.slice(0, 5), [codeAt, role, +!!p.blocked, +!!p.subjectRemoved, 0]));
+  const envelope = JSON.parse(NEXT.finishResults[fin.at(-1)]);
+  envelope.resources = Object.fromEntries(Object.entries(resources).map(([k, v]) => [k, v === null ? null : (ids[v] ?? cannot(`no record stands for ${v}`))]));
+  return JSON.stringify(envelope);
+}
+
 export const MATRIX = {
   ['domains/recruitment/lifecycle/contact.mjs#canContactAction']: {
     test: 'test/scoutbox/recruitment/contact_matrix_test.gleam',
@@ -99,4 +193,5 @@ export const MATRIX = {
     answer: canTransition,
   },
   ['domains/recruitment/lifecycle/lifecycle.mjs#availableActions']: { test: LIFECYCLE_TEST, answer: availableActions },
+  ['domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor']: { test: NEXT_TEST, answer: nextActionFor },
 };

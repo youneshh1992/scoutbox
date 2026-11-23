@@ -676,6 +676,12 @@ const ANALYTICS_MAP = {
     module: ACONTEXT,
     test: (c, ctx) => eq(`${ctx.use(ACONTEXT)}.first_terminal_at(${aroom(c.args[0], ctx)})`, option(int)(c.result, ctx)),
   },
+  [`${ANALYTICS}/funnels.mjs#journeyEvidenceFunnel`]: {
+    module: ACONTEXT,
+    test: () => {
+      throw new Error('the funnel reads a reporting context, which context.build makes from Sources; the calls are ported over Sources');
+    },
+  },
   [`${ANALYTICS}/timeSeries.mjs#stageVisits`]: {
     module: SERIES,
     test: (c, ctx) => eq(`${ctx.use(SERIES)}.stage_visits(${aroom(c.args[0], ctx)})`, list(visit)(c.result, ctx)),
@@ -4796,6 +4802,245 @@ const LIFECYCLE_MAP = {
   },
 };
 
+// ------------------------------------------------------------------------------------------- the journey
+
+const JOURNEY_FN = 'domains/recruitment/lifecycle/journeyModel.mjs';
+const JM = 'scoutbox/recruitment/journey_model';
+const REQUEST_ROWS = 'scoutbox/rows/recruitment_requests';
+const HISTORY_ROWS = 'scoutbox/rows/case_history';
+
+/** Refuses a fixture without the columns the model reads that every row has (NOT NULL): it is no stored row. */
+const needs = (what, v, keys) => {
+  for (const k of keys) if (v?.[k] === undefined || v[k] === null) throw new Error(`a stored ${what} always has ${k}`);
+};
+
+/**
+ * A contact as the model reads it: its id, status and times. `keys` are the NOT NULL columns the caller's rule
+ * reads; the rest of the row is the base contact's, which no rule here reads.
+ */
+const journeyContact = (keys) => (v, ctx) => {
+  needs('contact', v, ['id', 'status', ...keys]);
+  const row = record({
+    module: CONTACT_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(BASE)}.contact().row`,
+    fields: {
+      id: ['id', ident('contact')],
+      status: ['status', vocab(CONTACT_ROWS, 'status_pairs')],
+      createdAt: ['created_at', int],
+      updatedAt: ['updated_at', int],
+      deliveredAt: ['delivered_at', option(int)],
+      respondedAt: ['responded_at', option(int)],
+      occurredAt: ['occurred_at', option(int)],
+      recordedAt: ['recorded_at', option(int)],
+      failedAt: ['failed_at', option(int)],
+      cancelledAt: ['cancelled_at', option(int)],
+    },
+  })(v, ctx);
+  return `${ctx.use(CONTACTS)}.Contact(..${ctx.use(BASE)}.contact(), row: ${row})`;
+};
+
+/**
+ * A trial as the model reads it: its id, its acceptance, its workflow state, its schedule and its completion. A
+ * schedule is held by its revision, and the model reads only that there is one.
+ */
+const journeyTrial = (t, ctx) => {
+  if (!isPlainObject(t)) throw new Error(`cannot print ${JSON.stringify(t)} as a Trial`);
+  const { id, acceptedAt, workflowState: ws, schedule = null, completion = null, ...rest } = t;
+  if (Object.keys(rest).length) throw new Error(`Trial has no field for the JavaScript key ${Object.keys(rest)[0]}`);
+  needs('trial', t, ['id', 'acceptedAt']);
+  const parts = [`id: ${ident('trial')(id, ctx)}`, `accepted_at: ${int(acceptedAt)}`];
+  if (ws !== undefined) parts.push(`workflow_state: ${workflowState(ws, ctx)}`);
+  let sessions = [];
+  if (schedule !== null) {
+    only('a schedule', schedule, ['confirmedAt', 'sessions', 'revision']);
+    parts.push(`schedule_revision: Some(${int(schedule.revision ?? 1)})`, `schedule_confirmed_at: ${option(int)(schedule.confirmedAt, ctx)}`);
+    const ss = schedule.sessions ?? [];
+    if (!Array.isArray(ss)) throw new Error(`cannot print ${JSON.stringify(ss)} as a List`);
+    sessions = ss.map((x, i) => trialSession(x, i, ctx));
+  }
+  if (completion !== null) {
+    only('a completion', completion, ['state', 'at']);
+    parts.push(
+      `completion_state: Some(${vocab(TRIAL_ROWS, 'completion_state_pairs')(completion.state, ctx)})`,
+      `completion_at: ${option(int)(completion.at, ctx)}`,
+    );
+  }
+  const b = `${ctx.use(BASE)}.trial()`;
+  return `${ctx.use(TRIALS)}.Trial(..${b}, row: ${ctx.use(TRIAL_ROWS)}.Row(..${b}.row, ${parts.join(', ')}), sessions: [${sessions.join(', ')}])`;
+};
+
+/** An assessment as the model reads it. A row has no update time; one is refused rather than dropped. */
+const journeyAssessment = (a, ctx) => {
+  only('an assessment', a, ['id', 'state', 'createdAt', 'submittedAt']);
+  needs('assessment', a, ['id', 'state']);
+  // The creation time is read for a draft, or a submission without its own time.
+  if (a.state === 'draft' || a.submittedAt == null) needs('assessment', a, ['createdAt']);
+  return record({
+    module: ASSESSMENT_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(BASE)}.assessment()`,
+    fields: {
+      id: ['id', ident('assessment')],
+      state: ['state', vocab(ASSESSMENT_ROWS, 'state_pairs')],
+      createdAt: ['created_at', int],
+      submittedAt: ['submitted_at', option(int)],
+    },
+  })(a, ctx);
+};
+
+/** An Offer the current-Offer rule orders by its update time, which every row has. */
+const journeyOffer = (keys) => (v, ctx) => {
+  if (!isPlainObject(v)) throw new Error(`cannot print ${JSON.stringify(v)} as an Offer`);
+  needs('Offer', v, keys);
+  const { updatedAt, createdAt, ...rest } = v;
+  const times = [
+    ...(updatedAt !== undefined ? [`updated_at: ${int(updatedAt)}`] : []),
+    ...(createdAt !== undefined ? [`created_at: ${int(createdAt)}`] : []),
+  ];
+  const o = offer(rest, ctx);
+  if (!times.length) return o;
+  return `{ let o = ${o}\n ${ctx.use(OFFERS)}.Offer(..o, row: ${ctx.use('scoutbox/rows/recruitment_offers')}.Row(..o.row, ${times.join(', ')})) }`;
+};
+
+const journeyPackage = (v, ctx) => {
+  needs('signing package', v, ['id', 'status', 'createdAt', 'currentRevisionId']);
+  return signingPackage(v, ctx);
+};
+
+/** A trial invitation as the model reads it: its status. */
+const journeyRequest = (q, ctx) => {
+  only('a trial invitation', q, ['id', 'status']);
+  needs('trial invitation', q, ['status']);
+  const parts = [`status: ${vocab(REQUEST_ROWS, 'status_pairs')(q.status, ctx)}`];
+  if (q.id !== undefined) parts.push(`id: ${ident('request')(q.id, ctx)}`);
+  return `${ctx.use(REQUEST_ROWS)}.Row(..${ctx.use(BASE)}.trial_request(), ${parts.join(', ')})`;
+};
+
+/** A history entry: its action, instant and detail. */
+const journeyHistory = (h, i, ctx) => {
+  only('a history entry', h, ['action', 'at', 'detail']);
+  needs('history entry', h, ['action', 'at']);
+  return `${ctx.use(BASE)}.history_entry(${int(i)}, ${string(h.action)}, ${int(h.at)}, ${option(string)(h.detail === undefined ? null : JSON.stringify(h.detail), ctx)})`;
+};
+
+/** The facts the projector hands the journey's check and its completed stages. */
+const journeyFacts = (f, ctx) => {
+  only("the journey's facts", f, ['kase', 'status', 'now', 'history', 'contacts', 'trials', 'trialRequests', 'assessments', 'decisions', 'offers', 'packages', 'signingRow', 'foreign', 'domainProblems', 'corruptRecords']);
+  only('a case', f.kase, ['id', 'createdAt']);
+  needs('case', f.kase, ['createdAt']);
+  return `${ctx.use(JM)}.JourneyFacts(
+    status: ${roomStatus(f.status, ctx)},
+    created_at: ${int(f.kase.createdAt)},
+    history: [${(f.history ?? []).map((h, i) => journeyHistory(h, i, ctx)).join(', ')}],
+    links_signing_id: ${ctx.use('gleam/option')}.None,
+    contacts: ${list(journeyContact([]))(f.contacts ?? [], ctx)},
+    trials: ${list(journeyTrial)(f.trials ?? [], ctx)},
+    trial_requests: ${list(journeyRequest)(f.trialRequests ?? [], ctx)},
+    assessments: ${list(journeyAssessment)(f.assessments ?? [], ctx)},
+    decisions: ${list(decisionRec)(f.decisions ?? [], ctx)},
+    offers: ${list(journeyOffer([]))(f.offers ?? [], ctx)},
+    packages: ${list(journeyPackage)(f.packages ?? [], ctx)},
+    signing_row: ${option(completedSigningRow)(f.signingRow, ctx)},
+    signing_row_ids: [],
+    corrupt: ${int(f.corruptRecords ?? 0)},
+    foreign: ${list(string)(f.foreign ?? [], ctx)},
+    domain_problems: ${list(string)(f.domainProblems ?? [], ctx)},
+    now: ${int(f.now)},
+  )`;
+};
+
+/** A selector's answer: the record it picked, by its id (each fixture's ids are distinct). */
+const pickedId = (selector, printer, kind, extra = '') => ({
+  module: JM,
+  now: !!extra,
+  test: (c, ctx) =>
+    eq(
+      `${ctx.use('gleam/option')}.map(${ctx.use(JM)}.${selector}(${list(printer)(c.args[0], ctx)}${extra ? `, ${int(c.args[1] ?? ctx.now)}` : ''}), fn(x) { x.${kind === 'assessment' ? 'id' : 'row.id'} })`,
+      option(ident(kind))(c.result?.id, ctx),
+    ),
+});
+
+const JOURNEY_MAP = {
+  [`${JOURNEY_FN}#canonicalStageFor`]: {
+    module: JM,
+    test: (c, ctx) => {
+      const [status, facts = {}] = c.args;
+      only('the stage facts', facts, ['assessed', 'signingOpened']);
+      return eq(`${ctx.use(JM)}.stage_of(${roomStatus(status, ctx)}, ${bool(!!facts.assessed)}, ${bool(!!facts.signingOpened)})`, string(c.result));
+    },
+  },
+  [`${JOURNEY_FN}#timelineVisibleTo`]: plainIn(JM)('visible_to', [string, string], bool),
+  [`${JOURNEY_FN}#currentContactForCase`]: pickedId('current_contact', journeyContact(['createdAt', 'updatedAt']), 'contact'),
+  [`${JOURNEY_FN}#currentTrialForCase`]: pickedId('current_trial', journeyTrial, 'trial'),
+  [`${JOURNEY_FN}#currentAssessmentForCase`]: pickedId('current_assessment', journeyAssessment, 'assessment'),
+  [`${JOURNEY_FN}#currentDecisionForCase`]: {
+    module: JM,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(JM)}.current_decision(${list(decisionRec)(c.args[0], ctx)}), fn(d) { d.base.row.id })`,
+        option(ident('room_decision'))(c.result?.id, ctx),
+      ),
+  },
+  [`${JOURNEY_FN}#currentSigningForOffer`]: pickedId('current_signing', journeyPackage, 'signing_package', 'now'),
+  [`${JOURNEY_FN}#currentOfferForCase`]: {
+    module: JM,
+    now: true,
+    test: (c, ctx) => {
+      const [offers, now = ctx.now] = c.args;
+      const r = c.result;
+      const want =
+        r === null
+          ? 'None'
+          : `Some(${ctx.use(JM)}.NextOffer(id: ${ident('offer')(r.offer.id, ctx)}, revision: ${option(ident('offer_revision'))(r.revision?.id, ctx)}, status: ${option(offerStatus)(r.status, ctx)}, live_status: ${option(offerStatus)(r.liveStatus, ctx)}))`;
+      return eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(JM)}.current_offer(${list(journeyOffer(['updatedAt']))(offers, ctx)}, ${int(now)}), ${ctx.use(JM)}.next_offer(_, ${int(now)}))`,
+        want,
+      );
+    },
+  },
+  [`${JOURNEY_FN}#playerNextActionFor`]: {
+    module: JM,
+    test: (c, ctx) => {
+      const p = c.args[0];
+      only("the recipient's records", p, ['signingPending', 'issuedOffer', 'trialAwaitingConfirmation', 'pendingTrialRequest', 'pendingContactRequest']);
+      const idOf = (kind) => (v, ctx) => ident(kind)(v.id, ctx);
+      const issued = p.issuedOffer
+        ? `Some(#(${ident('offer')(p.issuedOffer.offer.id, ctx)}, ${option(idOf('offer_revision'))(p.issuedOffer.revision, ctx)}))`
+        : 'None';
+      return eqJson(
+        `{ let #(code, refs) = ${ctx.use(JM)}.player_next(${option(idOf('signing_package'))(p.signingPending, ctx)}, ${issued}, ${option(idOf('trial'))(p.trialAwaitingConfirmation, ctx)}, ${option(idOf('request'))(p.pendingTrialRequest, ctx)}, ${option(idOf('request'))(p.pendingContactRequest, ctx)})\n ${ctx.use('gleam/json')}.object([#("code", ${ctx.use('gleam/json')}.string(code)), #("resources", ${ctx.use('gleam/json')}.object(refs))]) }`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${JOURNEY_FN}#playerStageFor`]: {
+    module: JM,
+    now: true,
+    test: (c, ctx) => {
+      const p = c.args[0];
+      only("the recipient's records", p, ['contacts', 'trialRequests', 'trials', 'offer', 'signing', 'signingRow', 'now']);
+      if (p.offer) only("the current Offer's status", p.offer, ['liveStatus']);
+      // The rule only counts the contacts shared with the recipient; each is named by its id.
+      const contacts = list((x, ctx) => string(x.id))(p.contacts ?? [], ctx);
+      return eq(
+        `${ctx.use(JM)}.player_stage(${contacts}, ${list(journeyRequest)(p.trialRequests ?? [], ctx)}, ${list(journeyTrial)(p.trials ?? [], ctx)}, ${option(offerStatus)(p.offer?.liveStatus, ctx)}, ${option(journeyPackage)(p.signing, ctx)}, ${bool(!!p.signingRow)}, ${int(p.now ?? ctx.now)})`,
+        string(c.result),
+      );
+    },
+  },
+  [`${JOURNEY_FN}#validateRecruitmentJourney`]: {
+    module: JM,
+    test: (c, ctx) => eqJson(`${ctx.use(JM)}.verdict_json(${ctx.use(JM)}.validate(${journeyFacts(c.args[0], ctx)}))`, c.result, ctx),
+  },
+  [`${JOURNEY_FN}#completedStagesFor`]: {
+    module: JM,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use('gleam/json')}.preprocessed_array(${ctx.use(JM)}.completed_stages(${journeyFacts(c.args[0], ctx)}))`, c.result, ctx),
+  },
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -4867,6 +5112,7 @@ export const MAP = {
   ...SIGNING_MAP,
   ...DECISION_MAP,
   ...LIFECYCLE_MAP,
+  ...JOURNEY_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -5010,6 +5256,14 @@ export const NO_COUNTERPART = {
 export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
+  // A status, package status or instant no stored row can hold, a package with no current revision and an
+  // assessment's update time, which the row hasn't got.
+  ...Object.fromEntries(
+    ['canonicalStageFor', 'currentAssessmentForCase', 'currentSigningForOffer', 'nextActionFor', 'validateRecruitmentJourney'].map((f) => [
+      `domains/recruitment/lifecycle/journeyModel.mjs#${f}`,
+      'test/scoutbox/recruitment/journey_model_test.gleam',
+    ]),
+  ),
   ...Object.fromEntries(
     ['agents/compliance', 'agents/transactions'].map((d) => [`domains/${d}/errors.mjs#publicErrorBody`, 'test/scoutbox/agents/error_bodies_test.gleam']),
   ),
@@ -5165,7 +5419,7 @@ export const HAND_PORTED = {
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
   ...Object.fromEntries(
-    ['dashboard.mjs#buildDashboard', 'dashboard.mjs#buildReportingContext', 'funnels.mjs#stagesReached', 'metrics.mjs#assertMetricRegistry'].map(
+    ['dashboard.mjs#buildDashboard', 'dashboard.mjs#buildReportingContext', 'funnels.mjs#journeyEvidenceFunnel', 'funnels.mjs#stagesReached', 'metrics.mjs#assertMetricRegistry'].map(
       (f) => [`domains/recruitment/analytics/${f}`, 'test/scoutbox/recruitment/analytics_test.gleam'],
     ),
   ),

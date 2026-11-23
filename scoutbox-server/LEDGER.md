@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 235 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 4229 / 212 | 359 / 524 | 9 to go |
+| recruitment | 19 | 19 | 19 | 4428 / 0 | 372 / 537 | 9 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -76,8 +76,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 4 / 0 | 4 / 7 | 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 105 / 0 | 38 / 54 | 16 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 8 / 0 | 6 / 6 | **done** |
-| `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
-| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 5 / 16 | 8 / 9 | 16 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
+| `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 188 / 0 | 8 / 14 | 6 hand-port calls |
+| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 16 / 0 | 13 / 14 | 1 hand-port calls; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2917 / 0 | 17 / 109 | 92 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 146 / 0 | 38 / 44 | 6 hand-port calls |
@@ -279,7 +279,13 @@ ported by hand to a gleeunit test.
 | `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 6 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "accept" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print 0 as a stored rev; Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one; Gleam's types can't hold its arguments: references are child rows: there is no list that is not one | `test/scoutbox/recruitment/decisions_test.gleam` |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 3 | Gleam's types can't hold its arguments: cannot print "" as a value of scoutbox/vocab/room_status.pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/vocab/room_status.pairs; Gleam's types can't hold its arguments: cannot print "SIGNED" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/journey_model_test.gleam` |
+| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 | Gleam's types can't hold its arguments: an assessment has no column for updatedAt | `test/scoutbox/recruitment/journey_model_test.gleam` |
+| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor` | 1 | Gleam's types can't hold its arguments: cannot print "nonsense" as a RoomStatus | `test/scoutbox/recruitment/journey_model_test.gleam` |
+| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 3 | Gleam's types can't hold its arguments: a stored signing package always has currentRevisionId; Gleam's types can't hold its arguments: cannot print "SIGNED" as a value of scoutbox/vocab/room_status.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int | `test/scoutbox/recruitment/journey_model_test.gleam` |
 | `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 8 | Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-31" as a Day; Gleam's types can't hold its arguments: cannot print "NaN" as a Day; Gleam's types can't hold its arguments: cannot print "not-a-date" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print 12 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day | `test/scoutbox/rules/age_test.gleam` |
+| `recruitment/journeyAdversarial` | `domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel` | 3 | Gleam's types can't hold its arguments: the funnel reads a reporting context, which context.build makes from Sources; the calls are ported over Sources | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 2 | Gleam's types can't hold its arguments: cannot print "BOGUS" as a value of scoutbox/rows/signing_packages.status_pairs | `test/scoutbox/recruitment/journey_model_test.gleam` |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 1 | Gleam's types can't hold its arguments: cannot print "SIGNEDX" as a RoomStatus | to do |
 | `recruitment/lifecycle` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#sendDomainError` | 1 | args[].status is a function | `test/scoutbox/recruitment/domain_errors_test.gleam` |
@@ -423,26 +429,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 9 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor` | 1 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase` | 3 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase` | 3 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase` | 3 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 5 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase` | 2 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor` | 147 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerNextActionFor` | 4 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
-| `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/analytics/funnels.mjs#journeyEvidenceFunnel` | 3 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentContactForCase` | 2 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentDecisionForCase` | 2 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase` | 2 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 4 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase` | 2 |
 
 ## Cases closed: no Gleam counterpart
 

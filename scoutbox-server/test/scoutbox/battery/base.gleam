@@ -43,6 +43,7 @@ import scoutbox/rows/recruitment_briefs
 import scoutbox/rows/recruitment_cases
 import scoutbox/rows/recruitment_contacts
 import scoutbox/rows/recruitment_offers
+import scoutbox/rows/recruitment_requests
 import scoutbox/rows/representation_agreements
 import scoutbox/rows/room_decisions
 import scoutbox/rows/signing_documents
@@ -448,6 +449,57 @@ pub fn contact() -> contact_rules.Contact {
     ),
     attempts: [],
     history: [],
+  )
+}
+
+/// An assessment row; a journey fixture names only what the model reads.
+pub fn assessment() -> assessments.Row {
+  assessments.new(
+    id: id.assessment("as-base"),
+    org_id: id.org("org-base"),
+    player_id: id.player("pl-base"),
+    scout_user_id: id.org_user("u-base"),
+    scout_name: "Scout",
+    template_id: "tpl-base",
+    template_version: 1,
+    state: assessments.Draft,
+    created_at: 0,
+  )
+}
+
+/// A trial invitation row; a journey fixture names only what the model reads.
+pub fn trial_request() -> recruitment_requests.Row {
+  recruitment_requests.new(
+    id: id.request("rq-base"),
+    player_id: id.player("pl-base"),
+    org_id: id.org("org-base"),
+    org_name: "Club",
+    org_verified: True,
+    org_safeguarding_certified: True,
+    user_id: id.org_user("u-base"),
+    type_: recruitment_requests.Trial,
+    status: recruitment_requests.Pending,
+    created_at: 0,
+    routed_to: party.Player,
+  )
+}
+
+/// The `position`th entry of a case's history: its action, instant and detail (JSON text).
+pub fn history_entry(
+  position: Int,
+  action: String,
+  at: Int,
+  detail: Option(String),
+) -> case_history.Row {
+  case_history.Row(
+    ..case_history.new(
+      case_id: id.recruitment_case("case-base"),
+      position:,
+      id: id.case_event("ev-" <> int.to_string(position)),
+      at:,
+      action:,
+    ),
+    detail_json: detail,
   )
 }
 

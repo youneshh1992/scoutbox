@@ -159,9 +159,24 @@ commit. In this order:
    the journey (`case_lifecycle.conditions`). `toAnalyticsRecruitmentStage` has no caller and is closed in
    `NO_COUNTERPART`. The prototype-key stages are ported by hand: no such text becomes a `Stage`. What is left on
    the lifecycle battery is item 8's and the evidence calls below.
-7. **The journey model** (`lifecycle/journeyModel.mjs`, `journey`): `nextActionFor` (251 calls) is proved over its
-   whole matrix, as `canTransitionRecruitmentCase` is (`dev/matrix_cases.mjs`, `matrices.mjs`). The `current*For*`
-   selectors, `canonicalStageFor`, `playerStageFor` and `validateRecruitmentJourney` are generated.
+7. **The journey model** [**done**] (`lifecycle/journeyModel.mjs`, `journey_model`): the model's rules came out of
+   `journey` into `journey_model`, which `journey` feeds. `nextActionFor` is `finish(pick(…))` on both servers, so
+   each half is proved over its own matrix (`next_action_matrix.json`, `next_action_matrix_test.gleam`). `pick` runs
+   over the status and the case's current records reduced to the facts the rule reads (`NextFacts`), each status
+   with every combination of the facts it reads and every value of each other fact, one at a time. The generator
+   refuses to write the fixture if one of those changes the TypeScript answer. `finish` runs over every code, role,
+   block and integrity error. The `current*` selectors, `canonicalStageFor`, `playerStageFor`,
+   `playerNextActionFor`, `validateRecruitmentJourney`, `completedStagesFor` and `timelineVisibleTo` are generated.
+   The journey's check and completed stages take the facts the projector hands them (`JourneyFacts`), and the player
+   rules take what the TypeScript ones take: the Offer's live status, and the ids already picked. Three differences
+   turned up, all fixed in the Gleam:
+   - A draft Offer with no revision was `PREPARE_OFFER`; the TypeScript rule answers `ISSUE_OFFER`.
+   - A record naming the case but another club or player was dropped quietly. It is now also named
+     (`CLUB_MISMATCH`, `PLAYER_MISMATCH`), as `foreignReferences` does, which makes the journey an integrity error.
+   - A history instant at or before 0 is `TEMPORAL_ORDER`.
+
+   journeyAdversarial's three `journeyEvidenceFunnel` calls (T7) are ported over `Sources` in `analytics_test`.
+   What is left on the journey batteries is item 8's, and the lifecycle's `SIGNEDX`.
 8. **The journey builder and the evidence provider.** `buildRecruitmentJourney` (94 hand-port calls, store-backed,
    including `storeGuarantees`' 19) and `createEvidenceProvider` (51), as below.
 

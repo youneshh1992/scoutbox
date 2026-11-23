@@ -153,7 +153,8 @@ pub fn is_terminal(s: Status) -> Bool {
   s == Completed || s == Cancelled || s == Voided || s == Expired
 }
 
-fn live(s: Status) -> Bool {
+/// A package at this status can still be signed or cancelled.
+pub fn live(s: Status) -> Bool {
   s == Draft || s == Ready || s == InProgress
 }
 
