@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 3493 / 1150 | 61 / 329 | 13 to go |
+| recruitment | 19 | 19 | 19 | 3615 / 970 | 119 / 387 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -72,7 +72,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 21 / 213 | 0 / 47 | 213 cases pending; 47 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 143 / 33 | 58 / 105 | 33 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
@@ -246,6 +246,7 @@ ported by hand to a gleeunit test.
 | `recruitment/analytics` | `domains/recruitment/analytics/dashboard.mjs#buildReportingContext` | 3 | args[].reads.trials.byId is a function | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/analytics` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/analytics` | `domains/recruitment/analytics/metrics.mjs#assertMetricRegistry` | 2 | throws Error without a code | `test/scoutbox/recruitment/analytics_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 58 | Gleam's types can't hold its arguments: cannot print "__proto__" as a contact action; Gleam's types can't hold its arguments: cannot print "__proto__" as a contact status; Gleam's types can't hold its arguments: cannot print "" as a RoomRole; Gleam's types can't hold its arguments: cannot print "admin" as a RoomRole; Gleam's types can't hold its arguments: cannot print "constructor" as a contact action; Gleam's types can't hold its arguments: cannot print "constructor" as a contact status; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a contact action; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a contact status; Gleam's types can't hold its arguments: cannot print "prototype" as a contact action; Gleam's types can't hold its arguments: cannot print "prototype" as a contact status; Gleam's types can't hold its arguments: cannot print "toString" as a contact action; Gleam's types can't hold its arguments: cannot print "toString" as a contact status | `test/scoutbox/recruitment/contact_matrix_test.gleam` |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 1 | args[] is undefined | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 1 | Gleam's types can't hold its arguments: cannot print ["x"] as a String | to do |
@@ -384,7 +385,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 180 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 10 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 |

@@ -3539,6 +3539,8 @@ export const HAND_PORTED = {
   // Development throws on an emitted name the registry doesn't know; here no event can carry one (live_test).
   ['domains/platform/eventRegistry.mjs#assertEventRegistry']: 'test/scoutbox/live_test.gleam',
   ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',
+  // Its calls Gleam's types can't hold: a bogus status, action or role is refused before the validator.
+  ['domains/recruitment/lifecycle/contact.mjs#canContactAction']: 'test/scoutbox/recruitment/contact_matrix_test.gleam',
   ['domains/platform/concurrency.mjs#expectedRevOf']: 'test/scoutbox/rev_test.gleam',
   ['domains/platform/notificationPrefs.mjs#createNotificationPrefs']: 'test/scoutbox/messaging/notification_prefs_test.gleam',
   ['domains/platform/capabilities.mjs#buildCapabilityReport']: 'test/scoutbox/config_test.gleam',

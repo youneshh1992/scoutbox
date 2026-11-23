@@ -2871,9 +2871,22 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#canContactAction",
         "calls": 188,
-        "cases": 180,
-        "handPort": {},
-        "status": "pending"
+        "cases": 122,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a contact action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a contact status": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as a RoomRole": 24,
+          "Gleam's types can't hold its arguments: cannot print \"admin\" as a RoomRole": 24,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a contact action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a contact status": 1,
+          "Gleam's types can't hold its arguments: cannot print \"hasOwnProperty\" as a contact action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"hasOwnProperty\" as a contact status": 1,
+          "Gleam's types can't hold its arguments: cannot print \"prototype\" as a contact action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"prototype\" as a contact status": 1,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a contact action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a contact status": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",

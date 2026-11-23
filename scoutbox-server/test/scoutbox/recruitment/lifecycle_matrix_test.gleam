@@ -1,17 +1,17 @@
 //// The lifecycle validator (case_lifecycle.check and available) agrees with the TypeScript one
 //// (canTransitionRecruitmentCase and availableActions) on every input in test/fixtures/lifecycle_matrix.json,
-//// written by `node dev/lifecycle_cases.mjs`: every status × action × role × mode × evidence, and for resumeCase
+//// written by `node dev/matrix_cases.mjs`: every status × action × role × mode × evidence, and for resumeCase
 //// every state the case was held from. Each answer is compared whole, as JSON: the code, the message, and the
 //// allowed moves or the evidence asked for.
 
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
-import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import scoutbox/battery/base
+import scoutbox/matrix
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/room_rules.{
@@ -128,36 +128,19 @@ fn held_text(held: Option(RoomStatus)) -> String {
   option.map(held, room_status.to_string) |> option.unwrap("none")
 }
 
-/// Each answer that differs from the fixture's, described.
-fn compare(
+/// The rows for these inputs, each with the fixture's answer at its index.
+fn rows(
   m: Matrix,
   inputs: List(#(String, fn() -> String)),
   indexes: List(Int),
-) -> List(String) {
+) -> List(matrix.Row) {
   assert list.length(inputs) == list.length(indexes)
   list.zip(inputs, indexes)
-  |> list.filter_map(fn(pair) {
+  |> list.map(fn(pair) {
     let #(#(what, answer), i) = pair
     let assert Ok(expected) = dict.get(m.results, i)
-    let actual = answer()
-    case actual == expected {
-      True -> Error(Nil)
-      False ->
-        Ok(what <> "\n    expected " <> expected <> "\n    got      " <> actual)
-    }
+    matrix.Row(what:, expected:, actual: answer)
   })
-}
-
-fn report(mismatches: List(String)) -> Nil {
-  case mismatches {
-    [] -> Nil
-    _ ->
-      panic as {
-        int.to_string(list.length(mismatches))
-        <> " answers differ from the TypeScript validator:\n  "
-        <> string.join(list.take(mismatches, 20), "\n  ")
-      }
-  }
 }
 
 pub fn the_matrix_covers_what_this_server_has_test() {
@@ -211,9 +194,9 @@ pub fn check_agrees_with_the_typescript_validator_test() {
       })
     }
     let assert Ok(indexes) = dict.get(m.check, action.name)
-    compare(m, inputs, indexes)
+    rows(m, inputs, indexes)
   })
-  |> report
+  |> matrix.check("canTransitionRecruitmentCase")
 }
 
 pub fn available_agrees_with_the_typescript_validator_test() {
@@ -239,5 +222,5 @@ pub fn available_agrees_with_the_typescript_validator_test() {
       json.to_string(json.array(names, json.string))
     })
   }
-  compare(m, inputs, m.available) |> report
+  rows(m, inputs, m.available) |> matrix.check("availableActions")
 }

@@ -617,11 +617,10 @@ pub fn on_request_responded(
     None -> Ok(Nil)
     Some(cid) -> {
       use found <- result.try(by_id(store.reading(tx), cid))
-      case found {
-        Some(c)
-          if c.row.request_id == Some(request_id)
-          && c.row.status == row.Delivered
-        -> {
+      let answerable =
+        option.map(found, fn(c) { contact_rules.accepts_response(c.row.status) })
+      case found, answerable {
+        Some(c), Some(True) if c.row.request_id == Some(request_id) -> {
           let #(kind, outcome) = case accept {
             True -> #(row.Accepted, "accepted")
             False -> #(row.Declined, "declined")
@@ -683,7 +682,7 @@ pub fn on_request_responded(
             }
           }
         }
-        _ -> Ok(Nil)
+        _, _ -> Ok(Nil)
       }
     }
   }

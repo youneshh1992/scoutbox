@@ -1,5 +1,5 @@
 // Rules proved over a whole matrix of inputs rather than one generated test per recorded call. A fixture written
-// from the TypeScript rule holds its answer for every input that matters (dev/lifecycle_cases.mjs), and one Gleam
+// from the TypeScript rule holds its answer for every input that matters (dev/matrix_cases.mjs), and one Gleam
 // test checks every row. Each recorded call is then looked up in the fixture: the recording must give the same
 // answer, or the fixture is stale and cases:check fails.
 //
@@ -74,7 +74,26 @@ function availableActions([kase, context = {}]) {
   return result(LIFECYCLE.available[((held * S + status) * R + role(context)) * E + LACKS]);
 }
 
+// --------------------------------------------------------------------------------------------- the contacts
+
+const CONTACT = JSON.parse(readFileSync(new URL('../../test/fixtures/contact_matrix.json', import.meta.url)));
+
+function canContactAction([contact, action, context = {}]) {
+  if (!contact || typeof contact !== 'object') cannot(`cannot print ${JSON.stringify(contact)} as a Contact`);
+  // The validator reads only the status; a recorded contact names nothing else.
+  only(contact, ['status'], 'a Contact');
+  only(context, ['role'], "canContactAction's context");
+  at(CONTACT.statuses, contact.status, 'a contact status');
+  at(CONTACT.actions, action, 'a contact action');
+  at(CONTACT.roles, context.role ?? null, 'a RoomRole');
+  return CONTACT.answers[`${contact.status} ${action} ${context.role ?? 'none'}`];
+}
+
 export const MATRIX = {
+  ['domains/recruitment/lifecycle/contact.mjs#canContactAction']: {
+    test: 'test/scoutbox/recruitment/contact_matrix_test.gleam',
+    answer: canContactAction,
+  },
   ['domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase']: {
     test: LIFECYCLE_TEST,
     answer: canTransition,

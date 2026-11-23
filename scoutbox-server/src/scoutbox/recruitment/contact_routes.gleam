@@ -494,7 +494,7 @@ fn can(
   next: fn() -> Response,
 ) -> Response {
   case contact_rules.can_act(c, action, role) {
-    Ok(Nil) -> next()
+    Ok(_) -> next()
     Error(r) -> fail(r)
   }
 }

@@ -117,6 +117,12 @@ pub fn accepts_case(status: RoomStatus) -> Bool {
   list.contains(case_statuses, status)
 }
 
+/// Whether the recipient's answer moves a contact in this state (to `responded`). It is the recipient's act, not
+/// the club's: no role is asked, and an answer that reaches a contact in any other state leaves it alone.
+pub fn accepts_response(s: row.Status) -> Bool {
+  s == row.Delivered
+}
+
 /// States that count as "the recipient could have received it".
 pub fn is_evidence(s: row.Status) -> Bool {
   s == row.Delivered || s == row.Responded || s == row.Recorded
@@ -151,12 +157,13 @@ pub type Action {
   Cancel
 }
 
-/// Validation before the rev guard, so a stale rev on an impossible action reports the impossibility.
+/// Validation before the rev guard, so a stale rev on an impossible action reports the impossibility. Allowed,
+/// it answers the state the action leaves the contact in (canContactAction's `to`).
 pub fn can_act(
   c: Contact,
   action: Action,
   role: Option(RoomRole),
-) -> Result(Nil, Refusal) {
+) -> Result(row.Status, Refusal) {
   let status = c.row.status
   let from_ok = status == row.Draft || status == row.StatusFailed
   case role_allows(role, ContactWrite), from_ok {
@@ -165,7 +172,12 @@ pub fn can_act(
         "CONTACT_NOT_PERMITTED",
         "Your role cannot do this with a contact.",
       ))
-    True, True -> Ok(Nil)
+    True, True ->
+      Ok(case action {
+        Edit -> status
+        Send -> row.Delivered
+        Cancel -> row.Cancelled
+      })
     True, False ->
       case status, action {
         row.Delivered, Send ->
