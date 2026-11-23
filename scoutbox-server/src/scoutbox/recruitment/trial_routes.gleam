@@ -140,33 +140,21 @@ fn limited(
   }
 }
 
-const codes = [
-  #("expectedRev", "TRIAL_REV_REQUIRED"),
-  #("expectedVersion", "TRIAL_REV_REQUIRED"),
-  #("timezone", "TRIAL_TIMEZONE_INVALID"),
-  #("venue.*", "TRIAL_VENUE_INVALID"),
-  #("slots.*", "TRIAL_SLOTS_INVALID"),
-  #("sessions.*", "TRIAL_SCHEDULE_INVALID"),
-  #("sessions.venue.*", "TRIAL_VENUE_INVALID"),
-  #("state", "TRIAL_ATTENDANCE_INVALID"),
-  #("note", "TRIAL_ATTENDANCE_INVALID"),
-  #("boxSessionId", "TRIAL_EVIDENCE_REF_INVALID"),
-]
-
 /// The request body read with its shape, or the refusal (TRIAL_CONTENT_INVALID unless a field names its own).
 fn body(
   req: Request,
   shape: input.Shape(a),
   next: fn(a, Dynamic) -> Response,
 ) -> Response {
-  use raw <- http.json_body(req)
+  use raw, order <- http.json_body_in_order(req)
   case
-    input.parse_coded(
+    input.parse_in_order(
       shape,
       raw,
+      order,
       root: "body",
-      codes:,
-      default: "TRIAL_CONTENT_INVALID",
+      codes: trial_rules.input_codes,
+      default: trial_rules.input_default,
     )
   {
     Error(r) ->
@@ -189,21 +177,8 @@ fn client_key(
   }
 }
 
-const words_max = 1_000_000
-
-fn words() -> input.Rule(Option(String)) {
-  input.nullish(input.text(words_max))
-}
-
 fn rev_fields(next: fn() -> input.Shape(a)) -> input.Shape(a) {
   rev.fields(next)
-}
-
-fn venue_shape() -> input.Shape(VenueInput) {
-  use name <- input.field("name", words())
-  use town <- input.field("town", words())
-  use address <- input.field("address", words())
-  input.done(VenueInput(name:, town:, address:))
 }
 
 fn state_json(t: Trial) -> List(#(String, Json)) {
@@ -1022,14 +997,17 @@ type InviteBody {
 
 fn invite_shape() -> input.Shape(InviteBody) {
   use client_key <- input.field("clientKey", input.optional(input.anything()))
-  use timezone <- input.field("timezone", words())
-  use venue <- input.field("venue", input.optional(input.object(venue_shape())))
+  use timezone <- input.field("timezone", trial_rules.words())
+  use venue <- input.field(
+    "venue",
+    input.optional(input.object(trial_rules.venue_shape())),
+  )
   use slots <- input.field(
     "slots",
-    input.nullish(input.items(input.object(slot_shape()), words_max)),
+    input.nullish(input.items(input.object(slot_shape()), trial_rules.words_max)),
   )
-  use message <- input.field("message", words())
-  use instructions <- input.field("instructions", words())
+  use message <- input.field("message", trial_rules.words())
+  use instructions <- input.field("instructions", trial_rules.words())
   input.done(InviteBody(
     client_key:,
     timezone:,
@@ -1041,7 +1019,7 @@ fn invite_shape() -> input.Shape(InviteBody) {
 }
 
 fn slot_shape() -> input.Shape(SlotInput) {
-  use kind <- input.field("kind", words())
+  use kind <- input.field("kind", trial_rules.words())
   use starts_at <- input.field("startsAt", input.optional(input.anything()))
   use ends_at <- input.field("endsAt", input.optional(input.anything()))
   input.done(SlotInput(kind:, starts_at:, ends_at:))
@@ -1668,31 +1646,11 @@ type ScheduleBody {
   )
 }
 
-fn session_shape() -> input.Shape(trial_rules.SessionInput) {
-  use sid <- input.field("id", words())
-  use kind <- input.field("kind", words())
-  use starts_at <- input.field("startsAt", input.optional(input.anything()))
-  use ends_at <- input.field("endsAt", input.optional(input.anything()))
-  use venue <- input.field("venue", input.optional(input.object(venue_shape())))
-  use instructions <- input.field("instructions", words())
-  input.done(SessionInput(
-    id: sid,
-    kind:,
-    starts_at:,
-    ends_at:,
-    venue:,
-    instructions:,
-  ))
-}
-
 fn schedule_shape() -> input.Shape(ScheduleBody) {
   use client_key <- input.field("clientKey", input.optional(input.anything()))
   use <- rev_fields
-  use timezone <- input.field("timezone", words())
-  use sessions <- input.field(
-    "sessions",
-    input.nullish(input.items(input.object(session_shape()), words_max)),
-  )
+  use timezone <- input.field("timezone", trial_rules.words())
+  use sessions <- input.field("sessions", trial_rules.sessions_check())
   use reason <- input.field(
     "reason",
     input.nullish(input.text(trial_rules.limit_reason)),
@@ -2021,7 +1979,7 @@ pub fn cancel(
   let shape = {
     use client_key <- input.field("clientKey", input.optional(input.anything()))
     use <- rev_fields
-    use reason <- input.field("reason", words())
+    use reason <- input.field("reason", trial_rules.words())
     input.done(CancelBody(client_key:, reason:))
   }
   use b, raw <- body(req, shape)
@@ -2172,7 +2130,7 @@ pub fn attendance(
       "state",
       input.required(input.one_of(attendance_row.state_pairs)),
     )
-    use note <- input.field("note", words())
+    use note <- input.field("note", trial_rules.words())
     input.done(AttendanceBody(client_key:, state:, note:))
   }
   use b, raw <- body(req, shape)
@@ -3811,7 +3769,7 @@ type AnswerBody {
 
 fn answer_shape() -> input.Shape(AnswerBody) {
   use <- rev_fields
-  use reason <- input.field("reason", words())
+  use reason <- input.field("reason", trial_rules.words())
   input.done(AnswerBody(reason:))
 }
 

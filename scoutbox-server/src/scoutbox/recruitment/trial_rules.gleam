@@ -488,6 +488,42 @@ pub fn is_trial_date(v: Option(String)) -> Bool {
   }
 }
 
+/// The day a trial acceptance takes (domain.ts chooseTrialSlot), from the invitation's proposed day and alternative
+/// days: one of the days offered, or the proposed day when none is named. A day that is offered but not a valid
+/// trial date is taken as no date. Error: the valid days offered.
+pub fn choose_slot(
+  proposed: Option(String),
+  alts: List(String),
+  chosen: Option(Dynamic),
+) -> Result(Option(String), List(String)) {
+  let offered =
+    [option.unwrap(proposed, ""), ..alts]
+    |> list.filter(fn(d) { d != "" })
+  let valid = fn(d: Option(String)) {
+    case is_trial_date(d) {
+      True -> d
+      False -> None
+    }
+  }
+  let refused = fn() {
+    Error(list.filter(offered, fn(d) { is_trial_date(Some(d)) }))
+  }
+  let nothing = case chosen {
+    None -> True
+    Some(v) ->
+      dynamic.classify(v) == "Nil" || decode.run(v, decode.string) == Ok("")
+  }
+  case nothing, option.map(chosen, decode.run(_, decode.string)) {
+    True, _ -> Ok(valid(proposed))
+    False, Some(Ok(day)) ->
+      case list.contains(offered, day) {
+        True -> Ok(valid(Some(day)))
+        False -> refused()
+      }
+    False, _ -> refused()
+  }
+}
+
 /// The start of a trial date's UTC day.
 pub fn trial_date_ms(s: String) -> Option(Int) {
   trial_date(s) |> option.from_result |> option.map(temporal.day_start)
@@ -610,6 +646,61 @@ pub fn validate_venue(raw: Option(VenueInput)) -> Result(Venue, Refusal) {
           }
       }
   }
+}
+
+// ---------------------------------------------------------------------------------------------- input shapes
+
+/// The code a trial body's refusal takes, by the field it names; any other field takes `input_default`.
+pub const input_codes = [
+  #("expectedRev", "TRIAL_REV_REQUIRED"),
+  #("expectedVersion", "TRIAL_REV_REQUIRED"),
+  #("timezone", "TRIAL_TIMEZONE_INVALID"),
+  #("venue.*", "TRIAL_VENUE_INVALID"),
+  #("slots.*", "TRIAL_SLOTS_INVALID"),
+  #("sessions.*", "TRIAL_SCHEDULE_INVALID"),
+  #("sessions.venue.*", "TRIAL_VENUE_INVALID"),
+  #("state", "TRIAL_ATTENDANCE_INVALID"),
+  #("note", "TRIAL_ATTENDANCE_INVALID"),
+  #("boxSessionId", "TRIAL_EVIDENCE_REF_INVALID"),
+]
+
+pub const input_default = "TRIAL_CONTENT_INVALID"
+
+/// The shape bounds no text: each field's own rule does, with its own message.
+pub const words_max = 1_000_000
+
+/// Text, or nothing.
+pub fn words() -> input.Rule(Option(String)) {
+  input.nullish(input.text(words_max))
+}
+
+pub fn venue_shape() -> input.Shape(VenueInput) {
+  use name <- input.field("name", words())
+  use town <- input.field("town", words())
+  use address <- input.field("address", words())
+  input.done(VenueInput(name:, town:, address:))
+}
+
+pub fn session_shape() -> input.Shape(SessionInput) {
+  use sid <- input.field("id", words())
+  use kind <- input.field("kind", words())
+  use starts_at <- input.field("startsAt", input.optional(input.anything()))
+  use ends_at <- input.field("endsAt", input.optional(input.anything()))
+  use venue <- input.field("venue", input.optional(input.object(venue_shape())))
+  use instructions <- input.field("instructions", words())
+  input.done(SessionInput(
+    id: sid,
+    kind:,
+    starts_at:,
+    ends_at:,
+    venue:,
+    instructions:,
+  ))
+}
+
+/// A schedule's `sessions`: a list of session objects, or nothing.
+pub fn sessions_check() -> input.Rule(Option(List(SessionInput))) {
+  input.nullish(input.items(input.object(session_shape()), words_max))
 }
 
 // ------------------------------------------------------------------------------------------------- sessions

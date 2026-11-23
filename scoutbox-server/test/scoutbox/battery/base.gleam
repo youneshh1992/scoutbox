@@ -45,6 +45,9 @@ import scoutbox/rows/signing_documents
 import scoutbox/rows/signing_packages
 import scoutbox/rows/signing_revision_parties
 import scoutbox/rows/signing_revisions
+import scoutbox/rows/trial_attendance
+import scoutbox/rows/trial_schedule_sessions
+import scoutbox/rows/trials
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
@@ -63,6 +66,8 @@ import scoutbox/vocab/org_type
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/signing_party_type
+import scoutbox/vocab/trial_session_kind
+import scoutbox/vocab/trial_workflow_state
 import scoutbox/vocab/ver_level
 
 /// A current, unverified claim about a user, with nothing else known.
@@ -361,6 +366,62 @@ pub fn zone(name: String) -> zones.Zone {
 /// A trial rule's refusal as the TypeScript rule reports one: its error, its message and its other fields as JSON.
 pub fn trial_refusal(r: trial_rules.Refusal) -> #(String, String, String) {
   #(r.error, r.message, json.to_string(json.object(r.fields)))
+}
+
+/// A legacy trial awaiting its report, with nothing else known: a TypeScript trial without a workflow state is a
+/// legacy one, and its absent rev reads as 1.
+pub fn trial() -> trial_rules.Trial {
+  trial_rules.Trial(
+    row: trials.new(
+      id: id.trial("t-base"),
+      request_id: id.request("req-base"),
+      player_id: id.player("pl-base"),
+      org_id: id.org("org-base"),
+      org_name: "Org",
+      accepted_at: 0,
+      status: trials.AwaitingReport,
+      reminder_sent: False,
+      workflow_state: trial_workflow_state.LegacyAccepted,
+      rev: 1,
+    ),
+    sessions: [],
+    revisions: [],
+    attendance: [],
+    history: [],
+    keys: [],
+    reminders: [],
+    report: None,
+    day: trial_rules.Day(
+      staff: [],
+      consents: [],
+      checkins: [],
+      status_events: [],
+    ),
+  )
+}
+
+/// A training session of the base trial with no venue or instructions.
+pub fn trial_session() -> trial_schedule_sessions.Row {
+  trial_schedule_sessions.new(
+    trial_id: id.trial("t-base"),
+    position: 0,
+    id: id.trial_session("ts-base"),
+    kind: trial_session_kind.Training,
+    starts_at: 0,
+    ends_at: 1,
+  )
+}
+
+/// A manual attendance record of the base session, recorded at 0.
+pub fn trial_attendance() -> trial_attendance.Row {
+  trial_attendance.new(
+    trial_id: id.trial("t-base"),
+    position: 0,
+    session_id: id.trial_session("ts-base"),
+    state: trial_attendance.Attended,
+    source: trial_attendance.Manual,
+    recorded_at: 0,
+  )
 }
 
 /// A drafted in-app contact with nothing else known: a recorded contact names its parties, channel and state.

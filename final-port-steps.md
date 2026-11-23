@@ -50,9 +50,9 @@ By `LEDGER.md`:
 
 | Domain | Batteries to go | Cases pending | Hand-port calls to do |
 | --- | --- | --- | --- |
-| recruitment | 13 | 696 | 257 |
+| recruitment | 9 | 305 | 201 |
 | agents | 6 | 412 | 15 |
-| platform | 3 | 54 | 59 |
+| platform | 3 | 54 | 51 |
 
 Development and discovery are closed. Platform's three are `uploads` (waits for step 5); `dates`, which records
 only agents and trial rules and so closes with C and D below; and `storeGuarantees`, which is
@@ -125,9 +125,17 @@ commit. In this order:
    caller and is closed in `NO_COUNTERPART`. A partial lifecycle or a reference without `meta` is a storable row (the
    columns are nullable), so only the views refuse those fixtures. The views are ported over complete rows, with the
    TypeScript views' answers. `resolveEvidenceRefs` and `summariseAssessments` run against seeded rows.
-4. **trials** (`lifecycle/trial.mjs` and `domain.ts`'s trial rules, `trial_rules`): `trialStateAllows` 37,
-   `validateTrialDetails` 35, `validateScheduleInput` 27 (its `mintId` closure calls are hand ports),
+4. **trials** [**done**] (`lifecycle/trial.mjs` and `domain.ts`'s trial rules, `trial_rules`): `trialStateAllows`
+   37, `validateTrialDetails` 35, `validateScheduleInput` 27 (its `mintId` closure calls are hand ports),
    `chooseTrialSlot` 17, `trialIntegrity` 10, then the rest. The 16 `parseTrialDate` hand-port calls are here too.
+   No difference turned up. `choose_slot` comes out of the request route, and the session and venue shapes and the
+   input codes out of the trial routes, so a case calls the route's own checks. The trial routes parse in key
+   order now, as the offer routes do. A trial fixture is printed as the Gleam row holds it, even where only a CHECK
+   forbids it (a schedule with no timezone, a session that ends before it starts), because `integrity` names those
+   problems. `validateScheduleInput` runs as the route runs it: the shape, `validate_schedule`, ids minted in
+   order, then `order_sessions`. The block gate never sees "report" or "assess", and the trials battery checks both
+   over HTTP (B10, B8). The views' fixture has no request id, so the views are ported over a stored trial. The 14
+   calls left on `recruitment/trials` are `createEvidenceProvider`'s.
 5. **contacts** (`lifecycle/contact.mjs`, `contact_rules`): `contactIntegrity` 21, `resolveContactRecipient` 20
    (all closure calls: fetch and judge), `validateContactContent` 8, `validateContactReply` 5, and the rest.
 6. **lifecycle** (`lifecycle/lifecycle.mjs`): `isLifecycleReason` 19, `validateLifecycleReasons` 14,

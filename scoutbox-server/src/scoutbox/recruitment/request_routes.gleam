@@ -53,7 +53,7 @@ import wisp.{type Request, type Response}
 
 const message_max = 2000
 
-type Direct {
+pub type Direct {
   Direct(
     type_: request_row.Type,
     message: Option(String),
@@ -66,7 +66,7 @@ type Direct {
 
 /// One shape per type (schemas.mjs `oneShapeOf`): a contact carries a message only; a trial its logistics too,
 /// judged by the one Trial validator.
-fn direct_shape() -> input.Shape(Direct) {
+pub fn direct_shape() -> input.Shape(Direct) {
   use type_ <- input.field(
     "type",
     input.required(input.one_of(request_row.type_pairs)),
@@ -978,7 +978,13 @@ fn respond(
           use <- contact_budget(ctx, r, by)
           case r.type_, body.accept {
             request_row.Trial, True ->
-              case choose_trial_slot(r, body.chosen_slot) {
+              case
+                trial_rules.choose_slot(
+                  r.trial_proposed_date,
+                  requests.alt_days(r),
+                  body.chosen_slot,
+                )
+              {
                 Error(offered) ->
                   http.json(
                     400,
@@ -1208,41 +1214,5 @@ fn answer(
     Error(store.Refused(AlreadyResponded)) ->
       http.error(409, "ALREADY_RESPONDED")
     Error(failure) -> http.internal(failure)
-  }
-}
-
-/// The day a trial acceptance takes (domain.ts chooseTrialSlot): one of the days offered, or the proposed day
-/// when none is named. A day that is offered but not a valid trial date is taken as no date. Error: the valid
-/// days offered.
-fn choose_trial_slot(
-  r: requests.Request,
-  chosen: Option(Dynamic),
-) -> Result(Option(String), List(String)) {
-  let offered =
-    [option.unwrap(r.trial_proposed_date, ""), ..requests.alt_days(r)]
-    |> list.filter(fn(d) { d != "" })
-  let valid = fn(d: Option(String)) {
-    case trial_rules.is_trial_date(d) {
-      True -> d
-      False -> None
-    }
-  }
-  let nothing = case chosen {
-    None -> True
-    Some(v) ->
-      dynamic.classify(v) == "Nil" || decode.run(v, decode.string) == Ok("")
-  }
-  case nothing, option.map(chosen, decode.run(_, decode.string)) {
-    True, _ -> Ok(valid(r.trial_proposed_date))
-    False, Some(Ok(day)) ->
-      case list.contains(offered, day) {
-        True -> Ok(valid(Some(day)))
-        False ->
-          Error(
-            list.filter(offered, fn(d) { trial_rules.is_trial_date(Some(d)) }),
-          )
-      }
-    False, _ ->
-      Error(list.filter(offered, fn(d) { trial_rules.is_trial_date(Some(d)) }))
   }
 }

@@ -3281,12 +3281,248 @@ const refused = (call, ctx) => `${ctx.use('gleam/result')}.map_error(${call}, ${
 
 const venueInput = (v, ctx) => {
   if (v == null) return 'None';
+  if (typeof v !== 'object' || Array.isArray(v)) throw new Error(`cannot print ${JSON.stringify(v)} as a VenueInput`);
   const { name = null, town = null, address = null, ...rest } = v;
   if (Object.keys(rest).length) throw new Error(`VenueInput has no field for ${Object.keys(rest)}`);
   return `Some(${ctx.use(TRIALS)}.VenueInput(name: ${option(string)(name, ctx)}, town: ${option(string)(town, ctx)}, address: ${option(string)(address, ctx)}))`;
 };
 
+const TRIAL_FN = 'domains/recruitment/lifecycle/trial.mjs';
+const TRIAL_ROWS = 'scoutbox/rows/trials';
+const SESSION_ROWS = 'scoutbox/rows/trial_schedule_sessions';
+const ATTENDANCE_ROWS = 'scoutbox/rows/trial_attendance';
+const workflowState = vocab('scoutbox/vocab/trial_workflow_state');
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** A current session: its times, kind, venue and instructions. Its evidence is read only by the views. */
+const trialSession = (s, i, ctx) => {
+  if (!isPlainObject(s)) throw new Error(`cannot print ${JSON.stringify(s)} as a Session`);
+  const { id, startsAt, endsAt, kind, venue, instructions, evidence = [], ...rest } = s;
+  if (Object.keys(rest).length) throw new Error(`a session has no column for ${Object.keys(rest)}`);
+  if (evidence.length) throw new Error("a session's evidence is read only by the views, ported over a stored trial");
+  if (typeof id !== 'string') throw new Error(`cannot print ${JSON.stringify(id)} as a session id`);
+  const parts = [
+    `position: ${int(i)}`,
+    `id: ${ident('trial_session')(id, ctx)}`,
+    `starts_at: ${int(startsAt)}`,
+    `ends_at: ${int(endsAt)}`,
+  ];
+  if (kind !== undefined) parts.push(`kind: ${sessionKind(kind, ctx)}`);
+  if (venue != null) {
+    if (!isPlainObject(venue)) throw new Error(`cannot print ${JSON.stringify(venue)} as a venue`);
+    const { name = null, town = null, address = null, ...more } = venue;
+    if (Object.keys(more).length) throw new Error(`a venue has no column for ${Object.keys(more)}`);
+    parts.push(`venue_name: ${option(string)(name, ctx)}`, `venue_town: ${option(string)(town, ctx)}`, `venue_address: ${option(string)(address, ctx)}`);
+  }
+  if (instructions != null) parts.push(`instructions: ${string(instructions)}`);
+  return `${ctx.use(TRIALS)}.Session(row: ${ctx.use(SESSION_ROWS)}.Row(..${ctx.use(BASE)}.trial_session(), ${parts.join(', ')}), evidence: [])`;
+};
+
+/** An attendance record. Its state is required: a record without one says nothing about attendance. */
+const trialAttendance = (a, i, ctx) => {
+  if (!isPlainObject(a)) throw new Error(`cannot print ${JSON.stringify(a)} as an attendance record`);
+  const { sessionId, state, source, recordedAt, ...rest } = a;
+  if (Object.keys(rest).length) throw new Error(`an attendance record has no column for ${Object.keys(rest)}`);
+  const parts = [
+    `position: ${int(i)}`,
+    `session_id: ${ident('trial_session')(sessionId, ctx)}`,
+    `state: ${vocab(ATTENDANCE_ROWS, 'state_pairs')(state, ctx)}`,
+  ];
+  if (source !== undefined) parts.push(`source: ${vocab(ATTENDANCE_ROWS, 'source_pairs')(source, ctx)}`);
+  if (recordedAt !== undefined) parts.push(`recorded_at: ${int(recordedAt)}`);
+  return `${ctx.use(ATTENDANCE_ROWS)}.Row(..${ctx.use(BASE)}.trial_attendance(), ${parts.join(', ')})`;
+};
+
+/**
+ * A trial as the engine reads it: its row, its current sessions and its attendance. A JavaScript trial without a
+ * workflow state is a legacy one, which is what the base row is. A schedule is held by its revision (the row's
+ * CHECK ties its timezone to it), and the timezone is printed as given, so a missing one is the problem the
+ * integrity check names. Its id, organisation, player and report status are NOT NULL: a trial leaving one out is not
+ * printed.
+ */
+const trialRec = (t, ctx) => {
+  if (!isPlainObject(t)) throw new Error(`cannot print ${JSON.stringify(t)} as a Trial`);
+  const { id, orgId, playerId, status, workflowState: ws, caseId, rev, schedule = null, attendance = [], completion = null, ...rest } = t;
+  if (Object.keys(rest).length) throw new Error(`Trial has no field for the JavaScript key ${Object.keys(rest)[0]}`);
+  const parts = [
+    `id: ${ident('trial')(id, ctx)}`,
+    `org_id: ${ident('org')(orgId, ctx)}`,
+    `player_id: ${ident('player')(playerId, ctx)}`,
+    `status: ${vocab(TRIAL_ROWS, 'status_pairs')(status, ctx)}`,
+  ];
+  if (ws !== undefined) parts.push(`workflow_state: ${workflowState(ws, ctx)}`);
+  if (caseId !== undefined) parts.push(`case_id: ${option(ident('recruitment_case'))(caseId, ctx)}`);
+  if (rev !== undefined) parts.push(`rev: ${int(rev)}`);
+  let sessions = [];
+  if (schedule !== null) {
+    if (!isPlainObject(schedule)) throw new Error(`cannot print ${JSON.stringify(schedule)} as a schedule`);
+    const { timezone = null, revision, confirmedAt = null, sessions: ss, revisions = [], ...more } = schedule;
+    if (Object.keys(more).length) throw new Error(`a schedule has no column for ${Object.keys(more)}`);
+    if (revisions.length) throw new Error("a schedule's revisions are read only by the club view, ported over a stored trial");
+    parts.push(
+      `schedule_timezone: ${option(string)(timezone, ctx)}`,
+      `schedule_revision: Some(${int(revision)})`,
+      `schedule_confirmed_at: ${option(int)(confirmedAt, ctx)}`,
+    );
+    if (!Array.isArray(ss)) throw new Error(`cannot print ${JSON.stringify(ss)} as a List`);
+    sessions = ss.map((x, i) => trialSession(x, i, ctx));
+  }
+  if (!Array.isArray(attendance)) throw new Error(`cannot print ${JSON.stringify(attendance)} as a List`);
+  if (completion !== null) {
+    if (!isPlainObject(completion)) throw new Error(`cannot print ${JSON.stringify(completion)} as a completion`);
+    const { state, at = null, ...more } = completion;
+    if (Object.keys(more).length) throw new Error(`a completion has no column for ${Object.keys(more)}`);
+    parts.push(
+      `completion_state: Some(${vocab(TRIAL_ROWS, 'completion_state_pairs')(state, ctx)})`,
+      `completion_at: ${option(int)(at, ctx)}`,
+    );
+  }
+  const b = `${ctx.use(BASE)}.trial()`;
+  return `${ctx.use(TRIALS)}.Trial(..${b}, row: ${ctx.use(TRIAL_ROWS)}.Row(..${b}.row, ${parts.join(', ')}), sessions: [${sessions.join(', ')}], attendance: [${attendance.map((a, i) => trialAttendance(a, i, ctx)).join(', ')}])`;
+};
+
+const TRIAL_ACTS = {
+  schedule: 'ScheduleAct',
+  reschedule: 'RescheduleAct',
+  cancel: 'CancelAct',
+  attendance: 'AttendanceAct',
+  complete: 'CompleteAct',
+  link: 'LinkAct',
+  confirm: 'ConfirmAct',
+};
+const trialAct = (v, ctx) => {
+  if (!Object.hasOwn(TRIAL_ACTS, v)) throw new Error(`cannot print ${JSON.stringify(v)} as an Act`);
+  return `${ctx.use(TRIALS)}.${TRIAL_ACTS[v]}`;
+};
+const TRIAL_NEEDS = { trial_view: 'TrialView', trial_assess: 'TrialAssess', trial_write: 'TrialWrite' };
+
+/** A schedule as the material-change check compares it. The address, instructions and kind are not material. */
+const compared = (v, ctx) => {
+  if (v === null) return 'None';
+  const { timezone, sessions, ...rest } = v;
+  if (Object.keys(rest).length) throw new Error(`a compared schedule has no field for ${Object.keys(rest)}`);
+  const one = ({ id, startsAt, endsAt, venue = {} }) =>
+    `${ctx.use(TRIALS)}.Compared(id: ${string(id)}, starts_at: ${int(startsAt)}, ends_at: ${int(endsAt)}, name: ${string(venue?.name ?? '')}, town: ${string(venue?.town ?? '')})`;
+  return `#(${string(timezone)}, [${sessions.map(one).join(', ')}])`;
+};
+
 const TRIAL_MAP = {
+  [`${TRIAL_FN}#icsText`]: plainIn(TRIALS)('ics_text', [string], string),
+  // The views' fixture leaves out the request a trial is accepted from (NOT NULL) and carries keys and day records
+  // no trial can store; they are ported over a stored trial with the TypeScript views' answers.
+  ...Object.fromEntries(
+    ['trialClubView', 'trialFamilyView', 'trialMilestone', 'trialOutcomeLine'].map((f) => [
+      `${TRIAL_FN}#${f}`,
+      {
+        module: TRIALS,
+        test: () => {
+          throw new Error('the fixture leaves out the trial request, which every trial names');
+        },
+      },
+    ]),
+  ),
+  [`${TRIAL_FN}#trialRoleAllows`]: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [r, need] = c.args;
+      if (!Object.hasOwn(TRIAL_NEEDS, need)) throw new Error(`cannot print ${JSON.stringify(need)} as a Need`);
+      return eq(`${ctx.use(TRIALS)}.role_allows(${option(role)(r, ctx)}, ${ctx.use(TRIALS)}.${TRIAL_NEEDS[need]})`, bool(c.result));
+    },
+  },
+  // The gate runs only for a club's trial acts (and `invite`, which is no act on a trial). Filing the report and
+  // assessing never pass through it: the trials battery files the report while blocked (B10) and refuses the
+  // assessment (B8).
+  [`${TRIAL_FN}#blockedAllows`]: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [action] = c.args;
+      if (action === 'report' || action === 'assess') throw new Error(`no route asks the block gate about ${action}`);
+      const act = action === 'invite' ? 'None' : `Some(${trialAct(action, ctx)})`;
+      return eq(`${ctx.use(TRIALS)}.blocked_allows(${act})`, bool(c.result));
+    },
+  },
+  [`${TRIAL_FN}#materialChange`]: {
+    module: TRIALS,
+    test: (c, ctx) =>
+      eq(`${ctx.use(TRIALS)}.material_change(${option(compared)(c.args[0], ctx)}, ${compared(c.args[1], ctx)})`, bool(c.result)),
+  },
+  [`${TRIAL_FN}#isLegacyTrial`]: plainIn(TRIALS)('is_legacy', [trialRec], bool),
+  [`${TRIAL_FN}#deriveWorkflowState`]: plainIn(TRIALS)('workflow_state', [trialRec], workflowState),
+  [`${TRIAL_FN}#trialStateAllows`]: plainIn(TRIALS)('state_allows', [trialRec, trialAct], bool),
+  [`${TRIAL_FN}#canComplete`]: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [t, { now, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`can_complete has no argument for ${Object.keys(rest)}`);
+      return eq(
+        refused(`${ctx.use(TRIALS)}.can_complete(${trialRec(t, ctx)}, ${int(now)})`, ctx),
+        c.result.ok ? 'Ok(Nil)' : `Error(${trialRefusal(c.result)})`,
+      );
+    },
+  },
+  [`${TRIAL_FN}#trialIntegrity`]: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [t, { orgId = null, caseId = null, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`integrity has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(TRIALS)}.integrity(${trialRec(t, ctx)}, ${option(ident('org'))(orgId, ctx)}, ${option(ident('recruitment_case'))(caseId, ctx)})`,
+        list(string)(c.result, ctx),
+      );
+    },
+  },
+  [`${TRIAL_FN}#validateVenue`]: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [raw, opts = {}] = c.args;
+      if (Object.keys(opts).length) throw new Error(`validate_venue has no argument for ${Object.keys(opts)}`);
+      const r = c.result;
+      return eq(
+        refused(`${ctx.use(TRIALS)}.validate_venue(${venueInput(raw, ctx)})`, ctx),
+        r.ok
+          ? `Ok(${ctx.use(TRIALS)}.Venue(name: ${string(r.venue.name)}, town: ${option(string)(r.venue.town, ctx)}, address: ${option(string)(r.venue.address, ctx)}))`
+          : `Error(${trialRefusal(r)})`,
+      );
+    },
+  },
+  // The request's shape hands the rule each field as sent; a body that is not an object, or names a field the shape
+  // doesn't know, is refused before it.
+  ['domain.ts#validateTrialDetails']: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [raw] = c.args;
+      if (!isPlainObject(raw)) throw new Error("the request's shape refuses a body that is not an object");
+      const { proposedDate, altSlots, venue, notes, ...rest } = raw;
+      if (Object.keys(rest).length) throw new Error(`the request's shape refuses the unknown field ${Object.keys(rest)[0]}`);
+      const at = (v) => (v === undefined ? 'None' : `Some(${sent(v, ctx)})`);
+      const r = c.result;
+      const d = r.details;
+      return eq(
+        `${ctx.use('gleam/result')}.map_error(${ctx.use(TRIALS)}.validate_details(${at(proposedDate)}, ${at(altSlots)}, ${at(venue)}, ${at(notes)}), fn(f) { ${ctx.use('gleam/json')}.to_string(${ctx.use('gleam/json')}.object(f)) })`,
+        r.ok
+          ? `Ok(${ctx.use(TRIALS)}.Details(proposed_date: ${option(day)(d.proposedDate, ctx)}, alt_days: ${list(day)(d.altSlots, ctx)}, venue: ${option(string)(d.venue, ctx)}, notes: ${string(d.notes)}))`
+          : `Error(${string(JSON.stringify(r))})`,
+      );
+    },
+  },
+  // Its first argument is a stored trial request: its proposed day and alternative days. The route writes the
+  // refusal's code and message around the days offered.
+  ['domain.ts#chooseTrialSlot']: {
+    module: TRIALS,
+    test: (c, ctx) => {
+      const [request, ...chosen] = c.args;
+      if (!isPlainObject(request)) throw new Error('a trial is accepted from a stored request');
+      const { proposedDate = null, altSlots = [], ...rest } = request;
+      if (Object.keys(rest).length) throw new Error(`a request has no column for ${Object.keys(rest)}`);
+      const r = c.result;
+      if (!r.ok && (r.error !== 'TRIAL_SLOT_INVALID' || r.message !== 'Pick one of the dates the club offered.'))
+        throw new Error(`the route refuses a slot only with TRIAL_SLOT_INVALID, not ${r.error}`);
+      return eq(
+        `${ctx.use(TRIALS)}.choose_slot(${option(string)(proposedDate, ctx)}, ${list(string)(altSlots, ctx)}, ${chosen.length ? `Some(${sent(chosen[0], ctx)})` : 'None'})`,
+        r.ok ? `Ok(${option(string)(r.date, ctx)})` : `Error(${list(string)(r.offered, ctx)})`,
+      );
+    },
+  },
   ['domain.ts#parseDob']: {
     module: TEMPORAL,
     test: (c, ctx) =>
@@ -4226,7 +4462,6 @@ const decisionRefused = (r, ctx) => {
 /** Refused by the route's shape, before the rule: on both servers, under the rule's code. */
 const shapeRefused = (r, ctx) => `Error(${ctx.use(BASE)}.ByShape(${string(r.error)}))`;
 
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 const DECISION_MAP = {
   [`${DECISION_FN}#validateOutcome`]: {
@@ -4634,6 +4869,33 @@ export const HAND_PORTED = {
       'validateOutcome',
     ].map((f) => [`${DECISION_FN}#${f}`, 'test/scoutbox/recruitment/decisions_test.gleam']),
   ),
+  // Trial dates, timezones and instructions that aren't text are refused by the route's shape, and NaN and Infinity
+  // aren't JSON; a trial request body that isn't an object or names an inherited key is refused by its shape; a
+  // trial is accepted from a stored request; unstorable states and rows, roles read from text and acts outside the
+  // closed type can't be held; validateScheduleInput's mintId is the store's; the views run over a stored trial.
+  ...Object.fromEntries(
+    [
+      'domain.ts#parseTrialDate',
+      'domain.ts#validateTrialDetails',
+      'domain.ts#chooseTrialSlot',
+      ...[
+        'parseInstant',
+        'validateTimezone',
+        'validateSessionInput',
+        'validateScheduleInput',
+        'trialIntegrity',
+        'trialRoleAllows',
+        'trialStateAllows',
+        'trialClubView',
+        'trialFamilyView',
+        'trialMilestone',
+        'trialOutcomeLine',
+      ].map((f) => `${TRIAL_FN}#${f}`),
+    ].map((f) => [f, 'test/scoutbox/recruitment/trial_rules_test.gleam']),
+  ),
+  // No route asks the block gate about filing the report or assessing: the trials battery files the report while
+  // blocked (B10) and refuses the assessment (B8).
+  [`${TRIAL_FN}#blockedAllows`]: 'e2e/recruitment/trials.mjs',
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
   ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',
   ...Object.fromEntries(

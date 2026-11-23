@@ -4375,11 +4375,12 @@
       {
         "function": "domain.ts#chooseTrialSlot",
         "calls": 17,
-        "cases": 16,
+        "cases": 14,
         "handPort": {
-          "args[].toString is a function": 1
+          "args[].toString is a function": 1,
+          "Gleam's types can't hold its arguments: a trial is accepted from a stored request": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domain.ts#isTrialDate",
@@ -4424,9 +4425,16 @@
       {
         "function": "domain.ts#validateTrialDetails",
         "calls": 35,
-        "cases": 33,
-        "handPort": {},
-        "status": "pending"
+        "cases": 25,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the request's shape refuses a body that is not an object": 3,
+          "Gleam's types can't hold its arguments: the request's shape refuses the unknown field constructor": 1,
+          "Gleam's types can't hold its arguments: the request's shape refuses the unknown field hasOwnProperty": 1,
+          "Gleam's types can't hold its arguments: the request's shape refuses the unknown field prototype": 1,
+          "Gleam's types can't hold its arguments: the request's shape refuses the unknown field toString": 1,
+          "Gleam's types can't hold its arguments: the request's shape refuses the unknown field valueOf": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/platform/notificationPrefs.mjs#categoryOf",
@@ -4460,23 +4468,26 @@
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#blockedAllows",
         "calls": 9,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no route asks the block gate about assess": 1,
+          "Gleam's types can't hold its arguments: no route asks the block gate about report": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#canComplete",
         "calls": 9,
         "cases": 9,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#deriveWorkflowState",
         "calls": 8,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#icsLocal",
@@ -4490,14 +4501,14 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#isLegacyTrial",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#localDay",
@@ -4511,7 +4522,7 @@
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey",
@@ -4533,51 +4544,68 @@
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialClubView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the trial request, which every trial names": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialFamilyView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the trial request, which every trial names": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialIntegrity",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"done\" as a value of scoutbox/rows/trials.completion_state_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"flying\" as a value of scoutbox/vocab/trial_workflow_state.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yes\" as a List": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialMilestone",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the trial request, which every trial names": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialOutcomeLine",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the trial request, which every trial names": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialRoleAllows",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"admin\" as a code of scoutbox/recruitment/room_rules.role_code": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#trialStateAllows",
         "calls": 37,
-        "cases": 37,
-        "handPort": {},
-        "status": "pending"
+        "cases": 35,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"assess\" as an Act": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as an Act": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#validateScheduleInput",
@@ -4613,7 +4641,7 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomCan",
