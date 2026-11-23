@@ -9,6 +9,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
+import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/key_order
 import scoutbox/platform/temporal
@@ -347,7 +349,8 @@ pub fn brief() -> recruitment_briefs.Row {
 
 /// A request body as the route reads it, from its JSON text.
 pub fn body(text: String) -> Dynamic {
-  let assert Ok(d) = json.parse(text, decode.dynamic)
+  let assert Ok(d) =
+    json.parse(http.without_lone_surrogates(text), decode.dynamic)
   d
 }
 
@@ -449,6 +452,48 @@ pub fn contact() -> contact_rules.Contact {
 /// A contact rule's refusal as the TypeScript rule reports one: its error, its message and its other fields as JSON.
 pub fn contact_refusal(r: contact_rules.Refusal) -> #(String, String, String) {
   #(r.error, r.message, json.to_string(json.object(r.fields)))
+}
+
+/// A contact's words as the contact routes read them: their shape (`contact_rules.words_check`, under the routes'
+/// default code), then `validate_content`. Each is its field's JSON text, or None when the write leaves it out.
+pub fn contact_content(
+  subject: Option(String),
+  words: Option(String),
+) -> Result(contact_rules.Content, DecisionRefused) {
+  let fields =
+    [#("subject", subject), #("body", words)]
+    |> list.filter_map(fn(f) {
+      case f.1 {
+        Some(v) -> Ok(json.to_string(json.string(f.0)) <> ":" <> v)
+        None -> Error(Nil)
+      }
+    })
+  let shape = {
+    use s <- input.field("subject", contact_rules.words_check())
+    use b <- input.field("body", contact_rules.words_check())
+    input.done(#(s, b))
+  }
+  use #(s, b) <- result.try(
+    input.parse_coded(
+      shape,
+      body("{" <> string.join(fields, ",") <> "}"),
+      root: "body",
+      codes: [],
+      default: contact_rules.input_default,
+    )
+    |> result.map_error(fn(r) { ByShape(r.error) }),
+  )
+  contact_rules.validate_content(s, b)
+  |> result.map_error(fn(r) {
+    ByRule(
+      json.to_string(
+        json.object([
+          #("error", json.string(r.error)),
+          #("message", json.string(r.message)),
+        ]),
+      ),
+    )
+  })
 }
 
 /// A Room at `status` (rev 1), with these history entries in order: each an action and its detail as JSON text.

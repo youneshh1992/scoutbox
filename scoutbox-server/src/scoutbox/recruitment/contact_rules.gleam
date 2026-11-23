@@ -217,6 +217,18 @@ pub fn plain_shared(text: String, max: Int) -> String {
   |> input.utf16_take(max)
 }
 
+/// What the contact routes' shapes refuse a field under, unless the field names its own code.
+pub const input_default = "CONTACT_CONTENT_INVALID"
+
+/// Shape and type only: `validate_content` cleans the words and judges their length (markup is stripped first,
+/// so the raw text may run longer than the limit).
+pub const words_max = 1_000_000
+
+/// A field of words as the contact routes' shapes read it: text, or absent or null.
+pub fn words_check() -> input.Rule(Option(String)) {
+  input.nullish(input.text(words_max))
+}
+
 pub type Content {
   Content(subject: Option(String), body: String)
 }
@@ -258,6 +270,32 @@ fn content(s: String, b: String) -> Result(Content, Refusal) {
           _ -> Some(s)
         },
         body: b,
+      ))
+  }
+}
+
+/// The short reply a request's answer may carry, as sent: `Ok(None)` for none (absent, null or empty), the cleaned
+/// text, or the refusal when it isn't text or the request isn't a contact.
+pub fn validate_reply(
+  raw: Option(Dynamic),
+  is_contact: Bool,
+) -> Result(Option(String), Refusal) {
+  let as_text = option.map(raw, decode.run(_, decode.string))
+  let is_nothing = case raw {
+    None -> True
+    Some(v) -> dynamic.classify(v) == "Nil" || as_text == Some(Ok(""))
+  }
+  case is_nothing, as_text, is_contact {
+    True, _, _ -> Ok(None)
+    False, Some(Ok(text)), True ->
+      case plain_shared(text, reply_max) {
+        "" -> Ok(None)
+        reply -> Ok(Some(reply))
+      }
+    False, _, _ ->
+      Error(refusal(
+        "CONTACT_RESPONSE_INVALID",
+        "A reply must be text, and only a contact can carry one.",
       ))
   }
 }
@@ -677,7 +715,7 @@ pub fn integrity(
     #("recipient_missing", is_evidence(r.status) && r.recipient_type == None),
     #(
       "routing_snapshot_malformed",
-      r.routing_mode != None && r.routing_at == None,
+      { r.routing_mode == None } != { r.routing_at == None },
     ),
     #("routing_snapshot_unsent", routed_to_agent(r) && !sent),
     #(

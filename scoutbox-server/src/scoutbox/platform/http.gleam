@@ -334,7 +334,7 @@ pub fn signed_body(
 /// JavaScript's JSON.parse accepts a `\u` escape naming half of a surrogate pair with no other half, and the
 /// TypeScript server's text cleaners then drop it. A Gleam string cannot hold one, so it is dropped before parsing:
 /// the same text the cleaners leave, where the JSON would otherwise be refused whole.
-fn without_lone_surrogates(text: String) -> String {
+pub fn without_lone_surrogates(text: String) -> String {
   case string.contains(text, "\\ud") || string.contains(text, "\\uD") {
     False -> text
     True ->

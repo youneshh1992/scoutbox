@@ -693,23 +693,29 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the contact's orgId, which every contact row has": 3
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactMilestone",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/errors.mjs#httpStatusFor",
@@ -2895,30 +2901,43 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/rows/recruitment_contacts.channel_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"nope\" as a List": 1,
+          "Gleam's types can't hold its arguments: cannot print \"sent\" as a value of scoutbox/rows/recruitment_contacts.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a Contact": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactMilestone",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactRoleAllows",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a code of scoutbox/recruitment/room_rules.role_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a Need": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#cooldownFor",
@@ -2937,11 +2956,12 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#plainShared",
         "calls": 3,
-        "cases": 2,
+        "cases": 1,
         "handPort": {
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: the routes' shapes refuse words that aren't text": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient",
@@ -2957,14 +2977,14 @@
         "calls": 8,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#validateContactReply",
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#validateExternalRecord",
@@ -3019,9 +3039,14 @@
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a value of scoutbox/rows/recruitment_contacts.channel_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"not-a-list\" as a List": 1,
+          "Gleam's types can't hold its arguments: cannot print \"sent\" as a value of scoutbox/rows/recruitment_contacts.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",

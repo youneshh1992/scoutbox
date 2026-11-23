@@ -50,8 +50,8 @@ By `LEDGER.md`:
 
 | Domain | Batteries to go | Cases pending | Hand-port calls to do |
 | --- | --- | --- | --- |
-| recruitment | 9 | 305 | 201 |
-| agents | 6 | 412 | 15 |
+| recruitment | 9 | 268 | 179 |
+| agents | 6 | 407 | 15 |
 | platform | 3 | 54 | 51 |
 
 Development and discovery are closed. Platform's three are `uploads` (waits for step 5); `dates`, which records
@@ -136,8 +136,19 @@ commit. In this order:
    order, then `order_sessions`. The block gate never sees "report" or "assess", and the trials battery checks both
    over HTTP (B10, B8). The views' fixture has no request id, so the views are ported over a stored trial. The 14
    calls left on `recruitment/trials` are `createEvidenceProvider`'s.
-5. **contacts** (`lifecycle/contact.mjs`, `contact_rules`): `contactIntegrity` 21, `resolveContactRecipient` 20
-   (all closure calls: fetch and judge), `validateContactContent` 8, `validateContactReply` 5, and the rest.
+5. **contacts** [**done**] (`lifecycle/contact.mjs`, `contact_rules`): `contactIntegrity` 21,
+   `resolveContactRecipient` 20 (all closure calls: fetch and judge), `validateContactContent` 8,
+   `validateContactReply` 5, and the rest. One difference turned up: `integrity` named a snapshot with a mode and
+   no time, but not one with a time and no mode, which the TypeScript check calls malformed too (only a CHECK
+   forbids either); it names both now. `recipients.resolve` is a fetch and a pure `judge` over the player row, its
+   access and the guardians linked to it; the judgement is tested over rows, and the visibility (an agency or an
+   unverified club and a minor) against the seed (`recipients_test.gleam`). The reply rule comes out of the request
+   route (`contact_rules.validate_reply`), and the words shape and default code out of the contact routes, so the
+   content and reply cases call the routes' own checks; words that aren't text compare only the code
+   (`base.ByShape`), as decisions' do. `base.body` drops lone surrogates as `http` does, so a case reads a body as
+   the route reads it. The integrity fixture prints only what the check reads, and the views are ported over
+   complete rows. No call sent several unknown fields, so the contact routes' `parse_coded` showed no key-order
+   difference.
 6. **lifecycle** (`lifecycle/lifecycle.mjs`): `isLifecycleReason` 19, `validateLifecycleReasons` 14,
    `toAnalyticsRecruitmentStage` 13, and `rooms/shared.mjs#adoptionStatusForStage` 12 (plus
    `roomStatusForStage`'s 14 hand-port calls).

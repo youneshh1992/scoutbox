@@ -138,7 +138,7 @@ fn body(
       raw,
       root: "body",
       codes:,
-      default: "CONTACT_CONTENT_INVALID",
+      default: contact_rules.input_default,
     )
   {
     Error(r) ->
@@ -161,12 +161,8 @@ fn client_key(
   }
 }
 
-/// Shape and type only: `validate_content` cleans the words and judges their length (markup is stripped first,
-/// so the raw text may run longer than the limit).
-const words_max = 1_000_000
-
 fn words() -> input.Rule(Option(String)) {
-  input.nullish(input.text(words_max))
+  contact_rules.words_check()
 }
 
 fn fingerprint(fields: List(#(String, canonical.Value))) -> String {
@@ -864,11 +860,17 @@ type EditBody {
 }
 
 fn edit_shape() -> input.Shape(EditBody) {
-  use subject <- input.field("subject", input.clearable(input.text(words_max)))
-  use body <- input.field("body", input.clearable(input.text(words_max)))
+  use subject <- input.field(
+    "subject",
+    input.clearable(input.text(contact_rules.words_max)),
+  )
+  use body <- input.field(
+    "body",
+    input.clearable(input.text(contact_rules.words_max)),
+  )
   use contact_mode <- input.field(
     "contactMode",
-    input.clearable(input.text(words_max)),
+    input.clearable(input.text(contact_rules.words_max)),
   )
   use <- rev.fields
   input.done(EditBody(subject:, body:, contact_mode:))
@@ -1451,7 +1453,7 @@ fn external_shape() -> input.Shape(ExternalBody) {
   use summary <- input.field("summary", words())
   use recipient_type <- input.field(
     "recipientType",
-    input.optional(input.text(words_max)),
+    input.optional(input.text(contact_rules.words_max)),
   )
   input.done(ExternalBody(
     client_key:,

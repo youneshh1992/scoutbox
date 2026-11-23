@@ -3605,7 +3605,143 @@ const contactRow = record({
 });
 const contactRec = (v, ctx) => `${ctx.use(CONTACTS)}.Contact(..${ctx.use(BASE)}.contact(), row: ${contactRow(v, ctx)})`;
 
+const CONTACT_FN = 'domains/recruitment/lifecycle/contact.mjs';
+const CONTACT_NEEDS = { contact_view: 'ContactView', contact_write: 'ContactWrite' };
+
+/** Keys of a stored contact that contactIntegrity never reads. */
+const INTEGRITY_UNREAD = [
+  'subject', 'body', 'summary', 'createdBy', 'createdAt', 'updatedAt', 'sentBy', 'sentAt', 'failedAt', 'failureCode',
+  'attempts', 'requestId', 'emailCopy', 'lifecycle', 'recordedBy', 'recordedAt', 'respondedAt', 'response',
+  'cancelledAt', 'cancelledBy', 'keys', 'rev', 'revAt', 'revBy', 'policyVersion',
+];
+
+/**
+ * A contact as the integrity check reads it: the columns it judges, printed as the Gleam row holds them even where
+ * only a CHECK forbids the combination, because those are what it names. Its id, organisation, case, player, status
+ * and channel are NOT NULL: a contact leaving one out is not printed. A JavaScript contact without a mode is
+ * `player_only`. Its history is read only for being a list, which a Gleam list always is, so its entries aren't
+ * printed. A snapshot's agent is its user id column: an agent naming nobody can't be held.
+ */
+const integrityContact = (c, ctx) => {
+  if (!isPlainObject(c)) throw new Error(`cannot print ${JSON.stringify(c)} as a Contact`);
+  const { id, orgId, caseId, playerId, status, channel, recipient = null, contactMode = null, routingSnapshot = null,
+    history = [], deliveredAt = null, occurredAt = null, ...rest } = c;
+  const unknown = Object.keys(rest).filter((k) => !INTEGRITY_UNREAD.includes(k));
+  if (unknown.length) throw new Error(`a contact has no column for ${unknown}`);
+  for (const [k, v] of Object.entries({ id, orgId, caseId, playerId, status, channel }))
+    if (v === undefined) throw new Error(`the fixture leaves out the contact's ${k}, which every contact row has`);
+  if (!Array.isArray(history)) throw new Error(`cannot print ${JSON.stringify(history)} as a List`);
+  const parts = [
+    `id: ${ident('contact')(id, ctx)}`,
+    `org_id: ${ident('org')(orgId, ctx)}`,
+    `case_id: ${ident('recruitment_case')(caseId, ctx)}`,
+    `player_id: ${ident('player')(playerId, ctx)}`,
+    `status: ${vocab(CONTACT_ROWS, 'status_pairs')(status, ctx)}`,
+    `channel: ${vocab(CONTACT_ROWS, 'channel_pairs')(channel, ctx)}`,
+    `contact_mode: ${vocab('scoutbox/vocab/contact_mode')(contactMode ?? 'player_only', ctx)}`,
+    `delivered_at: ${option(int)(deliveredAt, ctx)}`,
+    `occurred_at: ${option(int)(occurredAt, ctx)}`,
+  ];
+  if (recipient !== null) {
+    if (!isPlainObject(recipient)) throw new Error(`cannot print ${JSON.stringify(recipient)} as a recipient`);
+    const { type, playerId: rp = null, guardianId = null, minor = null, ...more } = recipient;
+    if (Object.keys(more).length) throw new Error(`a recipient has no column for ${Object.keys(more)}`);
+    parts.push(
+      `recipient_type: ${option(vocab('scoutbox/vocab/party'))(type, ctx)}`,
+      `recipient_player_id: ${option(ident('player'))(rp, ctx)}`,
+      `recipient_guardian_id: ${option(ident('guardian'))(guardianId, ctx)}`,
+      `recipient_minor: ${option(bool)(minor, ctx)}`,
+    );
+  }
+  if (routingSnapshot !== null) {
+    if (!isPlainObject(routingSnapshot)) throw new Error(`cannot print ${JSON.stringify(routingSnapshot)} as a routing snapshot`);
+    const { at = null, mode = null, agent = null, ...more } = routingSnapshot;
+    if (Object.keys(more).length) throw new Error(`a routing snapshot has no column for ${Object.keys(more)}`);
+    if (agent !== null && typeof agent?.agentUserId !== 'string')
+      throw new Error("a snapshot's agent is its user id column: an agent naming nobody can't be held");
+    parts.push(
+      `routing_at: ${option(int)(at, ctx)}`,
+      `routing_mode: ${option(vocab('scoutbox/vocab/contact_mode'))(mode, ctx)}`,
+      `routing_agent_user_id: ${option(ident('org_user'))(agent?.agentUserId ?? null, ctx)}`,
+    );
+  }
+  const b = `${ctx.use(BASE)}.contact()`;
+  return `${ctx.use(CONTACTS)}.Contact(..${b}, row: ${ctx.use(CONTACT_ROWS)}.Row(..${b}.row, ${parts.join(', ')}))`;
+};
+
 const CONTACT_MAP = {
+  [`${CONTACT_FN}#contactRoleAllows`]: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [r, need] = c.args;
+      if (!Object.hasOwn(CONTACT_NEEDS, need)) throw new Error(`cannot print ${JSON.stringify(need)} as a Need`);
+      return eq(`${ctx.use(CONTACTS)}.role_allows(${option(role)(r, ctx)}, ${ctx.use(CONTACTS)}.${CONTACT_NEEDS[need]})`, bool(c.result));
+    },
+  },
+  // Absent text is the empty text the routes pass for it; anything else that isn't text is refused by their shapes.
+  [`${CONTACT_FN}#plainShared`]: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [v, max] = c.args;
+      if (v != null && typeof v !== 'string') throw new Error("the routes' shapes refuse words that aren't text");
+      return eq(`${ctx.use(CONTACTS)}.plain_shared(${string(v ?? '')}, ${int(max)})`, string(c.result));
+    },
+  },
+  // The words pass the routes' shape first, which refuses words that aren't text under the rule's own code, so the
+  // rule's message for them is never sent.
+  [`${CONTACT_FN}#validateContactContent`]: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [raw = {}, opts = {}] = c.args;
+      if (Object.keys(opts).length) throw new Error(`validate_content has no argument for ${Object.keys(opts)}`);
+      if (!isPlainObject(raw)) throw new Error("the routes' shape refuses a body that is not an object");
+      const { subject, body, ...rest } = raw;
+      if (Object.keys(rest).length) throw new Error(`the content has no field for ${Object.keys(rest)}`);
+      const r = c.result;
+      const expected = r.ok
+        ? `Ok(${ctx.use(CONTACTS)}.Content(subject: ${option(string)(r.subject, ctx)}, body: ${string(r.body)}))`
+        : r.message === 'Subject and message must be text.'
+          ? `Error(${ctx.use(BASE)}.ByShape(${string(r.error)}))`
+          : `Error(${ctx.use(BASE)}.ByRule(${string(JSON.stringify({ error: r.error, message: r.message }))}))`;
+      return eq(`${ctx.use(BASE)}.contact_content(${sentField(subject)}, ${sentField(body)})`, expected);
+    },
+  },
+  [`${CONTACT_FN}#validateContactReply`]: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [raw, { isContact = true, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validate_reply has no argument for ${Object.keys(rest)}`);
+      const r = c.result;
+      return eq(
+        `${ctx.use('gleam/result')}.map_error(${ctx.use(CONTACTS)}.validate_reply(${raw === undefined ? 'None' : `Some(${sent(raw, ctx)})`}, ${bool(isContact)}), ${ctx.use(BASE)}.contact_refusal)`,
+        r.ok ? `Ok(${option(string)(r.reply, ctx)})` : `Error(#(${string(r.error)}, ${string(r.message)}, "{}"))`,
+      );
+    },
+  },
+  [`${CONTACT_FN}#contactIntegrity`]: {
+    module: CONTACTS,
+    test: (c, ctx) => {
+      const [x, { orgId = null, caseId = null, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`integrity has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(CONTACTS)}.integrity(${integrityContact(x, ctx)}, ${option(ident('org'))(orgId, ctx)}, ${option(ident('recruitment_case'))(caseId, ctx)})`,
+        list(string)(c.result, ctx),
+      );
+    },
+  },
+  // The views' fixtures leave out the organisation, case and creation time every contact row has; they are ported
+  // over a complete row with the TypeScript views' answers.
+  ...Object.fromEntries(
+    ['contactView', 'contactMilestone'].map((f) => [
+      `${CONTACT_FN}#${f}`,
+      {
+        module: CONTACTS,
+        test: () => {
+          throw new Error('the fixture leaves out the columns every contact row has');
+        },
+      },
+    ]),
+  ),
   // `blockingContactId` is read by no route on either server: both answer only the time the cooldown ends.
   ['domains/recruitment/lifecycle/contact.mjs#cooldownFor']: {
     module: CONTACTS,
@@ -4916,6 +5052,17 @@ export const HAND_PORTED = {
   // Development throws on an emitted name the registry doesn't know; here no event can carry one (live_test).
   ['domains/platform/eventRegistry.mjs#assertEventRegistry']: 'test/scoutbox/live_test.gleam',
   ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',
+  // A role or need read from text, words that aren't text, stored values no contact row can hold and fixtures leaving
+  // out NOT NULL columns; the views run over a complete row.
+  ...Object.fromEntries(
+    ['contactRoleAllows', 'plainShared', 'validateExternalRecord', 'contactIntegrity', 'contactView', 'contactMilestone'].map((f) => [
+      `${CONTACT_FN}#${f}`,
+      'test/scoutbox/recruitment/contact_rules_test.gleam',
+    ]),
+  ),
+  // Its closures over the store are the fetch in `recipients.resolve`; the judgement is tested over rows, and the
+  // visibility it reads against the seed.
+  [`${CONTACT_FN}#resolveContactRecipient`]: 'test/scoutbox/recruitment/recipients_test.gleam',
   // Its calls Gleam's types can't hold: a bogus status, action or role is refused before the validator.
   ['domains/recruitment/lifecycle/contact.mjs#canContactAction']: 'test/scoutbox/recruitment/contact_matrix_test.gleam',
   ['domains/platform/concurrency.mjs#expectedRevOf']: 'test/scoutbox/rev_test.gleam',

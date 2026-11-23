@@ -17,13 +17,13 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 248 / 412 | 71 / 86 | 6 to go |
+| agents | 9 | 9 | 9 | 248 / 407 | 76 / 91 | 6 to go |
 | development | 3 | 3 | 3 | 127 / 0 | 45 / 45 | **ported** |
 | discovery | 3 | 3 | 3 | 323 / 0 | 2 / 2 | **ported** |
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 235 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 4162 / 305 | 309 / 510 | 9 to go |
+| recruitment | 19 | 19 | 19 | 4185 / 268 | 345 / 524 | 9 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -39,7 +39,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
-| `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 14 / 88 | 4 / 12 | 88 cases pending; 8 hand-port calls |
+| `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 14 / 83 | 9 / 17 | 83 cases pending; 8 hand-port calls |
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
 | `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 6 / 126 | 1 / 2 | 126 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
@@ -72,8 +72,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 147 / 29 | 58 / 105 | 29 cases pending; 47 hand-port calls |
-| `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 166 / 0 | 90 / 115 | 25 hand-port calls |
+| `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 4 / 0 | 4 / 7 | 3 hand-port calls |
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 105 / 0 | 38 / 54 | 16 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 8 / 0 | 6 / 6 | **done** |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
@@ -197,6 +197,9 @@ ported by hand to a gleeunit test.
 | `agents/crossApp` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#duplicateTransactionOf` | 7 | args[].partiesOf is a function | to do |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 3 | Gleam's types can't hold its arguments: the fixture leaves out the contact's orgId, which every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
 | `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 1 | Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped | `test/scoutbox/agents/error_bodies_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
@@ -249,12 +252,17 @@ ported by hand to a gleeunit test.
 | `recruitment/analytics` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/analytics` | `domains/recruitment/analytics/metrics.mjs#assertMetricRegistry` | 2 | throws Error without a code | `test/scoutbox/recruitment/analytics_test.gleam` |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#canContactAction` | 58 | Gleam's types can't hold its arguments: cannot print "__proto__" as a contact action; Gleam's types can't hold its arguments: cannot print "__proto__" as a contact status; Gleam's types can't hold its arguments: cannot print "" as a RoomRole; Gleam's types can't hold its arguments: cannot print "admin" as a RoomRole; Gleam's types can't hold its arguments: cannot print "constructor" as a contact action; Gleam's types can't hold its arguments: cannot print "constructor" as a contact status; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a contact action; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a contact status; Gleam's types can't hold its arguments: cannot print "prototype" as a contact action; Gleam's types can't hold its arguments: cannot print "prototype" as a contact status; Gleam's types can't hold its arguments: cannot print "toString" as a contact action; Gleam's types can't hold its arguments: cannot print "toString" as a contact status | `test/scoutbox/recruitment/contact_matrix_test.gleam` |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 1 | args[] is undefined | to do |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | to do |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 1 | Gleam's types can't hold its arguments: cannot print ["x"] as a String | to do |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 5 | Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_contacts.channel_pairs; Gleam's types can't hold its arguments: cannot print "nope" as a List; Gleam's types can't hold its arguments: cannot print "sent" as a value of scoutbox/rows/recruitment_contacts.status_pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print null as a Contact | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 | Gleam's types can't hold its arguments: cannot print "constructor" as a code of scoutbox/recruitment/room_rules.role_code; Gleam's types can't hold its arguments: cannot print "constructor" as a Need | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 2 | args[] is undefined; Gleam's types can't hold its arguments: the routes' shapes refuse words that aren't text | `test/scoutbox/recruitment/contact_rules_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#resolveContactRecipient` | 20 | args[].isAdult is a function | `test/scoutbox/recruitment/recipients_test.gleam` |
+| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 1 | Gleam's types can't hold its arguments: cannot print ["x"] as a String | `test/scoutbox/recruitment/contact_rules_test.gleam` |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].contacts.byId is a function; args[].signings.byId is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 9 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 | args[].evidence.check is a function | to do |
+| `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 4 | Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_contacts.channel_pairs; Gleam's types can't hold its arguments: cannot print "not-a-list" as a List; Gleam's types can't hold its arguments: cannot print "sent" as a value of scoutbox/rows/recruitment_contacts.status_pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int | `test/scoutbox/recruitment/contact_rules_test.gleam` |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 2 | args[].contacts.byId is a function | to do |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 1 | args[].reads.signings.byId is a function | to do |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 11 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "accept" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print 0 as a stored rev; Gleam's types can't hold its arguments: cannot print 1.5 as a stored rev; Gleam's types can't hold its arguments: every caller judges a row against its case and organisation; Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one; Gleam's types can't hold its arguments: references are child rows: there is no list that is not one | `test/scoutbox/recruitment/decisions_test.gleam` |
@@ -388,9 +396,6 @@ mapped, then `npm run cases`.
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 6 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#surfaceIsRegulated` | 12 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#surfaceScopes` | 1 |
-| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 3 |
-| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
-| `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 11 |
@@ -418,14 +423,6 @@ mapped, then `npm run cases`.
 | `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 10 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 2 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactContent` | 8 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
-| `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 8 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 9 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor` | 1 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |

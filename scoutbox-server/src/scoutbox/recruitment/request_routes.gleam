@@ -856,25 +856,8 @@ fn contact_reply(
   r: requests.Request,
   raw: Option(Dynamic),
 ) -> Result(Option(String), Response) {
-  let as_text = option.map(raw, decode.run(_, decode.string))
-  let is_nothing = case raw {
-    None -> True
-    Some(v) -> dynamic.classify(v) == "Nil" || as_text == Some(Ok(""))
-  }
-  case is_nothing, as_text, r.type_ {
-    True, _, _ -> Ok(None)
-    False, Some(Ok(text)), request_row.Contact ->
-      case contact_rules.plain_shared(text, contact_rules.reply_max) {
-        "" -> Ok(None)
-        reply -> Ok(Some(reply))
-      }
-    False, _, _ ->
-      Error(http.error_message(
-        400,
-        "CONTACT_RESPONSE_INVALID",
-        "A reply must be text, and only a contact can carry one.",
-      ))
-  }
+  contact_rules.validate_reply(raw, r.type_ == request_row.Contact)
+  |> result.map_error(fn(e) { http.error_message(400, e.error, e.message) })
 }
 
 type Responder {
