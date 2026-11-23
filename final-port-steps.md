@@ -48,15 +48,15 @@ analysis and uploads (until step 5) remain.
 
 By `LEDGER.md`:
 
-| Domain | Batteries to go |
-| --- | --- |
-| recruitment | 13 |
-| agents | 6 |
-| platform | 3 |
-| development | 1 |
-| discovery | 1 |
+| Domain | Batteries to go | Cases pending | Hand-port calls to do |
+| --- | --- | --- | --- |
+| recruitment | 13 | 914 | 266 |
+| agents | 6 | 412 | 15 |
+| platform | 3 | 54 | 59 |
 
-That leaves about 4,500 rule cases pending (4,003 of them in recruitment) and about 350 hand-port calls.
+Development and discovery are closed. Platform's three are `uploads` (waits for step 5); `dates`, which records
+only agents and trial rules and so closes with C and D below; and `storeGuarantees`, which is
+`buildRecruitmentJourney`'s 19 calls and closes with C.
 
 **Decided:** a pending function is generated wherever a Gleam rule plays its role, and closed in `NO_COUNTERPART`
 with its reason where this server structurally has none (it refuses what the rule cleans, its types or schema hold
@@ -70,6 +70,73 @@ records them again while the tree exists.
 A rule over a small finite domain is proved over its whole matrix rather than call by call (`dev/battery_cases/
 matrices.mjs`, status `matrix`). The lifecycle validator is the first: `canTransitionRecruitmentCase` and
 `availableActions` are proved by `test/scoutbox/recruitment/lifecycle_matrix_test.gleam`.
+
+**What the first pass found** (commits `c87fd78`, `ec7e2ad`):
+
+- Almost every pending function has a Gleam counterpart, so very little closes in `NO_COUNTERPART`. The `*View`
+  functions and the `*Integrity`, `*Corrupt` and `*Consistency` checks all have one (`contact_rules`, `trial_rules`,
+  `offer_rules`, `signing_rules`, `decisions`). The batteries don't check fields such as `hasNote` or
+  `liveRevisionId`, so closing these as "only shapes a response" would hide untested behaviour. They are generated
+  with their module.
+- When a TypeScript rule takes closures over a store (`reads.trials.byId`, `staffById`), split the Gleam into a fetch
+  and a pure judgement over the fetched rows. The pure half is then tested directly (`development/hub_evidence.judge`,
+  `hub_evidence_test.gleam`). Where the decision needs real lookups, test it against `support.fresh_store` and the
+  demo seed (`hub_assignee_test.gleam`).
+- A rule built inline in a route is moved into the rules module as a function, so a case can call it
+  (`hub_rules.plan_summary_json`, `goal_snapshots`).
+- Some calls are already answered over HTTP by a battery. `HAND_PORTED` may name that battery
+  (`e2e/development/hub.mjs` for `validateTarget("160+")`), with a comment giving the check.
+- `npm run cases` regenerates; a printer that throws turns that call into a hand-port call with the thrown reason.
+  The quickest way to see a function's calls is a few lines of script over `recordings.json.gz`: under
+  `suites[battery].pool`, each call is `{module, name, args, result, why, assertion}`, with `args` and `result`
+  as JSON text. For closure calls, read the rules
+  suite in `../scoutbox/scoutbox-server/scripts/rules/`.
+
+**C. Recruitment, one TypeScript module at a time.** For each module: map every pending function in
+`dev/battery_cases/map.mjs`, with that module's record printers (built on `base.gleam` row builders), including its
+views and integrity checks. Port its hand-port calls, regenerate, run `gleam test` and the domain's batteries, and
+commit. In this order:
+
+1. **offers** (`offers/offer.mjs`, `offer_rules`): `validateTerms` 48, `effectiveRevisionStatus` 37,
+   `validateExpiry` 25, `canRespondToRevision` 20, `minorOfferPathwayOpen` 18, `offerIntegrity` 18, `offerEvidence`
+   14, `validateDocumentRefs` 14, then the smaller ones and the three views. The hand-port calls are
+   `effectiveRevisionStatus` (4), `validateExpiry` (4) and `offerEvidence` (1).
+2. **signings** (`signings/signing.mjs`, `signing_rules`): `requiredPartiesFor` 63, `signingIntegrity` 40,
+   `canStart` 13, `minorSigningPathwayOpen` 11, `signingConsistency` 10, then the rest and the three views.
+3. **decisions** (`lifecycle/decision.mjs`, `decisions`): `validateDecisionReasons` 30, `decisionIntegrity` 25,
+   `validateOutcome` 25, `validateEvidenceRefShapes` 16, `resolveEvidenceRefs` 12 (12 hand-port calls),
+   `validateNote` 11, `decisionView` 9, `chainHead`, `duplicateFinalHeads`, `isFormal`, `draftView` and the rest.
+4. **trials** (`lifecycle/trial.mjs` and `domain.ts`'s trial rules, `trial_rules`): `trialStateAllows` 37,
+   `validateTrialDetails` 35, `validateScheduleInput` 27 (its `mintId` closure calls are hand ports),
+   `chooseTrialSlot` 17, `trialIntegrity` 10, then the rest. The 16 `parseTrialDate` hand-port calls are here too.
+5. **contacts** (`lifecycle/contact.mjs`, `contact_rules`): `contactIntegrity` 21, `resolveContactRecipient` 20
+   (all closure calls: fetch and judge), `validateContactContent` 8, `validateContactReply` 5, and the rest.
+6. **lifecycle** (`lifecycle/lifecycle.mjs`): `isLifecycleReason` 19, `validateLifecycleReasons` 14,
+   `toAnalyticsRecruitmentStage` 13, and `rooms/shared.mjs#adoptionStatusForStage` 12 (plus
+   `roomStatusForStage`'s 14 hand-port calls).
+7. **The journey model** (`lifecycle/journeyModel.mjs`, `journey`): `nextActionFor` (251 calls) is proved over its
+   whole matrix, as `canTransitionRecruitmentCase` is (`dev/matrix_cases.mjs`, `matrices.mjs`). The `current*For*`
+   selectors, `canonicalStageFor`, `playerStageFor` and `validateRecruitmentJourney` are generated.
+8. **The journey builder and the evidence provider.** `buildRecruitmentJourney` (94 hand-port calls, store-backed,
+   including `storeGuarantees`' 19) and `createEvidenceProvider` (51), as below.
+
+**D. Agents, one TypeScript module at a time**, the same way:
+
+1. **compliance policy** (`compliance/policy.mjs`, `approach_policy` and `compliance_store`): `evaluateMinorGate`
+   34, `selectPolicyVersion` 22, `isRegulatoryMinor` 19, `applicablePolicySet` 13, `earliestPermittedApproachAt`
+   12, `representationScopeProblem` 12, `ruleAt`, `ruleStatusAt`, `resolveScope` and `evaluatePolicy`.
+2. **conflict** (`compliance/conflict.mjs`, `conflict`): `evaluateConflict` 44, `mostSevere` 36,
+   `consentSufficiency` 33, `inputHashOf` and `canonicalJson` (`conflict.input_hash`), `conflictSummaryForParty`.
+3. **integration** (`integration/integration.mjs`, `integration`): `agentSurfaceDecision` 30,
+   `effectiveHandoffStatus` 21, `agentClientBasis` 13, `handoffBlockers` 12, `surfaceIsRegulated` 12,
+   `normaliseDisclosure` (both modules), `contactRouting`, and `duplicateTransactionOf` (closure calls).
+4. **transactions** (`transactions/transaction.mjs`, `transaction_rules`): `canSeeVisibility` 36 and
+   `actorTransitionAllowed` 14 look like matrix candidates. Then `timelineVisible` 15, `complianceStateFrom`,
+   `partyRevisionOf` and the rest.
+5. **The provider** (`compliance/provider.mjs`, `verification_provider`): `facetFromProviderAnswer`, and
+   `createVerificationProvider`'s closure calls.
+
+When C and D are done, platform/dates closes too, and only platform/uploads is left (step 5).
 
 **Left for later in this step:**
 
