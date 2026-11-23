@@ -212,6 +212,36 @@ track records are meant to be visible, still drop every row with no staff member
 clubs may see each other's activity counts. The club and grassroots portals read the endpoint (`getReputation`), so
 check what their screens assume first.
 
+## Expo's answers are never read, so dead device tokens are never pruned
+
+Found 2026-11-23 while porting the Expo push transport. Ported as the TypeScript server behaves.
+
+**What it is.** With `EXPO_ACCESS_TOKEN` set, a push makes one `POST /--/api/v2/push/send` per device token the
+player or guardian registered (`push.deliver`, `scoutbox-server/src/scoutbox/messaging/push.gleam`; `adapters.mjs`
+`createPushSender` in the TypeScript tree). It ignores what Expo answers:
+
+- **Tickets.** Expo answers each message with a ticket. A ticket can say the token is dead (`DeviceNotRegistered`,
+  after the app was uninstalled or its token rotated), but the token stays in `push_tokens`, so every later push to
+  that person still calls Expo for it.
+- **Receipts.** Whether Apple or Google actually delivered a message comes from a later call to Expo's receipts
+  endpoint, made with the ticket ids. It is never made, so a delivery failure is never seen. `push_log` only
+  records that a push was asked for.
+- **Batching.** Expo takes up to 100 messages in one call. The server makes one call per token. It costs nothing
+  (Expo is free), but it means more requests and more pressure on Expo's rate limit as volume grows.
+
+**Why it was accepted.** At pilot volume a few wasted calls cost nothing, and staying with the TypeScript server's
+behaviour kept the port to parity.
+
+**Fix.** In this order:
+
+1. Read the tickets. Delete the token whose ticket says `DeviceNotRegistered`, and log any other error.
+2. Send in batches of up to 100, so one call covers every token of a push, or several pushes in a sweep.
+3. If delivery needs to be known, store the ticket ids and have a sweep fetch their receipts about 15 minutes
+   later, pruning tokens the same way.
+
+The first two need no schema change. The third needs somewhere to keep ticket ids, either on `push_log` or in a
+table of their own.
+
 ## Revisit these questions
 
 ### A close can beat the completion of a fully signed package
