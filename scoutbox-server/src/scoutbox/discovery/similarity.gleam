@@ -9,6 +9,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
+import gleam/string
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read}
@@ -19,6 +20,7 @@ import scoutbox/rules/age
 import scoutbox/rules/visibility
 import scoutbox/vocab/foot.{type Foot}
 import scoutbox/vocab/position.{type Position}
+import sqlight
 
 /// What the score reads of a player: their position, foot, age, output and build.
 pub type Profile {
@@ -68,6 +70,38 @@ fn output_per_90(p: Profile) -> Float {
   /. int.to_float(apps)
 }
 
+// The score's numbers (domain.ts `SIMILARITY`), read by `score_aged` and `score_sql` alike: the most each part
+// earns, what costs a point of it, and the build assumed when one is missing.
+const position_points = 35
+
+const group_points = 18
+
+const foot_points = 10
+
+const age_points = 15
+
+const per_year_apart = 3
+
+const output_points = 25
+
+const per_output_apart = 25
+
+const build_points = 15
+
+const cm_per_point = 2
+
+const kg_per_point = 3
+
+const default_height_cm = 180
+
+const default_weight_kg = 75
+
+/// The most a candidate outside the base's position group can score: everything but the position part. A ranking
+/// whose top `k` from the group all beat it needs no other candidate.
+pub fn without_position() -> Int {
+  foot_points + age_points + output_points + build_points
+}
+
 /// 0 to 100: 35 for the same position (18 for the same group), 10 for the same foot, up to 15 for age, 25 for
 /// output and 15 for build. Ages are taken at `now`. A stored birth date is always a day, so an age is always
 /// known here; an unknown one would earn nothing for age.
@@ -96,37 +130,45 @@ fn aged(p: Profile, now: Int) -> Aged {
     foot: p.foot,
     age: age.age_on(p.birth_date, now),
     output: output_per_90(p),
-    height: int.to_float(option.unwrap(p.height_cm, 180)),
-    weight: int.to_float(option.unwrap(p.weight_kg, 75)),
+    height: int.to_float(option.unwrap(p.height_cm, default_height_cm)),
+    weight: int.to_float(option.unwrap(p.weight_kg, default_weight_kg)),
   )
 }
 
 fn score_aged(a: Aged, b: Aged) -> Int {
   let position = case a.position == b.position, a.group, b.group {
-    True, _, _ -> 35.0
-    False, Some(x), Some(y) if x == y -> 18.0
-    False, _, _ -> 0.0
+    True, _, _ -> position_points
+    False, Some(x), Some(y) if x == y -> group_points
+    False, _, _ -> 0
   }
   let foot = case a.foot == b.foot {
-    True -> 10.0
-    False -> 0.0
+    True -> foot_points
+    False -> 0
   }
   let age_part =
-    float.max(0.0, 15.0 -. int.to_float(int.absolute_value(a.age - b.age) * 3))
+    int.max(0, age_points - int.absolute_value(a.age - b.age) * per_year_apart)
   let output =
-    float.max(0.0, 25.0 -. float.absolute_value(a.output -. b.output) *. 25.0)
+    float.max(
+      0.0,
+      int.to_float(output_points)
+        -. float.absolute_value(a.output -. b.output)
+        *. int.to_float(per_output_apart),
+    )
   let build =
     float.max(
       0.0,
-      15.0
+      int.to_float(build_points)
         -. {
         float.absolute_value(a.height -. b.height)
-        /. 2.0
+        /. int.to_float(cm_per_point)
         +. float.absolute_value(a.weight -. b.weight)
-        /. 3.0
+        /. int.to_float(kg_per_point)
       },
     )
-  float.round(float.min(position +. foot +. age_part +. output +. build, 100.0))
+  float.round(float.min(
+    int.to_float(position + foot + age_part) +. output +. build,
+    100.0,
+  ))
 }
 
 /// A catalogue archetype's birth date, written as a literal below.
@@ -248,8 +290,9 @@ pub type Similar {
 }
 
 /// The `k` players `org` may see who are most like `base`, best first; a tie keeps creation order. The base, a
-/// removed player and a player who blocked the club are never candidates. Ranked over light rows, the columns the
-/// score and the answer read (search.mjs `mostSimilar` over `scanLight`), keeping only the best `k` as it goes.
+/// removed player and a player who blocked the club are never candidates. Scored in SQL (`score_sql`), so only the
+/// winners leave SQLite. The candidates who share the base's position or group are ranked first: when their `k`th
+/// beats `without_position()`, no other candidate can reach the answer and the rest are never scored.
 pub fn most_similar(
   read: Read,
   base: player_row.Row,
@@ -258,83 +301,158 @@ pub fn most_similar(
   now: Int,
 ) -> Result(List(Similar), Fail(e)) {
   let me = aged(of_row(base), now)
+  let near =
+    sql.concat([
+      sql.text("(p.position IS "),
+      sql.arg(sqlight.nullable(position_text, me.position)),
+      sql.text(" OR "),
+      group_sql("p.position"),
+      sql.text(" = "),
+      sql.arg(sqlight.nullable(sqlight.int, me.group)),
+      sql.text(")"),
+    ])
+  case k <= 0 {
+    True -> Ok([])
+    False -> {
+      use found <- result.try(ranked(read, base, org, me, k, now, Some(near)))
+      let full = list.length(found) == k
+      let bound = without_position()
+      case list.last(found) {
+        Ok(kth) if full && kth.score > bound -> Ok(found)
+        _ -> ranked(read, base, org, me, k, now, None)
+      }
+    }
+  }
+}
+
+/// The best `k` candidates by `score_sql`, narrowed by `narrow` when given.
+fn ranked(
+  read: Read,
+  base: player_row.Row,
+  org: Org,
+  me: Aged,
+  k: Int,
+  now: Int,
+  narrow: Option(sql.Fragment),
+) -> Result(List(Similar), Fail(e)) {
   let query =
     sql.concat([
       sql.text(
-        "SELECT p.id, p.name, p.position, p.foot, p.birth_date, p.height_cm, p.weight_kg, p.stats_appearances,"
-        <> " p.stats_goals, p.stats_assists"
-        <> " FROM players p WHERE p.deleted_at IS NULL AND p.id <> ",
+        "SELECT id, name, position, CAST(s AS INTEGER) + (s - CAST(s AS INTEGER) >= 0.5) AS score FROM ("
+        <> "SELECT p.rowid AS rid, p.id, p.name, p.position, ",
       ),
+      score_sql(me, now),
+      sql.text(" AS s FROM players p WHERE p.deleted_at IS NULL AND p.id <> "),
       sql.arg(id.player_sql(base.id)),
       sql.text(" AND "),
-      visibility.visible_sql(org, now),
-      sql.text(" AND NOT "),
-      visibility.blocked_sql(org),
-      sql.text(" ORDER BY p.rowid"),
+      visibility.can_see_sql(org, now),
+      case narrow {
+        Some(f) -> sql.concat([sql.text(" AND "), f])
+        None -> sql.text("")
+      },
+      sql.text(") ORDER BY score DESC, rid LIMIT "),
+      sql.arg(sqlight.int(k)),
     ])
-  use rows <- result.map(store.query(
-    read,
-    query.sql,
-    query.args,
-    candidate_decoder(),
-  ))
-  rows
-  |> list.fold([], fn(best, c: #(Similar, Profile)) {
-    let #(similar, profile) = c
-    keep_best(
-      best,
-      Similar(..similar, score: score_aged(me, aged(profile, now))),
-      k,
-    )
-  })
-  |> list.reverse
+  store.query(read, query.sql, query.args, similar_decoder())
 }
 
-/// A light row: the answer's fields (its score still 0) and the profile it is scored on.
-fn candidate_decoder() -> decode.Decoder(#(Similar, Profile)) {
+/// `score(base, p, now)` as SQL over the candidate `p`, before rounding. The terms are added in `score_aged`'s order
+/// and each is the same double it works out, so the rounded score is `score`'s own (similarity_test holds them
+/// together). A stored birth date is always a day, so its year and `MM-DD` are its text's.
+fn score_sql(me: Aged, now: Int) -> sql.Fragment {
+  let today = temporal.day_of(now)
+  let n = int.to_string
+  sql.concat([
+    sql.text("MIN(100, (CASE WHEN p.position IS "),
+    sql.arg(sqlight.nullable(position_text, me.position)),
+    sql.text(" THEN " <> n(position_points) <> " WHEN "),
+    group_sql("p.position"),
+    sql.text(" = "),
+    sql.arg(sqlight.nullable(sqlight.int, me.group)),
+    sql.text(
+      " THEN " <> n(group_points) <> " ELSE 0 END) + (CASE WHEN p.foot IS ",
+    ),
+    sql.arg(sqlight.nullable(fn(f) { sqlight.text(foot.to_string(f)) }, me.foot)),
+    sql.text(
+      " THEN "
+      <> n(foot_points)
+      <> " ELSE 0 END) + MAX(0, "
+      <> n(age_points)
+      <> " - ABS(",
+    ),
+    sql.arg(sqlight.int(temporal.day_year(today))),
+    sql.text(
+      " - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (substr(p.birth_date, 6) > ",
+    ),
+    sql.arg(sqlight.text(string.drop_start(temporal.day_text(today), 5))),
+    sql.text(") - "),
+    sql.arg(sqlight.int(me.age)),
+    sql.text(
+      ") * "
+      <> n(per_year_apart)
+      <> ") + MAX(0, "
+      <> n(output_points)
+      <> " - ABS(",
+    ),
+    sql.arg(sqlight.float(me.output)),
+    sql.text(
+      " - (COALESCE(p.stats_goals, 0) + COALESCE(p.stats_assists, 0)) * 1.0"
+      <> " / COALESCE(NULLIF(p.stats_appearances, 0), 1)) * "
+      <> n(per_output_apart)
+      <> ") + MAX(0, "
+      <> n(build_points)
+      <> " - (ABS(",
+    ),
+    sql.arg(sqlight.float(me.height)),
+    sql.text(
+      " - COALESCE(p.height_cm, "
+      <> n(default_height_cm)
+      <> ")) / "
+      <> n(cm_per_point)
+      <> ".0 + ABS(",
+    ),
+    sql.arg(sqlight.float(me.weight)),
+    sql.text(
+      " - COALESCE(p.weight_kg, "
+      <> n(default_weight_kg)
+      <> ")) / "
+      <> n(kg_per_point)
+      <> ".0)))",
+    ),
+  ])
+}
+
+/// `group_of` as SQL over a position column: NULL for no position.
+fn group_sql(column: String) -> sql.Fragment {
+  let whens =
+    list.filter_map(position.pairs, fn(pair) {
+      case group_of(Some(pair.1)) {
+        Some(g) ->
+          Ok(
+            sql.concat([
+              sql.text(" WHEN "),
+              sql.arg(sqlight.text(pair.0)),
+              sql.text(" THEN " <> int.to_string(g)),
+            ]),
+          )
+        None -> Error(Nil)
+      }
+    })
+  sql.concat(
+    [sql.text("(CASE " <> column), ..whens] |> list.append([sql.text(" END)")]),
+  )
+}
+
+fn position_text(p: Position) -> sqlight.Value {
+  sqlight.text(position.to_string(p))
+}
+
+fn similar_decoder() -> decode.Decoder(Similar) {
   use id <- decode.field(0, id.player_decoder())
   use name <- decode.field(1, decode.string)
   use position <- decode.field(2, decode.optional(position.decoder()))
-  use foot <- decode.field(3, decode.optional(foot.decoder()))
-  use birth_date <- decode.field(4, temporal.day_decoder())
-  use height_cm <- decode.field(5, decode.optional(decode.int))
-  use weight_kg <- decode.field(6, decode.optional(decode.int))
-  use appearances <- decode.field(7, decode.optional(decode.int))
-  use goals <- decode.field(8, decode.optional(decode.int))
-  use assists <- decode.field(9, decode.optional(decode.int))
-  decode.success(#(
-    Similar(id:, name:, position:, score: 0),
-    Profile(
-      position:,
-      foot:,
-      birth_date:,
-      height_cm:,
-      weight_kg:,
-      appearances:,
-      goals:,
-      assists:,
-    ),
-  ))
-}
-
-/// `best` holds at most `k`, worst first. A candidate joins only with a strictly higher score than the worst kept
-/// once `k` are kept, and goes in after every kept one with its score, so an equal earlier candidate stays ahead.
-fn keep_best(best: List(Similar), c: Similar, k: Int) -> List(Similar) {
-  case list.length(best) >= k, best {
-    _, _ if k <= 0 -> []
-    True, [worst, ..] if c.score <= worst.score -> best
-    True, [_, ..rest] -> insert_worst_first(rest, c)
-    _, _ -> insert_worst_first(best, c)
-  }
-}
-
-/// Puts `c` into a worst-first list just before the first entry it doesn't beat: past every lower score, and below
-/// any equal one, which came earlier.
-fn insert_worst_first(best: List(Similar), c: Similar) -> List(Similar) {
-  case best {
-    [e, ..rest] if e.score < c.score -> [e, ..insert_worst_first(rest, c)]
-    _ -> [c, ..best]
-  }
+  use score <- decode.field(3, decode.int)
+  decode.success(Similar(id:, name:, position:, score:))
 }
 
 /// Highest score first, equals in the order they came.

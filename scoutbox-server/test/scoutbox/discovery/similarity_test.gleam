@@ -1,4 +1,4 @@
-//// `most_similar` prunes in SQL and ranks in Gleam: its answer must be the same as ranking every candidate.
+//// `most_similar` scores and ranks in SQL: its answer must be the same as scoring every candidate with `score`.
 
 import gleam/int
 import gleam/list
@@ -180,4 +180,60 @@ fn first_player(s: Store) -> String {
       player_row.decoder(),
     ))
   id.player_to_string(r.id)
+}
+
+/// A twin in another position group scores exactly `without_position()`, by `score` and by `most_similar`'s SQL:
+/// the bound that lets `most_similar` stop at the base's group is every part but the position one.
+pub fn without_position_is_what_a_twin_in_another_group_scores_test() {
+  let s = support.fresh_store(fn(_) { Nil })
+  let assert Ok(Nil) =
+    store.unit(s, fn(tx) {
+      list.try_each(list.index_map(positions, fn(p, i) { #(p, i) }), fn(pair) {
+        store.run(
+          tx,
+          "INSERT INTO players (id, name, birth_date, country, position, foot, height_cm, weight_kg,"
+            <> " stats_appearances, stats_goals, stats_assists, profile_signal, created_at)"
+            <> " VALUES (?, ?, '2000-05-05', 'England', ?, 'left', 181, 77, 20, 4, 3, 50, ?)",
+          [
+            sqlight.text("pl-twin-" <> pair.0),
+            sqlight.text("Twin " <> pair.0),
+            sqlight.text(pair.0),
+            sqlight.int(pair.1),
+          ],
+        )
+      })
+    })
+  let o = org(s, "org-eastport")
+  let groups = [
+    ["GK"],
+    ["CB", "RB", "LB", "RWB", "LWB"],
+    ["CDM", "CM", "CAM"],
+    ["RW", "LW", "ST", "CF"],
+  ]
+  list.each(groups, fn(group) {
+    let assert [first, ..] = group
+    let base = row(s, "pl-twin-" <> first)
+    let assert Ok(ranked) =
+      store.read(s, similarity.most_similar(_, base, o, 1000, now))
+    positions
+    |> list.filter(fn(p) { !list.contains(group, p) })
+    |> list.each(fn(p) {
+      let twin = row(s, "pl-twin-" <> p)
+      #(
+        first,
+        p,
+        similarity.score(similarity.of_row(base), similarity.of_row(twin), now),
+      )
+      |> should.equal(#(first, p, similarity.without_position()))
+      list.find(ranked, fn(c) { c.id == twin.id })
+      |> should.equal(
+        Ok(Similar(
+          id: twin.id,
+          name: twin.name,
+          position: twin.position,
+          score: similarity.without_position(),
+        )),
+      )
+    })
+  })
 }
