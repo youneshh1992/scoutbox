@@ -17,13 +17,13 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 246 / 416 | 69 / 84 | 6 to go |
+| agents | 9 | 9 | 9 | 248 / 412 | 71 / 86 | 6 to go |
 | development | 3 | 3 | 3 | 127 / 0 | 45 / 45 | **ported** |
 | discovery | 3 | 3 | 3 | 323 / 0 | 2 / 2 | **ported** |
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 3615 / 970 | 119 / 387 | 13 to go |
+| recruitment | 19 | 19 | 19 | 3671 / 914 | 121 / 387 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -35,13 +35,13 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 40 / 77 | 29 / 33 | 77 cases pending; 4 hand-port calls |
-| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 6 / 115 | 0 / 2 | 115 cases pending; 2 hand-port calls |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 6 / 114 | 1 / 3 | 114 cases pending; 2 hand-port calls |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 0 / 2 |  | 2 cases pending |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
-| `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 13 / 89 | 4 / 12 | 89 cases pending; 8 hand-port calls |
+| `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 14 / 88 | 4 / 12 | 88 cases pending; 8 hand-port calls |
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
-| `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 5 / 128 | 0 / 1 | 128 cases pending; 1 hand-port calls |
+| `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 6 / 126 | 1 / 2 | 126 cases pending; 1 hand-port calls |
 | `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
 | `development/boxCam` | neutral | 3 → 0 | 150 | 146 | 40 | +36 added | yes | 40 / 0 |  | **done** |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
@@ -72,23 +72,23 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 18 / 0 | 0 / 19 | 19 hand-port calls |
 | `platform/uploads` | neutral | 0 → 0 | 0 | 26 |  | +26 added |  |  |  | not answered |
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
-| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 143 / 33 | 58 / 105 | 33 cases pending; 47 hand-port calls |
+| `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 147 / 29 | 58 / 105 | 29 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
-| `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 7 / 120 | 0 / 29 | 120 cases pending; 29 hand-port calls |
+| `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 14 / 113 | 0 / 29 | 113 cases pending; 29 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 3 / 18 | 8 / 9 | 18 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
-| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2853 / 76 | 2 / 109 | 76 cases pending; 107 hand-port calls |
-| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 13 / 148 | 15 / 29 | 148 cases pending; 14 hand-port calls |
+| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2875 / 54 | 3 / 109 | 54 cases pending; 106 hand-port calls |
+| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 22 / 139 | 16 / 29 | 139 cases pending; 13 hand-port calls |
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 12 / 79 | 10 / 14 | 79 cases pending; 4 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
-| `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 0 / 82 | 0 / 1 | 82 cases pending; 1 hand-port calls |
+| `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 1 / 81 | 0 / 1 | 81 cases pending; 1 hand-port calls |
 | `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 1 / 39 | 3 / 3 | 39 cases pending |
 | `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  | yes |  |  | **done** |
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
-| `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 58 / 108 | 0 / 39 | 108 cases pending; 39 hand-port calls |
+| `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 71 / 95 | 0 / 39 | 95 cases pending; 39 hand-port calls |
 | `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | **done** |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 257 |  | 26 moved, +19 added | yes |  |  | **done** |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 194 | 47 | +10 added | yes | 45 / 0 | 10 / 10 | **done** |
@@ -175,6 +175,7 @@ ported by hand to a gleeunit test.
 | `agents/adversarial` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 2 | args[].endAt is NaN; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#normaliseDisclosure` | 1 | args[].clubPresence is NaN | to do |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#termMonthsOf` | 1 | args[] is NaN | to do |
+| `agents/compliance` | `domains/agents/compliance/errors.mjs#publicErrorBody` | 1 | Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped | `test/scoutbox/agents/error_bodies_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/provider.mjs#createVerificationProvider` | 2 | result.verifyFifaLicence is a function | to do |
 | `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 2 | Gleam's types can't hold its arguments: an affiliation without a start {"endedAt":null}; Gleam's types can't hold its arguments: an affiliation without a start null | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 4 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -197,6 +198,7 @@ ported by hand to a gleeunit test.
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#duplicateTransactionOf` | 7 | args[].partiesOf is a function | to do |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
 | `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 1 | Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped | `test/scoutbox/agents/error_bodies_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
 | `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
 | `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
@@ -264,7 +266,7 @@ ported by hand to a gleeunit test.
 | `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 8 | Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-31" as a Day; Gleam's types can't hold its arguments: cannot print "NaN" as a Day; Gleam's types can't hold its arguments: cannot print "not-a-date" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print 12 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day | `test/scoutbox/rules/age_test.gleam` |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 1 | Gleam's types can't hold its arguments: cannot print "SIGNEDX" as a RoomStatus | to do |
 | `recruitment/lifecycle` | `domains/recruitment/analytics/funnels.mjs#stagesReached` | 2 | result is a Set | `test/scoutbox/recruitment/analytics_test.gleam` |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#sendDomainError` | 1 | args[].status is a function | to do |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#sendDomainError` | 1 | args[].status is a function | `test/scoutbox/recruitment/domain_errors_test.gleam` |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 7 | args[].signings.byId is a function; result.check is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 63 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 22 | args[].evidence.check is a function; Gleam's types can't hold its arguments: cannot print "__unknown_old_status__" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "" as a RoomRole; Gleam's types can't hold its arguments: cannot print "" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "admin" as a RoomRole; Gleam's types can't hold its arguments: cannot print "identified" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "IN_PROGRESS" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "nonsense" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "notAnAction" as a lifecycle action; Gleam's types can't hold its arguments: cannot print "owner" as a RoomRole; Gleam's types can't hold its arguments: cannot print "recruitment_admin " as a RoomRole; Gleam's types can't hold its arguments: cannot print "ROOM_LEAD" as a RoomRole; Gleam's types can't hold its arguments: cannot print "trial_in_progress" as a RoomStatus; Gleam's types can't hold its arguments: cannot print 42 as a RoomStatus; Gleam's types can't hold its arguments: cannot print null as a RoomStatus | to do |
@@ -272,7 +274,7 @@ ported by hand to a gleeunit test.
 | `recruitment/offers` | `domain.ts#isAdult` | 9 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "0000-00-00" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-30" as a Day; Gleam's types can't hold its arguments: cannot print "yesterday" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day; Gleam's types can't hold its arguments: cannot print undefined as a Day | `test/scoutbox/rules/age_test.gleam` |
 | `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
-| `recruitment/offers` | `domains/recruitment/offers/errors.mjs#sendOfferError` | 1 | args[].status is a function | to do |
+| `recruitment/offers` | `domains/recruitment/offers/errors.mjs#sendOfferError` | 1 | args[].status is a function | `test/scoutbox/recruitment/domain_errors_test.gleam` |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 | args[] is undefined | to do |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 4 | args[] is Infinity; args[] is NaN; args[] is undefined | to do |
@@ -327,7 +329,6 @@ mapped, then `npm run cases`.
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#evaluateConflict` | 36 |
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 2 |
 | `agents/compliance` | `domains/agents/compliance/conflict.mjs#mostSevere` | 3 |
-| `agents/compliance` | `domains/agents/compliance/errors.mjs#publicErrorBody` | 1 |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#applicablePolicySet` | 8 |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 4 |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 17 |
@@ -353,9 +354,7 @@ mapped, then `npm run cases`.
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 3 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
-| `agents/crossApp` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 1 |
 | `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
-| `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 2 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 11 |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#canSeeVisibility` | 36 |
@@ -386,7 +385,6 @@ mapped, then `npm run cases`.
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactRoleAllows` | 2 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 |
-| `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#normaliseClientKey` | 4 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#plainShared` | 2 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactContent` | 8 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
@@ -399,7 +397,6 @@ mapped, then `npm run cases`.
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionView` | 3 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#draftView` | 3 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 2 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#normaliseDecisionClientKey` | 7 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#summariseAssessments` | 4 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 29 |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes` | 16 |
@@ -430,20 +427,16 @@ mapped, then `npm run cases`.
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 4 |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase` | 2 |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#lifecycleTargetFor` | 2 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 21 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/errors.mjs#publicErrorBody` | 1 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#derivedConditions` | 2 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#isLifecycleReason` | 16 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons` | 13 |
 | `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#adoptionStatusForStage` | 11 |
-| `recruitment/offers` | `domains/recruitment/offers/errors.mjs#publicErrorBody` | 2 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 9 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRevise` | 6 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canWithdrawRevision` | 4 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 13 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 6 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#normaliseOfferClientKey` | 7 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerAgentView` | 1 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerClubView` | 1 |
 | `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 11 |
@@ -467,7 +460,6 @@ mapped, then `npm run cases`.
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 1 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
-| `recruitment/signings` | `domains/recruitment/signings/errors.mjs#publicErrorBody` | 1 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 6 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canStart` | 10 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#cleanText` | 2 |
@@ -494,14 +486,12 @@ mapped, then `npm run cases`.
 | `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 28 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 16 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#validateTrialDetails` | 33 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 7 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#blockedAllows` | 9 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#canComplete` | 9 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#deriveWorkflowState` | 8 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#icsText` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#isLegacyTrial` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#materialChange` | 5 |
-| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey` | 6 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialClubView` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialFamilyView` | 1 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialIntegrity` | 10 |

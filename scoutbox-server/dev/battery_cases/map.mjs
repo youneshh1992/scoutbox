@@ -350,6 +350,57 @@ const eqJson = (expression, result, ctx) =>
 
 // -------------------------------------------------------------------------------------------------- the map
 
+/**
+ * A refusal contract's public body (`errors.mjs#publicErrorBody`): the code's status from the table, then only the
+ * allowlisted fields. Reasons and outstanding consents are written already shaped by each route, from types with no
+ * place for prose, so a call that passes them is ported by hand.
+ */
+const errorBody = (contract) => ({
+  module: 'scoutbox/recruitment/domain_errors',
+  test: (c, ctx) => {
+    const { error, ...fields } = c.args[0];
+    for (const k of ['reasons', 'consentsOutstanding'])
+      if (k in fields) throw new Error(`publicErrorBody with ${k}: the Gleam routes write them already shaped`);
+    const list_ = Object.entries(fields).map(([k, v]) => `#(${string(k)}, ${jsonValue(v, ctx)})`);
+    return eq(
+      `${ctx.use('wisp/simulate')}.read_body(${ctx.use('scoutbox/recruitment/domain_errors')}.send(${contract(ctx)}, ${string(error)}, [${list_.join(', ')}]))`,
+      string(JSON.stringify(c.result)),
+    );
+  },
+});
+/** A domain's `clientKey` reader: the shared rule (idempotency.client_key), refusing with the domain's own code. */
+const clientKey = (code) => ({
+  module: 'scoutbox/platform/idempotency',
+  test: (c, ctx) => {
+    const r = c.result;
+    if (!r.ok && r.error !== code) throw new Error(`a ${code} reader refused with ${r.error}`);
+    const raw = c.args.length ? `Some(${ctx.use(BASE)}.body(${string(JSON.stringify(c.args[0]))}))` : 'None';
+    return eq(
+      `${ctx.use('scoutbox/platform/idempotency')}.client_key(${raw})`,
+      r.ok ? `Ok(${option(string)(r.key, ctx)})` : `Error(${string(r.message)})`,
+    );
+  },
+});
+const DE = 'scoutbox/recruitment/domain_errors';
+const ERRORS_MAP = {
+  ['domains/recruitment/lifecycle/contact.mjs#normaliseClientKey']: clientKey('CONTACT_CLIENT_KEY_INVALID'),
+  ['domains/recruitment/lifecycle/decision.mjs#normaliseDecisionClientKey']: clientKey('DECISION_CLIENT_KEY_INVALID'),
+  ['domains/recruitment/offers/offer.mjs#normaliseOfferClientKey']: clientKey('OFFER_CLIENT_KEY_INVALID'),
+  ['domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey']: clientKey('TRIAL_CLIENT_KEY_INVALID'),
+  ['domains/agents/compliance/errors.mjs#publicErrorBody']: errorBody(ref('scoutbox/agents/compliance_routes', 'contract')),
+  ['domains/agents/transactions/errors.mjs#publicErrorBody']: errorBody(ref('scoutbox/agents/transaction_routes', 'contract')),
+  ['domains/recruitment/lifecycle/errors.mjs#publicErrorBody']: errorBody(ref(DE, 'lifecycle')),
+  ['domains/recruitment/offers/errors.mjs#publicErrorBody']: errorBody(ref(DE, 'offer')),
+  ['domains/recruitment/signings/errors.mjs#publicErrorBody']: errorBody(ref(DE, 'signing')),
+  ['domains/recruitment/lifecycle/errors.mjs#httpStatusFor']: {
+    module: DE,
+    test: (c, ctx) =>
+      eq(`${ctx.use(DE)}.status_of(${ctx.use(DE)}.lifecycle, ${string(c.args[0])})`, option(int)(c.result, ctx)),
+  },
+};
+
+
+
 const SHARED = 'domains/verification/claims/shared.mjs';
 
 
@@ -1495,18 +1546,7 @@ const AGENT_MAP = {
     test: (c, ctx) =>
       eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(AR)}.summary_for_staff(${agreementRow(c.args[0], ctx)}, ${nowArg(c.args[1], ctx)}))`, c.result, ctx),
   },
-  [`${AGENT}/errors.mjs#publicErrorBody`]: {
-    module: 'scoutbox/agents/core_routes',
-    test: (c, ctx) => {
-      const { error, ...fields } = c.args[0];
-      if ('reasons' in fields) throw new Error('publicErrorBody with reasons: the Gleam routes write them already shaped');
-      const list_ = Object.entries(fields).map(([k, v]) => `#(${string(k)}, ${jsonValue(v, ctx)})`);
-      return eq(
-        `${ctx.use('wisp/simulate')}.read_body(${ctx.use('scoutbox/recruitment/domain_errors')}.send(${ctx.use('scoutbox/agents/core_routes')}.contract, ${string(error)}, [${list_.join(', ')}]))`,
-        string(JSON.stringify(c.result)),
-      );
-    },
-  },
+  [`${AGENT}/errors.mjs#publicErrorBody`]: errorBody(ref('scoutbox/agents/core_routes', 'contract')),
 };
 
 // -------------------------------------------------------------------------------------------------- passport
@@ -3423,6 +3463,7 @@ const PLATFORM_MAP = {
 };
 
 export const MAP = {
+  ...ERRORS_MAP,
   ...PLATFORM_MAP,
   ...TEMPORAL_MAP,
   ...TRIAL_MAP,
@@ -3566,6 +3607,11 @@ export const NO_COUNTERPART = {
 export const RANDOM = [`${PASSPORT}#mintShareSecret`];
 
 export const HAND_PORTED = {
+  ...Object.fromEntries(
+    ['agents/compliance', 'agents/transactions'].map((d) => [`domains/${d}/errors.mjs#publicErrorBody`, 'test/scoutbox/agents/error_bodies_test.gleam']),
+  ),
+  ['domains/recruitment/lifecycle/errors.mjs#sendDomainError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
+  ['domains/recruitment/offers/errors.mjs#sendOfferError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
   ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',
   ...Object.fromEntries(

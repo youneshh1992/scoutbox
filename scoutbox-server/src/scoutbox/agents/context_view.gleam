@@ -340,6 +340,15 @@ pub fn reason_json(r: Reason) -> Json {
   reason_fields_json(evaluation_reason(r))
 }
 
+/// An outstanding consent as a refusal names it: whose consent and of what kind, never which agent is waiting.
+pub fn public_outstanding_json(o: Outstanding) -> Json {
+  json.object([
+    #("partyRole", json.string(o.party_role)),
+    #("consentKind", json.string(o.consent_kind)),
+    #("reasonCode", json.string(o.reason_code)),
+  ])
+}
+
 fn outstanding_json(o: Outstanding) -> Json {
   json.object([
     #("partyRole", json.string(o.party_role)),

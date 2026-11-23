@@ -1043,13 +1043,10 @@ fn declare_in_unit(
                 [
                   #(
                     "consentsOutstanding",
-                    json.array(e.outstanding, fn(o) {
-                      json.object([
-                        #("partyRole", json.string(o.party_role)),
-                        #("consentKind", json.string(o.consent_kind)),
-                        #("reasonCode", json.string(o.reason_code)),
-                      ])
-                    }),
+                    json.array(
+                      e.outstanding,
+                      context_view.public_outstanding_json,
+                    ),
                   ),
                   reasons(filtered(["CONSENT_REQUIRED"])),
                   policy_versions,

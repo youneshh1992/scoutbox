@@ -201,9 +201,11 @@
       {
         "function": "domains/agents/compliance/errors.mjs#publicErrorBody",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#applicablePolicySet",
@@ -714,7 +716,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -759,9 +761,11 @@
       {
         "function": "domains/agents/transactions/errors.mjs#publicErrorBody",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#actorLabel",
@@ -2928,7 +2932,7 @@
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#plainShared",
@@ -3103,7 +3107,7 @@
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#resolveEvidenceRefs",
@@ -3428,14 +3432,14 @@
         "calls": 21,
         "cases": 21,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/errors.mjs#publicErrorBody",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/errors.mjs#sendDomainError",
@@ -3591,7 +3595,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/errors.mjs#sendOfferError",
@@ -3645,7 +3649,7 @@
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerAgentView",
@@ -4061,7 +4065,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#canCompleteParty",
@@ -4327,7 +4331,7 @@
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
@@ -4400,7 +4404,7 @@
         "calls": 7,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/trial.mjs#parseInstant",
