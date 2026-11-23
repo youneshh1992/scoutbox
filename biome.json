@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/package-lock.json", "!**/*.md", "!scoutbox-server/e2e/support/spec"]
+    "includes": ["**", "!**/package-lock.json", "!**/*.md", "!scoutbox-server/e2e/support/spec", "!box-cam/spec"]
   },
   "formatter": {
     "enabled": true,

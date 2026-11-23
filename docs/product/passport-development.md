@@ -118,5 +118,5 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md).
 
 ## Also worth knowing
 
-- [`../reference/combine-real-world-validation-plan.md`](../reference/combine-real-world-validation-plan.md): pre-registered thresholds, event definitions and consent rules; the binding protocol for ever enabling Combine.
+- [`../../box-cam/docs/validation.md`](../../box-cam/docs/validation.md): pre-registered thresholds, event definitions and consent rules; the binding protocol for ever enabling Combine. The rest of what the first CV engine learned is in [`../../box-cam/`](../../box-cam/README.md).
 - No third-party vision model: the npm `ultralytics` package is not YOLO, and real YOLO is AGPL.

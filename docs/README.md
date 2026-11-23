@@ -7,7 +7,7 @@
 | [`design.md`](design.md) | Before changing any UI. The Founder-approved designs for each app and the cross-app UI rules. |
 | [`product/`](product/) | Before changing a domain. How it works and what must stay true. |
 | [`known-issues.md`](known-issues.md) | Known defects, performance limits and flaky tests, not yet fixed. |
-| [`reference/`](reference/) | Research and catalogues: agent regulations (Sept 2026), the recruitment metric catalogue, the Combine validation protocol. |
+| [`reference/`](reference/) | Research and catalogues: agent regulations (Sept 2026) and the recruitment metric catalogue. The Combine validation protocol is in [`../box-cam/docs/validation.md`](../box-cam/docs/validation.md). |
 
 Product docs:
 

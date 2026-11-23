@@ -2,6 +2,9 @@
 
 **Status: NOT STARTED. No real football video has been observed by this engine.**
 
+File paths below (`domains/development/boxcam/cv/…`) refer to the TypeScript server at the git tag
+`box-cam-ts-final`; the two result files are copied to [`../fixtures/`](../fixtures/).
+
 This document is the plan for work that has not been done. It exists now, before
 the data exists, because a validation protocol written after seeing the results
 is not a protocol — it is a rationalisation. Every threshold, definition and
