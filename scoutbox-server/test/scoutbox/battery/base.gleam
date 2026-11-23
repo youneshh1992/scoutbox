@@ -19,6 +19,9 @@ import scoutbox/rows/agent_profiles
 import scoutbox/rows/case_budget_fx_assumptions
 import scoutbox/rows/case_budget_lines
 import scoutbox/rows/case_history
+import scoutbox/rows/development_actions
+import scoutbox/rows/development_evidence_links
+import scoutbox/rows/development_goals
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
@@ -33,7 +36,10 @@ import scoutbox/vocab/brief_status
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/contact_mode
 import scoutbox/vocab/currency
+import scoutbox/vocab/evidence_source
 import scoutbox/vocab/facet_state
+import scoutbox/vocab/goal_category
+import scoutbox/vocab/goal_status
 import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/org_type
 import scoutbox/vocab/room_status.{type RoomStatus}
@@ -218,6 +224,54 @@ pub fn dev_review() -> development_reviews.Row {
     share_summary: False,
     share_goals: False,
     share_actions: False,
+  )
+}
+
+/// A Development goal of no plan: an untitled technical goal not started, with no target, made by nobody.
+pub fn dev_goal() -> development_goals.Row {
+  development_goals.new(
+    id: id.dev_goal(""),
+    plan_id: id.dev_plan(""),
+    player_id: id.player(""),
+    title: "",
+    category: goal_category.Technical,
+    status: goal_status.NotStarted,
+    created_by_kind: development_goals.Org,
+    created_by_id: "",
+    created_at: 0,
+    updated_at: 0,
+    rev: 1,
+  )
+}
+
+/// A Development action of no goal: an untitled training action to do, made by nobody.
+pub fn dev_action() -> development_actions.Row {
+  development_actions.new(
+    id: id.dev_action(""),
+    plan_id: id.dev_plan(""),
+    goal_id: id.dev_goal(""),
+    player_id: id.player(""),
+    type_: development_actions.Training,
+    title: "",
+    status: development_actions.Todo,
+    created_by_kind: development_actions.Org,
+    created_by_id: "",
+    created_at: 0,
+    updated_at: 0,
+  )
+}
+
+/// An evidence link of no goal or action: an assessment of no id, linked by nobody.
+pub fn dev_link() -> development_evidence_links.Row {
+  development_evidence_links.new(
+    id: id.dev_link(""),
+    plan_id: id.dev_plan(""),
+    player_id: id.player(""),
+    source_type: evidence_source.Assessment,
+    source_id: "",
+    linked_by_kind: development_evidence_links.Org,
+    linked_by_id: "",
+    linked_at: 0,
   )
 }
 

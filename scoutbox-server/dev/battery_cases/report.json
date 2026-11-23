@@ -1141,14 +1141,14 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/reviews.mjs#buildGoalSnapshots",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/reviews.mjs#pageReviews",
@@ -1423,7 +1423,7 @@
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/platform/eventRegistry.mjs#minimizePayload",

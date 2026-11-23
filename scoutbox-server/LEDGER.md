@@ -18,8 +18,8 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
 | agents | 9 | 9 | 9 | 246 / 416 | 69 / 84 | 6 to go |
-| development | 3 | 3 | 3 | 125 / 2 | 22 / 45 | 1 to go |
-| discovery | 3 | 3 | 3 | 318 / 5 | 2 / 2 | 1 to go |
+| development | 3 | 3 | 3 | 127 / 0 | 45 / 45 | **ported** |
+| discovery | 3 | 3 | 3 | 323 / 0 | 2 / 2 | **ported** |
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
@@ -48,9 +48,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
 | `development/combine` | neutral | 2 → 0 | 92 | 75 | 20 | +3 added | yes | 22 / 0 |  | **done** |
 | `development/combineProductionGate` | TypeScript only | 9 → 9 | 58 | 58 |  |  |  |  |  | TypeScript only |
-| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 63 / 2 | 22 / 45 | 2 cases pending; 23 hand-port calls |
+| `development/hub` | neutral | 17 → 0 | 180 | 91 | 91 | +2 added | yes | 65 / 0 | 45 / 45 | **done** |
 | `discovery/exposureCalibrationAndCoverage` | neutral | 0 → 0 | 86 | 90 |  | +4 added | yes |  |  | **done** |
-| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 87 | 73 | +8 added | yes | 183 / 5 | 1 / 1 | 5 cases pending |
+| `discovery/matchingAndWatchlists` | neutral | 13 → 0 | 152 | 87 | 73 | +8 added | yes | 188 / 0 | 1 / 1 | **done** |
 | `discovery/secondLookAndNobodyMissed` | neutral | 2 → 0 | 251 | 134 | 117 |  | yes | 135 / 0 | 1 / 1 | **done** |
 | `operations/clubOperations` | neutral | 6 → 0 | 273 | 244 | 32 | +3 added | yes | 33 / 0 |  | **done** |
 | `operations/sweeps` | neutral | 0 → 0 | 0 | 20 |  | +20 added | yes |  |  | **done** |
@@ -198,11 +198,11 @@ ported by hand to a gleeunit test.
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#normaliseDisclosure` | 1 | args[] is a Object | to do |
 | `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
-| `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | to do |
-| `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | to do |
-| `development/hub` | `domains/development/hub/permissions.mjs#canAssign` | 5 | args[].staffById is a function | to do |
+| `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
+| `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
+| `development/hub` | `domains/development/hub/permissions.mjs#canAssign` | 5 | args[].staffById is a function | `test/scoutbox/development/hub_assignee_test.gleam` |
 | `development/hub` | `domains/development/hub/permissions.mjs#planAccess` | 22 | args[].orgCanSee is a function | `test/scoutbox/development/hub_access_test.gleam` |
-| `development/hub` | `domains/development/hub/targets.mjs#validateTarget` | 1 | Gleam's types can't hold its arguments: cannot print "160+" as a TargetInput | to do |
+| `development/hub` | `domains/development/hub/targets.mjs#validateTarget` | 1 | Gleam's types can't hold its arguments: cannot print "160+" as a TargetInput | `e2e/development/hub.mjs` |
 | `discovery/matchingAndWatchlists` | `domains/discovery/matching/match.mjs#matchPlayerToCriteria` | 1 | Gleam's types can't hold its arguments: a criterion of class undefined | `test/scoutbox/discovery/matching_test.gleam` |
 | `discovery/secondLookAndNobodyMissed` | `domains/discovery/shared.mjs#buildSecondLookCandidate` | 1 | Gleam's types can't hold its arguments: Cannot read properties of null (reading 'id') | `test/scoutbox/discovery/second_look_rules_test.gleam` |
 | `passport/passport` | `domains/passport/shared.mjs#mintShareSecret` | 2 | its result is random | `test/scoutbox/passport/passport_rules_test.gleam` |
@@ -375,9 +375,6 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
-| `development/hub` | `domains/development/hub/plan.mjs#planSummary` | 1 |
-| `development/hub` | `domains/development/hub/reviews.mjs#buildGoalSnapshots` | 1 |
-| `discovery/matchingAndWatchlists` | `domains/platform/eventRegistry.mjs#isRegistered` | 5 |
 | `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 13 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 7 |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 |

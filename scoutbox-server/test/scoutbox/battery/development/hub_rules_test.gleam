@@ -9,11 +9,14 @@ import scoutbox/development/hub_rules
 import scoutbox/rows/box_sessions
 import scoutbox/rows/combine_attempts
 import scoutbox/rows/development_actions
+import scoutbox/rows/development_evidence_links
 import scoutbox/rows/development_goals
 import scoutbox/rows/development_plans
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/vocab/box_provider
+import scoutbox/vocab/evidence_source
+import scoutbox/vocab/goal_category
 import scoutbox/vocab/goal_status
 
 // hub: assertDevelopmentVocabulary — the boot assertion passes ({"planStatuses":5,"goalStatuses":5,"goalCategories":7,"actionTypes":9,"actionStatuses":5,"evidenceSources":5,"forbiddenNames":11,"forbiddenFields":26})
@@ -122,6 +125,19 @@ pub fn action_counts_are_counts_test() {
 pub fn completion_is_a_sentence_of_counts_2_of_4_actions_completed_test() {
   assert json.to_string(hub_rules.completion_json(2, 5, 1))
     == "{\"done\":2,\"of\":4,\"phrase\":\"2 of 4 actions completed\"}"
+}
+
+// hub: planSummary — the plan summary is deterministic and made of counts
+pub fn the_plan_summary_is_deterministic_and_made_of_counts_test() {
+  assert json.to_string(hub_rules.plan_summary_json(
+      [goal_status.InProgress, goal_status.Achieved],
+      [#(development_actions.Todo, hub_rules.Due("overdue", None))],
+      2,
+      [1_781_438_400_000],
+      Some(1_781_784_000_000),
+      1_781_524_800_000,
+    ))
+    == "{\"goalsByStatus\":{\"not_started\":0,\"in_progress\":1,\"blocked\":0,\"achieved\":1,\"stopped\":0},\"activeGoals\":1,\"actionsDue\":0,\"actionsOverdue\":1,\"linkedEvidenceAvailable\":2,\"lastReviewAt\":1781438400000,\"nextReviewAt\":1781784000000,\"reviewDue\":{\"state\":\"review_due\",\"days\":3},\"note\":\"These are counts of agreed work. There is no overall figure here, and ScoutBox does not calculate one.\"}"
 }
 
 // hub: dueState — overdue is a fact about a date
@@ -788,6 +804,48 @@ pub fn an_explicitly_shared_summary_is_shown_test() {
       hub_rules.Caps(..hub_rules.no_caps, read_internal: False),
     ))
     == "{\"id\":\"r1\",\"planId\":\"pl2\",\"reviewerKind\":\"coach_review\",\"reviewedByName\":\"A Coach\",\"orgId\":null,\"reviewedAt\":1781524800000,\"nextReviewAt\":null,\"goalSnapshots\":[],\"supersedes\":null,\"supersededBy\":null,\"hasInternalNote\":true,\"summary\":\"Good week.\",\"internalNote\":null,\"internalNoteNote\":\"This review also contains notes kept inside the club. They are not shared.\"}"
+}
+
+// hub: buildGoalSnapshots — a snapshot records what the reviewer saw of the plan
+pub fn a_snapshot_records_what_the_reviewer_saw_of_the_plan_test() {
+  assert json.to_string(json.array(
+      hub_rules.goal_snapshots(
+        id.dev_review(""),
+        [
+          development_goals.Row(
+            ..base.dev_goal(),
+            id: id.dev_goal("g1"),
+            title: "Goal",
+            category: goal_category.Technical,
+            status: goal_status.InProgress,
+            created_at: 1_781_524_800_000,
+          ),
+        ],
+        [
+          development_actions.Row(
+            ..base.dev_action(),
+            goal_id: id.dev_goal("g1"),
+            status: development_actions.Done,
+          ),
+          development_actions.Row(
+            ..base.dev_action(),
+            goal_id: id.dev_goal("g1"),
+            status: development_actions.Todo,
+          ),
+        ],
+        [
+          development_evidence_links.Row(
+            ..base.dev_link(),
+            goal_id: Some(id.dev_goal("g1")),
+            source_type: evidence_source.Assessment,
+            source_id: "ass-1",
+          ),
+        ],
+        [],
+      ),
+      hub_rules.snapshot_json,
+    ))
+    == "[{\"goalId\":\"g1\",\"title\":\"Goal\",\"category\":\"technical\",\"status\":\"in_progress\",\"actionCounts\":{\"total\":2,\"done\":1,\"blocked\":0,\"cancelled\":0},\"completion\":{\"done\":1,\"of\":2,\"phrase\":\"1 of 2 actions completed\"},\"evidenceRefs\":[{\"sourceType\":\"assessment\",\"sourceId\":\"ass-1\"}],\"targetStateAtReview\":null}]"
 }
 
 // hub: pageReviews — reviews page newest-first with a stable cursor

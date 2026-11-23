@@ -2736,6 +2736,47 @@ const devReview = (v, ctx) => {
 };
 
 const HUB_MAP = {
+  [`${HUB}/plan.mjs#planSummary`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const { plan, goals, reviews, now, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`planSummary has no argument ${Object.keys(rest)[0]}`);
+      const due = (d, x) => `${x.use(HR)}.Due(${string(d.state)}, ${option(int)(d.days, x)})`;
+      const action = (a, x) => `#(${actionStatus(a.status, x)}, ${due(a.due, x)})`;
+      const available = goals.reduce((n, g) => n + g.evidenceSummary.available, 0);
+      return eqJson(
+        `${ctx.use(HR)}.plan_summary_json(${list((g, x) => goalStatus(g.status, x))(goals, ctx)}, ${list(action)(
+          goals.flatMap((g) => g.actions),
+          ctx,
+        )}, ${int(available)}, ${list((r) => int(r.reviewedAt))(reviews, ctx)}, ${option(int)(plan.nextReviewAt, ctx)}, ${int(now)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${HUB}/reviews.mjs#buildGoalSnapshots`]: {
+    module: HR,
+    test: (c, ctx) => {
+      const { goals, actions, links, attempts = [], sessions = [], ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`buildGoalSnapshots has no argument ${Object.keys(rest)[0]}`);
+      const G = 'scoutbox/rows/development_goals';
+      const goal = (g, x) => {
+        const { id, title, category, status, createdAt, target: t, ...more } = g;
+        if (Object.keys(more).length) throw new Error(`a snapshot reads no goal field ${Object.keys(more)[0]}`);
+        const row = `${x.use(G)}.Row(..${x.use(BASE)}.dev_goal(), id: ${ident('dev_goal')(id, x)}, title: ${string(title)}, category: ${vocab('scoutbox/vocab/goal_category')(category, x)}, status: ${goalStatus(status, x)}, created_at: ${int(createdAt)})`;
+        return t ? `${x.use(HR)}.with_target(${row}, ${option(target)(t, x)})` : row;
+      };
+      const action = (a, x) =>
+        `${x.use('scoutbox/rows/development_actions')}.Row(..${x.use(BASE)}.dev_action(), goal_id: ${ident('dev_goal')(a.goalId, x)}, status: ${actionStatus(a.status, x)})`;
+      const link = (l, x) =>
+        `${x.use('scoutbox/rows/development_evidence_links')}.Row(..${x.use(BASE)}.dev_link(), goal_id: ${option(ident('dev_goal'))(l.goalId, x)}, source_type: ${vocab('scoutbox/vocab/evidence_source')(l.sourceType, x)}, source_id: ${string(l.sourceId)})`;
+      return eqJson(
+        `${ctx.use('gleam/json')}.array(${ctx.use(HR)}.goal_snapshots(${ident('dev_review')('', ctx)}, ${list(goal)(goals, ctx)}, ${list(action)(actions, ctx)}, ${list(link)(links, ctx)}, ${list(measured(sessions))(attempts, ctx)}), ${ctx.use(HR)}.snapshot_json)`,
+        c.result,
+        ctx,
+      );
+    },
+  },
   [`${HUB}/shared.mjs#dueState`]: {
     module: HR,
     test: (c, ctx) => eqJson(`${ctx.use(HR)}.due_json(${ctx.use(HR)}.due_state(${option(int)(c.args[0], ctx)}, ${int(c.args[1])}))`, c.result, ctx),
@@ -3373,6 +3414,12 @@ const PLATFORM_MAP = {
       );
     },
   },
+  // Membership of the registry; live_test proves `registered` equals the registry's names.
+  ['domains/platform/eventRegistry.mjs#isRegistered']: {
+    module: 'scoutbox/platform/live_event',
+    test: (c, ctx) =>
+      eq(`${ctx.use('gleam/list')}.contains(${ctx.use('scoutbox/platform/live_event')}.registered, ${string(c.args[0])})`, bool(c.result)),
+  },
 };
 
 export const MAP = {
@@ -3549,6 +3596,12 @@ export const HAND_PORTED = {
   ['domains/platform/rateLimit.mjs#createRateLimiter']: 'test/scoutbox/config_test.gleam',
   ['domains/platform/rateLimit.mjs#memoryRateLimitProvider']: 'test/scoutbox/limits_test.gleam',
   ['domains/development/hub/permissions.mjs#planAccess']: 'test/scoutbox/development/hub_access_test.gleam',
+  ['domains/development/hub/permissions.mjs#canAssign']: 'test/scoutbox/development/hub_assignee_test.gleam',
+  ['domains/development/hub/evidence.mjs#resolveEvidenceLink']: 'test/scoutbox/development/hub_evidence_test.gleam',
+  ['domains/development/hub/evidence.mjs#recordBelongsToPlayer']: 'test/scoutbox/development/hub_evidence_test.gleam',
+  // A target sent as text is refused by the request's shape before validate_target; the battery sends the same
+  // "160+" over HTTP (IN3).
+  ['domains/development/hub/targets.mjs#validateTarget']: 'e2e/development/hub.mjs',
   ...Object.fromEntries(
     ['mintShareSecret', 'normWhen'].map((f) => [`${PASSPORT}#${f}`, 'test/scoutbox/passport/passport_rules_test.gleam']),
   ),

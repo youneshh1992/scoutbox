@@ -19,14 +19,13 @@ import gleam/order
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
-import scoutbox/development/box_cam_rules as box_rules
 import scoutbox/development/box_training
 import scoutbox/development/combine
-import scoutbox/development/combine_rules
 import scoutbox/development/hub.{
   type Actor, type Bundle, type Detail, ActorGuardian, ActorPlayer, ActorStaff,
   Detail,
 }
+import scoutbox/development/hub_evidence.{type Ev, type Looker, Looker}
 import scoutbox/development/hub_rules.{
   type Caps, type Target, type TargetInput, type Viewer, GuardianOf, PlayerSelf,
   StaffOf, TargetInput,
@@ -51,18 +50,14 @@ import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
 import scoutbox/recruitment/room_routes
-import scoutbox/recruitment/trial_rules
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/box_sessions as session_row
-import scoutbox/rows/combine_attempts as attempt_row
 import scoutbox/rows/dev_objectives as objective_row
 import scoutbox/rows/development_actions as action_row
 import scoutbox/rows/development_evidence_links as link_row
 import scoutbox/rows/development_goals as goal_row
 import scoutbox/rows/development_history as history_row
 import scoutbox/rows/development_plans as plan_row
-import scoutbox/rows/development_review_snapshot_refs as ref_row
-import scoutbox/rows/development_review_snapshots as snapshot_row
 import scoutbox/rows/development_reviews as review_row
 import scoutbox/rows/evidence as evidence_row
 import scoutbox/rows/id
@@ -983,10 +978,6 @@ fn detail_move(from: String, to: String) -> Detail {
 // ---------------------------------------------------------------------------------------------------- evidence
 
 /// Who is resolving a link: the viewer, the plan's player, and whether the viewer may see that player at all.
-type Looker {
-  Looker(viewer: Viewer, player: id.PlayerId, may_see: Bool, now: Int)
-}
-
 fn looker(x: Seen, now: Int) -> Looker {
   let pid = x.player.row.id
   Looker(
@@ -998,108 +989,6 @@ fn looker(x: Seen, now: Int) -> Looker {
       StaffOf(..) -> x.org_sees_player
     },
     now:,
-  )
-}
-
-/// A link resolved from its source record. `owned` is whether the record exists and is this player's.
-type Ev {
-  Ev(
-    source_id: String,
-    owned: Bool,
-    available: Bool,
-    reason: Option(String),
-    note: String,
-    occurred_at: Option(Int),
-    simulated: Bool,
-    title: Option(String),
-    provenance: Option(String),
-    label: String,
-    fields: List(#(String, Json)),
-  )
-}
-
-fn unavailable_note(reason: String) -> String {
-  case reason {
-    "evidence_not_found" -> "This evidence is no longer available."
-    "evidence_superseded" -> "This evidence was replaced by a corrected record."
-    "evidence_expired" -> "This evidence has passed its validity period."
-    "evidence_withdrawn" -> "This evidence was invalidated after review."
-    _ -> "This evidence is not available to you."
-  }
-}
-
-/// No title, date or organisation: an unavailable item must not leak its subject.
-fn unavailable(
-  source: EvidenceSource,
-  source_id: String,
-  owned: Bool,
-  reason: String,
-) -> Ev {
-  let label = hub_rules.source_label(source)
-  Ev(
-    source_id:,
-    owned:,
-    available: False,
-    reason: Some(reason),
-    note: unavailable_note(reason),
-    occurred_at: None,
-    simulated: False,
-    title: None,
-    provenance: None,
-    label:,
-    fields: [
-      #("sourceType", evidence_source.to_json(source)),
-      text_field("sourceId", source_id),
-      text_field("sourceLabel", label),
-      #("available", json.bool(False)),
-      text_field("reason", reason),
-      text_field("note", unavailable_note(reason)),
-      #("provenance", json.null()),
-      #("occurredAt", json.null()),
-      #("simulated", json.bool(False)),
-    ],
-  )
-}
-
-fn available(
-  source: EvidenceSource,
-  source_id: String,
-  title: String,
-  provenance: String,
-  occurred_at: Option(Int),
-  simulated: Bool,
-  middle: List(#(String, Json)),
-  after: List(#(String, Json)),
-) -> Ev {
-  let label = hub_rules.source_label(source)
-  Ev(
-    source_id:,
-    owned: True,
-    available: True,
-    reason: None,
-    note: "",
-    occurred_at:,
-    simulated:,
-    title: Some(title),
-    provenance: Some(provenance),
-    label:,
-    fields: list.flatten([
-      [
-        #("sourceType", evidence_source.to_json(source)),
-        text_field("sourceId", source_id),
-        text_field("sourceLabel", label),
-        #("available", json.bool(True)),
-        #("reason", json.null()),
-        text_field("title", title),
-      ],
-      middle,
-      [
-        text_field("provenance", provenance),
-        #("occurredAt", json.nullable(occurred_at, json.int)),
-        #("simulated", json.bool(simulated)),
-      ],
-      after,
-    ]),
   )
 }
 
@@ -1120,238 +1009,57 @@ fn resolve_source(
   source: EvidenceSource,
   sid: String,
 ) -> Result(Ev, Fail(e)) {
-  let missing = Ok(unavailable(source, sid, False, "evidence_not_found"))
-  let staff_org = case l.viewer {
-    StaffOf(org, _) -> Some(org)
-    _ -> None
+  case l.may_see {
+    False ->
+      Ok(hub_evidence.unavailable(source, sid, False, "evidence_not_visible"))
+    True ->
+      fetch_source(read, source, sid)
+      |> result.map(hub_evidence.judge(l, source, sid, _))
   }
-  case l.may_see, source {
-    False, _ -> Ok(unavailable(source, sid, False, "evidence_not_visible"))
-    True, evidence_source.PassportEvidence -> {
-      use found <- result.try(one_row(
+}
+
+fn fetch_source(
+  read: Read,
+  source: EvidenceSource,
+  sid: String,
+) -> Result(hub_evidence.Found, Fail(e)) {
+  case source {
+    evidence_source.PassportEvidence ->
+      one_row(
         read,
         "SELECT " <> evidence_row.columns <> " FROM evidence WHERE id = ?",
         id.scouting_evidence_sql(id.scouting_evidence(sid)),
         evidence_row.decoder(),
-      ))
-      case found {
-        Some(e) if e.player_id == l.player ->
-          case e.superseded_by_id, e.expires_at {
-            Some(_), _ ->
-              Ok(unavailable(source, sid, True, "evidence_superseded"))
-            None, Some(exp) if exp < l.now ->
-              Ok(unavailable(source, sid, True, "evidence_expired"))
-            _, _ ->
-              Ok(
-                available(
-                  source,
-                  sid,
-                  e.label,
-                  case e.verification_status {
-                    evidence_row.SelfReported -> "player_submitted"
-                    evidence_row.CoachConfirmed -> "verified_coach_confirmed"
-                    evidence_row.ClubAssessed -> "verified_club_confirmed"
-                  },
-                  Some(option.unwrap(e.observed_at, e.recorded_at)),
-                  False,
-                  [],
-                  [],
-                ),
-              )
-          }
-        _ -> missing
-      }
-    }
-    // The player sees an assessment only if the club published feedback; other clubs never do.
-    True, evidence_source.Assessment -> {
-      use found <- result.try(one_row(
+      )
+      |> result.map(hub_evidence.FoundEvidence)
+    evidence_source.Assessment ->
+      one_row(
         read,
         "SELECT " <> assessment_row.columns <> " FROM assessments WHERE id = ?",
         id.assessment_sql(id.assessment(sid)),
         assessment_row.decoder(),
-      ))
-      case found {
-        Some(a) if a.player_id == l.player -> {
-          let owning = staff_org == Some(a.org_id)
-          let subject = staff_org == None
-          case owning || subject && a.published_feedback_text != None, a.state {
-            False, _ ->
-              Ok(unavailable(source, sid, True, "evidence_not_visible"))
-            True, assessment_row.Draft ->
-              Ok(unavailable(source, sid, True, "evidence_not_found"))
-            True, _ ->
-              Ok(
-                available(
-                  source,
-                  sid,
-                  case a.context_fixture {
-                    Some(f) if f != "" -> "Assessment — " <> f
-                    _ -> "Assessment"
-                  },
-                  "verified_club_confirmed",
-                  Some(option.unwrap(a.submitted_at, a.created_at)),
-                  False,
-                  [
-                    #(
-                      "org",
-                      json.object([
-                        #("id", id.org_json(a.org_id)),
-                        #("name", json.null()),
-                      ]),
-                    ),
-                  ],
-                  [],
-                ),
-              )
-          }
-        }
-        _ -> missing
-      }
-    }
-    True, evidence_source.BoxCamSession -> {
-      use found <- result.try(one_row(
+      )
+      |> result.map(hub_evidence.FoundAssessment)
+    evidence_source.BoxCamSession ->
+      one_row(
         read,
         "SELECT " <> session_row.columns <> " FROM box_sessions WHERE id = ?",
         id.box_session_sql(id.box_session(sid)),
         session_row.decoder(),
-      ))
-      case found {
-        Some(s) if s.player_id == l.player ->
-          case s.verification_state {
-            Some(session_row.VerificationStateInvalidated) ->
-              Ok(unavailable(source, sid, True, "evidence_withdrawn"))
-            _ ->
-              Ok(available(
-                source,
-                sid,
-                s.drill_id,
-                "box_cam_observed",
-                Some(option.unwrap(
-                  s.ended_at,
-                  option.unwrap(s.started_at, s.created_at),
-                )),
-                box_rules.provider(s.provider_id).test_only,
-                [],
-                // No number or hours: volume is not progress.
-                [
-                  text_field(
-                    "note",
-                    "Observed training. ScoutBox recorded activity consistent with the selected drill; it does not measure how much the player improved.",
-                  ),
-                ],
-              ))
-          }
-        _ -> missing
-      }
-    }
-    True, evidence_source.CombineAttempt -> {
-      use found <- result.try(combine.attempt_by_id(
-        read,
-        id.combine_attempt(sid),
-      ))
-      case found {
-        Some(a) if a.row.player_id == l.player -> {
-          let state = combine.live_state(a)
-          case state {
-            attempt_row.CombineStateInvalidated ->
-              Ok(unavailable(source, sid, True, "evidence_withdrawn"))
-            _ -> {
-              let m = measured(a)
-              let proto =
-                or_else(
-                  combine_rules.protocol(
-                    a.row.protocol_id,
-                    a.row.protocol_version,
-                  ),
-                  combine_rules.latest_protocol(a.row.protocol_id),
-                )
-              let verified = state == attempt_row.CombineVerified
-              Ok(
-                available(
-                  source,
-                  sid,
-                  option.map(proto, fn(p) { p.title })
-                    |> option.unwrap(a.row.protocol_id),
-                  case m.test_only, verified {
-                    True, _ -> "simulated_demo"
-                    False, True -> "combine_verified"
-                    False, False -> "box_cam_observed"
-                  },
-                  Some(option.unwrap(a.row.completed_at, a.row.created_at)),
-                  m.test_only,
-                  [
-                    text_field("protocolId", a.row.protocol_id),
-                    #("protocolVersion", json.int(a.row.protocol_version)),
-                    #("measuredValue", case verified {
-                      True ->
-                        json.nullable(a.row.measured_value, json_text.number)
-                      False -> json.null()
-                    }),
-                    text_field("metricUnit", a.row.metric_unit),
-                    #("combineState", attempt_row.combine_state_to_json(state)),
-                  ],
-                  [
-                    #(
-                      "productionValid",
-                      json.bool(hub_rules.production_valid(m)),
-                    ),
-                  ],
-                ),
-              )
-            }
-          }
-        }
-        _ -> missing
-      }
-    }
-    // A trial report is a recruitment record: only the trial's organisation sees the link, never its content.
-    True, evidence_source.TrialReport -> {
-      use found <- result.try(one_row(
+      )
+      |> result.map(hub_evidence.FoundBoxSession)
+    evidence_source.CombineAttempt ->
+      combine.attempt_by_id(read, id.combine_attempt(sid))
+      |> result.map(hub_evidence.FoundCombineAttempt)
+    evidence_source.TrialReport ->
+      one_row(
         read,
         "SELECT " <> trial_row.columns <> " FROM trials WHERE id = ?",
         id.trial_sql(id.trial(sid)),
         trial_row.decoder(),
-      ))
-      case found {
-        Some(t) if t.player_id == l.player ->
-          case staff_org == Some(t.org_id), t.status {
-            False, _ ->
-              Ok(unavailable(source, sid, True, "evidence_not_visible"))
-            True, trial_row.Reported ->
-              Ok(
-                available(
-                  source,
-                  sid,
-                  "Trial report",
-                  "verified_club_confirmed",
-                  Some(
-                    option.then(t.proposed_date, trial_rules.trial_date_ms)
-                    |> option.unwrap(t.accepted_at),
-                  ),
-                  False,
-                  [],
-                  [],
-                ),
-              )
-            True, _ -> Ok(unavailable(source, sid, True, "evidence_not_found"))
-          }
-        _ -> missing
-      }
-    }
+      )
+      |> result.map(hub_evidence.FoundTrial)
   }
-}
-
-fn measured(a: combine.Attempt) -> hub_rules.Measured {
-  hub_rules.measured_of(
-    a.row.id,
-    a.row.protocol_id,
-    a.row.protocol_version,
-    a.row.measured_value,
-    a.row.completed_at,
-    a.row.combine_state,
-    a.session_state,
-    a.row.provider_id,
-  )
 }
 
 /// Whether a link may be made: the record is the player's, visible to the viewer, and currently valid.
@@ -1562,7 +1270,7 @@ fn project(
   let b = x.bundle
   let l = looker(x, now)
   use attempts <- result.try(combine.attempts_for_player(read, x.player.row.id))
-  let attempts = list.map(attempts, measured)
+  let attempts = list.map(attempts, hub_evidence.measured)
   let resolve_links = fn(holder: fn(link_row.Row) -> Bool) {
     list.filter(b.links, holder)
     |> list.try_map(fn(link) {
@@ -1746,22 +1454,6 @@ fn project(
       hub_rules.review_view(r, x.caps) |> option.to_result(Nil)
     })
   let p = b.plan.row
-  let #(by_status, active) =
-    hub_rules.goal_statuses_json(list.map(goals, fn(g) { g.row.status }))
-  let #(due_soon, overdue) =
-    list.fold(b.actions, #(0, 0), fn(acc, a) {
-      case not_finished(a.row.status) {
-        False -> acc
-        True ->
-          case hub_rules.due_state(a.row.due_at, now).state {
-            "overdue" -> #(acc.0, acc.1 + 1)
-            "due_today" | "due_soon" -> #(acc.0 + 1, acc.1)
-            _ -> acc
-          }
-      }
-    })
-  let last_review =
-    list.first(reviews) |> result.map(fn(r) { r.row.reviewed_at })
   let owner_kind = plan_row.owner_kind_to_string(p.owner_kind)
   Ok([
     #("policyVersion", json.int(hub_rules.policy_version)),
@@ -1829,26 +1521,16 @@ fn project(
     ),
     #(
       "summary",
-      json.object([
-        #("goalsByStatus", by_status),
-        #("activeGoals", json.int(active)),
-        #("actionsDue", json.int(due_soon)),
-        #("actionsOverdue", json.int(overdue)),
-        #(
-          "linkedEvidenceAvailable",
-          json.int(int.sum(list.map(goal_views, fn(v) { v.3 }))),
-        ),
-        #("lastReviewAt", http.nullable(last_review, json.int)),
-        #("nextReviewAt", json.nullable(p.next_review_at, json.int)),
-        #(
-          "reviewDue",
-          hub_rules.due_json(hub_rules.review_due_state(p.next_review_at, now)),
-        ),
-        text_field(
-          "note",
-          "These are counts of agreed work. There is no overall figure here, and ScoutBox does not calculate one.",
-        ),
-      ]),
+      hub_rules.plan_summary_json(
+        list.map(goals, fn(g) { g.row.status }),
+        list.map(b.actions, fn(a) {
+          #(a.row.status, hub_rules.due_state(a.row.due_at, now))
+        }),
+        int.sum(list.map(goal_views, fn(v) { v.3 })),
+        list.map(b.reviews, fn(r) { r.row.reviewed_at }),
+        p.next_review_at,
+        now,
+      ),
     ),
     #("goals", json.array(goal_views, fn(v) { join_object(v.4, v.5) })),
     #("reviews", json.preprocessed_array(review_views)),
@@ -3339,7 +3021,7 @@ const action_codes = [
   #("assignee.*", "ASSIGNEE_INVALID"),
 ]
 
-type Assignee {
+pub type Assignee {
   Assignee(kind: audience.Audience, id: String, name: Option(String))
 }
 
@@ -3363,80 +3045,95 @@ fn can_assign(
   x: Seen,
   next: fn(Option(Assignee)) -> Result(Response, Fail(Response)),
 ) -> Result(Response, Fail(Response)) {
-  let p = x.bundle.plan.row
-  let who = option.unwrap(raw.id, "")
-  case option.unwrap(raw.kind, "") {
+  use found <- result.try(
+    assignee(
+      read,
+      raw.kind,
+      raw.id,
+      plan: x.bundle.plan.row,
+      player: x.player,
+      minor: x.minor,
+    )
+    |> storage,
+  )
+  case found {
+    Ok(a) -> next(Some(a))
+    Error(detail) -> assignee_invalid(detail)
+  }
+}
+
+/// Who `kind` and `who` name as an action's assignee on plan `p`, or the detail an `ASSIGNEE_INVALID` gives.
+pub fn assignee(
+  read: Read,
+  kind: Option(String),
+  who: Option(String),
+  plan p: plan_row.Row,
+  player player: Player,
+  minor minor: Bool,
+) -> Result(Result(Assignee, String), Fail(e)) {
+  case option.unwrap(kind, "") {
     "player" ->
-      case raw.id == Some(id.player_to_string(p.player_id)) {
+      case who == Some(id.player_to_string(p.player_id)) {
         False ->
-          assignee_invalid(
-            "Only this plan’s player can be assigned as the player.",
-          )
+          Ok(Error("Only this plan’s player can be assigned as the player."))
         True ->
-          next(
-            Some(Assignee(
+          Ok(
+            Ok(Assignee(
               audience.Player,
-              id.player_to_string(x.player.row.id),
-              Some(x.player.row.name),
+              id.player_to_string(player.row.id),
+              Some(player.row.name),
             )),
           )
       }
     "guardian" -> {
-      use found <- result.try(
-        case raw.id {
-          Some(g) -> guardians.by_id(read, id.guardian(g))
-          None -> Ok(None)
-        }
-        |> storage,
-      )
+      use found <- result.map(case who {
+        Some(g) -> guardians.by_id(read, id.guardian(g))
+        None -> Ok(None)
+      })
       case found {
         Some(g) ->
-          case list.contains(g.child_ids, p.player_id), x.minor {
-            False, _ ->
-              assignee_invalid("That guardian does not manage this player.")
+          case list.contains(g.child_ids, p.player_id), minor {
+            False, _ -> Error("That guardian does not manage this player.")
             True, False ->
-              assignee_invalid(
+              Error(
                 "This player is an adult; a guardian cannot be assigned their actions.",
               )
             True, True ->
-              next(
-                Some(Assignee(
-                  audience.Guardian,
-                  id.guardian_to_string(g.row.id),
-                  Some(g.row.name),
-                )),
-              )
+              Ok(Assignee(
+                audience.Guardian,
+                id.guardian_to_string(g.row.id),
+                Some(g.row.name),
+              ))
           }
-        None -> assignee_invalid("That guardian does not manage this player.")
+        None -> Error("That guardian does not manage this player.")
       }
     }
     "org_user" ->
       case p.owner_org_id {
         None ->
-          assignee_invalid(
+          Ok(Error(
             "Club staff can only be assigned actions on a club-owned plan.",
-          )
+          ))
         Some(owner) -> {
-          use found <- result.try(
-            staff.by_id(read, id.org_user(who)) |> storage,
-          )
+          use found <- result.map(staff.by_id(
+            read,
+            id.org_user(option.unwrap(who, "")),
+          ))
           case found {
             Some(u) if u.org_id == owner && u.removed_at == None ->
-              next(
-                Some(Assignee(
-                  audience.OrgUser,
-                  id.org_user_to_string(u.id),
-                  Some(u.name),
-                )),
-              )
+              Ok(Assignee(
+                audience.OrgUser,
+                id.org_user_to_string(u.id),
+                Some(u.name),
+              ))
             _ ->
-              assignee_invalid(
+              Error(
                 "That person is not current staff of the organisation that owns this plan.",
               )
           }
         }
       }
-    kind -> assignee_invalid("Unknown assignee kind \"" <> kind <> "\".")
+    other -> Ok(Error("Unknown assignee kind \"" <> other <> "\"."))
   }
 }
 
@@ -4156,7 +3853,7 @@ fn create_review(
   use attempts <- result.try(
     combine.attempts_for_player(r, p.player_id) |> storage,
   )
-  let attempts = list.map(attempts, measured)
+  let attempts = list.map(attempts, hub_evidence.measured)
   use rid <- result.try(id.next_dev_review(tx) |> storage)
   let coach = v.kind == review_row.CoachReview
   let shared_at = case v.share_scopes != [] || !coach {
@@ -4189,7 +3886,14 @@ fn create_review(
       shared_with_player_at: shared_at,
       supersedes_review_id: superseded,
     )
-  let snapshots = goal_snapshots(rid, x.bundle, attempts)
+  let snapshots =
+    hub_rules.goal_snapshots(
+      rid,
+      list.map(x.bundle.goals, fn(g) { g.row }),
+      list.map(x.bundle.actions, fn(a) { a.row }),
+      x.bundle.links,
+      attempts,
+    )
   use _ <- result.try(hub.insert_review(tx, row, snapshots) |> storage)
   let stamp = clock.now_ms()
   use _ <- result.try(
@@ -4463,68 +4167,6 @@ fn supersession(
           }
       }
   }
-}
-
-/// What was true of each goal at the review: its state and evidence ids, never a copy of the Passport.
-fn goal_snapshots(
-  rid: id.DevReviewId,
-  b: Bundle,
-  attempts: List(hub_rules.Measured),
-) -> List(hub.Snapshot) {
-  b.goals
-  |> list.sort(fn(a, c) {
-    case int.compare(a.row.created_at, c.row.created_at) {
-      order.Eq ->
-        string.compare(
-          id.dev_goal_to_string(a.row.id),
-          id.dev_goal_to_string(c.row.id),
-        )
-      other -> other
-    }
-  })
-  |> list.index_map(fn(goal, i) {
-    let g = goal.row
-    let me = g.id
-    let counts =
-      list.filter(b.actions, fn(a) { a.row.goal_id == me })
-      |> list.map(fn(a) { a.row.status })
-      |> hub_rules.action_counts
-    let gid = Some(me)
-    let refs =
-      list.filter(b.links, fn(l) { l.goal_id == gid })
-      |> list.index_map(fn(l, j) {
-        ref_row.Row(
-          review_id: rid,
-          goal_id: me,
-          ord: j,
-          source_type: l.source_type,
-          source_id: l.source_id,
-        )
-      })
-    let evaluation =
-      hub_rules.target_of(g)
-      |> option.map(hub_rules.evaluate_target(_, attempts))
-    hub.Snapshot(
-      row: snapshot_row.Row(
-        review_id: rid,
-        ord: i,
-        goal_id: me,
-        title: g.title,
-        category: g.category,
-        status: g.status,
-        actions_total: counts.total,
-        actions_done: counts.done,
-        actions_blocked: counts.blocked,
-        actions_cancelled: counts.cancelled,
-        target_state: option.map(evaluation, fn(e) { e.state }),
-        target_reason: option.then(evaluation, fn(e) { e.reason }),
-        target_measured: option.then(evaluation, fn(e) {
-          option.then(e.best, fn(m) { m.measured_value })
-        }),
-      ),
-      refs:,
-    )
-  })
 }
 
 /// Shares the summary only; the internal note is never shared.

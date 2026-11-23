@@ -19,9 +19,11 @@ import scoutbox/platform/json_text
 import scoutbox/rows/box_sessions as session_row
 import scoutbox/rows/combine_attempts as attempt_row
 import scoutbox/rows/development_actions as action_row
+import scoutbox/rows/development_evidence_links as link_row
 import scoutbox/rows/development_goals as goal_row
 import scoutbox/rows/development_history as history_row
 import scoutbox/rows/development_plans as plan_row
+import scoutbox/rows/development_review_snapshot_refs as ref_row
 import scoutbox/rows/development_review_snapshots as snapshot_row
 import scoutbox/rows/development_reviews as review_row
 import scoutbox/rows/id
@@ -445,6 +447,48 @@ pub fn completion_json(done: Int, total: Int, cancelled: Int) -> Json {
         <> " of "
         <> int.to_string(of)
         <> " actions completed",
+      ),
+    ),
+  ])
+}
+
+/// A plan's summary: counts of agreed work, never an overall figure. `actions` are the plan's actions with their
+/// due state, `evidence_available` the goals' available linked evidence, `reviews` when each review was made.
+pub fn plan_summary_json(
+  goals: List(GoalStatus),
+  actions: List(#(action_row.Status, Due)),
+  evidence_available: Int,
+  reviews: List(Int),
+  next_review_at: Option(Int),
+  now: Int,
+) -> Json {
+  let #(by_status, active) = goal_statuses_json(goals)
+  let open =
+    list.filter(actions, fn(a) {
+      a.0 != action_row.Done && a.0 != action_row.Cancelled
+    })
+  let in_state = fn(states) {
+    list.count(open, fn(a) { list.contains(states, { a.1 }.state) })
+  }
+  json.object([
+    #("goalsByStatus", by_status),
+    #("activeGoals", json.int(active)),
+    #("actionsDue", json.int(in_state(["due_today", "due_soon"]))),
+    #("actionsOverdue", json.int(in_state(["overdue"]))),
+    #("linkedEvidenceAvailable", json.int(evidence_available)),
+    #(
+      "lastReviewAt",
+      json.nullable(
+        list.max(reviews, int.compare) |> option.from_result,
+        json.int,
+      ),
+    ),
+    #("nextReviewAt", json.nullable(next_review_at, json.int)),
+    #("reviewDue", due_json(review_due_state(next_review_at, now))),
+    #(
+      "note",
+      json.string(
+        "These are counts of agreed work. There is no overall figure here, and ScoutBox does not calculate one.",
       ),
     ),
   ])
@@ -1386,6 +1430,66 @@ pub fn catalogue() -> Json {
 
 fn text_pair(key: String, value: String) -> #(String, Json) {
   #(key, json.string(value))
+}
+
+/// What was true of each goal at the review: its state and evidence ids, never a copy of the Passport.
+pub fn goal_snapshots(
+  rid: id.DevReviewId,
+  goals: List(goal_row.Row),
+  actions: List(action_row.Row),
+  links: List(link_row.Row),
+  attempts: List(Measured),
+) -> List(hub.Snapshot) {
+  goals
+  |> list.sort(fn(a, c) {
+    case int.compare(a.created_at, c.created_at) {
+      order.Eq ->
+        string.compare(id.dev_goal_to_string(a.id), id.dev_goal_to_string(c.id))
+      other -> other
+    }
+  })
+  |> list.index_map(fn(g, i) {
+    let me = g.id
+    let counts =
+      list.filter(actions, fn(a) { a.goal_id == me })
+      |> list.map(fn(a) { a.status })
+      |> action_counts
+    let gid = Some(me)
+    let refs =
+      list.filter(links, fn(l) { l.goal_id == gid })
+      |> list.index_map(fn(l, j) {
+        ref_row.Row(
+          review_id: rid,
+          goal_id: me,
+          ord: j,
+          source_type: l.source_type,
+          source_id: l.source_id,
+        )
+      })
+    let evaluation =
+      target_of(g)
+      |> option.map(evaluate_target(_, attempts))
+    hub.Snapshot(
+      row: snapshot_row.Row(
+        review_id: rid,
+        ord: i,
+        goal_id: me,
+        title: g.title,
+        category: g.category,
+        status: g.status,
+        actions_total: counts.total,
+        actions_done: counts.done,
+        actions_blocked: counts.blocked,
+        actions_cancelled: counts.cancelled,
+        target_state: option.map(evaluation, fn(e) { e.state }),
+        target_reason: option.then(evaluation, fn(e) { e.reason }),
+        target_measured: option.then(evaluation, fn(e) {
+          option.then(e.best, fn(m) { m.measured_value })
+        }),
+      ),
+      refs:,
+    )
+  })
 }
 
 pub fn snapshot_json(s: hub.Snapshot) -> Json {
