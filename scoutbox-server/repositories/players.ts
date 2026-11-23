@@ -12,8 +12,21 @@
  */
 import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
 import { isConstraintError } from './writes.ts';
-import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM, trustScoreFromFacts, haversineKm, type LatLng } from '../domain.ts';
+import {
+  isAdult,
+  ADULT_AGE,
+  GRASSROOTS_RADIUS_KM,
+  POSITION_GROUPS,
+  SIMILARITY,
+  SIMILARITY_WITHOUT_POSITION,
+  trustScoreFromFacts,
+  haversineKm,
+  outputPer90,
+  type LatLng,
+  type PlayingProfile,
+} from '../domain.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
+import { ageOnMs } from '../temporal.ts';
 import { boxAround } from './grassroots.mjs';
 import {
   SUBRECORD_KEYS,
@@ -97,6 +110,52 @@ function adultsSql(nowMs: number): SqlWhere {
   ];
   return { sql, args };
 }
+/** The index of `position`'s group in POSITION_GROUPS, as SQL over `col`; NULL for no position. */
+function positionGroupSql(col: string): SqlWhere {
+  return {
+    sql: `CASE ${POSITION_GROUPS.map((g, i) => `WHEN ${col} IN (${g.map(() => '?').join(', ')}) THEN ${i}`).join(' ')} END`,
+    args: POSITION_GROUPS.flat(),
+  };
+}
+
+/**
+ * domain.ts `similarityScore(base, p)` as a SQL expression over the candidate `p`, before rounding, so a ranking
+ * leaves SQLite with only its winners. The terms are added in the rule's order and each is the same IEEE double
+ * the rule works out, so the rounded score is the rule's own (testSimilarPlayers holds them together).
+ */
+function similarityToSql(base: PlayingProfile, nowMs: number): SqlWhere {
+  const S = SIMILARITY;
+  const today = new Date(nowMs).toISOString();
+  const group = POSITION_GROUPS.findIndex((g) => g.includes(base.position ?? ''));
+  const g = positionGroupSql('p.position');
+  // The weights are numbers of the rule's own, written into the text; each division is of a REAL, as JavaScript's is.
+  return {
+    sql: `MIN(100,
+        (CASE WHEN p.position IS ? THEN ${S.position} WHEN ${g.sql} = ? THEN ${S.positionGroup} ELSE 0 END)
+      + (CASE WHEN p.foot IS ? THEN ${S.foot} ELSE 0 END)
+      + MAX(0, ${S.age} - ABS(? - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (substr(p.birth_date, 6) > ?) - ?) * ${S.perYearApart})
+      + MAX(0, ${S.output} - ABS(? - (COALESCE(p.stats_goals, 0) + COALESCE(p.stats_assists, 0)) * 1.0
+          / COALESCE(NULLIF(p.stats_appearances, 0), 1)) * ${S.perOutputApart})
+      + MAX(0, ${S.build} - (ABS(? - COALESCE(p.height_cm, ${S.defaultHeightCm})) * 1.0 / ${S.cmPerPoint}
+          + ABS(? - COALESCE(p.weight_kg, ${S.defaultWeightKg})) * 1.0 / ${S.kgPerPoint})))`,
+    args: [
+      base.position ?? null,
+      ...g.args,
+      group < 0 ? null : group,
+      base.foot ?? null,
+      Number(today.slice(0, 4)),
+      today.slice(5, 10),
+      ageOnMs(base.dob, nowMs),
+      outputPer90(base),
+      base.heightCm ?? S.defaultHeightCm,
+      base.weightKg ?? S.defaultWeightKg,
+    ],
+  };
+}
+
+/** A player among the ones most like a base, with their score. */
+export type SimilarPlayer = { id: string; name: string; position: string | null; score: number };
+
 /** The organisation a visibility read is for: what the rule reads off it. */
 export type ViewingOrgRecord = {
   id: string;
@@ -864,6 +923,36 @@ export function createPlayers(
         for (const d of rows) if (visit(lightFromRow(d)) === false) return;
         if (rows.length < SCAN_BATCH * 10) return;
       }
+    },
+    /**
+     * The `k` players `org` may see who are most like `base` (domain.ts similarityScore), best first; a tie keeps
+     * creation order. Scored in SQL, so only the winners are read. The candidates who share the base's position or
+     * group are ranked first: when their `k`th beats SIMILARITY_WITHOUT_POSITION, no other candidate can reach the
+     * answer and the rest are never scored.
+     */
+    mostSimilar: (
+      base: PlayingProfile & { id: string },
+      org: ViewingOrgRecord,
+      k: number,
+      at: number = now(),
+    ): SimilarPlayer[] => {
+      const w = k > 0 ? scanWhere({ visibleTo: org, exceptId: base.id }, at) : null;
+      if (!w) return [];
+      const score = similarityToSql(base, at);
+      const rank = (narrow: SqlWhere | null): SimilarPlayer[] =>
+        q(
+          `SELECT id, name, position, CAST(s AS INTEGER) + (s - CAST(s AS INTEGER) >= 0.5) AS score FROM (
+             SELECT p.rowid AS rid, p.id, p.name, p.position, ${score.sql} AS s
+             FROM players p WHERE ${w.sql}${narrow ? ` AND ${narrow.sql}` : ''}
+           ) ORDER BY score DESC, rid LIMIT ?`,
+        ).all(...score.args, ...w.args, ...(narrow?.args ?? []), k) as SimilarPlayer[];
+      const g = positionGroupSql('p.position');
+      const group = POSITION_GROUPS.findIndex((x) => x.includes(base.position ?? ''));
+      const near = rank({
+        sql: `(p.position IS ? OR ${g.sql} = ?)`,
+        args: [base.position ?? null, ...g.args, group < 0 ? null : group],
+      });
+      return near.length === k && near[k - 1].score > SIMILARITY_WITHOUT_POSITION ? near : rank(null);
     },
     /**
      * The Film Room deck: one page of the playable clips (a url) of the players the organisation may see,

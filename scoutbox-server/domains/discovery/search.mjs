@@ -35,20 +35,6 @@ export function registerPlayerSearch({
   nextId,
   playerViewForOrg,
 }) {
-  /** Best first; a tie keeps creation order. Ranked over light rows so only the winners are decoded. */
-  function mostSimilar(base, org, k) {
-    const best = [];
-    players.scanLight({ visibleTo: org, exceptId: base.id }, (c) => {
-      const score = similarityScore(base, c);
-      if (best.length === k && score <= best[k - 1].score) return;
-      let i = best.length;
-      while (i > 0 && best[i - 1].score < score) i -= 1;
-      best.splice(i, 0, { c, score });
-      if (best.length > k) best.pop();
-    });
-    return best;
-  }
-
   orgRouter.get('/players', (req, res) => {
     // A filter sent twice arrives as a list, and is refused.
     const query = discoveryInput(res, 'directoryQuery', req.query, 'query');
@@ -114,10 +100,10 @@ export function registerPlayerSearch({
       scoutName: req.orgUser.name,
     });
     const view = playerViewForOrg(p, req.org);
-    const similar = mostSimilar(p, req.org, 3).map(({ c, score }) => ({
-      playerId: c.id,
-      name: c.name,
-      position: c.position,
+    const similar = players.mostSimilar(p, req.org, 3).map(({ id, name, position, score }) => ({
+      playerId: id,
+      name,
+      position,
       score,
     }));
     const archetypes = ARCHETYPES.map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
@@ -158,11 +144,11 @@ export function registerPlayerSearch({
     const p = findPlayer(req.params.id);
     if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id))
       return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    const top = mostSimilar(p, req.org, 10);
-    const full = new Map(players.byIds(top.map(({ c }) => c.id)).map((c) => [c.id, c]));
+    const top = players.mostSimilar(p, req.org, 10);
+    const full = new Map(players.byIds(top.map(({ id }) => id)).map((c) => [c.id, c]));
     const ranked = top
-      .map(({ c, score }) => {
-        const view = full.has(c.id) ? playerViewForOrg(full.get(c.id), req.org) : null;
+      .map(({ id, score }) => {
+        const view = full.has(id) ? playerViewForOrg(full.get(id), req.org) : null;
         return view ? { ...view, similarity: score } : null;
       })
       .filter(Boolean);

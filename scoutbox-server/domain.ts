@@ -449,23 +449,55 @@ export function chooseTrialSlot(
 
 // AI Similar Players Engine — statistical similarity to reference playing
 // profiles. Position, foot, age, output, physique. A lead, not a verdict.
-export function similarityScore(a: PlayingProfile, b: PlayingProfile): number {
+
+/**
+ * The similarity score's numbers (similarityScore, and the SQL players.mostSimilar ranks by): the most each part
+ * earns, what costs a point of it, and the build assumed when one is missing.
+ */
+export const SIMILARITY = Object.freeze({
+  position: 35,
+  positionGroup: 18,
+  foot: 10,
+  age: 15,
+  perYearApart: 3,
+  output: 25,
+  perOutputApart: 25,
+  build: 15,
+  cmPerPoint: 2,
+  kgPerPoint: 3,
+  defaultHeightCm: 180,
+  defaultWeightKg: 75,
+});
+
+/**
+ * The most a candidate outside the base's position group can score: everything but the position part. A ranking
+ * whose top `k` from the group all beat it needs no other candidate.
+ */
+export const SIMILARITY_WITHOUT_POSITION = SIMILARITY.foot + SIMILARITY.age + SIMILARITY.output + SIMILARITY.build;
+
+export function similarityScore(a: PlayingProfile, b: PlayingProfile, onDate: Date | number = new Date()): number {
+  const S = SIMILARITY;
   let score = 0;
-  if (a.position === b.position) score += 35;
-  else if (samePositionGroup(a.position, b.position)) score += 18;
-  if (a.foot === b.foot) score += 10;
-  const ageDiff = Math.abs(ageOn(a.dob) - ageOn(b.dob));
-  score += Math.max(0, 15 - ageDiff * 3);
+  if (a.position === b.position) score += S.position;
+  else if (samePositionGroup(a.position, b.position)) score += S.positionGroup;
+  if (a.foot === b.foot) score += S.foot;
+  const ageDiff = Math.abs(ageOn(a.dob, onDate) - ageOn(b.dob, onDate));
+  score += Math.max(0, S.age - ageDiff * S.perYearApart);
   const outA = outputPer90(a),
     outB = outputPer90(b);
-  score += Math.max(0, 25 - Math.abs(outA - outB) * 25);
-  const hDiff = Math.abs((a.heightCm ?? 180) - (b.heightCm ?? 180));
-  const wDiff = Math.abs((a.weightKg ?? 75) - (b.weightKg ?? 75));
-  score += Math.max(0, 15 - (hDiff / 2 + wDiff / 3));
+  score += Math.max(0, S.output - Math.abs(outA - outB) * S.perOutputApart);
+  const hDiff = Math.abs((a.heightCm ?? S.defaultHeightCm) - (b.heightCm ?? S.defaultHeightCm));
+  const wDiff = Math.abs((a.weightKg ?? S.defaultWeightKg) - (b.weightKg ?? S.defaultWeightKg));
+  score += Math.max(0, S.build - (hDiff / S.cmPerPoint + wDiff / S.kgPerPoint));
   return Math.round(Math.min(score, 100));
 }
 
-const POSITION_GROUPS = [['GK'], ['CB', 'RB', 'LB', 'RWB', 'LWB'], ['CDM', 'CM', 'CAM'], ['RW', 'LW', 'ST', 'CF']];
+export const POSITION_GROUPS: readonly (readonly string[])[] = [
+  ['GK'],
+  ['CB', 'RB', 'LB', 'RWB', 'LWB'],
+  ['CDM', 'CM', 'CAM'],
+  ['RW', 'LW', 'ST', 'CF'],
+];
 
 function samePositionGroup(p1: string | null | undefined, p2: string | null | undefined): boolean {
   return POSITION_GROUPS.some((g) => g.includes(p1 ?? '') && g.includes(p2 ?? ''));

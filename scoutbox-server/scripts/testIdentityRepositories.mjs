@@ -15,7 +15,14 @@ import { GUARDIAN_RECORD_KEYS } from '../repositories/guardians.ts';
 import { bornByForAge } from '../repositories/players.ts';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
 import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
-import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.ts';
+import {
+  computeTrustScore,
+  visibleToOrg,
+  haversineKm,
+  similarityScore,
+  POSITION_GROUPS,
+  SIMILARITY_WITHOUT_POSITION,
+} from '../domain.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -926,6 +933,109 @@ test('read back: every live record with its hashes and no derived lists, a retai
     (e) => e.code === 'PLAYER_RECORD_INVALID' && /pl-adult2\): heightCm must be a whole number/.test(e.message),
   );
   assert.equal(JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid')), before, 'nothing was written');
+  t.close();
+});
+
+test('mostSimilar answers what scoring and ranking every candidate with similarityScore answers', () => {
+  const t = boot();
+  const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF', null];
+  const at = NOW;
+  const day = 86_400_000;
+  const ins = t.store.sqlite.prepare(
+    `INSERT INTO players (id, name, birth_date, country, position, foot, height_cm, weight_kg, level, lat, lng,
+       stats_appearances, stats_goals, stats_assists, profile_signal, created_at)
+     VALUES (?, ?, ?, 'GB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, ?)`,
+  );
+  const maybe = (j, every, v) => (j % every === 0 ? null : v);
+  // Every position (and none), both feet (and none), birthdays the day before, of and after today's, missing build
+  // and output, no appearances, half-point builds (99.5 rounds up), and every fourth player a copy of the one before,
+  // so scores tie at every rank.
+  for (let i = 0; i < 400; i++) {
+    const j = i % 4 === 3 ? i - 1 : i;
+    const born = new Date(at + ((j % 3) - 1) * day);
+    born.setUTCFullYear(1996 + (j % 14));
+    const near = j % 5 !== 0;
+    ins.run(
+      `pl-sim-${i}`,
+      `Similar ${i}`,
+      born.toISOString().slice(0, 10),
+      POSITIONS[j % 14],
+      [null, 'left', 'right'][j % 3],
+      maybe(j, 11, 160 + ((j * 7) % 40)),
+      maybe(j, 13, 60 + ((j * 5) % 30)),
+      j % 7 === 0 ? 'pro' : 'amateur',
+      near ? 53.8 + (j % 10) * 0.01 : null,
+      near ? -1.55 : null,
+      maybe(j, 9, (j % 7) * 6),
+      maybe(j, 5, j % 13),
+      maybe(j, 6, j % 9),
+      T0 + j,
+    );
+  }
+  t.store.sqlite
+    .prepare(
+      `INSERT INTO blocks (id, player_id, org_id, by_kind, reason, created_at) VALUES ('blk-sim-1', 'pl-sim-1', 'org-pro', 'player', 'Synthetic.', ?), ('blk-sim-2', 'pl-sim-6', 'org-grass', 'player', 'Synthetic.', ?)`,
+    )
+    .run(T0, T0);
+  const byScan = (base, org, k) => {
+    const all = [];
+    t.players.scanLight({ visibleTo: org, exceptId: base.id }, (c) => {
+      all.push({ id: c.id, name: c.name, position: c.position, score: similarityScore(base, c, at) });
+    });
+    return all
+      .map((c, i) => [c, i])
+      .sort(([a, i], [b, j]) => b.score - a.score || i - j)
+      .slice(0, k)
+      .map(([c]) => c);
+  };
+  let compared = 0;
+  for (const orgId of ['org-pro', 'org-agency', 'org-grass']) {
+    const org = orgOf(t, orgId);
+    for (const n of [0, 1, 2, 3, 13, 26, 39, 77, 154, 399]) {
+      const base = t.players.byId(`pl-sim-${n}`);
+      for (const k of [1, 3, 10, 50]) {
+        const got = t.players.mostSimilar(base, org, k).map((c) => ({ ...c }));
+        assert.deepEqual(got, byScan(base, org, k), `${orgId} ${base.id} k=${k}`);
+        compared += got.length;
+      }
+    }
+  }
+  assert.ok(compared > 1000, 'the rankings were not empty');
+  assert.ok(
+    !t.players.mostSimilar(t.players.byId('pl-sim-0'), orgOf(t, 'org-pro'), 50, at).some((c) => c.id === 'pl-sim-1'),
+    'a player who blocked the club is no candidate',
+  );
+  assert.deepEqual(
+    t.players.mostSimilar(t.players.byId('pl-sim-0'), orgOf(t, 'org-pro'), 0, at),
+    [],
+    'none asked, none given',
+  );
+  t.close();
+});
+
+test("SIMILARITY_WITHOUT_POSITION is what a twin in another position group scores, by the rule and by mostSimilar's SQL", () => {
+  const t = boot();
+  const ins = t.store.sqlite.prepare(
+    `INSERT INTO players (id, name, birth_date, country, position, foot, height_cm, weight_kg,
+       stats_appearances, stats_goals, stats_assists, profile_signal, created_at)
+     VALUES (?, ?, '2000-05-05', 'GB', ?, 'left', 181, 77, 20, 4, 3, 50, ?)`,
+  );
+  // One twin for every position: a base in each group, and every other position as a candidate.
+  POSITION_GROUPS.flat().forEach((pos, i) => ins.run(`pl-twin-${pos}`, `Twin ${pos}`, pos, T0 + i));
+  const pro = orgOf(t, 'org-pro');
+  for (const group of POSITION_GROUPS) {
+    const base = t.players.byId(`pl-twin-${group[0]}`);
+    const scored = new Map(t.players.mostSimilar(base, pro, 1000).map((c) => [c.id, c.score]));
+    for (const pos of POSITION_GROUPS.flat().filter((p) => !group.includes(p))) {
+      const twin = t.players.byId(`pl-twin-${pos}`);
+      assert.equal(
+        similarityScore(base, twin, NOW),
+        SIMILARITY_WITHOUT_POSITION,
+        `${base.position} by ${pos}, the rule`,
+      );
+      assert.equal(scored.get(twin.id), SIMILARITY_WITHOUT_POSITION, `${base.position} by ${pos}, the SQL`);
+    }
+  }
   t.close();
 });
 
