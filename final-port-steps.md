@@ -149,9 +149,16 @@ commit. In this order:
    the route reads it. The integrity fixture prints only what the check reads, and the views are ported over
    complete rows. No call sent several unknown fields, so the contact routes' `parse_coded` showed no key-order
    difference.
-6. **lifecycle** (`lifecycle/lifecycle.mjs`): `isLifecycleReason` 19, `validateLifecycleReasons` 14,
+6. **lifecycle** [**done**] (`lifecycle/lifecycle.mjs`): `isLifecycleReason` 19, `validateLifecycleReasons` 14,
    `toAnalyticsRecruitmentStage` 13, and `rooms/shared.mjs#adoptionStatusForStage` 12 (plus
-   `roomStatusForStage`'s 14 hand-port calls).
+   `roomStatusForStage`'s 14 hand-port calls). One difference turned up: the route's shape lets
+   `reasonCodes: null` through, and the TypeScript rule then refuses it (`LIFECYCLE_REASONS_INVALID`); the Gleam
+   route read null as no reasons and moved the case. It refuses it now. The reasons rule comes out of the lifecycle
+   route (`case_lifecycle.validate_reasons`, with the route's shape and input codes) and carries the TypeScript
+   rule's `prohibited` and `unknown`, which the contract keeps from the client. `derivedConditions` comes out of
+   the journey (`case_lifecycle.conditions`). `toAnalyticsRecruitmentStage` has no caller and is closed in
+   `NO_COUNTERPART`. The prototype-key stages are ported by hand: no such text becomes a `Stage`. What is left on
+   the lifecycle battery is item 8's and the evidence calls below.
 7. **The journey model** (`lifecycle/journeyModel.mjs`, `journey`): `nextActionFor` (251 calls) is proved over its
    whole matrix, as `canTransitionRecruitmentCase` is (`dev/matrix_cases.mjs`, `matrices.mjs`). The `current*For*`
    selectors, `canonicalStageFor`, `playerStageFor` and `validateRecruitmentJourney` are generated.

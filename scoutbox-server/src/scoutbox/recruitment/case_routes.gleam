@@ -142,50 +142,13 @@ pub fn journey(
 type Act {
   Act(
     action: String,
-    reason_codes: Option(List(String)),
+    reason_codes: Option(Option(List(String))),
     client_key: Option(Dynamic),
   )
 }
 
 fn action_names() -> Json {
   json.array(lifecycle.actions, fn(x) { json.string(x.name) })
-}
-
-/// Lifecycle reasons say why a case moved; decision codes say what a club concluded about a player. The sets do
-/// not overlap. The prohibited set is shared with decisions, and keeps the Rooms' error code.
-fn validate_lifecycle_reasons(
-  codes: List(String),
-) -> Result(List(String), #(String, String, List(#(String, Json)))) {
-  let clean =
-    codes
-    |> list.map(fn(c) { c |> string.trim |> string.lowercase })
-    |> list.filter(fn(c) { c != "" })
-    |> list.unique
-  let prohibited =
-    list.filter(clean, list.contains(room_rules.prohibited_reason_codes, _))
-  let unknown =
-    list.filter(clean, fn(c) { !list.contains(lifecycle.reason_codes, c) })
-  case list.length(clean) > 6, prohibited, unknown {
-    True, _, _ ->
-      Error(#("LIFECYCLE_REASONS_TOO_MANY", "Record up to 6 reasons.", []))
-    _, [_, ..], _ ->
-      Error(
-        #(
-          "ROOM_REASON_PROHIBITED",
-          "A protected characteristic can never be recorded as a recruitment reason.",
-          [],
-        ),
-      )
-    _, _, [_, ..] ->
-      Error(
-        #(
-          "LIFECYCLE_REASON_UNKNOWN",
-          "Reasons must come from the recruitment LIFECYCLE taxonomy, which describes why a case moved — not from the decision taxonomy, which describes what a club concluded about a player.",
-          [#("allowed", json.array(lifecycle.reason_codes, json.string))],
-        ),
-      )
-    _, _, _ -> Ok(clean)
-  }
 }
 
 /// `POST /org/rooms/:id/lifecycle`.
@@ -220,7 +183,7 @@ pub fn lifecycle_act(
     )
     use reason_codes <- input.field(
       "reasonCodes",
-      input.nullish(input.items(input.text(1_000_000), 1_000_000)),
+      case_lifecycle.reasons_check(),
     )
     use client_key <- input.field("clientKey", input.optional(input.anything()))
     input.done(Act(action:, reason_codes:, client_key:))
@@ -230,13 +193,8 @@ pub fn lifecycle_act(
       shape,
       raw,
       root: "body",
-      codes: [
-        #("expectedRev", "EXPECTED_REV_INVALID"),
-        #("expectedVersion", "EXPECTED_REV_INVALID"),
-        #("action", "LIFECYCLE_ACTION_UNKNOWN"),
-        #("reasonCodes.*", "LIFECYCLE_REASONS_INVALID"),
-      ],
-      default: "LIFECYCLE_INPUT_INVALID",
+      codes: case_lifecycle.input_codes,
+      default: case_lifecycle.input_default,
     )
   {
     Error(r) if r.error == "LIFECYCLE_ACTION_UNKNOWN" ->
@@ -251,9 +209,11 @@ pub fn lifecycle_act(
         Error(message) -> refuse("LIFECYCLE_CLIENT_KEY_INVALID", message, [])
         Ok(key) ->
           case
-            validate_lifecycle_reasons(option.unwrap(body.reason_codes, []))
+            case_lifecycle.validate_reasons(case_lifecycle.reasons_sent(
+              body.reason_codes,
+            ))
           {
-            Error(#(code, message, fields)) -> refuse(code, message, fields)
+            Error(r) -> refuse(r.error, r.message, r.fields)
             Ok(codes) -> act(ctx, req, a, room, raw, body.action, codes, key)
           }
       }

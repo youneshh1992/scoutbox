@@ -7,12 +7,15 @@
 //// trusted from the request.
 
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/platform/clock
 import scoutbox/platform/effect
+import scoutbox/platform/input
 import scoutbox/platform/live_event
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -482,6 +485,132 @@ pub fn available(
     }
   })
   |> result.map(list.reverse)
+}
+
+/// Conditions answered by looking at the case, not stored, so they can't disagree with its status
+/// (derivedConditions). `active_trial`: a trial awaits its report; `offer_awaiting`: an Offer is live and issued.
+pub fn conditions(
+  status: RoomStatus,
+  has_current_decision: Bool,
+  active_trial: Bool,
+  offer_awaiting: Bool,
+) -> List(#(String, Json)) {
+  [
+    #(
+      "decisionPending",
+      json.bool(status == room_status.TrialCompleted && !has_current_decision),
+    ),
+    #(
+      "trialActive",
+      json.bool(status == room_status.TrialScheduled && active_trial),
+    ),
+    #(
+      "offerAwaitingResponse",
+      json.bool(status == room_status.OfferMade && offer_awaiting),
+    ),
+    #("onHold", json.bool(status == room_status.OnHold)),
+    #("terminal", json.bool(list.contains(room_rules.terminal, status))),
+    #("reopenable", json.bool(list.contains(room_rules.reopened_from, status))),
+  ]
+}
+
+// ------------------------------------------------------------------------------------------------- reasons
+
+/// The lifecycle route's input codes (LIFECYCLE_INPUT_CODES): what a field's shape refusal is called.
+pub const input_codes = [
+  #("expectedRev", "EXPECTED_REV_INVALID"),
+  #("expectedVersion", "EXPECTED_REV_INVALID"),
+  #("action", "LIFECYCLE_ACTION_UNKNOWN"),
+  #("reasonCodes.*", "LIFECYCLE_REASONS_INVALID"),
+]
+
+/// A field the contract names no code for.
+pub const input_default = "LIFECYCLE_INPUT_INVALID"
+
+/// `reasonCodes`: absent, null or a list of text. The shape lets null through, and validate_reasons refuses it.
+pub fn reasons_check() -> input.Rule(Option(Option(List(String)))) {
+  input.clearable(input.items(input.text(1_000_000), 1_000_000))
+}
+
+/// The reasons as the route hands them to validate_reasons: absent is none given, null is not a list.
+pub fn reasons_sent(raw: Option(Option(List(String)))) -> Option(List(String)) {
+  case raw {
+    None -> Some([])
+    Some(codes) -> codes
+  }
+}
+
+/// At most this many reasons on one transition: the same ceiling decisions use.
+pub const reasons_max = 6
+
+/// Lifecycle reasons say why a case moved; decision codes say what a club concluded about a player. The sets don't
+/// overlap. The prohibited set is shared with decisions, and keeps the Rooms' error code. `None` is a value that
+/// isn't a list (null).
+pub fn validate_reasons(
+  codes: Option(List(String)),
+) -> Result(List(String), Refusal) {
+  case codes {
+    None ->
+      Error(
+        Refusal(
+          "LIFECYCLE_REASONS_INVALID",
+          "Reasons must be a list of lifecycle reason codes.",
+          [],
+        ),
+      )
+    Some(codes) -> {
+      let clean =
+        codes
+        |> list.map(fn(c) { c |> string.trim |> string.lowercase })
+        |> list.filter(fn(c) { c != "" })
+        |> list.unique
+      let prohibited =
+        list.filter(clean, list.contains(room_rules.prohibited_reason_codes, _))
+      let unknown = list.filter(clean, fn(c) { !lifecycle.is_reason(c) })
+      case list.length(clean) > reasons_max, prohibited, unknown {
+        True, _, _ ->
+          Error(
+            Refusal(
+              "LIFECYCLE_REASONS_TOO_MANY",
+              "Record up to " <> int.to_string(reasons_max) <> " reasons.",
+              [],
+            ),
+          )
+        _, [_, ..], _ ->
+          Error(
+            Refusal(
+              "ROOM_REASON_PROHIBITED",
+              "A protected characteristic can never be recorded as a recruitment reason.",
+              [#("prohibited", json.array(prohibited, json.string))],
+            ),
+          )
+        _, _, [_, ..] ->
+          Error(
+            Refusal(
+              "LIFECYCLE_REASON_UNKNOWN",
+              "Reasons must come from the recruitment LIFECYCLE taxonomy, which describes why a case moved — not from the decision taxonomy, which describes what a club concluded about a player.",
+              [
+                #("unknown", json.array(unknown, json.string)),
+                #("allowed", json.array(lifecycle.reason_codes, json.string)),
+              ],
+            ),
+          )
+        _, _, _ -> Ok(clean)
+      }
+    }
+  }
+}
+
+/// validateLifecycleReasons' answer: `{ok, codes}`, or `{ok, error, message}` and the refusal's fields.
+pub fn reasons_json(r: Result(List(String), Refusal)) -> Json {
+  case r {
+    Ok(codes) ->
+      json.object([
+        #("ok", json.bool(True)),
+        #("codes", json.array(codes, json.string)),
+      ])
+    Error(refusal) -> verdict_json(Error(refusal))
+  }
 }
 
 // --------------------------------------------------------------------------------------------------- writer

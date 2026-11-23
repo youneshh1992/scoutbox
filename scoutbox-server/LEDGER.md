@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 235 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 4185 / 268 | 345 / 524 | 9 to go |
+| recruitment | 19 | 19 | 19 | 4229 / 212 | 359 / 524 | 9 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -77,9 +77,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 105 / 0 | 38 / 54 | 16 hand-port calls |
 | `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 8 / 0 | 6 / 6 | **done** |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
-| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 3 / 18 | 8 / 9 | 18 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
+| `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 5 / 16 | 8 / 9 | 16 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
-| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2875 / 54 | 3 / 109 | 54 cases pending; 106 hand-port calls |
+| `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2917 / 0 | 17 / 109 | 92 hand-port calls |
 | `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 146 / 0 | 38 / 44 | 6 hand-port calls |
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 55 / 0 | 49 / 51 | 2 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
@@ -286,7 +286,7 @@ ported by hand to a gleeunit test.
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 7 | args[].signings.byId is a function; result.check is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 63 | args[].reads.contacts.byId is a function; args[].reads.signings.byId is a function | to do |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 22 | args[].evidence.check is a function; Gleam's types can't hold its arguments: cannot print "__unknown_old_status__" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "" as a RoomRole; Gleam's types can't hold its arguments: cannot print "" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "admin" as a RoomRole; Gleam's types can't hold its arguments: cannot print "identified" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "IN_PROGRESS" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "nonsense" as a RoomStatus; Gleam's types can't hold its arguments: cannot print "notAnAction" as a lifecycle action; Gleam's types can't hold its arguments: cannot print "owner" as a RoomRole; Gleam's types can't hold its arguments: cannot print "recruitment_admin " as a RoomRole; Gleam's types can't hold its arguments: cannot print "ROOM_LEAD" as a RoomRole; Gleam's types can't hold its arguments: cannot print "trial_in_progress" as a RoomStatus; Gleam's types can't hold its arguments: cannot print 42 as a RoomStatus; Gleam's types can't hold its arguments: cannot print null as a RoomStatus | to do |
-| `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#roomStatusForStage` | 14 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "isPrototypeOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "prototype" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "valueOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs | to do |
+| `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#roomStatusForStage` | 14 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "constructor" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "isPrototypeOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "prototype" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "toString" as a value of scoutbox/rows/recruitment_cases.stage_pairs; Gleam's types can't hold its arguments: cannot print "valueOf" as a value of scoutbox/rows/recruitment_cases.stage_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/offers` | `domain.ts#isAdult` | 9 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "0000-00-00" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-30" as a Day; Gleam's types can't hold its arguments: cannot print "yesterday" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day; Gleam's types can't hold its arguments: cannot print undefined as a Day | `test/scoutbox/rules/age_test.gleam` |
 | `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
@@ -443,12 +443,6 @@ mapped, then `npm run cases`.
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentOfferForCase` | 2 |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentSigningForOffer` | 4 |
 | `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/journeyModel.mjs#currentTrialForCase` | 2 |
-| `recruitment/journeyAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#lifecycleTargetFor` | 2 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#derivedConditions` | 2 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#isLifecycleReason` | 16 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 |
-| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons` | 13 |
-| `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#adoptionStatusForStage` | 11 |
 
 ## Cases closed: no Gleam counterpart
 
@@ -485,3 +479,4 @@ their role, so their recorded calls get no test.
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 | No event can carry a name outside the registry (live_event.registered, proved equal to it), so none is unclassified. |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionMilestone` | 1 | No TypeScript route calls it. The journey writes its own decision lines (journey.gleam's decision_line, never the note), which the journey batteries compare. |
+| `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 | No TypeScript code calls it. The analytics funnel counts the stages a case reached its own way (funnels.mjs#stagesReached, ported with analytics). |

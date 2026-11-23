@@ -539,42 +539,35 @@ fn club(
     ),
     #(
       "conditions",
-      json.object([
-        #(
-          "decisionPending",
-          json.bool(status == room_status.TrialCompleted && current == None),
-        ),
-        #(
-          "trialActive",
-          json.bool(
-            status == room_status.TrialScheduled
-            && list.any(listed_trials, fn(t) {
+      json.object(
+        list.append(
+          case_lifecycle.conditions(
+            status,
+            current != None,
+            list.any(listed_trials, fn(t) {
               t.row.status == trial_row.AwaitingReport
             }),
+            offer_awaiting,
           ),
+          [
+            #(
+              "decisionOutstanding",
+              json.bool(
+                !terminal
+                && current_formal == None
+                && {
+                  assessed
+                  || list.any(listed_trials, fn(t) {
+                    trial_rules.workflow_state(t)
+                    == trial_workflow_state.Completed
+                  })
+                },
+              ),
+            ),
+            #("hasFormalDecision", json.bool(current_formal != None)),
+          ],
         ),
-        #(
-          "offerAwaitingResponse",
-          json.bool(status == room_status.OfferMade && offer_awaiting),
-        ),
-        #("onHold", json.bool(status == room_status.OnHold)),
-        #("terminal", json.bool(terminal)),
-        #("reopenable", json.bool(reopenable)),
-        #(
-          "decisionOutstanding",
-          json.bool(
-            !terminal
-            && current_formal == None
-            && {
-              assessed
-              || list.any(listed_trials, fn(t) {
-                trial_rules.workflow_state(t) == trial_workflow_state.Completed
-              })
-            },
-          ),
-        ),
-        #("hasFormalDecision", json.bool(current_formal != None)),
-      ]),
+      ),
     ),
     #("nextActions", json.array(actions, json.string)),
     #(

@@ -410,6 +410,7 @@ const room = plainIn(ROOMS);
 const ROOM_MAP = {
   [`${ROOM_RULES}#stageForRoomStatus`]: room('stage_for_room_status', [roomStatus, level], stage),
   [`${ROOM_RULES}#roomStatusForStage`]: room('room_status_for_stage', [stage, level], option(roomStatus)),
+  [`${ROOM_RULES}#adoptionStatusForStage`]: room('adoption_status_for_stage', [stage, level], roomStatus),
   [`${ROOM_RULES}#canTransition`]: room('can_transition', [roomStatus, roomStatus], bool),
   [`${ROOM_RULES}#validateTransition`]: {
     module: ROOMS,
@@ -4741,6 +4742,60 @@ const DECISION_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------- lifecycle
+
+const LIFECYCLE_FN = 'domains/recruitment/lifecycle/lifecycle.mjs';
+const LIFECYCLE = 'scoutbox/recruitment/lifecycle';
+const CASE_LIFECYCLE = 'scoutbox/recruitment/case_lifecycle';
+
+/** A case as the lifecycle reads it, `{room: {status}, history}`, as a Room at that status with those entries. */
+const lifecycleCase = (kase, ctx) => {
+  only('a lifecycle case', kase, ['room', 'history']);
+  only("a lifecycle case's room", kase.room, ['status']);
+  const entries = (kase.history ?? []).map((h) => {
+    only('a history entry', h, ['action', 'detail']);
+    return `#(${string(h.action)}, ${string(JSON.stringify(h.detail ?? null))})`;
+  });
+  return `${ctx.use(BASE)}.room(${roomStatus(kase.room.status, ctx)}, [${entries.join(', ')}])`;
+};
+
+const LIFECYCLE_MAP = {
+  [`${LIFECYCLE_FN}#isLifecycleReason`]: plainIn(LIFECYCLE)('is_reason', [string], bool),
+  [`${LIFECYCLE_FN}#validateLifecycleReasons`]: {
+    module: CASE_LIFECYCLE,
+    test: (c, ctx) => {
+      const [raw] = c.args;
+      const r = c.result;
+      const call = `${ctx.use(BASE)}.lifecycle_reasons(${sentField(raw)})`;
+      // The route's shape lets null through to the rule, which refuses it.
+      const shaped = raw === null || (Array.isArray(raw) && raw.every((x) => typeof x === 'string'));
+      if (!shaped) return eq(call, shapeRefused(r, ctx));
+      return eq(call, r.ok ? `Ok(${list(string)(r.codes, ctx)})` : decisionRefused(r, ctx));
+    },
+  },
+  [`${LIFECYCLE_FN}#lifecycleTargetFor`]: {
+    module: CASE_LIFECYCLE,
+    test: (c, ctx) => {
+      const [kase, action, context = {}] = c.args;
+      // Without an evidence provider, the TypeScript default answers every kind unsatisfied, as base.no_evidence does.
+      only("lifecycleTargetFor's context", context, []);
+      return eq(`${ctx.use(BASE)}.lifecycle_target(${lifecycleCase(kase, ctx)}, ${string(action)})`, option(roomStatus)(c.result, ctx));
+    },
+  },
+  [`${LIFECYCLE_FN}#derivedConditions`]: {
+    module: CASE_LIFECYCLE,
+    test: (c, ctx) => {
+      const { status, hasCurrentDecision = false, activeTrial = false, offerAwaitingResponse = false, ...rest } = c.args[0];
+      only("derivedConditions' context", rest, []);
+      return eqJson(
+        `${ctx.use('gleam/json')}.object(${ctx.use(CASE_LIFECYCLE)}.conditions(${roomStatus(status, ctx)}, ${bool(hasCurrentDecision)}, ${bool(activeTrial)}, ${bool(offerAwaitingResponse)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -4811,6 +4866,7 @@ export const MAP = {
   ...OFFER_MAP,
   ...SIGNING_MAP,
   ...DECISION_MAP,
+  ...LIFECYCLE_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -4903,6 +4959,8 @@ export const MAP = {
  * has no entry in MAP, and its recorded calls get no test.
  */
 export const NO_COUNTERPART = {
+  ['domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage']:
+    'No TypeScript code calls it. The analytics funnel counts the stages a case reached its own way (funnels.mjs#stagesReached, ported with analytics).',
   [`${DECISION_FN}#decisionMilestone`]:
     "No TypeScript route calls it. The journey writes its own decision lines (journey.gleam's decision_line, never the note), which the journey batteries compare.",
   ['temporal.ts#readInstant']:
@@ -5116,7 +5174,7 @@ export const HAND_PORTED = {
   [`${SHARED}#peekToken`]: 'test/scoutbox/verification/tokens_test.gleam',
   [`${SHARED}#consumeToken`]: 'test/scoutbox/verification/tokens_test.gleam',
   ...Object.fromEntries(
-    ['buildRoomSnapshot', 'roomCan', 'roomSummary', 'validateDecision', 'validateReasonCodes', 'validateTransition'].map(
+    ['buildRoomSnapshot', 'roomCan', 'roomStatusForStage', 'roomSummary', 'validateDecision', 'validateReasonCodes', 'validateTransition'].map(
       (f) => [`domains/recruitment/rooms/shared.mjs#${f}`, 'test/scoutbox/recruitment/room_rules_test.gleam'],
     ),
   ),

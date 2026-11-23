@@ -235,6 +235,105 @@ pub fn neg_h3b_in_either_vocabulary_8_test() {
     == Some(room_status.Archived)
 }
 
+// lifecycle: adoptionStatusForStage — [neg] W2 but a Room adopting that case does NOT start at `trial_completed` — no trial is proven
+pub fn neg_w2_but_a_room_adopting_that_case_does_not_start_at_trial_completed_n_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.AwaitingResponse,
+      orgs.LevelGrassroots,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Identified,
+      orgs.LevelPro,
+    )
+    == room_status.Watching
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_2_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Review,
+      orgs.LevelPro,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_3_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Observation,
+      orgs.LevelPro,
+    )
+    == room_status.Shortlisted
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_4_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Trial,
+      orgs.LevelPro,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_5_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Decision,
+      orgs.LevelPro,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_6_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Closed,
+      orgs.LevelPro,
+    )
+    == room_status.Archived
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_7_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Review,
+      orgs.LevelGrassroots,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_8_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Invited,
+      orgs.LevelGrassroots,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_9_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Decision,
+      orgs.LevelGrassroots,
+    )
+    == room_status.UnderReview
+}
+
+// lifecycle: adoptionStatusForStage — [neg] W3 no stage in either vocabulary starts a room at a status the records cannot prove
+pub fn neg_w3_no_stage_in_either_vocabulary_starts_a_room_at_a_status_the_recor_10_test() {
+  assert room_rules.adoption_status_for_stage(
+      recruitment_cases.Closed,
+      orgs.LevelGrassroots,
+    )
+    == room_status.Archived
+}
+
 // offers: roomCan — A12 roomCan: anyone who reads the room reads Offers; drafting and issuing sit with the room lead
 pub fn a12_roomcan_anyone_who_reads_the_room_reads_offers_drafting_and_issuing_test() {
   assert room_rules.room_can(Some(room_rules.Viewer), room_rules.OfferView)

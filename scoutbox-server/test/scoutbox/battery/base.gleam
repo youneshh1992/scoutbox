@@ -13,8 +13,10 @@ import gleam/string
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/key_order
+import scoutbox/platform/store
 import scoutbox/platform/temporal
 import scoutbox/platform/zones
+import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/decisions
@@ -769,6 +771,17 @@ pub fn decision_field(
   check: input.Rule(a),
   raw: Option(String),
 ) -> Result(a, DecisionRefused) {
+  coded_field(name, check, raw, decisions.input_codes, decisions.input_default)
+}
+
+/// One field of a body, read under a contract's `codes` and `default`, as `decision_field` reads a decision's.
+pub fn coded_field(
+  name: String,
+  check: input.Rule(a),
+  raw: Option(String),
+  codes: List(#(String, String)),
+  default: String,
+) -> Result(a, DecisionRefused) {
   let text = case raw {
     Some(v) -> "{" <> json.to_string(json.string(name)) <> ":" <> v <> "}"
     None -> "{}"
@@ -777,14 +790,50 @@ pub fn decision_field(
     use v <- input.field(name, check)
     input.done(v)
   }
-  input.parse_coded(
-    shape,
-    body(text),
-    root: "body",
-    codes: decisions.input_codes,
-    default: decisions.input_default,
-  )
+  input.parse_coded(shape, body(text), root: "body", codes:, default:)
   |> result.map_error(fn(r) { ByShape(r.error) })
+}
+
+/// The lifecycle route's reasons as it reads them: the shape under the lifecycle contract's codes, then
+/// validate_reasons. `raw` is the field's JSON text, or None when the act leaves it out.
+pub fn lifecycle_reasons(
+  raw: Option(String),
+) -> Result(List(String), DecisionRefused) {
+  use codes <- result.try(coded_field(
+    "reasonCodes",
+    case_lifecycle.reasons_check(),
+    raw,
+    case_lifecycle.input_codes,
+    case_lifecycle.input_default,
+  ))
+  case_lifecycle.validate_reasons(case_lifecycle.reasons_sent(codes))
+  |> result.map_error(fn(r) {
+    ByRule(
+      json.object([
+        #("error", json.string(r.error)),
+        #("message", json.string(r.message)),
+        ..r.fields
+      ])
+      |> json.to_string,
+    )
+  })
+}
+
+/// The TypeScript default evidence provider: every kind is unsatisfied.
+pub fn no_evidence(_kind) -> Result(case_lifecycle.Evidence, store.Fail(Nil)) {
+  Ok(case_lifecycle.Lacks("not_implemented"))
+}
+
+/// Where `action` (by name) takes `room` with no evidence: None for an action the lifecycle doesn't have.
+pub fn lifecycle_target(
+  room: cases.Room,
+  action: String,
+) -> Option(RoomStatus) {
+  case_lifecycle.action_named(action)
+  |> option.map(fn(a) {
+    let assert Ok(to) = case_lifecycle.target_for(room, a, no_evidence)
+    to
+  })
 }
 
 /// A decision rule's refusal as the TypeScript rule reports one, in its key order: the error, the message, then its

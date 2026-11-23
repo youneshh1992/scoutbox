@@ -3464,7 +3464,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -3558,35 +3558,35 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#isLifecycleReason",
         "calls": 19,
         "cases": 16,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage",
         "calls": 13,
         "cases": 12,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons",
         "calls": 14,
         "cases": 13,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#adoptionStatusForStage",
         "calls": 12,
         "cases": 11,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomStatusForStage",

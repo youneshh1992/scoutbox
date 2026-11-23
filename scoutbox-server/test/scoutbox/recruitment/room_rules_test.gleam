@@ -2,7 +2,7 @@
 //// suite of recruitment/rooms (scripts/rules/). Two kinds:
 ////
 //// - The snapshot (buildRoomSnapshot) depends on the clock; here it runs against `room_snapshots`.
-//// - The other calls pass values Gleam's types can't hold (an unknown status, recommendation or capability, a
+//// - The other calls pass values Gleam's types can't hold (an unknown status, stage, recommendation or capability, a
 ////   reason list that isn't a list, a note that isn't text). Here those are refused where the request is read, so
 ////   the checks run against the input shapes the routes use, and against the closed types themselves.
 
@@ -229,4 +229,18 @@ pub fn an_invisible_player_leaks_nothing_into_a_list_row_test() {
   assert string.contains(row, "\"playerAvailable\":false")
   assert string.contains(row, "\"position\":null")
   assert string.contains(row, "\"trust\":null")
+}
+
+// roomStatusForStage — a key every JavaScript object inherits names no stage: a stage is read from a typed column,
+// and no text outside the stages becomes one
+pub fn an_inherited_key_is_no_stage_test() {
+  list.each(
+    [
+      "__proto__", "constructor", "hasOwnProperty", "isPrototypeOf", "prototype",
+      "toString", "valueOf",
+    ],
+    fn(key) {
+      assert case_row.stage_from_string(key) == Error(Nil)
+    },
+  )
 }

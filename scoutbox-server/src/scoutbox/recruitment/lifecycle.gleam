@@ -106,6 +106,11 @@ pub const reason_codes = [
   "case_reopened",
 ]
 
+/// Is `code` one of the lifecycle's reasons (isLifecycleReason)?
+pub fn is_reason(code: String) -> Bool {
+  list.contains(reason_codes, code)
+}
+
 /// `GET /org/recruitment/lifecycle`.
 pub fn vocabulary(_ctx: Ctx) -> Response {
   http.json(
