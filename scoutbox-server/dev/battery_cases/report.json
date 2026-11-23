@@ -4133,105 +4133,123 @@
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#canStart",
         "calls": 10,
         "cases": 10,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#cleanText",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#completionGate",
         "calls": 7,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#effectiveStatus",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"\" as a value of scoutbox/rows/signing_packages.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"EXPIRED\" as a value of scoutbox/rows/signing_packages.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/rows/signing_packages.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"SIGNED\" as a value of scoutbox/rows/signing_packages.status_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#minorSigningPathwayOpen",
         "calls": 11,
-        "cases": 11,
-        "handPort": {},
-        "status": "pending"
+        "cases": 10,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#payloadFingerprint",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#requiredPartiesFor",
         "calls": 28,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingAgentView",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingClubView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored package always has its creator; this fixture's has none": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingConsistency",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: every caller reads the completed rows, so a COMPLETED package is always checked against them": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingCorrupt",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingIntegrity",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 8,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"countersigned\" as a value of scoutbox/rows/signing_revisions.status_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"SIGNED\" as a value of scoutbox/rows/signing_packages.status_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingRecipientView",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored document always has an id; this fixture's on spr-1 has none": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#validateContractDates",
         "calls": 6,
-        "cases": 6,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print 1720000000000 as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#validateExpiry",
@@ -4240,7 +4258,7 @@
         "handPort": {
           "args[] is undefined": 1
         },
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -4263,56 +4281,63 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#canStart",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#completionGate",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#effectiveStatus",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#requiredPartiesFor",
         "calls": 35,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingConsistency",
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingCorrupt",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/signings/signing.mjs#signingIntegrity",
         "calls": 30,
-        "cases": 28,
-        "handPort": {},
-        "status": "pending"
+        "cases": 23,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"later\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"WITNESS\" as a value of scoutbox/vocab/signing_party_type.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 2
+        },
+        "status": "generated"
       }
     ]
   },

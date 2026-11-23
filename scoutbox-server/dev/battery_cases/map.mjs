@@ -3673,6 +3673,375 @@ const OFFER_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------- signings
+
+const SIGNINGS = 'scoutbox/recruitment/signing_rules';
+const SIGNING_FN = 'domains/recruitment/signings/signing.mjs';
+const PACKAGE_ROWS = 'scoutbox/rows/signing_packages';
+const SIGNING_REVISION_ROWS = 'scoutbox/rows/signing_revisions';
+const PARTY_ROWS = 'scoutbox/rows/signing_revision_parties';
+const SIGNING_DOCUMENT_ROWS = 'scoutbox/rows/signing_documents';
+const partyType = vocab('scoutbox/vocab/signing_party_type');
+const signerKind = vocab('scoutbox/vocab/recruitment_actor_kind');
+const signingMethod = vocab('scoutbox/vocab/signing_method');
+const signingStatus = code(SIGNINGS, 'status_name');
+
+const only = (what, v, keys) => {
+  const extra = Object.keys(v ?? {}).filter((k) => !keys.includes(k));
+  if (extra.length) throw new Error(`${what} has no column for ${extra}`);
+};
+
+/**
+ * A required party, the `position`th of revision `revisionId`. Who completed it is three columns, absent together;
+ * its evidence reference is eight, the reference itself absent when its kind and id both are.
+ */
+const signingParty = (revisionId, position) =>
+  record({
+    module: PARTY_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(PARTY_ROWS)}.Row(..${ctx.use(BASE)}.signing_party(), revision_id: ${ident('signing_revision')(revisionId, ctx)}, position: ${position})`,
+    fields: {
+      partyType: ['party_type', partyType],
+      forEntityId: ['for_entity_id', option(string)],
+      forPlayerId: ['for_player_id', option(ident('player'))],
+      status: ['status', vocab(PARTY_ROWS, 'status_pairs')],
+      completedAt: ['completed_at', storedInstant],
+      method: ['method', option(signingMethod)],
+      completedBy: (v, ctx) => {
+        if (v === null) return [];
+        only('completedBy', v, ['kind', 'id', 'name']);
+        return [
+          ['completed_by_kind', option(signerKind)(v.kind, ctx)],
+          ['completed_by_id', option(string)(v.id, ctx)],
+          ['completed_by_name', option(string)(v.name, ctx)],
+        ];
+      },
+      evidenceRef: (v, ctx) => {
+        if (v === null) return [];
+        only('an evidence reference', v, ['kind', 'id', 'revisionId', 'documentSha256', 'at', 'actorKind', 'actorId', 'session']);
+        if (v.kind == null && v.id == null) throw new Error('an evidence reference with neither kind nor id reads as none');
+        return [
+          ['evidence_ref_kind', option(vocab(PARTY_ROWS, 'evidence_ref_kind_pairs'))(v.kind, ctx)],
+          ['evidence_ref_id', option(string)(v.id, ctx)],
+          ['evidence_revision_id', option(ident('signing_revision'))(v.revisionId, ctx)],
+          ['evidence_document_sha256', option(string)(v.documentSha256, ctx)],
+          ['evidence_at', storedInstant(v.at, ctx)],
+          ['evidence_actor_kind', option(string)(v.actorKind, ctx)],
+          ['evidence_actor_id', option(string)(v.actorId, ctx)],
+          ['evidence_session', option(string)(v.session, ctx)],
+        ];
+      },
+    },
+  });
+
+/** A revision's document (or executed document), when it has one. */
+const signingDocument = (revisionId, kind) => (v, ctx) => {
+  if (v === null || v === undefined) return 'None';
+  const doc = record({
+    module: SIGNING_DOCUMENT_ROWS,
+    constructor: 'Row',
+    base: (ctx) =>
+      `${ctx.use(SIGNING_DOCUMENT_ROWS)}.Row(..${ctx.use(BASE)}.signing_document(), revision_id: ${ident('signing_revision')(revisionId, ctx)}, kind: ${ctx.use(SIGNING_DOCUMENT_ROWS)}.${kind})`,
+    fields: {
+      id: ['id', ident('signing_document')],
+      evidenceId: ['evidence_id', ident('evidence')],
+      sha256: ['sha256', string],
+      label: ['label', option(string)],
+      filename: ['filename', option(string)],
+      mime: ['mime', option(string)],
+      bytes: ['bytes', option(int)],
+    },
+  });
+  return `Some(${doc(v, ctx)})`;
+};
+
+/** A revision of package `packageId`, the `position`th: its row, its documents and its parties as child rows. */
+const signingRevision = (packageId, position) => (v, ctx) => {
+  if (v === null || typeof v !== 'object') throw new Error(`cannot print ${JSON.stringify(v)} as a signing revision`);
+  const { id: rid, document = null, executedDocument = null, requiredParties = [], ...rest } = v;
+  if (typeof rid !== 'string') throw new Error('a stored signing revision always has an id');
+  const row = record({
+    module: SIGNING_REVISION_ROWS,
+    constructor: 'Row',
+    base: (ctx) =>
+      `${ctx.use(SIGNING_REVISION_ROWS)}.Row(..${ctx.use(BASE)}.signing_revision(), id: ${ident('signing_revision')(rid, ctx)}, package_id: ${ident('signing_package')(packageId, ctx)}, position: ${position})`,
+    fields: {
+      revisionNumber: ['revision_number', int],
+      status: ['status', vocab(SIGNING_REVISION_ROWS, 'status_pairs')],
+      createdAt: ['created_at', int],
+      readyAt: ['ready_at', storedInstant],
+      completedAt: ['completed_at', storedInstant],
+      supersedesRevisionId: ['supersedes_revision_id', option(ident('signing_revision'))],
+      supersededByRevisionId: ['superseded_by_revision_id', option(ident('signing_revision'))],
+      contract: (c, ctx) => {
+        if (c === null) return [];
+        only('a contract', c, ['startDate', 'endDate']);
+        return [
+          ['contract_start_date', option(string)(c.startDate, ctx)],
+          ['contract_end_date', option(string)(c.endDate, ctx)],
+        ];
+      },
+    },
+  });
+  if (!Array.isArray(requiredParties)) throw new Error('a revision\'s parties are rows');
+  return `${ctx.use(SIGNINGS)}.Revision(row: ${row(rest, ctx)}, document: ${signingDocument(rid, 'Signing')(document, ctx)}, executed: ${signingDocument(rid, 'Executed')(executedDocument, ctx)}, parties: [${requiredParties.map((q, i) => signingParty(rid, i)(q, ctx)).join(', ')}])`;
+};
+
+/** A stored package: its row, and its revisions as child rows. */
+const signingPackage = (v, ctx) => {
+  if (v === null || typeof v !== 'object') throw new Error(`cannot print ${JSON.stringify(v)} as a signing package`);
+  const { revisions = [], history = [], completion = null, ...rest } = v;
+  if (history.length) throw new Error('a package with history is read only by its history view');
+  if (!Array.isArray(revisions)) throw new Error("a package's revisions are rows");
+  const ids = revisions.map((r) => r?.id);
+  // A revision's id is the table's primary key: two revisions can't share one.
+  if (new Set(ids).size !== ids.length) throw new Error(`cannot print revisions sharing an id (${ids}) as rows`);
+  const pid = rest.id ?? 'spk-base';
+  const row = record({
+    module: PACKAGE_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(BASE)}.signing_package().row`,
+    fields: {
+      id: ['id', ident('signing_package')],
+      orgId: ['org_id', ident('org')],
+      playerId: ['player_id', ident('player')],
+      caseId: ['case_id', ident('recruitment_case')],
+      offerId: ['offer_id', ident('offer')],
+      offerRevisionId: ['offer_revision_id', string],
+      transactionId: ['transaction_id', option(ident('transaction'))],
+      status: ['status', vocab(PACKAGE_ROWS, 'status_pairs')],
+      currentRevisionId: ['current_revision_id', ident('signing_revision')],
+      createdAt: ['created_at', int],
+      updatedAt: ['updated_at', int],
+      expiresAt: ['expires_at', storedInstant],
+      internalNote: ['internal_note', option(string)],
+      rev: ['rev', int],
+      policyVersion: ['policy_version', int],
+    },
+  });
+  const completionFields = (() => {
+    if (completion === null) return {};
+    only('a completion', completion, ['signingId', 'completedAt']);
+    return { completionSigningId: completion.signingId, completionCompletedAt: completion.completedAt };
+  })();
+  const pkgRow = record({
+    module: PACKAGE_ROWS,
+    constructor: 'Row',
+    base: (ctx) => row(rest, ctx),
+    fields: {
+      completionSigningId: ['completion_signing_id', option(ident('signing'))],
+      completionCompletedAt: ['completion_completed_at', storedInstant],
+    },
+  })(completionFields, ctx);
+  return `${ctx.use(SIGNINGS)}.Package(..${ctx.use(BASE)}.signing_package(), row: ${pkgRow}, revisions: [${revisions.map((r, i) => signingRevision(pid, i)(r, ctx)).join(', ')}])`;
+};
+
+const signingRefused = (r) => {
+  const { ok, ...body } = r;
+  return `Error(${string(JSON.stringify(body))})`;
+};
+const mapSigningError = (call, ctx) => `${ctx.use('gleam/result')}.map_error(${call}, ${ctx.use(BASE)}.signing_refusal)`;
+
+/** A case as the signing rules compare it: a Room naming its organisation and player, at its status. */
+const signingCase = (v, ctx) => {
+  if (v === null) return 'None';
+  only('a case', v, ['id', 'orgId', 'playerId', 'room']);
+  only("a case's Room", v.room, ['status']);
+  return `Some(${ctx.use(BASE)}.kase(${ident('recruitment_case')(v.id ?? 'case-base', ctx)}, ${ident('org')(v.orgId, ctx)}, ${ident('player')(v.playerId, ctx)}, ${roomStatus(v.room.status, ctx)}))`;
+};
+
+/** An Offer as signingConsistency reads one: its references, and its revisions' ids, statuses and closings. */
+const consistencyOffer = (v, ctx) => {
+  if (v === null || v === undefined) return 'None';
+  const { revisions = [], responses = [], ...row } = v;
+  const revs = revisions.map((r, i) => {
+    only('an Offer revision', r, ['id', 'status', 'supersededByRevisionId', 'withdrawnAt']);
+    const rr = record({
+      module: REVISION_ROWS,
+      constructor: 'Row',
+      base: (ctx) => `${ctx.use(REVISION_ROWS)}.Row(..${ctx.use(BASE)}.offer_revision(), position: ${i}, revision_number: ${i + 1})`,
+      fields: {
+        id: ['id', ident('offer_revision')],
+        status: ['status', offerStatus],
+        supersededByRevisionId: ['superseded_by_revision_id', option(ident('offer_revision'))],
+        withdrawnAt: ['withdrawn_at', storedInstant],
+      },
+    })(r, ctx);
+    return `${ctx.use(OFFERS)}.Revision(row: ${rr}, documents: [])`;
+  });
+  return `Some(${ctx.use(OFFERS)}.Offer(..${ctx.use(BASE)}.offer(), row: ${offerRow(row, ctx)}, revisions: [${revs.join(', ')}], responses: ${list(responseRow)(responses, ctx)}))`;
+};
+
+/** A completed-signing row as signingConsistency reads one: its id and the package it completes. */
+const completedSigningRow = (v, ctx) => {
+  only('a completed signing', v, ['id', 'signingPackageId']);
+  return `${ctx.use('scoutbox/rows/signings')}.Row(..${ctx.use('scoutbox/rows/signings')}.new(id: ${ident('signing')(v.id, ctx)}, player_id: ${ident('player')('pl-base', ctx)}, org_id: ${ident('org')('org-base', ctx)}, ts: 0), signing_package_id: ${option(ident('signing_package'))(v.signingPackageId, ctx)})`;
+};
+
+/** A JSON value as canonical.Value. */
+const canonicalValue = (v, ctx) => {
+  const C = ctx.use('scoutbox/platform/canonical');
+  if (v === null) return `${C}.Null`;
+  if (typeof v === 'boolean') return `${C}.Bool(${bool(v)})`;
+  if (Number.isInteger(v)) return `${C}.Int(${v})`;
+  if (typeof v === 'string') return `${C}.Str(${string(v)})`;
+  if (Array.isArray(v)) return `${C}.Array([${v.map((x) => canonicalValue(x, ctx)).join(', ')}])`;
+  if (typeof v === 'object') return `${C}.Object([${Object.entries(v).map(([k, x]) => `#(${string(k)}, ${canonicalValue(x, ctx)})`).join(', ')}])`;
+  throw new Error(`cannot print ${JSON.stringify(v)} as a canonical value`);
+};
+
+/**
+ * A view of a package, compared as JSON. A view prints every stored column, so a fixture that leaves out one every
+ * stored row has (a document's id, the package's creator) can't be a row: the TypeScript view prints null where the
+ * Gleam one prints the column.
+ */
+const signingView = (fnName, extra) => ({
+  module: SIGNINGS,
+  test: (c, ctx) => {
+    const [pkg, now, opts = {}] = c.args;
+    // The club view prints the creator and every revision's documents; the recipient view the presented revisions'.
+    if (fnName === 'club_view' && !('createdBy' in pkg))
+      throw new Error("a stored package always has its creator; this fixture's has none");
+    const shown = { club_view: () => true, recipient_view: (r) => !!r.readyAt, agent_view: () => false }[fnName];
+    for (const r of (pkg.revisions ?? []).filter(shown))
+      for (const d of [r.document, r.executedDocument])
+        if (d && !('id' in d)) throw new Error(`a stored document always has an id; this fixture's on ${r.id} has none`);
+    return eqJson(`${ctx.use('gleam/json')}.object(${ctx.use(SIGNINGS)}.${fnName}(${signingPackage(pkg, ctx)}, ${int(now)}${extra(opts, ctx)}))`, c.result, ctx);
+  },
+});
+
+const SIGNING_MAP = {
+  [`${SIGNING_FN}#minorSigningPathwayOpen`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      if (c.args.length > 1) throw new Error('the pathway table is the build\'s own');
+      return eq(`${ctx.use(SIGNINGS)}.minor_pathway_open(${string(c.args[0])})`, bool(c.result));
+    },
+  },
+  [`${SIGNING_FN}#cleanText`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [raw, max] = c.args;
+      const r = c.result;
+      if (!r.ok && !r.tooLong) throw new Error('cleanText refused text that is not text');
+      return eq(`${ctx.use(SIGNINGS)}.clean_text(${option(string)(raw === '' ? null : raw, ctx)}, ${int(max)})`, r.ok ? `Ok(${option(string)(r.value, ctx)})` : 'Error(Nil)');
+    },
+  },
+  [`${SIGNING_FN}#validateContractDates`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const { startDate, endDate, ...rest } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`validateContractDates reads no ${Object.keys(rest)}`);
+      const r = c.result;
+      const call = `${ctx.use(SIGNINGS)}.validate_contract_dates(${option(string)(startDate, ctx)}, ${option(string)(endDate, ctx)})`;
+      return r.ok
+        ? eq(call, `Ok(${ctx.use(SIGNINGS)}.Contract(${string(r.contract.startDate)}, ${option(string)(r.contract.endDate, ctx)}))`)
+        : eq(mapSigningError(call, ctx), signingRefused(r));
+    },
+  },
+  [`${SIGNING_FN}#validateExpiry`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [raw, { now, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validateExpiry has no option ${Object.keys(rest)}`);
+      const r = c.result;
+      const call = `${ctx.use(SIGNINGS)}.validate_expiry(${raw === undefined || raw === null ? 'None' : `Some(${sent(raw, ctx)})`}, ${int(now)})`;
+      return r.ok ? eq(call, `Ok(#(${int(r.ms)}, ${bool(r.defaulted)}))`) : eq(mapSigningError(call, ctx), signingRefused(r));
+    },
+  },
+  [`${SIGNING_FN}#payloadFingerprint`]: {
+    module: 'scoutbox/platform/canonical',
+    test: (c, ctx) => eq(`${ctx.use('scoutbox/platform/canonical')}.to_string(${canonicalValue(c.args[0], ctx)})`, string(c.result)),
+  },
+  [`${SIGNING_FN}#requiredPartiesFor`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const { recipientType, playerId, guardianId = null, orgId, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`requiredPartiesFor reads no ${Object.keys(rest)}`);
+      if (recipientType !== 'player' && recipientType !== 'guardian') throw new Error(`a recipient is a player or a guardian, not ${recipientType}`);
+      const spec = (p) => {
+        const { partyType: t, forEntityId, forPlayerId, ...pending } = p;
+        if (JSON.stringify(pending) !== JSON.stringify({ status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null }))
+          throw new Error('a new party is pending with no evidence');
+        return `${ctx.use(SIGNINGS)}.PartySpec(${partyType(t, ctx)}, ${string(forEntityId)}, ${ident('player')(forPlayerId, ctx)})`;
+      };
+      const guardian = recipientType === 'guardian' ? `Some(${ident('guardian')(guardianId, ctx)})` : 'None';
+      return eq(`${ctx.use(SIGNINGS)}.required_parties_for(${guardian}, ${ident('player')(playerId, ctx)}, ${ident('org')(orgId, ctx)})`, `[${c.result.map(spec).join(', ')}]`);
+    },
+  },
+  [`${SIGNING_FN}#effectiveStatus`]: plainIn(SIGNINGS)('effective_status', [signingPackage, int], signingStatus),
+  [`${SIGNING_FN}#canStart`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [{ offerStatus: os, offerRevisionStatus: ors, caseStatus, recipientType, jurisdiction, existing = [], ...rest }, now] = c.args;
+      if (Object.keys(rest).length) throw new Error(`canStart reads no ${Object.keys(rest)}`);
+      const facts = `${ctx.use(SIGNINGS)}.StartFacts(offer_status: ${option(offerStatus)(os, ctx)}, offer_revision_status: ${option(offerStatus)(ors, ctx)}, case_status: ${option(roomStatus)(caseStatus, ctx)}, recipient: ${option(string)(recipientType, ctx)}, jurisdiction: ${string(jurisdiction)}, existing: ${list(signingPackage)(existing, ctx)})`;
+      const call = `${ctx.use(SIGNINGS)}.can_start(${facts}, ${int(now)})`;
+      return c.result.ok ? eq(call, 'Ok(Nil)') : eq(mapSigningError(call, ctx), signingRefused(c.result));
+    },
+  },
+  [`${SIGNING_FN}#canCompleteParty`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [pkg, { partyType: t, actorKind: k, actorId, revisionId, documentSha256, ...rest }, now] = c.args;
+      if (Object.keys(rest).length) throw new Error(`canCompleteParty reads no ${Object.keys(rest)}`);
+      const call = `${ctx.use(SIGNINGS)}.can_complete_party(${signingPackage(pkg, ctx)}, ${partyType(t, ctx)}, ${signerKind(k, ctx)}, ${string(actorId)}, ${string(revisionId)}, ${string(documentSha256)}, ${int(now)})`;
+      const r = c.result;
+      return r.ok
+        ? eq(`${ctx.use('gleam/result')}.map(${call}, fn(x) { #({x.0}.row.id, {x.1}.party_type) })`, `Ok(#(${ident('signing_revision')(r.revision.id, ctx)}, ${partyType(r.party.partyType, ctx)}))`)
+        : eq(mapSigningError(call, ctx), signingRefused(r));
+    },
+  },
+  [`${SIGNING_FN}#completionGate`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [pkg, { now, offer = null, offerRevision = null, kase = null, otherCompleted = false, blocked = false, documentProblem = null, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`completionGate reads no ${Object.keys(rest)}`);
+      const gateOffer = (o) => {
+        only('the gate\'s Offer', o, ['id', 'status', 'orgId', 'playerId', 'caseId']);
+        return `${ctx.use(SIGNINGS)}.GateOffer(id: ${ident('offer')(o.id, ctx)}, status: ${option(offerStatus)(o.status, ctx)}, org_id: ${ident('org')(o.orgId, ctx)}, player_id: ${ident('player')(o.playerId, ctx)}, case_id: ${ident('recruitment_case')(o.caseId, ctx)})`;
+      };
+      const gateRevision = (r) => {
+        only("the gate's Offer revision", r, ['id', 'status']);
+        return `${ctx.use(SIGNINGS)}.GateRevision(id: ${ident('offer_revision')(r.id, ctx)}, status: ${offerStatus(r.status, ctx)})`;
+      };
+      const facts = `${ctx.use(SIGNINGS)}.GateFacts(now: ${int(now)}, offer: ${option(gateOffer)(offer, ctx)}, offer_revision: ${option(gateRevision)(offerRevision, ctx)}, kase: ${signingCase(kase, ctx)}, other_completed: ${bool(otherCompleted)}, blocked: ${bool(blocked)}, document_problem: ${option(string)(documentProblem, ctx)})`;
+      return eq(`${ctx.use(SIGNINGS)}.completion_gate(${signingPackage(pkg, ctx)}, ${facts})`, list(string)(c.result, ctx));
+    },
+  },
+  [`${SIGNING_FN}#signingIntegrity`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [pkg, { orgId = null, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`signingIntegrity has no option ${Object.keys(rest)}`);
+      return eq(`${ctx.use(SIGNINGS)}.integrity(${signingPackage(pkg, ctx)}, ${option(ident('org'))(orgId, ctx)})`, list(string)(c.result, ctx));
+    },
+  },
+  [`${SIGNING_FN}#signingConsistency`]: {
+    module: SIGNINGS,
+    test: (c, ctx) => {
+      const [pkg, { offer = null, kase = null, rows = null, player = null, ...rest }, now] = c.args;
+      if (Object.keys(rest).length) throw new Error(`signingConsistency reads no ${Object.keys(rest)}`);
+      if (player !== null) throw new Error('a player is a stored row');
+      // Both callers read the package's completed rows (an empty list when there are none), so the row checks always
+      // run. Without rows they find nothing unless the package is COMPLETED, so only then is there no list to pass.
+      if (rows === null && pkg.status === 'COMPLETED')
+        throw new Error('every caller reads the completed rows, so a COMPLETED package is always checked against them');
+      return eq(
+        `${ctx.use(SIGNINGS)}.consistency(${signingPackage(pkg, ctx)}, ${consistencyOffer(offer, ctx)}, ${signingCase(kase, ctx)}, ${list(completedSigningRow)(rows ?? [], ctx)}, None, ${int(now)})`,
+        list(string)(c.result, ctx),
+      );
+    },
+  },
+  [`${SIGNING_FN}#signingCorrupt`]: plainIn(SIGNINGS)('corrupt', [list(string)], bool),
+  [`${SIGNING_FN}#signingClubView`]: signingView('club_view', ({ orgName = null }, ctx) => `, ${option(string)(orgName, ctx)}`),
+  [`${SIGNING_FN}#signingRecipientView`]: signingView(
+    'recipient_view',
+    ({ orgName = null, partyType: t, forEntityId }, ctx) => `, ${option(string)(orgName, ctx)}, ${partyType(t, ctx)}, ${string(forEntityId)}`,
+  ),
+  [`${SIGNING_FN}#signingAgentView`]: signingView('agent_view', ({ orgName = null }, ctx) => `, ${option(string)(orgName, ctx)}`),
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -3741,6 +4110,7 @@ export const MAP = {
   ...TRIAL_MAP,
   ...CONTACT_MAP,
   ...OFFER_MAP,
+  ...SIGNING_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -3901,6 +4271,21 @@ export const HAND_PORTED = {
       'responderMatches',
       'validateExpiry',
     ].map((f) => [`domains/recruitment/offers/offer.mjs#${f}`, 'test/scoutbox/recruitment/offer_rules_test.gleam']),
+  ),
+  // Junk statuses, party types and instants can't be stored or decoded; a contract day that isn't text is refused by
+  // the route's shape; a COMPLETED package is always checked against its rows; the club view's fixture and A42's
+  // leave out columns every stored row has, so the views are proved over the same package as stored.
+  ...Object.fromEntries(
+    [
+      'effectiveStatus',
+      'minorSigningPathwayOpen',
+      'signingClubView',
+      'signingConsistency',
+      'signingIntegrity',
+      'signingRecipientView',
+      'validateContractDates',
+      'validateExpiry',
+    ].map((f) => [`domains/recruitment/signings/signing.mjs#${f}`, 'test/scoutbox/recruitment/signing_rules_test.gleam']),
   ),
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
   ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',

@@ -720,15 +720,58 @@ pub fn can_complete_party(
   }
 }
 
+/// The Offer as the completion gate judges it: its references, and its status now.
+pub type GateOffer {
+  GateOffer(
+    id: id.OfferId,
+    status: Option(offer_status.OfferStatus),
+    org_id: id.OrgId,
+    player_id: id.PlayerId,
+    case_id: id.RecruitmentCaseId,
+  )
+}
+
+/// The Offer revision a package is bound to, with its effective status now.
+pub type GateRevision {
+  GateRevision(id: id.OfferRevisionId, status: offer_status.OfferStatus)
+}
+
 pub type GateFacts {
   GateFacts(
     now: Int,
-    offer: Option(Offer),
+    offer: Option(GateOffer),
+    offer_revision: Option(GateRevision),
     kase: Option(Room),
     other_completed: Bool,
     blocked: Bool,
     document_problem: Option(String),
   )
+}
+
+/// The gate's view of an Offer at `now`.
+pub fn gate_offer(o: Offer, now: Int) -> GateOffer {
+  GateOffer(
+    id: o.row.id,
+    status: offer_rules.status(o, now),
+    org_id: o.row.org_id,
+    player_id: o.row.player_id,
+    case_id: o.row.case_id,
+  )
+}
+
+/// The gate's view of the revision of `o` that `revision_id` names, if it has one.
+pub fn gate_revision(
+  o: Offer,
+  revision_id: String,
+  now: Int,
+) -> Option(GateRevision) {
+  list.find(o.revisions, fn(r) {
+    id.offer_revision_to_string(r.row.id) == revision_id
+  })
+  |> result.map(fn(r) {
+    GateRevision(r.row.id, offer_rules.effective(r.row, now))
+  })
+  |> option.from_result
 }
 
 /// Every unmet condition, named; only an empty list lets completion run.
@@ -794,36 +837,32 @@ pub fn completion_gate(p: Package, f: GateFacts) -> List(String) {
       ])
     }
   }
-  let offer_id = p.row.offer_id
   let offer = case f.offer {
     Some(o) ->
-      list.flatten([
-        case
-          offer_rules.status(o, now) == Some(offer_status.Accepted)
-          && o.row.id == offer_id
-        {
-          True -> []
-          False -> ["OFFER_NOT_ACCEPTED"]
-        },
-        case
-          list.find(o.revisions, fn(r) {
-            id.offer_revision_to_string(r.row.id) == p.row.offer_revision_id
-          })
-          |> result.map(fn(r) { offer_rules.effective(r.row, now) })
-        {
-          Ok(offer_status.Accepted) -> []
-          _ -> ["OFFER_REVISION_MISMATCH"]
-        },
-        case
-          o.row.org_id != p.row.org_id
-          || o.row.player_id != p.row.player_id
-          || o.row.case_id != p.row.case_id
-        {
-          True -> ["REFERENCE_MISMATCH"]
-          False -> []
-        },
-      ])
-    None -> ["OFFER_NOT_ACCEPTED", "OFFER_REVISION_MISMATCH"]
+      when(
+        o.status != Some(offer_status.Accepted) || o.id != p.row.offer_id,
+        "OFFER_NOT_ACCEPTED",
+      )
+    None -> ["OFFER_NOT_ACCEPTED"]
+  }
+  let offer_revision = case f.offer_revision {
+    Some(r) ->
+      when(
+        r.status != offer_status.Accepted
+          || id.offer_revision_to_string(r.id) != p.row.offer_revision_id,
+        "OFFER_REVISION_MISMATCH",
+      )
+    None -> ["OFFER_REVISION_MISMATCH"]
+  }
+  let reference = case f.offer {
+    Some(o) ->
+      when(
+        o.org_id != p.row.org_id
+          || o.player_id != p.row.player_id
+          || o.case_id != p.row.case_id,
+        "REFERENCE_MISMATCH",
+      )
+    None -> []
   }
   let kase = case f.kase {
     Some(k)
@@ -842,6 +881,8 @@ pub fn completion_gate(p: Package, f: GateFacts) -> List(String) {
     state,
     rev,
     offer,
+    offer_revision,
+    reference,
     kase,
     case f.other_completed {
       True -> ["CONFLICTING_COMPLETED_SIGNING"]

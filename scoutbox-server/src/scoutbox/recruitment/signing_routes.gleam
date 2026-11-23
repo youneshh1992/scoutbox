@@ -146,7 +146,8 @@ fn limited(
   }
 }
 
-const codes = [
+/// The Signing contract's codes for shape refusals, by field.
+pub const input_codes = [
   #("contract.*", "SIGNING_CONTRACT_DATES_INVALID"),
   #("expiresAt", "SIGNING_EXPIRY_INVALID"),
   #("dataUrl", "SIGNING_DOCUMENT_INVALID"),
@@ -166,7 +167,7 @@ fn parsed(
       shape,
       raw,
       root:,
-      codes:,
+      codes: input_codes,
       default: "SIGNING_INPUT_INVALID",
     )
   {
@@ -2564,7 +2565,12 @@ pub fn complete(
               p,
               signing_rules.GateFacts(
                 now:,
-                offer: Some(l.offer),
+                offer: Some(signing_rules.gate_offer(l.offer, now)),
+                offer_revision: signing_rules.gate_revision(
+                  l.offer,
+                  p.row.offer_revision_id,
+                  now,
+                ),
                 kase: Some(l.room),
                 other_completed: other,
                 blocked: is_blocked,

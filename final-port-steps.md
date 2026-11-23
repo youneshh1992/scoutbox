@@ -110,8 +110,11 @@ commit. In this order:
    `validateExpiry` 25, `canRespondToRevision` 20, `minorOfferPathwayOpen` 18, `offerIntegrity` 18, `offerEvidence`
    14, `validateDocumentRefs` 14, then the smaller ones and the three views. The hand-port calls are
    `effectiveRevisionStatus` (4), `validateExpiry` (4) and `offerEvidence` (1).
-2. **signings** (`signings/signing.mjs`, `signing_rules`): `requiredPartiesFor` 63, `signingIntegrity` 40,
-   `canStart` 13, `minorSigningPathwayOpen` 11, `signingConsistency` 10, then the rest and the three views.
+2. **signings** [**done**] (`signings/signing.mjs`, `signing_rules`): `requiredPartiesFor` 63, `signingIntegrity`
+   40, `canStart` 13, `minorSigningPathwayOpen` 11, `signingConsistency` 10, then the rest and the three views.
+   `completion_gate` judged the whole Offer; it now takes the facts the TypeScript gate does (`GateOffer`,
+   `GateRevision`, built by the route with `gate_offer` and `gate_revision`). `signingConsistency` without rows
+   isn't a call either caller makes, so a COMPLETED package passed none is ported by hand.
 3. **decisions** (`lifecycle/decision.mjs`, `decisions`): `validateDecisionReasons` 30, `decisionIntegrity` 25,
    `validateOutcome` 25, `validateEvidenceRefShapes` 16, `resolveEvidenceRefs` 12 (12 hand-port calls),
    `validateNote` 11, `decisionView` 9, `chainHead`, `duplicateFinalHeads`, `isFormal`, `draftView` and the rest.

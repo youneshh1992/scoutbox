@@ -16,6 +16,7 @@ import scoutbox/platform/zones
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/offer_rules
+import scoutbox/recruitment/signing_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
@@ -36,6 +37,10 @@ import scoutbox/rows/recruitment_cases
 import scoutbox/rows/recruitment_contacts
 import scoutbox/rows/recruitment_offers
 import scoutbox/rows/representation_agreements
+import scoutbox/rows/signing_documents
+import scoutbox/rows/signing_packages
+import scoutbox/rows/signing_revision_parties
+import scoutbox/rows/signing_revisions
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
@@ -52,6 +57,7 @@ import scoutbox/vocab/offer_status
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status.{type RoomStatus}
+import scoutbox/vocab/signing_party_type
 import scoutbox/vocab/ver_level
 
 /// A current, unverified claim about a user, with nothing else known.
@@ -561,4 +567,79 @@ pub fn offer_documents(
     raw,
   ))
   offer_rules.validate_documents(refs) |> result.map_error(offer_refusal)
+}
+
+/// A case's Room naming its own organisation and player: what the signing rules compare a package's references with.
+pub fn kase(
+  case_id: id.RecruitmentCaseId,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
+  status: RoomStatus,
+) -> cases.Room {
+  let r = room(status, [])
+  cases.Room(
+    ..r,
+    row: recruitment_cases.Row(..r.row, id: case_id, org_id:, player_id:),
+  )
+}
+
+/// A DRAFT package with no revisions, created at 0: a recorded package names its parties, status and revisions.
+pub fn signing_package() -> signing_rules.Package {
+  signing_rules.Package(
+    row: signing_packages.new(
+      id: id.signing_package("spk-base"),
+      org_id: id.org("org-base"),
+      case_id: id.recruitment_case("case-base"),
+      player_id: id.player("pl-base"),
+      offer_id: id.offer("o-base"),
+      offer_revision_id: "rev-base",
+      status: signing_packages.Draft,
+      current_revision_id: id.signing_revision("spr-base"),
+      created_at: 0,
+      created_by_user_id: id.org_user("u-base"),
+      updated_at: 0,
+    ),
+    revisions: [],
+    history: [],
+    keys: [],
+  )
+}
+
+/// Revision 1 of the base package, a draft created at 0 with no document or parties.
+pub fn signing_revision() -> signing_revisions.Row {
+  signing_revisions.new(
+    id: id.signing_revision("spr-base"),
+    package_id: id.signing_package("spk-base"),
+    position: 0,
+    revision_number: 1,
+    status: signing_revisions.Draft,
+    created_at: 0,
+  )
+}
+
+/// A pending player party of the base revision, naming no one: a recorded party names its type and entities.
+pub fn signing_party() -> signing_revision_parties.Row {
+  signing_revision_parties.new(
+    revision_id: id.signing_revision("spr-base"),
+    position: 0,
+    party_type: signing_party_type.Player,
+  )
+}
+
+/// The base revision's document, uploaded at 0: a recorded document names its digest.
+pub fn signing_document() -> signing_documents.Row {
+  signing_documents.new(
+    id: id.signing_document("sd-base"),
+    revision_id: id.signing_revision("spr-base"),
+    kind: signing_documents.Signing,
+    evidence_id: id.evidence("vevd-base"),
+    sha256: "",
+    uploaded_at: 0,
+  )
+}
+
+/// A signing rule's refusal as the TypeScript rule reports one, as JSON in its key order: the error, the field and
+/// problem when it names them, the message, then its other fields.
+pub fn signing_refusal(r: signing_rules.Refusal) -> String {
+  offer_refusal(offer_rules.Refusal(r.error, r.message, r.fields))
 }

@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 3838 / 696 | 182 / 439 | 13 to go |
+| recruitment | 19 | 19 | 19 | 3941 / 576 | 201 / 457 | 11 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -84,8 +84,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 55 / 0 | 49 / 51 | 2 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
-| `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 1 / 81 | 0 / 1 | 81 cases pending; 1 hand-port calls |
-| `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 1 / 39 | 3 / 3 | 39 cases pending |
+| `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 71 / 0 | 12 / 12 | **done** |
+| `recruitment/signingsAdversarial` | neutral | 4 → 0 | 212 | 174 | 38 |  | yes | 34 / 0 | 10 / 10 | **done** |
 | `recruitment/signingsPersistence` | neutral | 3 → 0 | 78 | 78 |  |  | yes |  |  | **done** |
 | `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  | yes | 43 / 49 | 3 / 20 | 49 cases pending; 17 hand-port calls |
 | `recruitment/trials` | neutral | 8 → 0 | 388 | 308 | 90 | +10 added | yes | 71 / 95 | 0 / 39 | 95 cases pending; 39 hand-port calls |
@@ -300,8 +300,17 @@ ported by hand to a gleeunit test.
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 2 | args[].note.toString is a function; Gleam's types can't hold its arguments: cannot print "sign_immediately" as a value of scoutbox/rows/room_decisions.recommendation_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 1 | args[] is undefined | to do |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 4 | Gleam's types can't hold its arguments: cannot print "" as a value of scoutbox/rows/signing_packages.status_pairs; Gleam's types can't hold its arguments: cannot print "EXPIRED" as a value of scoutbox/rows/signing_packages.status_pairs; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/rows/signing_packages.status_pairs; Gleam's types can't hold its arguments: cannot print "SIGNED" as a value of scoutbox/rows/signing_packages.status_pairs | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#minorSigningPathwayOpen` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingClubView` | 1 | Gleam's types can't hold its arguments: a stored package always has its creator; this fixture's has none | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingConsistency` | 1 | Gleam's types can't hold its arguments: every caller reads the completed rows, so a COMPLETED package is always checked against them | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 2 | Gleam's types can't hold its arguments: cannot print "countersigned" as a value of scoutbox/rows/signing_revisions.status_pairs; Gleam's types can't hold its arguments: cannot print "SIGNED" as a value of scoutbox/rows/signing_packages.status_pairs | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingRecipientView` | 1 | Gleam's types can't hold its arguments: a stored document always has an id; this fixture's on spr-1 has none | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateContractDates` | 1 | Gleam's types can't hold its arguments: cannot print 1720000000000 as a String | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 1 | args[] is undefined | `test/scoutbox/recruitment/signing_rules_test.gleam` |
 | `recruitment/signingsAdversarial` | `domain.ts#isAdult` | 3 | Gleam's types can't hold its arguments: cannot print "not-a-date" as a Day; Gleam's types can't hold its arguments: cannot print null as a Day; Gleam's types can't hold its arguments: cannot print undefined as a Day | `test/scoutbox/rules/age_test.gleam` |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 1 | Gleam's types can't hold its arguments: cannot print "soon" as an Int | `test/scoutbox/recruitment/signing_rules_test.gleam` |
+| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 6 | Gleam's types can't hold its arguments: cannot print "later" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print "WITNESS" as a value of scoutbox/vocab/signing_party_type.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int | `test/scoutbox/recruitment/signing_rules_test.gleam` |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 1 | args[].toString is a function | to do |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 16 | args[] is a function; args[] is a symbol; args[] is NaN; Gleam's types can't hold its arguments: cannot print -1 as a String; Gleam's types can't hold its arguments: cannot print ["2026-10-03"] as a String; Gleam's types can't hold its arguments: cannot print [] as a String; Gleam's types can't hold its arguments: cannot print {"$date":1790985600000} as a String; Gleam's types can't hold its arguments: cannot print {"proposedDate":"2026-10-03"} as a String; Gleam's types can't hold its arguments: cannot print {} as a String; Gleam's types can't hold its arguments: cannot print 0 as a String; Gleam's types can't hold its arguments: cannot print 1000000000000 as a String; Gleam's types can't hold its arguments: cannot print false as a String; Gleam's types can't hold its arguments: cannot print true as a String; Gleam's types can't hold its arguments: no trial date is no date: the field is absent before the rule reads it | to do |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 3 | args[] is NaN; Gleam's types can't hold its arguments: cannot print "bad" as an Int; Gleam's types can't hold its arguments: cannot print undefined as an Int | `test/scoutbox/platform/temporal_test.gleam` |
@@ -443,30 +452,6 @@ mapped, then `npm run cases`.
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons` | 13 |
 | `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#adoptionStatusForStage` | 11 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 6 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canStart` | 10 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#cleanText` | 2 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#completionGate` | 7 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 7 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#minorSigningPathwayOpen` | 11 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#payloadFingerprint` | 4 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#requiredPartiesFor` | 1 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingAgentView` | 1 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingClubView` | 1 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingConsistency` | 8 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingCorrupt` | 1 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 10 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#signingRecipientView` | 2 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateContractDates` | 6 |
-| `recruitment/signings` | `domains/recruitment/signings/signing.mjs#validateExpiry` | 4 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 2 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#canStart` | 3 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#completionGate` | 2 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#effectiveStatus` | 1 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#requiredPartiesFor` | 1 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingConsistency` | 1 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingCorrupt` | 1 |
-| `recruitment/signingsAdversarial` | `domains/recruitment/signings/signing.mjs#signingIntegrity` | 28 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 16 |
 | `recruitment/trialDatesMinorsAndErasure` | `domain.ts#validateTrialDetails` | 33 |
 | `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#blockedAllows` | 9 |
