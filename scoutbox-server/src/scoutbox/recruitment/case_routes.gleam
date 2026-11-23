@@ -611,48 +611,18 @@ pub fn decision(
               ),
               #(
                 "requirements",
-                json.object([
-                  #("canDraft", json.bool(can_finalize && !removed)),
-                  #("canFinalize", json.bool(can_finalize && !removed)),
-                  #(
-                    "role",
-                    json.nullable(
-                      option.map(role, room_rules.role_code),
-                      json.string,
-                    ),
-                  ),
-                  #("blocked", json.bool(blocked)),
-                  #("subjectRemoved", json.bool(removed)),
-                  #("hasDraft", json.bool(draft != None)),
-                  #("hasFinal", json.bool(current != None)),
-                  #(
-                    "inputs",
-                    json.object([
-                      #(
-                        "submittedAssessments",
-                        json.int(list.length(summary.submitted)),
-                      ),
-                      #("completedTrials", json.int(completed_trials)),
-                      #(
-                        "note",
-                        json.string(
-                          "Inputs are counts of what exists. None of them is required by policy, and none of them decides anything.",
-                        ),
-                      ),
-                    ]),
-                  ),
-                  #(
-                    "outcomes",
-                    json.preprocessed_array(availability(room, role)),
-                  ),
-                  #("status", room_status.to_json(room.status)),
-                  #(
-                    "note",
-                    json.string(
-                      "A formal decision is an explicit human act by a room lead or recruitment lead. ScoutBox never takes it.",
-                    ),
-                  ),
-                ]),
+                decisions.requirements_json(
+                  role:,
+                  can_finalize:,
+                  status: room.status,
+                  submitted_assessments: list.length(summary.submitted),
+                  completed_trials:,
+                  blocked:,
+                  subject_removed: removed,
+                  has_draft: draft != None,
+                  has_final: current != None,
+                  outcomes: availability(room, role),
+                ),
               ),
               #("blocked", json.bool(blocked)),
               #("subjectRemoved", json.bool(removed)),
@@ -750,35 +720,12 @@ type Content {
   )
 }
 
-const decision_codes = [
-  #("expectedRev", "DECISION_REV_REQUIRED"),
-  #("expectedVersion", "DECISION_REV_REQUIRED"),
-  #("outcome", "DECISION_OUTCOME_INVALID"),
-  #("reasonCodes.*", "DECISION_REASON_INVALID"),
-  #("evidenceRefs.*", "DECISION_EVIDENCE_INVALID"),
-]
-
 fn content_shape(with_key: Bool, with_rev: Bool) -> input.Shape(Content) {
   let rest = fn() {
-    use outcome <- input.field(
-      "outcome",
-      input.clearable(input.one_of(decision_outcome.pairs)),
-    )
-    use reason_codes <- input.field(
-      "reasonCodes",
-      input.clearable(input.items(input.text(1_000_000), 1_000_000)),
-    )
-    use note <- input.field(
-      "note",
-      input.clearable(input.text(decisions.note_max)),
-    )
-    use refs <- input.field(
-      "evidenceRefs",
-      input.clearable(input.items(
-        decisions.refs_shape(),
-        decisions.evidence_refs_max,
-      )),
-    )
+    use outcome <- input.field("outcome", decisions.outcome_check())
+    use reason_codes <- input.field("reasonCodes", decisions.reasons_check())
+    use note <- input.field("note", decisions.note_check(decisions.note_max))
+    use refs <- input.field("evidenceRefs", decisions.refs_check())
     case with_key {
       True -> {
         use client_key <- input.field(
@@ -895,8 +842,8 @@ fn draft_body(
       content_shape(with_key, with_rev),
       raw,
       root: "body",
-      codes: decision_codes,
-      default: "DECISION_CONTENT_INVALID",
+      codes: decisions.input_codes,
+      default: decisions.input_default,
     )
   {
     Error(r) -> refused(r)
@@ -1297,8 +1244,8 @@ pub fn discard_draft(
           rev.fields(fn() { input.nothing() }),
           raw,
           root: "body",
-          codes: decision_codes,
-          default: "DECISION_CONTENT_INVALID",
+          codes: decisions.input_codes,
+          default: decisions.input_default,
         )
       {
         Error(refusal) -> refused(refusal)
@@ -1393,10 +1340,10 @@ pub fn finalize(
       shape,
       raw,
       root: "body",
-      codes: list.append(decision_codes, [
+      codes: list.append(decisions.input_codes, [
         #("supersedesRev", "DECISION_REV_REQUIRED"),
       ]),
-      default: "DECISION_CONTENT_INVALID",
+      default: decisions.input_default,
     )
   {
     Error(refusal) -> refused(refusal)

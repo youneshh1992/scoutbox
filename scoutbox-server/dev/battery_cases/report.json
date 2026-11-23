@@ -3051,56 +3051,71 @@
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#chainHead",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#decisionIntegrity",
         "calls": 16,
-        "cases": 16,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/vocab/decision_outcome.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"accept\" as a value of scoutbox/vocab/decision_outcome.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a stored rev": 1,
+          "Gleam's types can't hold its arguments: cannot print 1.5 as a stored rev": 1,
+          "Gleam's types can't hold its arguments: every caller judges a row against its case and organisation": 4,
+          "Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one": 1,
+          "Gleam's types can't hold its arguments: references are child rows: there is no list that is not one": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#decisionMilestone",
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#decisionRequirements",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the route always counts the submitted assessments and completed trials": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#decisionView",
         "calls": 9,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored lifecycle is written whole; this fixture's has no action": 6
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#draftView",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored draft always has createdAt (NOT NULL); this fixture's has none": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#normaliseDecisionClientKey",
@@ -3121,9 +3136,11 @@
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#summariseAssessments",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an assessment's ratings are counted by assessments_for as it reads them; ported over the store": 3
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons",
@@ -3132,28 +3149,32 @@
         "handPort": {
           "args[] is undefined": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes",
         "calls": 16,
-        "cases": 16,
-        "handPort": {},
-        "status": "pending"
+        "cases": 15,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the route's shape refuses a reference with a field beyond kind and id, which the rule drops": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#validateNote",
         "calls": 11,
         "cases": 11,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#validateOutcome",
         "calls": 25,
-        "cases": 23,
-        "handPort": {},
-        "status": "pending"
+        "cases": 22,
+        "handPort": {
+          "Gleam's types can't hold its arguments: the route reads a null or absent outcome as none, without the rule": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
@@ -3190,28 +3211,35 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#decisionIntegrity",
         "calls": 9,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/vocab/decision_outcome.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"accept\" as a value of scoutbox/vocab/decision_outcome.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print 0 as a stored rev": 1,
+          "Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one": 1,
+          "Gleam's types can't hold its arguments: references are child rows: there is no list that is not one": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/decision.mjs#isFormal",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },

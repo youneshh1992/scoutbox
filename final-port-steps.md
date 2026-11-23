@@ -115,9 +115,16 @@ commit. In this order:
    `completion_gate` judged the whole Offer; it now takes the facts the TypeScript gate does (`GateOffer`,
    `GateRevision`, built by the route with `gate_offer` and `gate_revision`). `signingConsistency` without rows
    isn't a call either caller makes, so a COMPLETED package passed none is ported by hand.
-3. **decisions** (`lifecycle/decision.mjs`, `decisions`): `validateDecisionReasons` 30, `decisionIntegrity` 25,
-   `validateOutcome` 25, `validateEvidenceRefShapes` 16, `resolveEvidenceRefs` 12 (12 hand-port calls),
-   `validateNote` 11, `decisionView` 9, `chainHead`, `duplicateFinalHeads`, `isFormal`, `draftView` and the rest.
+3. **decisions** [**done**] (`lifecycle/decision.mjs`, `decisions`): `validateDecisionReasons` 30,
+   `decisionIntegrity` 25, `validateOutcome` 25, `validateEvidenceRefShapes` 16, `resolveEvidenceRefs` 12 (12
+   hand-port calls), `validateNote` 11, `decisionView` 9, `chainHead`, `duplicateFinalHeads`, `isFormal`, `draftView`
+   and the rest. No difference turned up. On both servers the four validators sit behind the route's schema, which
+   refuses junk under the rule's own code (`DECISION_INPUT_CODES`). So a call the shape refuses compares only the
+   code (`base.ByShape`), and the rule's own message for it is never sent. `decisions` now exports the shape's checks
+   and codes, and `duplicate_heads` and `requirements_json` come out of inline code. `decisionMilestone` has no
+   caller and is closed in `NO_COUNTERPART`. A partial lifecycle or a reference without `meta` is a storable row (the
+   columns are nullable), so only the views refuse those fixtures. The views are ported over complete rows, with the
+   TypeScript views' answers. `resolveEvidenceRefs` and `summariseAssessments` run against seeded rows.
 4. **trials** (`lifecycle/trial.mjs` and `domain.ts`'s trial rules, `trial_rules`): `trialStateAllows` 37,
    `validateTrialDetails` 35, `validateScheduleInput` 27 (its `mintId` closure calls are hand ports),
    `chooseTrialSlot` 17, `trialIntegrity` 10, then the rest. The 16 `parseTrialDate` hand-port calls are here too.

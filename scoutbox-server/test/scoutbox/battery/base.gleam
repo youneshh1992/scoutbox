@@ -15,12 +15,15 @@ import scoutbox/platform/temporal
 import scoutbox/platform/zones
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/contact_rules
+import scoutbox/recruitment/decisions
 import scoutbox/recruitment/offer_rules
+import scoutbox/recruitment/room_records
 import scoutbox/recruitment/signing_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
 import scoutbox/rows/agent_profiles
+import scoutbox/rows/assessments
 import scoutbox/rows/case_budget_fx_assumptions
 import scoutbox/rows/case_budget_lines
 import scoutbox/rows/case_history
@@ -37,6 +40,7 @@ import scoutbox/rows/recruitment_cases
 import scoutbox/rows/recruitment_contacts
 import scoutbox/rows/recruitment_offers
 import scoutbox/rows/representation_agreements
+import scoutbox/rows/room_decisions
 import scoutbox/rows/signing_documents
 import scoutbox/rows/signing_packages
 import scoutbox/rows/signing_revision_parties
@@ -48,6 +52,7 @@ import scoutbox/vocab/brief_status
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/contact_mode
 import scoutbox/vocab/currency
+import scoutbox/vocab/decision_outcome.{type DecisionOutcome}
 import scoutbox/vocab/evidence_source
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/goal_category
@@ -642,4 +647,140 @@ pub fn signing_document() -> signing_documents.Row {
 /// problem when it names them, the message, then its other fields.
 pub fn signing_refusal(r: signing_rules.Refusal) -> String {
   offer_refusal(offer_rules.Refusal(r.error, r.message, r.fields))
+}
+
+/// How the decision contract refused one field: by the route's shape, before any rule (its code: both servers' schemas
+/// refuse these under the rule's own code, so the rule's message is never sent), or by the rule (its JSON).
+pub type DecisionRefused {
+  ByShape(String)
+  ByRule(String)
+}
+
+/// One field of a decision write, read as case_routes reads the body: `check` under the decision contract's codes.
+/// `raw` is the field's JSON text, or None when the write leaves it out.
+pub fn decision_field(
+  name: String,
+  check: input.Rule(a),
+  raw: Option(String),
+) -> Result(a, DecisionRefused) {
+  let text = case raw {
+    Some(v) -> "{" <> json.to_string(json.string(name)) <> ":" <> v <> "}"
+    None -> "{}"
+  }
+  let shape = {
+    use v <- input.field(name, check)
+    input.done(v)
+  }
+  input.parse_coded(
+    shape,
+    body(text),
+    root: "body",
+    codes: decisions.input_codes,
+    default: decisions.input_default,
+  )
+  |> result.map_error(fn(r) { ByShape(r.error) })
+}
+
+/// A decision rule's refusal as the TypeScript rule reports one, in its key order: the error, the message, then its
+/// other fields (validate_reasons carries the taxonomy's message among them).
+pub fn decision_refusal(r: decisions.Refusal) -> DecisionRefused {
+  ByRule(
+    json.object([
+      #("error", json.string(r.error)),
+      ..case r.message {
+        "" -> r.fields
+        m -> [#("message", json.string(m)), ..r.fields]
+      }
+    ])
+    |> json.to_string,
+  )
+}
+
+/// A write's outcome as validateOutcome judges it: the route's shape alone (a null outcome is none).
+pub fn decision_outcome(
+  raw: Option(String),
+) -> Result(Option(DecisionOutcome), DecisionRefused) {
+  decision_field("outcome", decisions.outcome_check(), raw)
+  |> result.map(option.flatten)
+}
+
+/// A write's reasons as validateDecisionReasons judges them, for an act that requires `outcome`.
+pub fn decision_reasons(
+  raw: Option(String),
+  outcome: Option(DecisionOutcome),
+) -> Result(List(String), DecisionRefused) {
+  use codes <- result.try(decision_field(
+    "reasonCodes",
+    decisions.reasons_check(),
+    raw,
+  ))
+  decisions.validate_reasons(
+    codes |> option.flatten |> option.unwrap([]),
+    outcome,
+  )
+  |> result.map_error(decision_refusal)
+}
+
+/// A write's note (or supersession reason, `field` with its `max`) as validateNote judges it.
+pub fn decision_note(
+  field: String,
+  max: Int,
+  raw: Option(String),
+) -> Result(Option(String), DecisionRefused) {
+  use note <- result.try(decision_field(field, decisions.note_check(max), raw))
+  decisions.validate_note(option.flatten(note), field, max)
+  |> result.map_error(decision_refusal)
+}
+
+/// A write's evidence references as validateEvidenceRefShapes judges them: deduplicated and trimmed.
+pub fn decision_refs(
+  raw: Option(String),
+) -> Result(List(decisions.RefShape), DecisionRefused) {
+  use refs <- result.map(decision_field(
+    "evidenceRefs",
+    decisions.refs_check(),
+    raw,
+  ))
+  decisions.ref_shapes(option.flatten(refs))
+}
+
+/// A legacy recommendation of the base case, written at 0 by no one: a recorded row names its own fields.
+pub fn decision() -> decisions.Decision {
+  decisions.Decision(
+    base: room_records.Decision(
+      row: room_decisions.new(
+        id: id.room_decision("rdec-base"),
+        room_id: id.recruitment_case("case-base"),
+        org_id: id.org("org-base"),
+        player_id: id.player("pl-base"),
+        recommendation: room_decisions.NoDecision,
+        created_at: 0,
+      ),
+      reason_codes: [],
+      snapshot: None,
+    ),
+    refs: [],
+    assessment_ids: [],
+  )
+}
+
+/// A submitted assessment of the base player, counted as rating nothing: a recorded summary names its own fields.
+pub fn counted() -> decisions.Counted {
+  decisions.Counted(
+    row: assessments.new(
+      id: id.assessment("a-base"),
+      org_id: id.org("org-base"),
+      player_id: id.player("pl-base"),
+      scout_user_id: id.org_user("u-base"),
+      scout_name: "",
+      template_id: "t-base",
+      template_version: 1,
+      state: assessments.Submitted,
+      created_at: 0,
+    ),
+    rated: 0,
+    not_observed: 0,
+    confidence: #(0, 0, 0),
+    evidence_refs: 0,
+  )
 }

@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 3941 / 576 | 201 / 457 | 11 to go |
+| recruitment | 19 | 19 | 19 | 4040 / 449 | 245 / 488 | 10 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -74,8 +74,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/analytics` | neutral | 13 → 0 | 104 | 48 | 58 | +2 added | yes | 52 / 0 | 11 / 11 | **done** |
 | `recruitment/contacts` | neutral | 10 → 0 | 366 | 256 | 118 | +8 added | yes | 147 / 29 | 58 / 105 | 29 cases pending; 47 hand-port calls |
 | `recruitment/contactsPersistence` | neutral | 6 → 0 | 47 | 40 | 7 |  | yes | 0 / 8 | 0 / 3 | 8 cases pending; 3 hand-port calls |
-| `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 14 / 113 | 0 / 29 | 113 cases pending; 29 hand-port calls |
-| `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
+| `recruitment/decisions` | neutral | 9 → 0 | 249 | 185 | 66 | +2 added | yes | 105 / 0 | 38 / 54 | 16 hand-port calls |
+| `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 8 / 0 | 6 / 6 | **done** |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  | yes | 0 / 196 | 0 / 6 | 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 3 / 18 | 8 / 9 | 18 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
@@ -257,10 +257,18 @@ ported by hand to a gleeunit test.
 | `recruitment/contacts` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 2 | args[].evidence.check is a function | to do |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 2 | args[].contacts.byId is a function | to do |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 1 | args[].reads.signings.byId is a function | to do |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#resolveEvidenceRefs` | 12 | args[].reads.trials.byId is a function | to do |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 1 | args[] is undefined | to do |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 11 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "accept" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print 0 as a stored rev; Gleam's types can't hold its arguments: cannot print 1.5 as a stored rev; Gleam's types can't hold its arguments: every caller judges a row against its case and organisation; Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one; Gleam's types can't hold its arguments: references are child rows: there is no list that is not one | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionRequirements` | 1 | Gleam's types can't hold its arguments: the route always counts the submitted assessments and completed trials | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionView` | 6 | Gleam's types can't hold its arguments: a stored lifecycle is written whole; this fixture's has no action | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#draftView` | 2 | Gleam's types can't hold its arguments: a stored draft always has createdAt (NOT NULL); this fixture's has none | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#resolveEvidenceRefs` | 12 | args[].reads.trials.byId is a function | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#summariseAssessments` | 3 | Gleam's types can't hold its arguments: an assessment's ratings are counted by assessments_for as it reads them; ported over the store | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 1 | args[] is undefined | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes` | 1 | Gleam's types can't hold its arguments: the route's shape refuses a reference with a field beyond kind and id, which the rule drops | `test/scoutbox/recruitment/decisions_test.gleam` |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateOutcome` | 1 | Gleam's types can't hold its arguments: the route reads a null or absent outcome as none, without the rule | `test/scoutbox/recruitment/decisions_test.gleam` |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 8 | args[].contacts.byId is a function | to do |
 | `recruitment/decisions` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 8 | args[].evidence.check is a function | to do |
+| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 6 | Gleam's types can't hold its arguments: cannot print "__proto__" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "accept" as a value of scoutbox/vocab/decision_outcome.pairs; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print 0 as a stored rev; Gleam's types can't hold its arguments: reasons are child rows: there is no list that is not one; Gleam's types can't hold its arguments: references are child rows: there is no list that is not one | `test/scoutbox/recruitment/decisions_test.gleam` |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/journeyAdversarial` | `domain.ts#isAdult` | 8 | Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-31" as a Day; Gleam's types can't hold its arguments: cannot print "NaN" as a Day; Gleam's types can't hold its arguments: cannot print "not-a-date" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print 12 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day | `test/scoutbox/rules/age_test.gleam` |
@@ -409,23 +417,6 @@ mapped, then `npm run cases`.
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactContent` | 8 |
 | `recruitment/contacts` | `domains/recruitment/lifecycle/contact.mjs#validateContactReply` | 5 |
 | `recruitment/contactsPersistence` | `domains/recruitment/lifecycle/contact.mjs#contactIntegrity` | 8 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#assessmentSnapshot` | 1 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 2 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 16 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionMilestone` | 1 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionRequirements` | 2 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionView` | 3 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#draftView` | 3 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 2 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#summariseAssessments` | 4 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateDecisionReasons` | 29 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateEvidenceRefShapes` | 16 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateNote` | 11 |
-| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#validateOutcome` | 23 |
-| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 1 |
-| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 9 |
-| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 1 |
-| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#isFormal` | 3 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 9 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor` | 1 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |
@@ -503,3 +494,4 @@ their role, so their recorded calls get no test.
 | `platform/productionHardening` | `domains/platform/concurrency.mjs#revOf` | 2 | A revision is a typed column: NOT NULL on every versioned table, and on a case present exactly when its Room is (the table's CHECK), so no record lacks one to default. |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 | An event reaches a stream by its variant (live.gleam): no event can carry a name outside the registry, so none can fail closed; the batteries check each delivery over SSE. |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 | No event can carry a name outside the registry (live_event.registered, proved equal to it), so none is unclassified. |
+| `recruitment/decisions` | `domains/recruitment/lifecycle/decision.mjs#decisionMilestone` | 1 | No TypeScript route calls it. The journey writes its own decision lines (journey.gleam's decision_line, never the note), which the journey batteries compare. |

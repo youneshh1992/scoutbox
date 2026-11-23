@@ -4042,6 +4042,334 @@ const SIGNING_MAP = {
   [`${SIGNING_FN}#signingAgentView`]: signingView('agent_view', ({ orgName = null }, ctx) => `, ${option(string)(orgName, ctx)}`),
 };
 
+// ----------------------------------------------------------------------------------------- decisions
+
+const DECISIONS = 'scoutbox/recruitment/decisions';
+const DECISION_FN = 'domains/recruitment/lifecycle/decision.mjs';
+const DECISION_ROWS = 'scoutbox/rows/room_decisions';
+const DRAFT_ROWS = 'scoutbox/rows/case_decision_drafts';
+const ASSESSMENT_ROWS = 'scoutbox/rows/assessments';
+const decisionOutcome = vocab('scoutbox/vocab/decision_outcome');
+const evidenceRefKind = vocab('scoutbox/vocab/decision_evidence_kind');
+const OUTCOMES = ['progress', 'hold', 'reject'];
+const EVIDENCE_REF_KINDS = ['assessment', 'trial', 'box_cam_session', 'passport_evidence'];
+const utf16 = (s) => s.length;
+const LIFECYCLE_KEYS = ['action', 'from', 'to', 'applied', 'reason', 'at'];
+
+/** A reference a formal row or a draft keeps: its kind, its id and the metadata resolved when it was cited (a NULL
+ * column reads as null). */
+const storedRef = (r, ctx) => {
+  only('a stored reference', r, ['kind', 'id', 'meta']);
+  return `${ctx.use(DECISIONS)}.Ref(kind: ${evidenceRefKind(r.kind, ctx)}, id: ${string(r.id)}, meta: ${jsonValue(r.meta ?? null, ctx)})`;
+};
+
+/** Who acted, as three columns absent together. */
+const actorColumns = (prefix, withRole) => (v, ctx) => {
+  if (v === null) return [];
+  only('an actor', v, withRole ? ['userId', 'name', 'role'] : ['userId', 'name']);
+  return [
+    [`${prefix}_user_id`, option(ident('org_user'))(v.userId, ctx)],
+    [`${prefix}_name`, option(string)(v.name, ctx)],
+    ...(withRole ? [[`${prefix}_role`, option(string)(v.role, ctx)]] : []),
+  ];
+};
+
+/**
+ * A decision row of the Room's memory: its columns, its reasons and (on a formal row) its references and assessment
+ * ids as child rows. The lifecycle's columns are nullable, so a fixture naming only some of them is still a row.
+ */
+const decisionRec = (v, ctx) => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error(`cannot print ${JSON.stringify(v)} as a decision row`);
+  const { reasonCodes = [], evidenceRefs = [], assessmentSummary = null, snapshot = null, ...rest } = v;
+  if (typeof rest.id !== 'string' || !rest.id) throw new Error('a decision row always has its id (the primary key)');
+  if (snapshot !== null) throw new Error('no recorded decision names a snapshot');
+  if (!Array.isArray(reasonCodes)) throw new Error('reasons are child rows: there is no list that is not one');
+  if (!Array.isArray(evidenceRefs)) throw new Error('references are child rows: there is no list that is not one');
+  const summaryCols = (() => {
+    if (assessmentSummary === null) return {};
+    only('an assessment summary', assessmentSummary, ['submitted', 'withheld', 'verdicts', 'assessmentIds']);
+    return { assessmentsSubmitted: assessmentSummary.submitted, assessmentsWithheld: assessmentSummary.withheld, verdicts: assessmentSummary.verdicts };
+  })();
+  const row = record({
+    module: DECISION_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(BASE)}.decision().base.row`,
+    fields: {
+      id: ['id', ident('room_decision')],
+      roomId: ['room_id', ident('recruitment_case')],
+      orgId: ['org_id', ident('org')],
+      playerId: ['player_id', ident('player')],
+      kind: ['kind', option(vocab(DECISION_ROWS, 'kind_pairs'))],
+      state: ['state', option(vocab(DECISION_ROWS, 'state_pairs'))],
+      outcome: ['outcome', option(decisionOutcome)],
+      recommendation: ['recommendation', recommendation],
+      note: ['note', option(string)],
+      by: actorColumns('by', true),
+      createdAt: ['created_at', int],
+      finalizedAt: ['finalized_at', option(int)],
+      trigger: ['trigger', option(string)],
+      clientKey: ['client_key', option(string)],
+      supersedes: ['supersedes_id', option(ident('room_decision'))],
+      supersededById: ['superseded_by_id', option(ident('room_decision'))],
+      supersession: (s, ctx) => {
+        if (s === null) return [];
+        only('a supersession', s, ['of', 'reason']);
+        return [
+          ['supersession_of_id', `Some(${ident('room_decision')(s.of, ctx)})`],
+          ['supersession_reason', `Some(${string(s.reason)})`],
+        ];
+      },
+      rev: ['rev', (r, ctx) => {
+        if (r === undefined || r === null) return 'None';
+        // The column is INTEGER CHECK (rev >= 1) in a STRICT table.
+        if (!Number.isInteger(r) || r < 1) throw new Error(`cannot print ${JSON.stringify(r)} as a stored rev`);
+        return `Some(${int(r)})`;
+      }],
+      revAt: ['rev_at', option(int)],
+      keys: (k, ctx) => {
+        only("a decision's keys", k, ['finalize', 'draft']);
+        return ['finalize', 'draft'].flatMap((name) => {
+          const e = k[name];
+          if (!e) return [];
+          only('a key', e, ['key', 'fp']);
+          return [
+            [`${name}_key`, `Some(${string(e.key)})`],
+            [`${name}_fp`, `Some(${string(e.fp)})`],
+          ];
+        });
+      },
+      draftId: ['draft_id', option(string)],
+      lifecycle: (l, ctx) => {
+        if (l === null) return [];
+        only('a lifecycle', l, LIFECYCLE_KEYS);
+        return [
+          ['lifecycle_action', option(string)(l.action, ctx)],
+          ['lifecycle_from', option(roomStatus)(l.from, ctx)],
+          ['lifecycle_to', option(roomStatus)(l.to, ctx)],
+          ['lifecycle_applied', option(bool)(l.applied, ctx)],
+          ['lifecycle_reason', option(string)(l.reason, ctx)],
+          ['lifecycle_at', option(int)(l.at, ctx)],
+        ];
+      },
+      policyVersion: ['policy_version', option(int)],
+      assessmentsSubmitted: ['assessments_submitted', (n) => `Some(${int(n)})`],
+      assessmentsWithheld: ['assessments_withheld', (n) => `Some(${int(n)})`],
+      verdicts: ['assessment_verdicts_json', (o) => `Some(${string(JSON.stringify(o))})`],
+    },
+  })({ ...rest, ...summaryCols }, ctx);
+  const ids = assessmentSummary ? assessmentSummary.assessmentIds : [];
+  return `${ctx.use(DECISIONS)}.Decision(base: ${ctx.use('scoutbox/recruitment/room_records')}.Decision(row: ${row}, reason_codes: ${list(string)(reasonCodes, ctx)}, snapshot: None), refs: [${evidenceRefs.map((r) => storedRef(r, ctx)).join(', ')}], assessment_ids: ${list(string)(ids, ctx)})`;
+};
+
+/** The case's draft: its row, its reasons and its references. Created and updated with its own times and rev. */
+const draftRec = (v, ctx) => {
+  if (v === null || v === undefined) return 'None';
+  const { reasonCodes = [], evidenceRefs = [], ...rest } = v;
+  for (const k of ['createdAt', 'updatedAt', 'rev'])
+    if (!(k in rest)) throw new Error(`a stored draft always has ${k} (NOT NULL); this fixture's has none`);
+  const row = record({
+    module: DRAFT_ROWS,
+    constructor: 'Row',
+    base: (ctx) =>
+      `${ctx.use(DRAFT_ROWS)}.new(case_id: ${ident('recruitment_case')('case-base', ctx)}, id: ${ident('decision_draft')(rest.id, ctx)}, created_at: ${int(rest.createdAt)}, updated_at: ${int(rest.updatedAt)}, rev: ${int(rest.rev)})`,
+    fields: {
+      id: ['id', ident('decision_draft')],
+      outcome: ['outcome', option(decisionOutcome)],
+      note: ['note', option(string)],
+      by: actorColumns('by', false),
+      updatedBy: actorColumns('updated_by', false),
+      createdAt: ['created_at', int],
+      updatedAt: ['updated_at', int],
+      rev: ['rev', int],
+    },
+  })(rest, ctx);
+  return `Some(${ctx.use(DECISIONS)}.Draft(row: ${row}, reason_codes: ${list(string)(reasonCodes, ctx)}, refs: [${evidenceRefs.map((r) => storedRef(r, ctx)).join(', ')}]))`;
+};
+
+/** One assessment of a summary, as the summary counts it. */
+const countedRec = (a, ctx) => {
+  only('a summarised assessment', a, ['id', 'scoutName', 'scoutUserId', 'state', 'submittedAt', 'verdict', 'trialId', 'trialSessionId', 'rated', 'notObserved', 'confidence', 'evidenceRefs', 'published']);
+  only('a confidence count', a.confidence, ['low', 'medium', 'high']);
+  if (a.published) throw new Error('no recorded summary has published feedback');
+  const row = record({
+    module: ASSESSMENT_ROWS,
+    constructor: 'Row',
+    base: (ctx) => `${ctx.use(BASE)}.counted().row`,
+    fields: {
+      id: ['id', ident('assessment')],
+      scoutName: ['scout_name', string],
+      scoutUserId: ['scout_user_id', ident('org_user')],
+      state: ['state', vocab(ASSESSMENT_ROWS, 'state_pairs')],
+      submittedAt: ['submitted_at', option(int)],
+      verdict: ['recommendation_verdict', option(vocab('scoutbox/vocab/case_outcome'))],
+      trialId: ['context_trial_id', option(string)],
+      trialSessionId: ['context_trial_session_id', option(string)],
+    },
+    ignore: ['rated', 'notObserved', 'confidence', 'evidenceRefs', 'published'],
+  })(a, ctx);
+  const c = a.confidence;
+  return `${ctx.use(DECISIONS)}.Counted(row: ${row}, rated: ${int(a.rated)}, not_observed: ${int(a.notObserved)}, confidence: #(${int(c.low)}, ${int(c.medium)}, ${int(c.high)}), evidence_refs: ${int(a.evidenceRefs)})`;
+};
+
+const VERDICTS = ['sign', 'monitor', 'pass', 'none'];
+const verdictCounts = (v) => {
+  only('the verdict counts', v, VERDICTS);
+  return `[${VERDICTS.map((k) => `#(${string(k)}, ${int(v[k])})`).join(', ')}]`;
+};
+
+/** A field's JSON text as the write sends it, or None when it leaves the field out. */
+const sentField = (v) => (v === undefined ? 'None' : `Some(${string(JSON.stringify(v))})`);
+const decisionRefused = (r, ctx) => {
+  const { ok, ...body } = r;
+  return `Error(${ctx.use(BASE)}.ByRule(${string(JSON.stringify(body))}))`;
+};
+/** Refused by the route's shape, before the rule: on both servers, under the rule's code. */
+const shapeRefused = (r, ctx) => `Error(${ctx.use(BASE)}.ByShape(${string(r.error)}))`;
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+const DECISION_MAP = {
+  [`${DECISION_FN}#validateOutcome`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [raw] = c.args;
+      // validateContent reads a null outcome as none and never asks the rule; the route's shape does the same.
+      if (raw === null || raw === undefined) throw new Error('the route reads a null or absent outcome as none, without the rule');
+      const r = c.result;
+      const call = `${ctx.use(BASE)}.decision_outcome(${sentField(raw)})`;
+      if (OUTCOMES.includes(raw)) return eq(call, `Ok(Some(${decisionOutcome(r.outcome, ctx)}))`);
+      if (r.ok) throw new Error(`validateOutcome accepted ${JSON.stringify(raw)}, which the route's shape refuses`);
+      return eq(call, shapeRefused(r, ctx));
+    },
+  },
+  [`${DECISION_FN}#validateDecisionReasons`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [raw, { outcome = null, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validateDecisionReasons has no option ${Object.keys(rest)}`);
+      const r = c.result;
+      const call = `${ctx.use(BASE)}.decision_reasons(${sentField(raw)}, ${option(decisionOutcome)(outcome, ctx)})`;
+      const shaped = raw === null || raw === undefined || (Array.isArray(raw) && raw.every((x) => typeof x === 'string'));
+      if (!shaped) return eq(call, shapeRefused(r, ctx));
+      return eq(call, r.ok ? `Ok(${list(string)(r.codes, ctx)})` : decisionRefused(r, ctx));
+    },
+  },
+  [`${DECISION_FN}#validateNote`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [raw, { field = 'note', max = 2000, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validateNote has no option ${Object.keys(rest)}`);
+      const r = c.result;
+      const call = `${ctx.use(BASE)}.decision_note(${string(field)}, ${int(max)}, ${sentField(raw)})`;
+      const shaped = raw === null || raw === undefined || (typeof raw === 'string' && utf16(raw) <= max);
+      if (!shaped) return eq(call, shapeRefused(r, ctx));
+      return eq(call, r.ok ? `Ok(${option(string)(r.text, ctx)})` : decisionRefused(r, ctx));
+    },
+  },
+  [`${DECISION_FN}#validateEvidenceRefShapes`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [raw] = c.args;
+      const r = c.result;
+      const call = `${ctx.use(BASE)}.decision_refs(${sentField(raw)})`;
+      const each = (x) =>
+        isPlainObject(x) &&
+        Object.keys(x).every((k) => k === 'kind' || k === 'id') &&
+        EVIDENCE_REF_KINDS.includes(x.kind) &&
+        typeof x.id === 'string' &&
+        x.id.length > 0 &&
+        x.id.length <= 80;
+      const shaped = raw === null || raw === undefined || (Array.isArray(raw) && raw.length <= 50 && raw.every(each));
+      if (!shaped) {
+        if (r.ok) throw new Error("the route's shape refuses a reference with a field beyond kind and id, which the rule drops");
+        return eq(call, shapeRefused(r, ctx));
+      }
+      const shape = (x, ctx) => `${ctx.use(DECISIONS)}.RefShape(kind: ${evidenceRefKind(x.kind, ctx)}, id: ${string(x.id)})`;
+      return eq(call, r.ok ? `Ok(${list(shape)(r.refs, ctx)})` : decisionRefused(r, ctx));
+    },
+  },
+  [`${DECISION_FN}#decisionIntegrity`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [d, opts] = c.args;
+      if (opts === undefined) throw new Error('every caller judges a row against its case and organisation');
+      const { orgId, caseId, ...rest } = opts;
+      if (Object.keys(rest).length) throw new Error(`decisionIntegrity has no option ${Object.keys(rest)}`);
+      return eq(`${ctx.use(DECISIONS)}.integrity(${decisionRec(d, ctx)}, ${ident('org')(orgId, ctx)}, ${ident('recruitment_case')(caseId, ctx)})`, list(string)(c.result, ctx));
+    },
+  },
+  [`${DECISION_FN}#duplicateFinalHeads`]: plainIn(DECISIONS)('duplicate_heads', [list(decisionRec)], list(ident('room_decision'))),
+  [`${DECISION_FN}#chainHead`]: {
+    module: DECISIONS,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use('gleam/option')}.map(${ctx.use(DECISIONS)}.chain_head(${list(decisionRec)(c.args[0], ctx)}), fn(d) { d.base.row.id })`,
+        option(ident('room_decision'))(c.result?.id, ctx),
+      ),
+  },
+  // Called through Array.filter, whose index and array it ignores.
+  [`${DECISION_FN}#isFormal`]: {
+    module: DECISIONS,
+    test: (c, ctx) => eq(`${ctx.use(DECISIONS)}.is_formal(${decisionRec(c.args[0], ctx)})`, bool(c.result)),
+  },
+  [`${DECISION_FN}#decisionView`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [d, { omitNote = false, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`decisionView has no option ${Object.keys(rest)}`);
+      // The view prints every stored column: a lifecycle record_lifecycle wrote has all six, and a cited reference
+      // the metadata it was resolved with.
+      for (const k of LIFECYCLE_KEYS)
+        if (d.lifecycle && !(k in d.lifecycle)) throw new Error(`a stored lifecycle is written whole; this fixture's has no ${k}`);
+      if (d.kind === 'formal' && (d.evidenceRefs ?? []).some((r) => !('meta' in r)))
+        throw new Error('a cited reference is stored with the metadata it was resolved with; this fixture\'s has none');
+      return eqJson(`${ctx.use(DECISIONS)}.view(${decisionRec(d, ctx)}, ${bool(omitNote)})`, c.result, ctx);
+    },
+  },
+  [`${DECISION_FN}#draftView`]: {
+    module: DECISIONS,
+    test: (c, ctx) => eqJson(`${ctx.use(DECISIONS)}.draft_view(${draftRec(c.args[0], ctx)})`, c.result, ctx),
+  },
+  [`${DECISION_FN}#summariseAssessments`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const [visible, { withheld = 0, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`summariseAssessments has no option ${Object.keys(rest)}`);
+      // assessments_for counts each assessment's ratings in SQL; an assessment is never read without them.
+      if (visible.length) throw new Error("an assessment's ratings are counted by assessments_for as it reads them; ported over the store");
+      return eqJson(`${ctx.use(DECISIONS)}.summary_json(${ctx.use(DECISIONS)}.summarise([], ${int(withheld)}))`, c.result, ctx);
+    },
+  },
+  [`${DECISION_FN}#assessmentSnapshot`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const { submitted, drafts, withheld, verdicts, disagreement, assessments, note, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`a summary has no ${Object.keys(rest)}`);
+      if (submitted !== assessments.length) throw new Error('a summary counts the assessments it lists');
+      const summary = `${ctx.use(DECISIONS)}.Summary(submitted: ${list(countedRec)(assessments, ctx)}, drafts: ${int(drafts)}, withheld: ${int(withheld)}, verdicts: ${verdictCounts(verdicts)})`;
+      const r = c.result;
+      return eq(
+        `${ctx.use(DECISIONS)}.snapshot_of(${summary})`,
+        `${ctx.use(DECISIONS)}.AssessmentSnapshot(submitted: ${int(r.submitted)}, withheld: ${int(r.withheld)}, verdicts: ${verdictCounts(r.verdicts)}, ids: ${list(ident('assessment'))(r.assessmentIds, ctx)})`,
+      );
+    },
+  },
+  [`${DECISION_FN}#decisionRequirements`]: {
+    module: DECISIONS,
+    test: (c, ctx) => {
+      const { role: rl, canFinalize, status: st, submittedAssessments, completedTrials, blocked, subjectRemoved, draft, hasFinal, availability } = c.args[0];
+      // The rule reads these keys only; the route passes each, counted.
+      if (!Number.isInteger(submittedAssessments) || !Number.isInteger(completedTrials))
+        throw new Error('the route always counts the submitted assessments and completed trials');
+      return eqJson(
+        `${ctx.use(DECISIONS)}.requirements_json(role: ${option(role)(rl, ctx)}, can_finalize: ${bool(canFinalize)}, status: ${roomStatus(st, ctx)}, submitted_assessments: ${int(submittedAssessments)}, completed_trials: ${int(completedTrials)}, blocked: ${bool(blocked)}, subject_removed: ${bool(subjectRemoved)}, has_draft: ${bool(draft !== null && draft !== undefined)}, has_final: ${bool(hasFinal)}, outcomes: ${list(jsonValue)(availability, ctx)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -4111,6 +4439,7 @@ export const MAP = {
   ...CONTACT_MAP,
   ...OFFER_MAP,
   ...SIGNING_MAP,
+  ...DECISION_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -4203,6 +4532,8 @@ export const MAP = {
  * has no entry in MAP, and its recorded calls get no test.
  */
 export const NO_COUNTERPART = {
+  [`${DECISION_FN}#decisionMilestone`]:
+    "No TypeScript route calls it. The journey writes its own decision lines (journey.gleam's decision_line, never the note), which the journey batteries compare.",
   ['temporal.ts#readInstant']:
     'A stored instant is an INTEGER column decoded as an Int: there is no unreadable one for the reader to drop.',
   ['domains/platform/concurrency.mjs#revOf']:
@@ -4286,6 +4617,22 @@ export const HAND_PORTED = {
       'validateContractDates',
       'validateExpiry',
     ].map((f) => [`domains/recruitment/signings/signing.mjs#${f}`, 'test/scoutbox/recruitment/signing_rules_test.gleam']),
+  ),
+  // A null outcome, absent reasons and a reference with an extra field are judged by the route's shape; junk outcomes,
+  // revs and times can't be stored; every caller passes a row's case and organisation; the views' and draft's fixtures
+  // leave out columns every stored row has; resolveEvidenceRefs and summariseAssessments read the store.
+  ...Object.fromEntries(
+    [
+      'decisionIntegrity',
+      'decisionRequirements',
+      'decisionView',
+      'draftView',
+      'resolveEvidenceRefs',
+      'summariseAssessments',
+      'validateDecisionReasons',
+      'validateEvidenceRefShapes',
+      'validateOutcome',
+    ].map((f) => [`${DECISION_FN}#${f}`, 'test/scoutbox/recruitment/decisions_test.gleam']),
   ),
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
   ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',

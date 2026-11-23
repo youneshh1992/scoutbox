@@ -94,6 +94,39 @@ pub const evidence_kinds = [
 
 // ---------------------------------------------------------------------------------------------- validation
 
+/// The decision contract's input codes (DECISION_INPUT_CODES): what a field's shape refusal is called. Every value
+/// the shapes below refuse is refused before the rules, on both servers, under the rule's own code.
+pub const input_codes = [
+  #("expectedRev", "DECISION_REV_REQUIRED"),
+  #("expectedVersion", "DECISION_REV_REQUIRED"),
+  #("outcome", "DECISION_OUTCOME_INVALID"),
+  #("reasonCodes.*", "DECISION_REASON_INVALID"),
+  #("evidenceRefs.*", "DECISION_EVIDENCE_INVALID"),
+]
+
+/// A field the contract names no code for.
+pub const input_default = "DECISION_CONTENT_INVALID"
+
+/// `outcome`: absent, null or one of the outcomes.
+pub fn outcome_check() -> input.Rule(Option(Option(DecisionOutcome))) {
+  input.clearable(input.one_of(decision_outcome.pairs))
+}
+
+/// `reasonCodes`: absent, null or a list of text; the taxonomy is validate_reasons'.
+pub fn reasons_check() -> input.Rule(Option(Option(List(String)))) {
+  input.clearable(input.items(input.text(1_000_000), 1_000_000))
+}
+
+/// `note`, or `supersessionReason` with its own limit: absent, null or text of at most `max`.
+pub fn note_check(max: Int) -> input.Rule(Option(Option(String))) {
+  input.clearable(input.text(max))
+}
+
+/// `evidenceRefs`: absent, null or at most `evidence_refs_max` references, each `{ kind, id }` only.
+pub fn refs_check() -> input.Rule(Option(Option(List(RefShape)))) {
+  input.clearable(input.items(refs_shape(), evidence_refs_max))
+}
+
 /// A refusal of the lifecycle contract: its code, message and the public fields it carries.
 pub type Refusal {
   Refusal(error: String, message: String, fields: List(#(String, Json)))
@@ -579,10 +612,6 @@ pub fn rows_of(
   let mine = list.filter(found, fn(d) { d.base.row.org_id == org_id })
   let good = list.filter(mine, fn(d) { integrity(d, org_id, room_id) == [] })
   let good = list.sort(good, by_created_then_id)
-  let heads =
-    list.filter(good, fn(d) {
-      is_formal(d) && d.base.row.superseded_by_id == None
-    })
   Rows(
     problems: list.filter_map(mine, fn(d) {
       case integrity(d, org_id, room_id) {
@@ -592,11 +621,20 @@ pub fn rows_of(
     }),
     rows: good,
     omitted: list.length(mine) - list.length(good),
-    duplicate_heads: case heads {
-      [_, _, ..] -> list.map(heads, fn(d) { d.base.row.id })
-      _ -> []
-    },
+    duplicate_heads: duplicate_heads(good),
   )
+}
+
+/// More than one formal row with no successor is corruption, not a tie: their ids, or none.
+pub fn duplicate_heads(rows: List(Decision)) -> List(id.RoomDecisionId) {
+  let heads =
+    list.filter(rows, fn(d) {
+      is_formal(d) && d.base.row.superseded_by_id == None
+    })
+  case heads {
+    [_, _, ..] -> list.map(heads, fn(d) { d.base.row.id })
+    _ -> []
+  }
 }
 
 fn by_created_then_id(a: Decision, b: Decision) -> order.Order {
@@ -1210,6 +1248,55 @@ pub fn draft_view(dr: Option(Draft)) -> Json {
         #("label", json.string("Draft — not a formal decision")),
       ])
   }
+}
+
+/// decisionRequirements: what has been done, never whether the player is good enough. `outcomes` is each outcome's
+/// availability to this viewer.
+pub fn requirements_json(
+  role role: Option(room_rules.RoomRole),
+  can_finalize can_finalize: Bool,
+  status status: RoomStatus,
+  submitted_assessments submitted_assessments: Int,
+  completed_trials completed_trials: Int,
+  blocked blocked: Bool,
+  subject_removed subject_removed: Bool,
+  has_draft has_draft: Bool,
+  has_final has_final: Bool,
+  outcomes outcomes: List(Json),
+) -> Json {
+  json.object([
+    #("canDraft", json.bool(can_finalize && !subject_removed)),
+    #("canFinalize", json.bool(can_finalize && !subject_removed)),
+    #(
+      "role",
+      json.nullable(option.map(role, room_rules.role_code), json.string),
+    ),
+    #("blocked", json.bool(blocked)),
+    #("subjectRemoved", json.bool(subject_removed)),
+    #("hasDraft", json.bool(has_draft)),
+    #("hasFinal", json.bool(has_final)),
+    #(
+      "inputs",
+      json.object([
+        #("submittedAssessments", json.int(submitted_assessments)),
+        #("completedTrials", json.int(completed_trials)),
+        #(
+          "note",
+          json.string(
+            "Inputs are counts of what exists. None of them is required by policy, and none of them decides anything.",
+          ),
+        ),
+      ]),
+    ),
+    #("outcomes", json.preprocessed_array(outcomes)),
+    #("status", room_status.to_json(status)),
+    #(
+      "note",
+      json.string(
+        "A formal decision is an explicit human act by a room lead or recruitment lead. ScoutBox never takes it.",
+      ),
+    ),
+  ])
 }
 
 // ------------------------------------------------------------------------------------------- assessments
