@@ -304,3 +304,20 @@ body, and runs the fault layer, before its instrumentation.
 **The question.** Should `/admin/metrics` count every request? An operator watching for abuse would want to see a
 burst of oversized or malformed bodies, and a 4xx rate that leaves them out understates it. If it should, change
 both servers together: in TypeScript, install the instrumentation before the body parser and the fault layer.
+
+## Sending a closed contact says it "cannot be sended"
+
+Found 2026-11-23 while proving the contact validator over its matrix. Ported as the TypeScript server behaves.
+
+**What it is.** `POST /org/rooms/:id/contacts/:cid/send` on a contact that is cancelled, recorded (external) or
+answered is refused with `CONTACT_INVALID_STATE` (409) and the message "A contact that is cancelled cannot be
+sended." `canContactAction` (`domains/recruitment/lifecycle/contact.mjs`) spells out "edited" and "cancelled", and
+builds every other verb as `action + 'ed'`. Sending a delivered contact has its own message
+(`CONTACT_ALREADY_SENT`), so only these three states show it. The club and Grassroots portals' demo modes
+(`roomsDemo.ts`) already say "cannot be sent".
+
+**Where it is in the port.** `contact_rules.can_act` (`scoutbox-server/src/scoutbox/recruitment/contact_rules.gleam`)
+writes "sended", and `test/fixtures/contact_matrix.json` records it.
+
+**Fix.** Spell out "sent" in `canContactAction`, then in `can_act`, and regenerate the fixture
+(`node dev/matrix_cases.mjs`). The `contacts` battery (D4b) checks only the code, so no battery changes.
