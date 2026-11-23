@@ -88,8 +88,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 - A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
   TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
 - A battery's checks of the rules themselves live in the TypeScript tree's `scripts/rules/<domain>/<battery>.mjs`.
-  `npm run cases` records their calls to the rules (with the clock frozen); `dev/battery_cases/map.mjs` maps each
-  ported rule to its Gleam and generates a gleeunit test per call into `test/scoutbox/battery/` (never edit those).
+  Their calls to the rules were recorded (with the clock frozen) into `dev/battery_cases/recordings.json.gz`, so no
+  TypeScript tree is needed; `npm run cases:record` records them again while it exists. `npm run cases` reads the
+  recordings; `dev/battery_cases/map.mjs` maps each ported rule to its Gleam and generates a gleeunit test per call
+  into `test/scoutbox/battery/` (never edit those).
   `dev/battery_cases/report.json` lists each function's cases (generated or pending) and the calls to port by hand,
   which go in `test/scoutbox/<domain>/`. A rule this server has nothing to play the role of (it refuses what the rule
   cleans, or its types hold what the rule repairs) is closed in `NO_COUNTERPART` with its reason, not left pending.

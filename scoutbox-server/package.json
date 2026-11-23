@@ -16,6 +16,7 @@
     "sql:check": "gleam dev sql-check",
     "cases": "node dev/battery_cases.mjs",
     "cases:check": "node dev/battery_cases.mjs --check",
+    "cases:record": "node dev/battery_cases.mjs --record",
     "ledger": "node dev/ledger.mjs",
     "migrations": "node dev/migrations_sql.mjs"
   }

@@ -58,9 +58,14 @@ By `LEDGER.md`:
 
 That leaves about 4,500 rule cases pending (4,003 of them in recruitment) and about 350 hand-port calls.
 
-**Decide first** whether every pending case must be generated before the switch, or whether a domain whose
-batteries pass end to end may close its remaining cases with a recorded reason. The cases are recorded from the
-TypeScript rules, so they must be generated (or frozen, see step 4) **before** the TypeScript server is deleted.
+**Decided:** a pending function is generated wherever a Gleam rule plays its role, and closed in `NO_COUNTERPART`
+with its reason where this server structurally has none (it refuses what the rule cleans, its types or schema hold
+what the rule checks, or the rule only shapes a response the batteries compare). A domain is not closed wholesale
+because its batteries pass. A difference a generated case finds is fixed in the Gleam.
+
+The recordings are frozen in `scoutbox-server/dev/battery_cases/recordings.json.gz` (every distinct call, about
+320 KB), so this step no longer has to finish before the TypeScript server is deleted. `npm run cases:record`
+records them again while the tree exists.
 
 ## 4. Stop depending on the TypeScript tree
 
