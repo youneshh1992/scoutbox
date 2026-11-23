@@ -7,11 +7,15 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
+import gleam/result
+import scoutbox/platform/input
+import scoutbox/platform/key_order
 import scoutbox/platform/temporal
 import scoutbox/platform/zones
 import scoutbox/recruitment/cases
 import scoutbox/recruitment/contact_rules
+import scoutbox/recruitment/offer_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agency_affiliations
 import scoutbox/rows/agent_profile_facets
@@ -24,10 +28,13 @@ import scoutbox/rows/development_evidence_links
 import scoutbox/rows/development_goals
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
+import scoutbox/rows/offer_responses
+import scoutbox/rows/offer_revisions
 import scoutbox/rows/orgs
 import scoutbox/rows/recruitment_briefs
 import scoutbox/rows/recruitment_cases
 import scoutbox/rows/recruitment_contacts
+import scoutbox/rows/recruitment_offers
 import scoutbox/rows/representation_agreements
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
@@ -41,7 +48,9 @@ import scoutbox/vocab/facet_state
 import scoutbox/vocab/goal_category
 import scoutbox/vocab/goal_status
 import scoutbox/vocab/jurisdiction
+import scoutbox/vocab/offer_status
 import scoutbox/vocab/org_type
+import scoutbox/vocab/party
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/ver_level
 
@@ -409,4 +418,147 @@ pub fn room(
     request_ids: [],
     trial_ids: [],
   )
+}
+
+/// An Offer with no revisions, responses, receipts or history: a recorded Offer names its parties and revisions.
+pub fn offer() -> offer_rules.Offer {
+  offer_rules.Offer(
+    row: recruitment_offers.new(
+      id: id.offer("o-base"),
+      org_id: id.org("org-base"),
+      case_id: id.recruitment_case("case-base"),
+      player_id: id.player("pl-base"),
+      type_: recruitment_offers.DirectRecruitment,
+      status: offer_status.Draft,
+      current_revision_id: id.offer_revision("rev-base"),
+      created_at: 0,
+      created_by_user_id: id.org_user("u-base"),
+      updated_at: 0,
+      rev: 1,
+      policy_version: offer_rules.policy_version,
+    ),
+    revisions: [],
+    responses: [],
+    receipts: [],
+    history: [],
+    keys: [],
+  )
+}
+
+/// Revision 1 of the base Offer, a draft with no terms, created at 0: a recorded revision names its number, status
+/// and instants.
+pub fn offer_revision() -> offer_revisions.Row {
+  offer_revisions.new(
+    id: id.offer_revision("rev-base"),
+    offer_id: id.offer("o-base"),
+    position: 0,
+    revision_number: 1,
+    status: offer_status.Draft,
+    term_offer_type: offer_revisions.DirectRecruitment,
+    created_at: 0,
+    updated_at: 0,
+    rev: 1,
+  )
+}
+
+/// The player's acceptance of revision 1 of the base Offer: a recorded response names its revision, type and actor.
+pub fn offer_response() -> offer_responses.Row {
+  offer_responses.new(
+    id: id.offer_response("resp-base"),
+    offer_id: id.offer("o-base"),
+    position: 0,
+    revision_id: id.offer_revision("rev-base"),
+    response_type: offer_responses.Accepted,
+    actor_type: party.Player,
+    actor_id: "pl-base",
+    for_player_id: id.player("pl-base"),
+    occurred_at: 0,
+  )
+}
+
+/// An Offer rule's refusal as the TypeScript rule reports one, as JSON in its key order: the error, the field and
+/// problem when it names them, the message, then its other fields.
+pub fn offer_refusal(r: offer_rules.Refusal) -> String {
+  let named = fn(key) { list.filter(r.fields, fn(f) { f.0 == key }) }
+  let rest = list.filter(r.fields, fn(f) { f.0 != "field" && f.0 != "problem" })
+  json.object(
+    list.flatten([
+      [#("error", json.string(r.error))],
+      named("field"),
+      named("problem"),
+      [#("message", json.string(r.message))],
+      rest,
+    ]),
+  )
+  |> json.to_string
+}
+
+/// One field of an Offer write, read as offer_routes reads the body: `check` under the Offer contract's codes. `raw`
+/// is the field's JSON text, or None when the write leaves it out; a refusal is its JSON.
+pub fn offer_field(
+  name: String,
+  check: input.Rule(a),
+  raw: Option(String),
+) -> Result(a, String) {
+  let text = case raw {
+    Some(v) -> "{" <> json.to_string(json.string(name)) <> ":" <> v <> "}"
+    None -> "{}"
+  }
+  let shape = {
+    use v <- input.field(name, check)
+    input.done(v)
+  }
+  input.parse_in_order(
+    shape,
+    body(text),
+    key_order.of(text),
+    root: "body",
+    codes: offer_rules.input_codes,
+    default: "OFFER_INPUT_INVALID",
+  )
+  |> result.map_error(fn(r) { json.to_string(input.refusal_json(r)) })
+}
+
+/// An Offer write's terms as validateTerms reads them: the route's shape, then the terms' own rules.
+pub fn offer_terms(
+  raw: Option(String),
+  require_complete: Bool,
+) -> Result(offer_rules.Terms, String) {
+  use t <- result.try(offer_field("terms", offer_rules.terms_check(), raw))
+  offer_rules.validate_terms(
+    t |> option.flatten |> option.unwrap(offer_rules.no_terms),
+    require_complete,
+  )
+  |> result.map_error(offer_refusal)
+}
+
+/// An Offer write's two messages as validateMessages reads them, each the field's JSON text or None.
+pub fn offer_messages(
+  recipient_message: Option(String),
+  internal_note: Option(String),
+) -> Result(offer_rules.Messages, String) {
+  use m <- result.try(offer_field(
+    "recipientMessage",
+    offer_rules.message_check(),
+    recipient_message,
+  ))
+  use n <- result.try(offer_field(
+    "internalNote",
+    offer_rules.message_check(),
+    internal_note,
+  ))
+  offer_rules.validate_messages(option.flatten(m), option.flatten(n))
+  |> result.map_error(offer_refusal)
+}
+
+/// An Offer write's document references as validateDocumentRefs reads them.
+pub fn offer_documents(
+  raw: Option(String),
+) -> Result(Option(List(offer_rules.DocumentRef)), String) {
+  use refs <- result.try(offer_field(
+    "documents",
+    offer_rules.documents_check(),
+    raw,
+  ))
+  offer_rules.validate_documents(refs) |> result.map_error(offer_refusal)
 }

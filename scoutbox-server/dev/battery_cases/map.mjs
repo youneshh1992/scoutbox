@@ -3401,6 +3401,278 @@ const CONTACT_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------- offers
+
+const OFFERS = 'scoutbox/recruitment/offer_rules';
+const OFFER_FN = 'domains/recruitment/offers/offer.mjs';
+const REVISION_ROWS = 'scoutbox/rows/offer_revisions';
+const RESPONSE_ROWS = 'scoutbox/rows/offer_responses';
+const offerStatus = vocab('scoutbox/vocab/offer_status');
+const party = vocab('scoutbox/vocab/party');
+
+/** A stored instant: an INTEGER column, so text, an object or `false` can't be one. */
+const storedInstant = option(int);
+
+const revisionRow = record({
+  module: REVISION_ROWS,
+  constructor: 'Row',
+  base: call(BASE, 'offer_revision'),
+  fields: {
+    id: ['id', ident('offer_revision')],
+    revisionNumber: ['revision_number', int],
+    status: ['status', offerStatus],
+    expiresAt: ['expires_at', storedInstant],
+    issuedAt: ['issued_at', storedInstant],
+    createdAt: ['created_at', int],
+    respondedAt: ['responded_at', storedInstant],
+    withdrawnAt: ['withdrawn_at', storedInstant],
+    supersededByRevisionId: ['superseded_by_revision_id', option(ident('offer_revision'))],
+    // The snapshot is four columns, written together (the table's CHECK): who it was addressed to, and when.
+    recipientSnapshot: (v, ctx) => {
+      if (v === null) return [];
+      const { type, playerId, guardianId = null, minor = null, ...rest } = v;
+      if (Object.keys(rest).length) throw new Error(`a recipient snapshot has no column for ${Object.keys(rest)}`);
+      return [
+        ['recipient_type', `Some(${party(type, ctx)})`],
+        ['recipient_player_id', `Some(${ident('player')(playerId, ctx)})`],
+        ['recipient_guardian_id', option(ident('guardian'))(guardianId, ctx)],
+        ['recipient_minor', option(bool)(minor, ctx)],
+        ['recipient_at', 'Some(0)'],
+      ];
+    },
+  },
+});
+/** A revision's status is NOT NULL: a fixture without one is the TypeScript rule's unknown status, not a draft. */
+const storedRevision = (v, ctx) => {
+  if (v === null || typeof v !== 'object' || !('status' in v)) throw new Error(`cannot print ${JSON.stringify(v)} as a revision: a stored one always has a status`);
+  return revisionRow(v, ctx);
+};
+/** A revision of an Offer, which the rules find by its id and order by its number: a fixture must give both. */
+const revision = (v, ctx) => {
+  for (const k of ['id', 'revisionNumber']) if (!(k in (v ?? {}))) throw new Error(`a stored revision always has ${k}`);
+  return `${ctx.use(OFFERS)}.Revision(row: ${storedRevision(v, ctx)}, documents: [])`;
+};
+
+const responseRow = record({
+  module: RESPONSE_ROWS,
+  constructor: 'Row',
+  base: call(BASE, 'offer_response'),
+  fields: {
+    revisionId: ['revision_id', ident('offer_revision')],
+    responseType: ['response_type', vocab(RESPONSE_ROWS, 'response_type_pairs')],
+    actorType: ['actor_type', party],
+    actorId: ['actor_id', string],
+  },
+});
+
+const offerRow = record({
+  module: 'scoutbox/rows/recruitment_offers',
+  constructor: 'Row',
+  base: (ctx) => `${ctx.use(BASE)}.offer().row`,
+  fields: {
+    id: ['id', ident('offer')],
+    orgId: ['org_id', ident('org')],
+    caseId: ['case_id', ident('recruitment_case')],
+    playerId: ['player_id', ident('player')],
+    type: ['type_', vocab('scoutbox/rows/recruitment_offers', 'type_pairs')],
+    currentRevisionId: ['current_revision_id', ident('offer_revision')],
+  },
+});
+
+/** A stored Offer: its row, and its revisions and responses as child rows. */
+const offer = (v, ctx) => {
+  if (v === null || typeof v !== 'object') throw new Error(`cannot print ${JSON.stringify(v)} as an Offer`);
+  const { revisions = [], responses = [], history = [], ...row } = v;
+  if (history.length) throw new Error('an Offer with history is read only by its history view');
+  const ids = revisions.map((r) => r?.id);
+  // A revision's id is the table's primary key: two revisions can't share one.
+  if (new Set(ids).size !== ids.length) throw new Error(`cannot print revisions sharing an id (${ids}) as rows`);
+  return `${ctx.use(OFFERS)}.Offer(..${ctx.use(BASE)}.offer(), row: ${offerRow(row, ctx)}, revisions: ${list(revision)(revisions, ctx)}, responses: ${list(responseRow)(responses, ctx)})`;
+};
+
+/** A refusal as offer_rules reports one: the whole of it as JSON when the TypeScript rule gives a message, else its code. */
+const offerRefused = (call, r, ctx) => {
+  const { ok, ...body } = r;
+  return 'message' in body
+    ? eq(`${ctx.use('gleam/result')}.map_error(${call}, ${ctx.use(BASE)}.offer_refusal)`, `Error(${string(JSON.stringify(body))})`)
+    : eq(`${ctx.use('gleam/result')}.map_error(${call}, fn(r) { r.error })`, `Error(${string(body.error)})`);
+};
+/** A refusal as base's input helpers report one: its JSON, without `ok`. */
+const inputRefusal = (r) => {
+  const { ok, ...body } = r;
+  return `Error(${string(JSON.stringify(body))})`;
+};
+/** A field of a write as sent: its JSON text, or None when the write leaves it out. */
+const field = (v) => (v === undefined ? 'None' : `Some(${string(JSON.stringify(v))})`);
+
+const evidenceKind = (v, ctx) => {
+  const c = { offer_sent: 'OfferSent', offer_accepted_by_recipient: 'AcceptedByRecipient', offer_declined_by_recipient: 'DeclinedByRecipient' }[v];
+  if (!c) throw new Error(`cannot print ${JSON.stringify(v)} as an offer_rules.EvidenceKind`);
+  return `${ctx.use(OFFERS)}.${c}`;
+};
+
+/**
+ * A view of an Offer, compared as JSON without `signing` (the routes add the signing summary). A view prints every
+ * stored column, so a fixture that leaves out one every stored row has (a revision's createdAt or terms, the Offer's
+ * createdAt) can't be a row: the TypeScript view prints null or {} where the Gleam one prints the column.
+ */
+const offerView = (fnName, extra) => ({
+  module: OFFERS,
+  test: (c, ctx) => {
+    const [o, now, opts = {}] = c.args;
+    for (const r of o.revisions ?? [])
+      for (const k of ['createdAt', 'terms']) if (!(k in r)) throw new Error(`a stored revision always has ${k}; this fixture's ${r.id} has none`);
+    if (!('createdAt' in o)) throw new Error("a stored Offer always has createdAt; this fixture's has none");
+    const view = `${ctx.use(OFFERS)}.${fnName}(${offer(o, ctx)}, ${int(now)}${extra(opts, ctx)})`;
+    return eqJson(`${ctx.use('gleam/json')}.object(${ctx.use('gleam/list')}.filter(${view}, fn(f) { f.0 != "signing" }))`, c.result, ctx);
+  },
+});
+
+const OFFER_MAP = {
+  [`${OFFER_FN}#minorOfferPathwayOpen`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [jurisdiction, policy] = c.args;
+      const table = policy === undefined ? ref(OFFERS, 'minor_pathway')(ctx) : `[${Object.entries(policy).map(([k, v]) => `#(${string(k)}, ${bool(v)})`).join(', ')}]`;
+      return eq(`${ctx.use(OFFERS)}.pathway_open(${table}, ${string(jurisdiction)})`, bool(c.result));
+    },
+  },
+  [`${OFFER_FN}#validateTerms`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [raw, { requireComplete = false, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validateTerms has no option ${Object.keys(rest)}`);
+      const r = c.result;
+      if (r.ok && r.terms.offerType !== 'direct_recruitment') throw new Error('there is one Offer type');
+      const t = r.ok && r.terms;
+      return eq(
+        `${ctx.use(BASE)}.offer_terms(${field(raw)}, ${bool(requireComplete)})`,
+        r.ok
+          ? `Ok(${ctx.use(OFFERS)}.Terms(role: ${option(string)(t.role, ctx)}, squad: ${option(string)(t.squad, ctx)}, start_date: ${option(string)(t.startDate, ctx)}, end_date: ${option(string)(t.endDate, ctx)}, conditions: ${option(string)(t.conditions, ctx)}))`
+          : inputRefusal(r),
+      );
+    },
+  },
+  [`${OFFER_FN}#validateMessages`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const { recipientMessage, internalNote, ...rest } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`validateMessages reads no ${Object.keys(rest)}`);
+      const r = c.result;
+      return eq(
+        `${ctx.use(BASE)}.offer_messages(${field(recipientMessage)}, ${field(internalNote)})`,
+        r.ok
+          ? `Ok(${ctx.use(OFFERS)}.Messages(recipient_message: ${option(string)(r.recipientMessage, ctx)}, internal_note: ${option(string)(r.internalNote, ctx)}))`
+          : inputRefusal(r),
+      );
+    },
+  },
+  [`${OFFER_FN}#validateExpiry`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [raw, { now = null, required = false, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`validateExpiry has no option ${Object.keys(rest)}`);
+      const r = c.result;
+      return eq(
+        `${ctx.use('gleam/result')}.map_error(${ctx.use(OFFERS)}.validate_expiry(${raw === undefined ? 'None' : `Some(${sent(raw, ctx)})`}, ${option(int)(now, ctx)}, ${bool(required)}), ${ctx.use(BASE)}.offer_refusal)`,
+        r.ok ? `Ok(${option(int)(r.ms, ctx)})` : inputRefusal(r),
+      );
+    },
+  },
+  [`${OFFER_FN}#validateDocumentRefs`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const r = c.result;
+      const ref_ = (d, ctx) => `${ctx.use(OFFERS)}.DocumentRef(evidence_id: ${string(d.evidenceId)}, label: ${option(string)(d.label, ctx)})`;
+      return eq(
+        `${ctx.use(BASE)}.offer_documents(${field(c.args[0])})`,
+        r.ok ? `Ok(${option(list(ref_))(r.documents, ctx)})` : inputRefusal(r),
+      );
+    },
+  },
+  [`${OFFER_FN}#effectiveRevisionStatus`]: plainIn(OFFERS)('effective', [storedRevision, int], offerStatus),
+  [`${OFFER_FN}#liveStatus`]: plainIn(OFFERS)('live_status', [offer, int], option(offerStatus)),
+  [`${OFFER_FN}#canRevise`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const call = `${ctx.use(OFFERS)}.can_revise(${offer(c.args[0], ctx)}, ${int(c.args[1])})`;
+      return c.result.ok ? eq(call, `Ok(${offerStatus(c.result.from, ctx)})`) : offerRefused(call, c.result, ctx);
+    },
+  },
+  [`${OFFER_FN}#canRespondToRevision`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [o, revisionId, now] = c.args;
+      const call = `${ctx.use(OFFERS)}.can_respond(${offer(o, ctx)}, ${string(revisionId)}, ${int(now)})`;
+      return c.result.ok
+        ? eq(`${ctx.use('gleam/result')}.map(${call}, fn(r) { r.row.id })`, `Ok(${ident('offer_revision')(c.result.revision.id, ctx)})`)
+        : offerRefused(call, c.result, ctx);
+    },
+  },
+  [`${OFFER_FN}#canWithdrawRevision`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const call = `${ctx.use(OFFERS)}.can_withdraw(${offer(c.args[0], ctx)}, ${int(c.args[1])})`;
+      const r = c.result;
+      return r.ok
+        ? eq(`${ctx.use('gleam/result')}.map(${call}, fn(x) { #({x.0}.row.id, x.1) })`, `Ok(#(${ident('offer_revision')(r.revision.id, ctx)}, ${offerStatus(r.from, ctx)}))`)
+        : offerRefused(call, r, ctx);
+    },
+  },
+  [`${OFFER_FN}#responderMatches`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [rev, { kind, actorId, playerId, ...rest }] = c.args;
+      if (Object.keys(rest).length) throw new Error(`a Responder has no field for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(OFFERS)}.responder_matches(${revisionRow(rev, ctx)}, ${ctx.use(OFFERS)}.Responder(kind: ${party(kind, ctx)}, actor_id: ${string(actorId)}, player_id: ${ident('player')(playerId, ctx)}))`,
+        bool(c.result),
+      );
+    },
+  },
+  [`${OFFER_FN}#offerIntegrity`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [o, { orgId = null, caseId = null, ...rest } = {}] = c.args;
+      if (Object.keys(rest).length) throw new Error(`offerIntegrity has no option ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(OFFERS)}.integrity(${offer(o, ctx)}, ${option(ident('org'))(orgId, ctx)}, ${option(ident('recruitment_case'))(caseId, ctx)})`,
+        list(string)(c.result, ctx),
+      );
+    },
+  },
+  [`${OFFER_FN}#offerCaseConsistency`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [o, kase, now] = c.args;
+      return eq(
+        `${ctx.use(OFFERS)}.case_consistency(${offer(o, ctx)}, ${option(roomStatus)(kase?.room?.status, ctx)}, ${int(now)})`,
+        list(string)(c.result, ctx),
+      );
+    },
+  },
+  [`${OFFER_FN}#offerClubView`]: offerView('club_view', () => ''),
+  [`${OFFER_FN}#offerRecipientView`]: offerView(
+    'recipient_view',
+    ({ orgName = null, caseOpen = true }, ctx) => `, ${option(string)(orgName, ctx)}, ${bool(caseOpen)}`,
+  ),
+  [`${OFFER_FN}#offerAgentView`]: offerView('agent_view', ({ orgName = null }, ctx) => `, ${option(string)(orgName, ctx)}`),
+  [`${OFFER_FN}#offerCaseCorrupt`]: plainIn(OFFERS)('case_corrupt', [list(string)], bool),
+  [`${OFFER_FN}#offerEvidence`]: {
+    module: OFFERS,
+    test: (c, ctx) => {
+      const [offers, kase, kind, now] = c.args;
+      const r = c.result;
+      return eq(
+        `${ctx.use(OFFERS)}.evidence(${list(offer)(offers, ctx)}, ${ident('org')(kase.orgId, ctx)}, ${ident('recruitment_case')(kase.id, ctx)}, ${ident('player')(kase.playerId, ctx)}, ${evidenceKind(kind, ctx)}, ${int(now)})`,
+        r.satisfied
+          ? `${ctx.use(OFFERS)}.Satisfied(source_id: ${ident('offer')(r.sourceId, ctx)}, revision_id: ${ident('offer_revision')(r.revisionId, ctx)})`
+          : `${ctx.use(OFFERS)}.Unsatisfied(${string(r.reason)})`,
+      );
+    },
+  },
+};
+
 // ----------------------------------------------------------------------------------------- platform
 
 const REV = 'scoutbox/platform/rev';
@@ -3468,6 +3740,7 @@ export const MAP = {
   ...TEMPORAL_MAP,
   ...TRIAL_MAP,
   ...CONTACT_MAP,
+  ...OFFER_MAP,
   ...AGE_MAP,
   ...TOTP_MAP,
   ...WEBHOOK_MAP,
@@ -3612,6 +3885,23 @@ export const HAND_PORTED = {
   ),
   ['domains/recruitment/lifecycle/errors.mjs#sendDomainError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
   ['domains/recruitment/offers/errors.mjs#sendOfferError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
+  // Junk statuses, expiries, types and pointers can't be stored or decoded; the views' fixtures leave out columns every
+  // stored row has, so the views are proved over the same Offer as stored.
+  ...Object.fromEntries(
+    [
+      'canRespondToRevision',
+      'effectiveRevisionStatus',
+      'liveStatus',
+      'minorOfferPathwayOpen',
+      'offerAgentView',
+      'offerClubView',
+      'offerEvidence',
+      'offerIntegrity',
+      'offerRecipientView',
+      'responderMatches',
+      'validateExpiry',
+    ].map((f) => [`domains/recruitment/offers/offer.mjs#${f}`, 'test/scoutbox/recruitment/offer_rules_test.gleam']),
+  ),
   ['domain.ts#ageOn']: 'test/scoutbox/rules/age_test.gleam',
   ['domain.ts#isAdult']: 'test/scoutbox/rules/age_test.gleam',
   ...Object.fromEntries(

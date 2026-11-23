@@ -132,25 +132,19 @@ fn status_label(s: room_status.RoomStatus) -> String {
   room_rules.status_label(s)
 }
 
-const codes = [
-  #("terms.*", "OFFER_TERMS_INVALID"),
-  #("documents.*", "OFFER_DOCUMENT_INVALID"),
-  #("expectedRev", "OFFER_REV_REQUIRED"),
-  #("expectedVersion", "OFFER_REV_REQUIRED"),
-]
-
 fn body(
   req: Request,
   shape: input.Shape(a),
   next: fn(a, Dynamic) -> Response,
 ) -> Response {
-  use raw <- http.json_body(req)
+  use raw, order <- http.json_body_in_order(req)
   case
-    input.parse_coded(
+    input.parse_in_order(
       shape,
       raw,
+      order,
       root: "body",
-      codes:,
+      codes: offer_rules.input_codes,
       default: "OFFER_INPUT_INVALID",
     )
   {
@@ -811,26 +805,14 @@ type ContentInput {
 }
 
 fn content_fields(next: fn(ContentInput) -> input.Shape(a)) -> input.Shape(a) {
-  use terms <- input.field(
-    "terms",
-    input.clearable(input.object(offer_rules.terms_shape())),
-  )
+  use terms <- input.field("terms", offer_rules.terms_check())
   use recipient_message <- input.field(
     "recipientMessage",
-    input.clearable(input.text(1_000_000)),
+    offer_rules.message_check(),
   )
-  use internal_note <- input.field(
-    "internalNote",
-    input.clearable(input.text(1_000_000)),
-  )
+  use internal_note <- input.field("internalNote", offer_rules.message_check())
   use expires_at <- input.field("expiresAt", input.optional(input.anything()))
-  use documents <- input.field(
-    "documents",
-    input.optional(input.items(
-      offer_rules.document_shape(),
-      offer_rules.limit_documents,
-    )),
-  )
+  use documents <- input.field("documents", offer_rules.documents_check())
   next(ContentInput(
     terms:,
     recipient_message:,

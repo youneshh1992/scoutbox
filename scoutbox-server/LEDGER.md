@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
 | platform | 15 | 15 | 14 | 2192 / 54 | 227 / 286 | 3 to go |
-| recruitment | 19 | 19 | 19 | 3671 / 914 | 121 / 387 | 13 to go |
+| recruitment | 19 | 19 | 19 | 3838 / 696 | 182 / 439 | 13 to go |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -80,8 +80,8 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/journeyAdversarial` | neutral | 9 → 0 | 217 | 196 | 19 | 2 moved | yes | 3 / 18 | 8 / 9 | 18 cases pending; 1 hand-port calls; 2 TypeScript-only moves unreviewed |
 | `recruitment/journeyPersistence` | neutral | 2 → 0 | 65 | 65 |  |  | yes |  |  | **done** |
 | `recruitment/lifecycle` | neutral | 11 → 0 | 307 | 148 | 159 |  | yes | 2875 / 54 | 3 / 109 | 54 cases pending; 106 hand-port calls |
-| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 22 / 139 | 16 / 29 | 139 cases pending; 13 hand-port calls |
-| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 12 / 79 | 10 / 14 | 79 cases pending; 4 hand-port calls |
+| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  | yes | 146 / 0 | 38 / 44 | 6 hand-port calls |
+| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  | yes | 55 / 0 | 49 / 51 | 2 hand-port calls |
 | `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  | yes |  |  | **done** |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
 | `recruitment/signings` | neutral | 5 → 0 | 245 | 201 | 44 |  | yes | 1 / 81 | 0 / 1 | 81 cases pending; 1 hand-port calls |
@@ -275,14 +275,25 @@ ported by hand to a gleeunit test.
 | `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
 | `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
 | `recruitment/offers` | `domains/recruitment/offers/errors.mjs#sendOfferError` | 1 | args[].status is a function | `test/scoutbox/recruitment/domain_errors_test.gleam` |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 | args[] is undefined | to do |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 4 | args[] is Infinity; args[] is NaN; args[] is undefined | to do |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 8 | args[].expiresAt is Infinity; args[].expiresAt is NaN; Gleam's types can't hold its arguments: cannot print "2026-02-30T00:00:00Z" as an Int; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print "VIEWED" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print null as a revision: a stored one always has a status | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 1 | Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerAgentView` | 1 | Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerClubView` | 1 | Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 2 | args[] is undefined; Gleam's types can't hold its arguments: cannot print "confirmed_join" as an offer_rules.EvidenceKind | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 3 | Gleam's types can't hold its arguments: cannot print "loan" as a value of scoutbox/rows/recruitment_offers.type_pairs; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print revisions sharing an id (r1,r1) as rows | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 1 | Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#responderMatches` | 1 | Gleam's types can't hold its arguments: cannot print "agent" as a value of scoutbox/vocab/party.pairs | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 4 | args[] is Infinity; args[] is NaN; args[] is undefined | `test/scoutbox/recruitment/offer_rules_test.gleam` |
 | `recruitment/offers` | `domains/recruitment/rooms/shared.mjs#roomCan` | 6 | Gleam's types can't hold its arguments: cannot print "__proto__" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "constructor" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "prototype" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "toString" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "valueOf" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/offersAdversarial` | `domain.ts#isAdult` | 10 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print "" as a Day; Gleam's types can't hold its arguments: cannot print "0000-00-00" as a Day; Gleam's types can't hold its arguments: cannot print "2026-02-30" as a Day; Gleam's types can't hold its arguments: cannot print "yesterday" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print 19900101 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day; Gleam's types can't hold its arguments: cannot print undefined as a Day | `test/scoutbox/rules/age_test.gleam` |
 | `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].offers.byId is a function | to do |
 | `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 1 | args[].evidence.check is a function | to do |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 9 | Gleam's types can't hold its arguments: cannot print "" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "ISSUED " as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "Issued" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "VIEWED" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print {"id":"r1","revisionNumber":1,"createdAt":1799996400000,"issuedAt":1800000000000,"expiresAt":1800086400000,"recipientSnapshot":{"type":"player","playerId":"p1","guardianId":null}} as a revision: a stored one always has a status; Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 15 | args[].expiresAt is Infinity; args[].expiresAt is NaN; Gleam's types can't hold its arguments: cannot print "" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "1e12" as an Int; Gleam's types can't hold its arguments: cannot print "2026-02-30T00:00:00Z" as an Int; Gleam's types can't hold its arguments: cannot print "ISSUED " as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "Issued" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print "VIEWED" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print {"id":"r1","revisionNumber":1,"createdAt":1799996400000,"issuedAt":1800000000000,"expiresAt":1800086400000,"recipientSnapshot":{"type":"player","playerId":"p1","guardianId":null}} as a revision: a stored one always has a status; Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#liveStatus` | 9 | Gleam's types can't hold its arguments: cannot print "" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "ISSUED " as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "Issued" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "signed" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print "VIEWED" as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print {"id":"r1","revisionNumber":1,"createdAt":1799996400000,"issuedAt":1800000000000,"expiresAt":1800086400000,"recipientSnapshot":{"type":"player","playerId":"p1","guardianId":null}} as a revision: a stored one always has a status; Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs; Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 2 | Gleam's types can't hold its arguments: cannot print null as a String; Gleam's types can't hold its arguments: cannot print undefined as a String | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 1 | Gleam's types can't hold its arguments: cannot print 7 as a String | `test/scoutbox/recruitment/offer_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 3 | Gleam's types can't hold its arguments: a stored revision always has terms; this fixture's r1 has none | `test/scoutbox/recruitment/offer_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#buildRoomSnapshot` | 2 | its result depends on the clock | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomCan` | 1 | Gleam's types can't hold its arguments: cannot print "invent_capability" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomSummary` | 1 | Gleam's types can't hold its arguments: cannot print "s" as a value of scoutbox/rows/recruitment_cases.stage_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
@@ -432,34 +443,6 @@ mapped, then `npm run cases`.
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#toAnalyticsRecruitmentStage` | 12 |
 | `recruitment/lifecycle` | `domains/recruitment/lifecycle/lifecycle.mjs#validateLifecycleReasons` | 13 |
 | `recruitment/lifecycle` | `domains/recruitment/rooms/shared.mjs#adoptionStatusForStage` | 11 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 9 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRevise` | 6 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canWithdrawRevision` | 4 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 13 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 6 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerAgentView` | 1 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerClubView` | 1 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 11 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 8 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 1 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#responderMatches` | 8 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateDocumentRefs` | 14 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 20 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateMessages` | 3 |
-| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateTerms` | 34 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 11 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 20 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#liveStatus` | 9 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 12 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerCaseConsistency` | 5 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerCaseCorrupt` | 3 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 10 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 2 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#responderMatches` | 1 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 1 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
-| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canCompleteParty` | 6 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#canStart` | 10 |
 | `recruitment/signings` | `domains/recruitment/signings/signing.mjs#cleanText` | 2 |

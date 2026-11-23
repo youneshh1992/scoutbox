@@ -3611,38 +3611,46 @@
         "calls": 9,
         "cases": 9,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#canRevise",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#canWithdrawRevision",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#effectiveRevisionStatus",
         "calls": 15,
-        "cases": 13,
+        "cases": 7,
         "handPort": {
           "args[].expiresAt is Infinity": 1,
-          "args[].expiresAt is NaN": 1
+          "args[].expiresAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-02-30T00:00:00Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"VIEWED\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a revision: a stored one always has a status": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen",
         "calls": 6,
-        "cases": 6,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#normaliseOfferClientKey",
@@ -3654,53 +3662,66 @@
       {
         "function": "domains/recruitment/offers/offer.mjs#offerAgentView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerClubView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerEvidence",
         "calls": 13,
-        "cases": 11,
+        "cases": 10,
         "handPort": {
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"confirmed_join\" as an offer_rules.EvidenceKind": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerIntegrity",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 5,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"loan\" as a value of scoutbox/rows/recruitment_offers.type_pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print revisions sharing an id (r1,r1) as rows": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerRecipientView",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored revision always has createdAt; this fixture's r1 has none": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#responderMatches",
         "calls": 8,
-        "cases": 8,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"agent\" as a value of scoutbox/vocab/party.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateDocumentRefs",
         "calls": 14,
         "cases": 14,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateExpiry",
@@ -3711,21 +3732,21 @@
           "args[] is NaN": 1,
           "args[] is undefined": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateMessages",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateTerms",
         "calls": 46,
         "cases": 34,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomCan",
@@ -3806,96 +3827,136 @@
       {
         "function": "domains/recruitment/offers/offer.mjs#canRespondToRevision",
         "calls": 11,
-        "cases": 11,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"ISSUED \" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"Issued\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"VIEWED\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"id\":\"r1\",\"revisionNumber\":1,\"createdAt\":1799996400000,\"issuedAt\":1800000000000,\"expiresAt\":1800086400000,\"recipientSnapshot\":{\"type\":\"player\",\"playerId\":\"p1\",\"guardianId\":null}} as a revision: a stored one always has a status": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#effectiveRevisionStatus",
         "calls": 22,
-        "cases": 20,
+        "cases": 7,
         "handPort": {
           "args[].expiresAt is Infinity": 1,
-          "args[].expiresAt is NaN": 1
+          "args[].expiresAt is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1e12\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2026-02-30T00:00:00Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"ISSUED \" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"Issued\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"VIEWED\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"id\":\"r1\",\"revisionNumber\":1,\"createdAt\":1799996400000,\"issuedAt\":1800000000000,\"expiresAt\":1800086400000,\"recipientSnapshot\":{\"type\":\"player\",\"playerId\":\"p1\",\"guardianId\":null}} as a revision: a stored one always has a status": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#liveStatus",
         "calls": 9,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"ISSUED \" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"Issued\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"signed\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print \"VIEWED\" as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print {\"id\":\"r1\",\"revisionNumber\":1,\"createdAt\":1799996400000,\"issuedAt\":1800000000000,\"expiresAt\":1800086400000,\"recipientSnapshot\":{\"type\":\"player\",\"playerId\":\"p1\",\"guardianId\":null}} as a revision: a stored one always has a status": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print 1 as a value of scoutbox/vocab/offer_status.pairs": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a value of scoutbox/vocab/offer_status.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen",
         "calls": 12,
-        "cases": 12,
-        "handPort": {},
-        "status": "pending"
+        "cases": 10,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print undefined as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerCaseConsistency",
         "calls": 6,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerCaseCorrupt",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerEvidence",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerIntegrity",
         "calls": 10,
-        "cases": 10,
-        "handPort": {},
-        "status": "pending"
+        "cases": 9,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print 7 as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#offerRecipientView",
         "calls": 3,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a stored revision always has terms; this fixture's r1 has none": 3
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#responderMatches",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateExpiry",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateMessages",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#validateTerms",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "temporal.ts#isExpiredAt",

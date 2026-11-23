@@ -50,7 +50,7 @@ By `LEDGER.md`:
 
 | Domain | Batteries to go | Cases pending | Hand-port calls to do |
 | --- | --- | --- | --- |
-| recruitment | 13 | 914 | 266 |
+| recruitment | 13 | 696 | 257 |
 | agents | 6 | 412 | 15 |
 | platform | 3 | 54 | 59 |
 
@@ -92,12 +92,21 @@ matrices.mjs`, status `matrix`). The lifecycle validator is the first: `canTrans
   as JSON text. For closure calls, read the rules
   suite in `../scoutbox/scoutbox-server/scripts/rules/`.
 
+**What offers found** (fixed in the Gleam): a body with several unknown fields named the wrong one, because the
+offer routes parsed without the body's key order (`http.json_body_in_order` and `input.parse_in_order` now); and an
+expiry sent as `true`, `{}` or `[]` was "wrong shape" rather than "not a date-time", because `offer_rules` had its
+own copy of parseInstant (it uses `temporal.instant` now). The contact, signing, trial and case routes still parse
+with `parse_coded`, so expect the first difference again in their modules. A rule that reads a field through the
+route's shape is tested through the same check (`offer_rules.terms_check`, composed in `base.offer_terms`), not
+through the rule alone. A fixture that leaves out a NOT NULL column (a revision's status, createdAt or terms) is
+refused by its printer, not given the base row's value.
+
 **C. Recruitment, one TypeScript module at a time.** For each module: map every pending function in
 `dev/battery_cases/map.mjs`, with that module's record printers (built on `base.gleam` row builders), including its
 views and integrity checks. Port its hand-port calls, regenerate, run `gleam test` and the domain's batteries, and
 commit. In this order:
 
-1. **offers** (`offers/offer.mjs`, `offer_rules`): `validateTerms` 48, `effectiveRevisionStatus` 37,
+1. **offers** [**done**] (`offers/offer.mjs`, `offer_rules`): `validateTerms` 48, `effectiveRevisionStatus` 37,
    `validateExpiry` 25, `canRespondToRevision` 20, `minorOfferPathwayOpen` 18, `offerIntegrity` 18, `offerEvidence`
    14, `validateDocumentRefs` 14, then the smaller ones and the three views. The hand-port calls are
    `effectiveRevisionStatus` (4), `validateExpiry` (4) and `offerEvidence` (1).

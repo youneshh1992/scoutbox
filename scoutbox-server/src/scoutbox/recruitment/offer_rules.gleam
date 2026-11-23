@@ -184,9 +184,17 @@ pub const minor_pathway = [
 ]
 
 pub fn minor_pathway_open(jurisdiction: String) -> Bool {
-  case list.key_find(minor_pathway, jurisdiction) {
+  pathway_open(minor_pathway, jurisdiction)
+}
+
+/// Whether `policy` opens the pathway in `jurisdiction`: its own entry, or the DEFAULT entry when it has none.
+pub fn pathway_open(
+  policy: List(#(String, Bool)),
+  jurisdiction: String,
+) -> Bool {
+  case list.key_find(policy, jurisdiction) {
     Ok(open) -> open
-    Error(Nil) -> list.key_find(minor_pathway, "DEFAULT") == Ok(True)
+    Error(Nil) -> list.key_find(policy, "DEFAULT") == Ok(True)
   }
 }
 
@@ -1152,6 +1160,29 @@ fn clean_field(
   }
 }
 
+/// The refusal codes of an Offer write's shape (OFFER_INPUT_CODES); any other field's is OFFER_INPUT_INVALID.
+pub const input_codes = [
+  #("terms.*", "OFFER_TERMS_INVALID"),
+  #("documents.*", "OFFER_DOCUMENT_INVALID"),
+  #("expectedRev", "OFFER_REV_REQUIRED"),
+  #("expectedVersion", "OFFER_REV_REQUIRED"),
+]
+
+/// An Offer write's `terms`: absent, null, or the terms object.
+pub fn terms_check() -> input.Rule(Option(Option(TermsInput))) {
+  input.clearable(input.object(terms_shape()))
+}
+
+/// An Offer write's `recipientMessage` or `internalNote`: absent, null or text, measured only once cleaned.
+pub fn message_check() -> input.Rule(Option(Option(String))) {
+  input.clearable(input.text(1_000_000))
+}
+
+/// An Offer write's `documents`: absent, or at most `limit_documents` references.
+pub fn documents_check() -> input.Rule(Option(List(DocumentRef))) {
+  input.optional(input.items(document_shape(), limit_documents))
+}
+
 /// The terms as sent: each field's shape is already judged by the route's schema.
 pub type TermsInput {
   TermsInput(
@@ -1320,7 +1351,7 @@ pub fn validate_expiry(
       }
     False, None -> Ok(None)
     False, Some(v) ->
-      case parse_instant(v) {
+      case temporal.instant(v, temporal.year_min, temporal.year_max) {
         Error(problem) ->
           bad(
             "not_a_timestamp",
@@ -1352,19 +1383,6 @@ pub fn validate_expiry(
               )
             _ -> Ok(Some(ms))
           }
-      }
-  }
-}
-
-/// parseInstant: a whole number of milliseconds, or ISO 8601 text with an offset.
-fn parse_instant(v: Dynamic) -> Result(Int, temporal.InstantProblem) {
-  case decode.run(v, decode.int), decode.run(v, decode.float) {
-    Ok(n), _ -> Ok(n)
-    _, Ok(_) -> Error(temporal.NotAWholeNumber)
-    _, _ ->
-      case decode.run(v, decode.string) {
-        Ok(s) -> temporal.instant_ms(s)
-        Error(_) -> Error(temporal.InstantWrongShape)
       }
   }
 }
