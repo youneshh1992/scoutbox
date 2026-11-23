@@ -96,6 +96,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   which go in `test/scoutbox/<domain>/`. A rule this server has nothing to play the role of (it refuses what the rule
   cleans, or its types hold what the rule repairs) is closed in `NO_COUNTERPART` with its reason, not left pending.
   `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
+- A rule over a small finite domain (the lifecycle validator) is proved over its whole matrix instead: a
+  `dev/*_cases.mjs` fixture holds the TypeScript rule's answer for every input, one Gleam test loops over every row,
+  and `dev/battery_cases/matrices.mjs` checks that each recorded call is a row with the same answer (status
+  `matrix` in the report).
 - `LEDGER.md` (`npm run ledger`, checked by `e2e:check`) says, per TypeScript battery, where its checks went and what
   is left, and which domains are ported. Record a hand port in `HAND_PORTED` (`dev/battery_cases/map.mjs`).
 

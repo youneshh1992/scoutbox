@@ -684,13 +684,12 @@ fn advance(
   let assert Some(action) = case_lifecycle.action_named(action_name)
     as "a trial act names a lifecycle action"
   use verdict <- result.try(case_lifecycle.check(
-    store.reading(tx),
     room,
     action,
     role,
     [],
-    at,
     False,
+    case_lifecycle.provider(store.reading(tx), room, at),
   ))
   case verdict {
     Ok(allowed) -> {

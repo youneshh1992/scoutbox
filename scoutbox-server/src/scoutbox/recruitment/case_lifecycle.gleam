@@ -39,6 +39,16 @@ pub type Evidence {
   Lacks(reason: String)
 }
 
+/// What the validator asks whether a record supports a state (the TypeScript evidence provider). The
+/// validator itself reads nothing: routes pass `provider`, over the stores; tests pass their own answers.
+pub type Provider(e) =
+  fn(room_rules.Evidence) -> Result(Evidence, Fail(e))
+
+/// The provider over the stores: `evidence` for this case, at `now`.
+pub fn provider(read: Read, room: Room, now: Int) -> Provider(e) {
+  fn(kind) { evidence(read, room, kind, now) }
+}
+
 /// Is there a record that supports `kind` for this case? From stores the lifecycle does not own and never
 /// writes.
 ///
@@ -231,10 +241,9 @@ pub fn held_from(room: Room) -> Option(RoomStatus) {
 /// Where an action takes this case: static for every action but `resumeCase`, which returns to the held-from
 /// state when it is live and its evidence still stands (asked of the provider, not trusted from history).
 pub fn target_for(
-  read: Read,
   room: Room,
   action: Action,
-  now: Int,
+  evidence: Provider(e),
 ) -> Result(RoomStatus, Fail(e)) {
   case action.name {
     "resumeCase" ->
@@ -249,7 +258,7 @@ pub fn target_for(
               case room_rules.evidence_required(from) {
                 None -> Ok(from)
                 Some(kind) -> {
-                  use verdict <- result.map(evidence(read, room, kind, now))
+                  use verdict <- result.map(evidence(kind))
                   case verdict {
                     Holds(..) -> from
                     Lacks(..) -> room_status.UnderReview
@@ -271,6 +280,27 @@ pub type Allowed {
 /// A refusal: its code, message and public fields.
 pub type Refusal {
   Refusal(error: String, message: String, fields: List(#(String, Json)))
+}
+
+/// A verdict as canTransitionRecruitmentCase returns it: `{ok, to, from, reason}`, or `{ok, error, message}` and
+/// the refusal's public fields.
+pub fn verdict_json(verdict: Result(Allowed, Refusal)) -> Json {
+  case verdict {
+    Ok(Allowed(from:, to:, reason:)) ->
+      json.object([
+        #("ok", json.bool(True)),
+        #("to", room_status.to_json(to)),
+        #("from", room_status.to_json(from)),
+        #("reason", json.string(reason)),
+      ])
+    Error(Refusal(error:, message:, fields:)) ->
+      json.object([
+        #("ok", json.bool(False)),
+        #("error", json.string(error)),
+        #("message", json.string(message)),
+        ..fields
+      ])
+  }
 }
 
 fn allowed_json(from: RoomStatus) -> #(String, Json) {
@@ -303,13 +333,12 @@ pub fn reason_of(action: Action) -> String {
 /// `for_availability` asks "could this be taken, given a reason?": a reason is supplied when the action is
 /// performed, not when it is offered.
 pub fn check(
-  read: Read,
   room: Room,
   action: Action,
   role: Option(RoomRole),
   reason_codes: List(String),
-  now: Int,
   for_availability: Bool,
+  evidence: Provider(e),
 ) -> Result(Result(Allowed, Refusal), Fail(e)) {
   let from = room.status
   case permitted(action, role) {
@@ -324,7 +353,7 @@ pub fn check(
         ),
       )
     True -> {
-      use to <- result.try(target_for(read, room, action, now))
+      use to <- result.try(target_for(room, action, evidence))
       let resume = action.name == "resumeCase"
       let own_edge = resume && !list.contains(room_rules.terminal, to)
       case from == to, room_rules.can_transition(from, to) || own_edge {
@@ -388,7 +417,7 @@ pub fn check(
                   case room_rules.evidence_required(to) {
                     None -> Ok(Ok(Allowed(from, to, reason_of(action))))
                     Some(kind) -> {
-                      use verdict <- result.map(evidence(read, room, kind, now))
+                      use verdict <- result.map(evidence(kind))
                       case verdict {
                         Holds(..) -> Ok(Allowed(from, to, reason_of(action)))
                         Lacks(why) ->
@@ -441,13 +470,12 @@ fn evidence_note(kind: room_rules.Evidence) -> String {
 
 /// Which actions are available right now, for this role.
 pub fn available(
-  read: Read,
   room: Room,
   role: Option(RoomRole),
-  now: Int,
+  evidence: Provider(e),
 ) -> Result(List(String), Fail(e)) {
   list.try_fold(lifecycle.actions, [], fn(out, action) {
-    use verdict <- result.map(check(read, room, action, role, [], now, True))
+    use verdict <- result.map(check(room, action, role, [], True, evidence))
     case verdict {
       Ok(_) -> [action.name, ..out]
       Error(_) -> out
@@ -643,13 +671,12 @@ pub fn advance(
     as "an act names a lifecycle action"
   let from = room_status.to_string(room.status)
   use verdict <- result.try(check(
-    store.reading(tx),
     room,
     action,
     role,
     [],
-    at,
     False,
+    provider(store.reading(tx), room, at),
   ))
   case verdict {
     Ok(allowed) -> {

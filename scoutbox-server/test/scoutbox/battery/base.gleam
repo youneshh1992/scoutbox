@@ -4,10 +4,13 @@
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
-import gleam/option.{None}
+import gleam/list
+import gleam/option.{None, Some}
 import scoutbox/platform/temporal
 import scoutbox/platform/zones
+import scoutbox/recruitment/cases
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/trial_rules
 import scoutbox/rows/agency_affiliations
@@ -15,10 +18,12 @@ import scoutbox/rows/agent_profile_facets
 import scoutbox/rows/agent_profiles
 import scoutbox/rows/case_budget_fx_assumptions
 import scoutbox/rows/case_budget_lines
+import scoutbox/rows/case_history
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
 import scoutbox/rows/orgs
 import scoutbox/rows/recruitment_briefs
+import scoutbox/rows/recruitment_cases
 import scoutbox/rows/recruitment_contacts
 import scoutbox/rows/representation_agreements
 import scoutbox/rows/ver_admins
@@ -31,6 +36,7 @@ import scoutbox/vocab/currency
 import scoutbox/vocab/facet_state
 import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/org_type
+import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/ver_level
 
 /// A current, unverified claim about a user, with nothing else known.
@@ -308,4 +314,45 @@ pub fn contact() -> contact_rules.Contact {
 /// A contact rule's refusal as the TypeScript rule reports one: its error, its message and its other fields as JSON.
 pub fn contact_refusal(r: contact_rules.Refusal) -> #(String, String, String) {
   #(r.error, r.message, json.to_string(json.object(r.fields)))
+}
+
+/// A Room at `status` (rev 1), with these history entries in order: each an action and its detail as JSON text.
+pub fn room(
+  status: RoomStatus,
+  history: List(#(String, String)),
+) -> cases.Room {
+  let case_id = id.recruitment_case("case-m")
+  cases.Room(
+    row: recruitment_cases.new(
+      id: case_id,
+      org_id: id.org("org-m"),
+      player_id: id.player("pl-m"),
+      owner_user_id: id.org_user("usr-m"),
+      stage: recruitment_cases.Review,
+      priority: recruitment_cases.Medium,
+      restricted: False,
+      created_at: 0,
+    ),
+    status:,
+    priority: recruitment_cases.Normal,
+    updated_at: 0,
+    rev: 1,
+    tags: [],
+    assignments: [],
+    tasks: [],
+    history: list.index_map(history, fn(entry, i) {
+      case_history.Row(
+        ..case_history.new(
+          case_id:,
+          position: i,
+          id: id.case_event("ev-" <> int.to_string(i)),
+          at: 0,
+          action: entry.0,
+        ),
+        detail_json: Some(entry.1),
+      )
+    }),
+    request_ids: [],
+    trial_ids: [],
+  )
 }

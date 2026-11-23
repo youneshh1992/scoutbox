@@ -220,10 +220,9 @@ pub fn build(
 ) -> Result(Json, Fail(e)) {
   use rec <- result.try(load(read, room, blocked, player_present))
   use actions <- result.map(case_lifecycle.available(
-    read,
     room,
     viewer.role,
-    now,
+    case_lifecycle.provider(read, room, now),
   ))
   club(rec, viewer, paging, actions, now)
 }

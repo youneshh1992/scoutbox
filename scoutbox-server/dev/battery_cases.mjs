@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import zlib from 'node:zlib';
 import { existing, generate, unprintable } from './battery_cases/generate.mjs';
 import { MAP, NO_COUNTERPART, RANDOM } from './battery_cases/map.mjs';
+import { CannotHold, MATRIX } from './battery_cases/matrices.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -144,6 +145,23 @@ if (RECORD) {
 /** A reason without its positions, so the same kind of argument counts once: `args[1].evidence is a function`. */
 const reason = (why) => why.replace(/\[\d+\]/g, '[]');
 
+/**
+ * Why a call to a rule proved over a matrix isn't one of its rows, or null when it is. A row that answers otherwise
+ * than the recording means the fixture is stale, and stops the run.
+ */
+function unheld(id, c) {
+  let answer;
+  try {
+    answer = MATRIX[id].answer(JSON.parse(c.args));
+  } catch (err) {
+    if (err instanceof CannotHold) return `Gleam's types can't hold its arguments: ${err.message}`;
+    throw err;
+  }
+  if (answer !== c.result)
+    throw new Error(`${id}: the matrix answers ${answer} where the recording has ${c.result} for ${c.args}; regenerate its fixture`);
+  return null;
+}
+
 /** One battery's report: every function its suite calls, and what each call is; and its calls that are cases. */
 function report(battery, calls) {
   const fns = new Map();
@@ -157,7 +175,7 @@ function report(battery, calls) {
     const clockDependent = !why && !!c.moved;
     // A rule that takes `now` in Gleam is given the instant the recording stood at.
     if (clockDependent && !MAP[id]?.now) why = 'its result depends on the clock';
-    if (!why) why = unprintable(id, c, CLOCK);
+    if (!why) why = MATRIX[id] ? unheld(id, c) : unprintable(id, c, CLOCK);
     if (why) f.handPort[why] = (f.handPort[why] ?? 0) + 1;
     else {
       f.cases.add(JSON.stringify([c.args, c.result ?? null, c.throws ?? null, c.argsAfter ?? null]));
@@ -174,7 +192,13 @@ function report(battery, calls) {
           calls: f.calls,
           cases: f.cases.size,
           handPort: Object.fromEntries(Object.entries(f.handPort).sort(([a], [b]) => a.localeCompare(b))),
-          status: MAP[f.function] ? 'generated' : NO_COUNTERPART[f.function] ? 'closed' : 'pending',
+          status: MAP[f.function]
+            ? 'generated'
+            : MATRIX[f.function]
+              ? 'matrix'
+              : NO_COUNTERPART[f.function]
+                ? 'closed'
+                : 'pending',
         })),
     },
     cases,

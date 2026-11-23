@@ -360,7 +360,16 @@ fn act(
       }
     None ->
       case
-        read(ctx, case_lifecycle.check(_, room, action, role, codes, now, False))
+        read(ctx, fn(r) {
+          case_lifecycle.check(
+            room,
+            action,
+            role,
+            codes,
+            False,
+            case_lifecycle.provider(r, room, now),
+          )
+        })
       {
         Error(response) -> response
         Ok(Error(r)) -> refuse(r.error, r.message, r.fields)
@@ -1883,13 +1892,12 @@ fn write_formal(
       False -> {
         use verdict <- result.try(
           case_lifecycle.check(
-            read,
             room,
             action,
             role,
             m.lifecycle_reasons,
-            now,
             False,
+            case_lifecycle.provider(read, room, now),
           )
           |> storage,
         )

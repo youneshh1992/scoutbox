@@ -83,7 +83,8 @@ function gleamSide(r) {
   const hand = fns.filter((f) => handPortCalls(f) > 0);
   return {
     answered: BATTERIES.includes(r.battery),
-    generated: sum(fns.filter((f) => f.status === 'generated'), (f) => f.cases),
+    // A rule proved over a matrix (dev/battery_cases/matrices.mjs) has each recorded call checked as a row of it.
+    generated: sum(fns.filter((f) => f.status === 'generated' || f.status === 'matrix'), (f) => f.cases),
     pending: sum(fns.filter((f) => f.status === 'pending'), (f) => f.cases),
     pendingFns: fns.filter((f) => f.status === 'pending' && f.cases > 0),
     closedFns: fns.filter((f) => f.status === 'closed' && f.cases > 0),

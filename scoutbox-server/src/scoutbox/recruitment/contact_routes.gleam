@@ -522,13 +522,12 @@ fn advance(
   use current <- result.try(cases.room(store.reading(tx), room.row.id))
   let room = option.unwrap(current, room)
   use verdict <- result.try(case_lifecycle.check(
-    store.reading(tx),
     room,
     action,
     role,
     [],
-    at,
     False,
+    case_lifecycle.provider(store.reading(tx), room, at),
   ))
   case verdict {
     Ok(allowed) -> {

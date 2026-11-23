@@ -2985,7 +2985,7 @@
         "handPort": {
           "args[].evidence.check is a function": 2
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomCan",
@@ -3154,7 +3154,7 @@
         "handPort": {
           "args[].evidence.check is a function": 8
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomCan",
@@ -3383,9 +3383,11 @@
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"SIGNEDX\" as a RoomStatus": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#lifecycleTargetFor",
@@ -3456,16 +3458,30 @@
         "calls": 175,
         "cases": 78,
         "handPort": {},
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
         "calls": 2821,
-        "cases": 2773,
+        "cases": 2759,
         "handPort": {
-          "args[].evidence.check is a function": 8
+          "args[].evidence.check is a function": 8,
+          "Gleam's types can't hold its arguments: cannot print \"__unknown_old_status__\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as a RoomRole": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"admin\" as a RoomRole": 1,
+          "Gleam's types can't hold its arguments: cannot print \"identified\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"IN_PROGRESS\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"nonsense\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"notAnAction\" as a lifecycle action": 1,
+          "Gleam's types can't hold its arguments: cannot print \"owner\" as a RoomRole": 1,
+          "Gleam's types can't hold its arguments: cannot print \"recruitment_admin \" as a RoomRole": 1,
+          "Gleam's types can't hold its arguments: cannot print \"ROOM_LEAD\" as a RoomRole": 1,
+          "Gleam's types can't hold its arguments: cannot print \"trial_in_progress\" as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print 42 as a RoomStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a RoomStatus": 1
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/lifecycle/lifecycle.mjs#derivedConditions",
@@ -3555,7 +3571,7 @@
         "handPort": {
           "args[].evidence.check is a function": 5
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/offers/errors.mjs#publicErrorBody",
@@ -3768,7 +3784,7 @@
         "handPort": {
           "args[].evidence.check is a function": 1
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/recruitment/offers/offer.mjs#canRespondToRevision",
