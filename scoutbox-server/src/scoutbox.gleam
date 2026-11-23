@@ -15,7 +15,7 @@ import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/dev_mail
 import scoutbox/messaging/live_routes
-import scoutbox/messaging/outbox
+import scoutbox/messaging/mailer
 import scoutbox/messaging/push
 import scoutbox/operations/follow_ups
 import scoutbox/platform/clock
@@ -79,6 +79,7 @@ fn boot() -> Result(Nil, String) {
   let store =
     store.with_dispatch(store, dispatch(
       store,
+      config,
       hub,
       dev_mail,
       request_metrics,
@@ -109,6 +110,7 @@ fn boot() -> Result(Nil, String) {
   let store =
     store.with_dispatch(store, dispatch(
       store,
+      config,
       hub,
       dev_mail,
       request_metrics,
@@ -191,6 +193,7 @@ fn sweeping(ctx: Ctx) -> Nil {
 /// After COMMIT. A failing effect never undoes the act's data; it is logged.
 fn dispatch(
   store: Store,
+  config: config.Config,
   hub: Hub,
   dev_mail: dev_mail.Deliveries,
   request_metrics: request_metrics.RequestMetrics,
@@ -201,26 +204,22 @@ fn dispatch(
     Live(event:) -> live_routes.publish(store, hub, event)
     CloseStreams(org_user_id:) ->
       live.close_streams_of(hub, id.org_user(org_user_id))
-    SendMail(to:, subject:, text:, secrets:) -> {
-      let recorded =
-        store.unit(store, fn(tx) {
-          outbox.append(tx, to:, subject:, text:, secrets:, at: clock.now_ms())
-        })
-      case recorded, secrets {
-        Ok(_), [] -> Nil
-        Ok(mail), _ -> dev_mail.keep(dev_mail, mail, text)
-        Error(e), _ ->
-          wisp.log_error("mail not recorded: " <> string.inspect(e))
-      }
-    }
+    SendMail(to:, subject:, text:, secrets:) ->
+      mailer.send(
+        store,
+        config.mail,
+        dev_mail,
+        mailer.Mail(to:, subject:, text:, secrets:),
+        clock.now_ms(),
+        fn(_) { Nil },
+      )
     SendPush(to:, id:, title:, body:) -> {
       let recorded =
         store.unit(store, fn(tx) {
-          push.send(tx, to, id, title, body, clock.now_ms())
-          |> result.replace(Nil)
+          push.send(tx, config.push, to, id, title, body, clock.now_ms())
         })
       case recorded {
-        Ok(Nil) -> Nil
+        Ok(Nil) -> push.deliver(store, config.push, to, id, title, body)
         Error(e) -> wisp.log_error("push not recorded: " <> string.inspect(e))
       }
     }

@@ -9,6 +9,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/messaging/transport
 import scoutbox/passport/trust_rules
 import scoutbox/platform/cors
 import scoutbox/platform/input
@@ -67,6 +68,10 @@ pub type Config {
     allowed_origins: List(String),
     /// SCOUTBOX_TRUST_PROXY: which proxies' X-Forwarded-For to believe for the client address.
     trust_proxy: proxy_trust.Setting,
+    /// SENDGRID_API_KEY (and MAIL_FROM): mail through SendGrid. Unset, the outbox is the delivery.
+    mail: transport.Mail,
+    /// EXPO_ACCESS_TOKEN: push through Expo. Unset, the push log is the delivery.
+    push: transport.Push,
   )
 }
 
@@ -190,6 +195,8 @@ pub fn load() -> Result(Config, String) {
     },
     allowed_origins: cors.parse_allowed(envoy.get("SCOUTBOX_ALLOWED_ORIGINS")),
     trust_proxy: proxy_trust.parse(envoy.get("SCOUTBOX_TRUST_PROXY")),
+    mail: transport.mail_from_env(envoy.get),
+    push: transport.push_from_env(envoy.get),
   ))
 }
 

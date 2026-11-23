@@ -10,6 +10,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/messaging/notifications
+import scoutbox/messaging/transport
 import scoutbox/platform/clock
 import scoutbox/platform/config.{type Config}
 import scoutbox/platform/http
@@ -223,12 +224,13 @@ pub fn capability_states(config: Config) -> Json {
         "Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.",
       ),
     ),
-    // The TypeScript server sends through SendGrid when SENDGRID_API_KEY is set; this one has no transport (outbound
-    // providers other than webhooks are outside the port), so its mail is always the local outbox's.
     #(
       "email_transport",
       state(
-        "local_outbox",
+        case config.mail {
+          transport.SendGrid(..) -> "configured"
+          transport.DevOutbox -> "local_outbox"
+        },
         "Without a transport, invitations and notifications are recorded in the local outbox and the delivery centre, and are not sent anywhere.",
       ),
     ),

@@ -1,28 +1,35 @@
 //// Push (`push_log`, `push_tokens`; adapters.mjs `createPushSender`). The push record is written after the
 //// notice's unit commits, in a unit of its own. The device tokens are the Player app's: players' and guardians'.
 ////
-//// Out of scope: the Expo transport. Every push is `dev-log`: the record is the delivery, as on a server with
-//// no EXPO_ACCESS_TOKEN.
+////
+//// Without EXPO_ACCESS_TOKEN every push is `dev-log`: the record is the delivery. With it the record says `expo`,
+//// and once it is written each of the audience's registered tokens is handed to Expo (`deliver`), in a process of
+//// its own. Expo's answer is not kept: the record is the push either way.
 
 import gleam/dynamic/decode
+import gleam/erlang/process
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
+import gleam/string
+import scoutbox/messaging/transport
 import scoutbox/platform/input
 import scoutbox/platform/paging.{type Page, IntKey}
-import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/platform/store.{type Fail, type Read, type Store, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/push_log as row
 import scoutbox/vocab/audience.{type Audience}
 import scoutbox/vocab/party.{type Party}
 import sqlight
+import wisp
 
 const body_max = 4000
 
-/// Records a push to `kind`/`id`, titled `title`.
+/// Records a push to `kind`/`id`, titled `title`, on `via`.
 pub fn send(
   tx: Tx,
+  via: transport.Push,
   kind: Audience,
   id: String,
   title: String,
@@ -39,8 +46,67 @@ pub fn send(
       audience_id: id,
       title:,
       body: input.utf16_take(body, body_max),
-      transport: row.DevLog,
+      transport: case via {
+        transport.DevLog -> row.DevLog
+        transport.Expo(..) -> row.Expo
+      },
     ),
+  )
+}
+
+/// After the record is written: on Expo, one call per device token `kind`/`id` registered, oldest first, in a
+/// process of its own. Nothing on the dev transport.
+pub fn deliver(
+  store: Store,
+  via: transport.Push,
+  kind: Audience,
+  id: String,
+  title: String,
+  body: String,
+) -> Nil {
+  case via {
+    transport.DevLog -> Nil
+    transport.Expo(..) ->
+      case holder(kind) {
+        // Staff never register a device (`POST /push/register` refuses them): there is nobody to call.
+        Error(Nil) -> Nil
+        Ok(holder) -> {
+          process.spawn_unlinked(fn() {
+            case store.read(store, tokens(_, holder, id)) {
+              Ok(tokens) ->
+                list.each(tokens, fn(token) {
+                  transport.send_push(via, token:, title:, body:)
+                })
+              Error(e) ->
+                wisp.log_error("push tokens not read: " <> string.inspect(e))
+            }
+          })
+          Nil
+        }
+      }
+  }
+}
+
+/// Who may hold a device token among a push's audiences: players and guardians.
+fn holder(kind: Audience) -> Result(Party, Nil) {
+  case kind {
+    audience.Player -> Ok(party.Player)
+    audience.Guardian -> Ok(party.Guardian)
+    audience.OrgUser -> Error(Nil)
+  }
+}
+
+/// The device tokens `kind`/`id` registered, oldest first.
+pub fn tokens(
+  read: Read,
+  kind: Party,
+  id: String,
+) -> Result(List(String), Fail(e)) {
+  store.query(
+    read,
+    "SELECT token FROM push_tokens WHERE ref_kind = ? AND ref_id = ? ORDER BY registered_at, seq",
+    [sqlight.text(party.to_string(kind)), sqlight.text(id)],
+    decode.at([0], decode.string),
   )
 }
 

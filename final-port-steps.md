@@ -32,7 +32,7 @@ The three TypeScript-only CV batteries (`boxCamCvProvider`, `boxCamCvRobustness`
 when the TypeScript server goes. Their transport-security and no-frame-persisted checks are written down as
 requirements in `box-cam/docs/contract.md`.
 
-## 2. Port what the pilot left out of scope
+## 2. Port what the pilot left out of scope [**done**]
 
 These are marked `Out of scope:` in `src/`. A production server needs every one, except video analysis. Uploads are
 not ported as the TypeScript server has them: they are redesigned in step 5.

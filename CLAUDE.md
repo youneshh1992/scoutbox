@@ -124,7 +124,7 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 - Tables come from numbered migrations in `scoutbox-server/priv/migrations/`, copied from the TypeScript
   server's schema.
 - Behaviour not ported yet is marked `Not ported yet:` in a comment. Grep for it. Behaviour that stays out of scope
-  for good (uploads, video analysis, outbound providers other than webhooks) is marked `Out of scope:`.
+  (video analysis, and uploads until they move to object storage) is marked `Out of scope:`.
 
 ## Batteries
 

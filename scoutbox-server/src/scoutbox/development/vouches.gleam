@@ -15,8 +15,8 @@ import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players.{type Player}
 import scoutbox/messaging/notifications
-import scoutbox/messaging/outbox
 import scoutbox/platform/clock
+import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/live_pings
@@ -161,23 +161,25 @@ fn request(ctx: Ctx, req: Request, p: Player) -> Response {
               withdrawn_reason: None,
             ),
           ))
-          use _ <- result.map(outbox.append(
+          // Sent once the request is durable, as every mail is.
+          store.emit(
             tx,
-            to: email,
-            subject: "Reference request for " <> player_name <> " on ScoutBox",
-            text: "Hi "
-              <> name
-              <> ",\n\n"
-              <> player_name
-              <> " has asked you for a coach reference on ScoutBox Grassroots.\n\nYour one-time reference code is "
-              <> code
-              <> ". Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on "
-              <> player_name
-              <> "'s profile.\n\nReferences are screened by moderation and reviewed by Trust & Safety.",
-            secrets: [],
-            at: now,
-          ))
-          vouch_id
+            effect.SendMail(
+              to: email,
+              subject: "Reference request for " <> player_name <> " on ScoutBox",
+              text: "Hi "
+                <> name
+                <> ",\n\n"
+                <> player_name
+                <> " has asked you for a coach reference on ScoutBox Grassroots.\n\nYour one-time reference code is "
+                <> code
+                <> ". Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on "
+                <> player_name
+                <> "'s profile.\n\nReferences are screened by moderation and reviewed by Trust & Safety.",
+              secrets: [],
+            ),
+          )
+          Ok(vouch_id)
         })
       case saved {
         Ok(vouch_id) ->

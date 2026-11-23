@@ -14,6 +14,7 @@ const read = [
   "NODE_ENV", "ADMIN_KEY", "MEDIA_SECRET", "SESSION_TTL_DAYS",
   "AGENT_VERIFICATION_TEST_PROVIDER", "SCOUTBOX_FAULTS", "SCOUTBOX_TEST_CLOCK",
   "ALLOW_DEV_LOGINS", "S3_BUCKET", "BOX_CAM_TEST_PROVIDER", "SENDGRID_API_KEY",
+  "MAIL_FROM", "EXPO_ACCESS_TOKEN",
 ]
 
 fn with_env(pairs: List(#(String, String)), run: fn() -> a) -> a {
@@ -126,11 +127,10 @@ pub fn the_capability_report_carries_no_secret_value_test() {
     report,
     "\"media_signing_secret\":{\"state\":\"configured\"",
   )
-  // This server has no SendGrid transport (outbound providers are outside the port), so its mail goes to the
-  // outbox whatever key is set, and the report says so; the TypeScript server reports `configured`.
+  // A SendGrid key switches mail to SendGrid; the report says so without naming the key.
   assert string.contains(
     report,
-    "\"email_transport\":{\"state\":\"local_outbox\"",
+    "\"email_transport\":{\"state\":\"configured\"",
   )
   assert string.contains(
     report,

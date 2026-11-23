@@ -15,6 +15,7 @@ import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
+import scoutbox/messaging/transport
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
@@ -118,9 +119,14 @@ pub fn signup(ctx: Ctx, req: Request) -> Response {
                       #("guardian", guardians.self_view(g)),
                       #("token", json.string(token)),
                       #("emailVerificationSent", json.bool(True)),
-                      // Mail only ever reaches the local outbox here, which has no real inbox, so the code is
-                      // returned to let the flow complete (the TypeScript server's dev transport).
-                      #("devEmailCode", json.string(code)),
+                      // On the dev transport the mail only reaches the local outbox, which has no real inbox, so the
+                      // code is returned to let the flow complete. A real transport delivers it instead.
+                      ..case ctx.config.mail {
+                        transport.DevOutbox -> [
+                          #("devEmailCode", json.string(code)),
+                        ]
+                        transport.SendGrid(..) -> []
+                      }
                     ]),
                   )
                 Error(store.Refused(guardians.EmailInUse)) -> email_in_use()

@@ -1,6 +1,6 @@
-//// The mail outbox (`outbox`). Every mail is recorded before its provider call; on the dev transport, which is
-//// the only one this server has so far, the outbox is the delivery. It also holds what the delivery centre's
-//// local fake provider accepted (`source = 'delivery'`).
+//// The mail outbox (`outbox`). Every mail is recorded before its provider call (`mailer`): on the dev transport the
+//// outbox is the delivery; on SendGrid the record is written undelivered and the provider's answer is written to it
+//// when it comes. It also holds what the delivery centre's local fake provider accepted (`source = 'delivery'`).
 
 import gleam/json.{type Json}
 import gleam/list
@@ -20,10 +20,12 @@ pub type Mail =
 pub const withheld_placeholder =
   "[code withheld — delivered to the recipient only]"
 
-/// Records a mail on the dev transport, with each of `secrets` withheld. A subject or text longer than the columns
-/// hold is shortened, never refused: the mail still goes.
+/// Records a mail on `transport`, with each of `secrets` withheld. A subject or text longer than the columns hold is
+/// shortened, never refused: the mail still goes. On the dev transport the record is the delivery; on SendGrid it is
+/// undelivered until `mark_delivered`.
 pub fn append(
   tx: Tx,
+  transport transport: row.Transport,
   to to: String,
   subject subject: String,
   text text: String,
@@ -47,13 +49,25 @@ pub fn append(
         created_at: at,
         to_address: to,
         text: string.slice(text, 0, 10_000),
-        transport: row.DevOutbox,
+        transport:,
       ),
       subject: Some(string.slice(subject, 0, 300)),
-      delivered: Some(True),
+      delivered: Some(transport == row.DevOutbox),
     ),
   )
   |> result.replace(id)
+}
+
+/// The provider's answer to a mail it was handed.
+pub fn mark_delivered(
+  tx: Tx,
+  mail: id.MailId,
+  delivered: Bool,
+) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE outbox SET delivered = ? WHERE id = ?", [
+    sqlight.bool(delivered),
+    id.mail_sql(mail),
+  ])
 }
 
 /// What the delivery centre's local fake provider accepted: the record is the send.

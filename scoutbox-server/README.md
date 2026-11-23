@@ -51,8 +51,10 @@ Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY`
 `scoutbox-admin`, refused in production), `NODE_ENV=production` (turns off demo sign-ins and the seed),
 `SCOUTBOX_QUIET_LOGS=1`, `SCOUTBOX_FAST_SWEEPS=1` (the sweeps every half second, and the delivery and webhook
 retry ladders in milliseconds), `MEDIA_SECRET` (signs media links; in development a random key per boot,
-required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's), and
-`ALLOW_LOCAL_WEBHOOKS=1` (a webhook may go to a loopback address).
+required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's),
+`ALLOW_LOCAL_WEBHOOKS=1` (a webhook may go to a loopback address), `SENDGRID_API_KEY` and `MAIL_FROM` (mail through
+SendGrid, from `noreply@scoutbox.app` by default; unset, the outbox is the delivery) and `EXPO_ACCESS_TOKEN` (push
+through Expo, one call per registered device token; unset, the push log is the delivery).
 
 ## Layout
 
@@ -136,7 +138,7 @@ Every route below is exercised by a battery, except where marked.
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour not ported yet would say `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`); nothing does
-now. Behaviour that stays out of scope for good (uploads, video analysis, the Expo push transport) says `Out of scope:`.
+now. Behaviour that stays out of scope (video analysis, and uploads until they move to object storage) says `Out of scope:`.
 
 ## Known differences from the TypeScript server
 

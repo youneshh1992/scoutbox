@@ -24,8 +24,8 @@ import scoutbox/identity/guardians
 import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/messaging/delivery
+import scoutbox/messaging/mailer
 import scoutbox/messaging/notifications
-import scoutbox/messaging/outbox
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -1118,6 +1118,38 @@ type Mail {
   Mail(to: String, subject: String, text: String)
 }
 
+/// The guardian's e-mail copy once the transport answered (contactRoutes.mjs `settle`).
+fn settle_email_copy(
+  ctx: Ctx,
+  contact: id.ContactId,
+  sent: Result(mailer.Sent, Nil),
+) -> Nil {
+  let #(state, mail, at) = case sent {
+    Ok(mailer.Sent(mail:, at:, outcome:)) -> #(
+      case outcome {
+        mailer.Recorded -> row.LocalOutbox
+        mailer.Accepted -> row.AcceptedByProvider
+        mailer.NotAccepted -> row.EmailCopyStateFailed
+      },
+      Some(id.mail_to_string(mail)),
+      at,
+    )
+    Error(Nil) -> #(row.EmailCopyStateFailed, None, clock.now_ms())
+  }
+  case
+    store.unit(ctx.store, contacts.set_email_copy(_, contact, state, mail, at))
+  {
+    Ok(Nil) -> Nil
+    Error(e) ->
+      io.println_error(
+        "CONTACT email_copy_not_recorded "
+        <> id.contact_to_string(contact)
+        <> ": "
+        <> string.inspect(e),
+      )
+  }
+}
+
 type Sent {
   SendFailed(Contact)
   Sent(contact: Contact, moved: Moved, mail: Option(Mail))
@@ -1193,30 +1225,18 @@ fn send_now(
         json.object([contact_json(failed), #("delivered", json.bool(False))]),
       )
     Ok(Sent(contact, moved, mail)) -> {
-      // The guardian's copy is sent once the unit committed; its record and state are a later write of their own.
+      // The guardian's copy is sent once the unit committed; its state is a later write of its own, once the
+      // transport answered: at once on the dev outbox, from the provider's process on SendGrid.
       case mail {
-        Some(m) -> {
-          let now = clock.now_ms()
-          let _ =
-            store.unit(ctx.store, fn(tx) {
-              use mail_id <- result.try(outbox.append(
-                tx,
-                to: m.to,
-                subject: m.subject,
-                text: m.text,
-                secrets: [],
-                at: now,
-              ))
-              contacts.set_email_copy(
-                tx,
-                c.row.id,
-                row.LocalOutbox,
-                Some(id.mail_to_string(mail_id)),
-                now,
-              )
-            })
-          Nil
-        }
+        Some(m) ->
+          mailer.send(
+            ctx.store,
+            ctx.config.mail,
+            ctx.dev_mail,
+            mailer.Mail(to: m.to, subject: m.subject, text: m.text, secrets: []),
+            clock.now_ms(),
+            settle_email_copy(ctx, c.row.id, _),
+          )
         None -> Nil
       }
       http.json(

@@ -34,6 +34,10 @@ pub type Event {
   /// A Box Cam session, a Box Challenge or a Combine attempt changed the player's development evidence. By the
   /// subject rule.
   PlayerDevelopmentEvidenceChanged(player_id: String)
+  /// A Box Cam session's video analysis started, was refused or observed the player (each its own registry entry).
+  /// Private to the player, by the subject rule, and ids only: an observation is something a player did at home, and
+  /// a measurement in a payload ends up somewhere it was never gated for. There is no per-frame event.
+  BoxCam(change: BoxCamChange, player_id: String, session_id: String)
   /// A compliance policy version was published. Every stream.
   PolicyVersionPublished
   /// A Development Hub plan changed (each change is its own registry entry), for one organisation that may read it.
@@ -213,6 +217,14 @@ pub type Event {
   )
 }
 
+/// What the video analysis of a Box Cam session did.
+pub type BoxCamChange {
+  CvSessionStarted
+  /// A reason code carries no observation content, and the player needs to know why.
+  CvRefused(reason: String)
+  Observed
+}
+
 /// What changed in a plan, with the ids the registry's payload adds after the plan's.
 pub type DevelopmentChange {
   PlanCreated
@@ -298,8 +310,7 @@ pub type TypingSide {
 }
 
 /// Every name in the TypeScript server's event registry, in its order: what `/capabilities` counts as registered.
-/// Each name an `Event` has is one of these (`name`). Out of scope: the three `box_cam_*` events, which only the
-/// video analysis routes send (`development/cv_stub` answers 503 before them), so no `Event` carries them. `test/scoutbox/live_test.gleam` proves the list equals the
+/// Each name an `Event` has is one of these (`name`). `test/scoutbox/live_test.gleam` proves the list equals the
 /// registry's names.
 pub const registered = [
   "players",
@@ -416,6 +427,12 @@ pub fn name(event: Event) -> String {
     Evidence(..) -> "evidence"
     PlayerDevelopmentEvidenceChanged(..) ->
       "player_development_evidence_changed"
+    BoxCam(change:, ..) ->
+      case change {
+        CvSessionStarted -> "box_cam_cv_session_started"
+        CvRefused(..) -> "box_cam_cv_refused"
+        Observed -> "box_cam_observed"
+      }
     PolicyVersionPublished -> "policy_version_published"
     Development(change:, ..) ->
       case change {
@@ -595,6 +612,7 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | Requests(..)
     | Evidence(..)
     | PlayerDevelopmentEvidenceChanged(..)
+    | BoxCam(..)
     | PolicyVersionPublished -> Error(Nil)
   }
 }
@@ -609,7 +627,8 @@ pub fn subject_of(event: Event) -> Result(String, Nil) {
     | Inbox(player_id: p)
     | Requests(player_id: p)
     | Evidence(player_id: p)
-    | PlayerDevelopmentEvidenceChanged(player_id: p) -> Ok(p)
+    | PlayerDevelopmentEvidenceChanged(player_id: p)
+    | BoxCam(player_id: p, ..) -> Ok(p)
     _ -> Error(Nil)
   }
 }
@@ -632,8 +651,10 @@ pub fn audience(event: Event) -> EventAudience {
     | Friendlies
     | Ledger(..)
     | PolicyVersionPublished -> PublicSafe
-    Notify(..) | Inbox(..) | PlayerDevelopmentEvidenceChanged(..) ->
-      PlayerPrivate
+    Notify(..)
+    | Inbox(..)
+    | PlayerDevelopmentEvidenceChanged(..)
+    | BoxCam(..) -> PlayerPrivate
     _ -> OrgPrivate
   }
 }
@@ -657,6 +678,15 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
     | Evidence(player_id:)
     | PlayerDevelopmentEvidenceChanged(player_id:) -> [
       #("playerId", json.string(player_id)),
+    ]
+    BoxCam(change: CvRefused(reason:), player_id:, session_id:) -> [
+      #("playerId", json.string(player_id)),
+      #("sessionId", json.string(session_id)),
+      #("reason", json.string(reason)),
+    ]
+    BoxCam(player_id:, session_id:, ..) -> [
+      #("playerId", json.string(player_id)),
+      #("sessionId", json.string(session_id)),
     ]
     PolicyVersionPublished -> []
     Development(change:, org_id:, plan_id:) -> [

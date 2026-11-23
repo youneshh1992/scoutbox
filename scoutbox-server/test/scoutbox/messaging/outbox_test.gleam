@@ -5,6 +5,7 @@ import gleam/dynamic/decode
 import gleam/string
 import scoutbox/messaging/outbox
 import scoutbox/platform/store
+import scoutbox/rows/outbox as row
 import scoutbox/support
 
 fn stored(secrets: List(String), text: String) -> String {
@@ -12,6 +13,7 @@ fn stored(secrets: List(String), text: String) -> String {
   let assert Ok(_) =
     store.unit(s, outbox.append(
       _,
+      transport: row.DevOutbox,
       to: "club@eastport.example",
       subject: "Verify",
       text:,
