@@ -169,7 +169,7 @@ pub fn create(
             _ -> Some(r.rule_status)
           },
           regulator: r.regulator,
-          jurisdiction: option.map(r.jurisdiction, jurisdiction.to_string),
+          jurisdiction: r.jurisdiction,
           policy_version_id: r.policy_version,
           facet: option.map(r.facet, agent_facet.to_string),
           member_association: option.map(

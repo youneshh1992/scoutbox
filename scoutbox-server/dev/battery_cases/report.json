@@ -66,7 +66,7 @@
         "handPort": {
           "its result depends on the clock": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
@@ -75,21 +75,25 @@
         "handPort": {
           "args[] is undefined": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#ruleStatusAt",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an entry without a rule: every caller passes the rule find_rule found": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"SCO\" as a value of scoutbox/vocab/jurisdiction.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
@@ -212,63 +216,71 @@
         "calls": 12,
         "cases": 8,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#earliestPermittedApproachAt",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
         "calls": 22,
         "cases": 17,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#evaluatePolicy",
         "calls": 4,
-        "cases": 4,
-        "handPort": {},
-        "status": "pending"
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no Gleam evaluation for the action \"bribe\"": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#representationScopeProblem",
         "calls": 12,
-        "cases": 12,
-        "handPort": {},
-        "status": "pending"
+        "cases": 11,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"offer\" as a value of scoutbox/vocab/context_type.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#resolveScope",
         "calls": 6,
-        "cases": 6,
-        "handPort": {},
-        "status": "pending"
+        "cases": 3,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a jurisdiction entry here is text, not {\"memberAssociation\":\"ENG\"}": 1,
+          "Gleam's types can't hold its arguments: a jurisdiction entry here is text, not {\"memberAssociation\":\"INT\"}": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a List": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#ruleAt",
         "calls": 8,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/provider.mjs#createVerificationProvider",
@@ -310,7 +322,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -2131,35 +2143,38 @@
         "calls": 8,
         "cases": 7,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
         "calls": 2,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#ruleStatusAt",
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
         "calls": 13,
-        "cases": 12,
-        "handPort": {},
-        "status": "pending"
+        "cases": 10,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print 1790078400000 as a String": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#affiliationActive",

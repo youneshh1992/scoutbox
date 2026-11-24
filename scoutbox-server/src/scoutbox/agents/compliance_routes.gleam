@@ -2271,7 +2271,7 @@ pub fn public_reason(r: approach_policy.Reason) -> Json {
     #("ruleId", json.nullable(r.rule_id, json.string)),
     #("ruleStatus", rule_status.to_json(r.rule_status)),
     #("regulator", json.nullable(r.regulator, json.string)),
-    #("jurisdiction", json.nullable(r.jurisdiction, jurisdiction.to_json)),
+    #("jurisdiction", json.nullable(r.jurisdiction, json.string)),
     #("policyVersion", json.nullable(r.policy_version, id.policy_json)),
   ])
 }

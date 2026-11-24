@@ -203,9 +203,25 @@ commit. In this order:
 
 **D. Agents, one TypeScript module at a time**, the same way:
 
-1. **compliance policy** (`compliance/policy.mjs`, `approach_policy` and `compliance_store`): `evaluateMinorGate`
-   34, `selectPolicyVersion` 22, `isRegulatoryMinor` 19, `applicablePolicySet` 13, `earliestPermittedApproachAt`
-   12, `representationScopeProblem` 12, `ruleAt`, `ruleStatusAt`, `resolveScope` and `evaluatePolicy`.
+1. **compliance policy** [**done**] (`compliance/policy.mjs`, `approach_policy` and `compliance_store`):
+   `evaluateMinorGate` 34, `selectPolicyVersion` 22, `isRegulatoryMinor` 19, `applicablePolicySet` 13,
+   `earliestPermittedApproachAt` 12, `representationScopeProblem` 12, `ruleAt`, `ruleStatusAt`, `resolveScope` and
+   `evaluatePolicy`. A policy version is printed as `approach_policy.published` reads it back from its rows (flags,
+   counts, texts and sets of text, by name), over `base.policy()`. Two differences turned up, both fixed in the
+   Gleam:
+   - A reason for a member association with no policy (`FRA`) named no jurisdiction: `unencoded` kept only codes
+     ScoutBox has a policy for. A reason's jurisdiction is text now, as the TypeScript reason's is, and so is the
+     stored review reason's.
+   - `select_version` didn't check that a version is published. Only published ones reach it from the store, but
+     the rule now checks as the TypeScript one does.
+
+   `rule_at` and `Entry` are public, and the `Known` wrapper on a status is gone. `representationScopeProblem` was
+   written out twice, in the context and transaction routes; it is one `approach_policy.scope_problem` now, which
+   both call and the cases test. The minors gate (`evaluateMinorGate`, `isRegulatoryMinor`,
+   `earliestPermittedApproachAt`) is closed in `NO_COUNTERPART`: no TypeScript route calls it, and the minor pathway
+   is closed in every jurisdiction (DR-49). It has to be ported when that pathway opens. The calls Gleam's types
+   can't hold (an unsupported jurisdiction, a boundary that isn't a stored day, an unknown action or context type,
+   jurisdictions as objects) are in `approach_policy_test.gleam`.
 2. **conflict** (`compliance/conflict.mjs`, `conflict`): `evaluateConflict` 44, `mostSevere` 36,
    `consentSufficiency` 33, `inputHashOf` and `canonicalJson` (`conflict.input_hash`), `conflictSummaryForParty`.
 3. **integration** (`integration/integration.mjs`, `integration`): `agentSurfaceDecision` 30,
@@ -216,6 +232,10 @@ commit. In this order:
    `partyRevisionOf` and the rest.
 5. **The provider** (`compliance/provider.mjs`, `verification_provider`): `facetFromProviderAnswer`, and
    `createVerificationProvider`'s closure calls.
+6. **The rest of the agent core** (`core/shared.mjs`, `agent_rules`): `agreementTermCoversNow`, `termMonthsOf`,
+   `newFacets` and `tiersOf` still have pending calls (46 with `normaliseDisclosure`, which goes with integration).
+   Take them with integration.
+7. **The transaction audit** (`transactions/audit.mjs`): `transactionAuditRows` (1). Take it with transactions.
 
 When C and D are done, platform/dates closes too, and only platform/uploads is left (step 5).
 

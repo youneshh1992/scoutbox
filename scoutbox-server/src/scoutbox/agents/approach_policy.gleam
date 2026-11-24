@@ -10,6 +10,9 @@
 ////
 //// `approach_minor` is the agent's own readiness for a minor pathway, evaluated against no subject.
 ////
+//// `scope_problem` is `representationScopeProblem`: whether an agreement authorises an act in a context, which the
+//// context and transaction routes both ask.
+////
 //// `request_consent` and the minors gate (`evaluateMinorGate`) are not here: no TypeScript route evaluates either,
 //// and the minor pathway is closed in every jurisdiction.
 
@@ -17,8 +20,10 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/agents/agent_rules
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/platform/temporal
+import scoutbox/rows/agreement_scopes.{type Scope}
 import scoutbox/rows/id
 import scoutbox/rows/jurisdiction_policies as policy_row
 import scoutbox/rows/jurisdiction_policy_rule_overrides as override_row
@@ -29,6 +34,8 @@ import scoutbox/vocab/agent_facet.{
   type AgentFacet, DomesticAuthorisation, FifaLicence, MinorsAuthorisation,
   NationalRegistration,
 }
+import scoutbox/vocab/agreement_status.{type AgreementStatus}
+import scoutbox/vocab/context_type.{type ContextType}
 import scoutbox/vocab/facet_state.{type FacetState, Inactive, Stale, Verified}
 import scoutbox/vocab/jurisdiction.{type Jurisdiction}
 import scoutbox/vocab/rule_status.{type RuleStatus}
@@ -160,7 +167,8 @@ fn day_ms_of(s: String) -> Option(Int) {
   temporal.parse_day(s) |> option.from_result |> option.map(temporal.day_start)
 }
 
-/// The latest version among those in effect for `ma` at `now`.
+/// The latest published version among those in effect for `ma` at `now`. `published` reads only published versions;
+/// a proposed one never applies (publication needs dual control).
 pub fn select_version(
   policies: List(Policy),
   ma: Jurisdiction,
@@ -180,7 +188,11 @@ pub fn select_version(
       Some(f) -> f <= now && to_ok
       None -> False
     }
-    case p.row.jurisdiction == ma && in_effect {
+    case
+      p.row.jurisdiction == ma
+      && p.row.status == policy_row.Published
+      && in_effect
+    {
       False -> best
       True ->
         case best {
@@ -221,21 +233,18 @@ pub fn applicable(
 
 // ------------------------------------------------------------------------------------------------- reasons
 
-/// A rule's status at `now`, or `None` for a rule no policy encodes (UNKNOWN).
-type Entry {
+/// A rule looked up in a policy set, with its status at `now`: UNKNOWN, with no rule or policy, for a rule no policy
+/// encodes.
+pub type Entry {
   Entry(
     rule_id: String,
     rule: Option(Rule),
     policy: Option(Policy),
-    status: Status,
+    status: RuleStatus,
   )
 }
 
 /// A rule's operative status: the stored one, with PENDING_IMPLEMENTATION read as ACTIVE from its own date.
-pub type Status {
-  Known(RuleStatus)
-}
-
 pub fn status_at(rule: Rule, now: Int) -> RuleStatus {
   case rule.status {
     rule_status.PendingImplementation -> {
@@ -263,11 +272,11 @@ pub fn find_rule(
   })
 }
 
-fn rule_at(policies: List(Policy), rule_id: String, now: Int) -> Entry {
-  let found = find_rule(policies, rule_id)
-  case found {
-    Ok(#(r, p)) -> Entry(rule_id, Some(r), Some(p), Known(status_at(r, now)))
-    Error(Nil) -> Entry(rule_id, None, None, Known(rule_status.Unknown))
+/// A missing rule is an UNKNOWN entry, so it still produces a reason.
+pub fn rule_at(policies: List(Policy), rule_id: String, now: Int) -> Entry {
+  case find_rule(policies, rule_id) {
+    Ok(#(r, p)) -> Entry(rule_id, Some(r), Some(p), status_at(r, now))
+    Error(Nil) -> Entry(rule_id, None, None, rule_status.Unknown)
   }
 }
 
@@ -277,7 +286,9 @@ pub type Reason {
     rule_id: Option(String),
     rule_status: RuleStatus,
     regulator: Option(String),
-    jurisdiction: Option(Jurisdiction),
+    /// The policy's jurisdiction, or the member association no policy covers (which may be one ScoutBox has no
+    /// policy for at all, `FRA`).
+    jurisdiction: Option(String),
     policy_version: Option(id.PolicyId),
     facet: Option(AgentFacet),
     member_association: Option(Jurisdiction),
@@ -286,13 +297,15 @@ pub type Reason {
 }
 
 fn reason_of(code: String, e: Entry) -> Reason {
-  let Known(st) = e.status
+  let st = e.status
   Reason(
     code:,
     rule_id: Some(e.rule_id),
     rule_status: st,
     regulator: option.map(e.policy, fn(p) { p.row.regulator }),
-    jurisdiction: option.map(e.policy, fn(p) { p.row.jurisdiction }),
+    jurisdiction: option.map(e.policy, fn(p) {
+      jurisdiction.to_string(p.row.jurisdiction)
+    }),
     policy_version: option.map(e.policy, policy_id),
     facet: None,
     member_association: None,
@@ -306,7 +319,7 @@ fn unencoded(ma: String) -> Reason {
     rule_id: None,
     rule_status: rule_status.Unknown,
     regulator: None,
-    jurisdiction: jurisdiction.from_string(ma) |> option.from_result,
+    jurisdiction: Some(ma),
     policy_version: None,
     facet: None,
     member_association: None,
@@ -352,7 +365,7 @@ fn require_facet(
   ma: Option(Jurisdiction),
   state_of: fn(AgentFacet, Option(Jurisdiction)) -> FacetState,
 ) -> Decision {
-  let Known(st) = e.status
+  let st = e.status
   let add = fn(d: Decision, r: Reason) {
     Decision(..d, reasons: list.append(d.reasons, [r]))
   }
@@ -440,8 +453,8 @@ pub fn approach_adult(
     )
   let approach = rule_at(policies, "FIFA-12.2", now)
   let d = case approach.status {
-    Known(rule_status.Active) -> d
-    Known(rule_status.Unknown) ->
+    rule_status.Active -> d
+    rule_status.Unknown ->
       Decision(
         ..d,
         reasons: list.append(d.reasons, [
@@ -469,7 +482,7 @@ pub fn approach_adult(
         _, Ok(policy) -> {
           let ma = Some(policy.row.jurisdiction)
           list.fold(policy.rules, d, fn(d, r) {
-            let e = Entry(r.id, Some(r), Some(policy), Known(status_at(r, now)))
+            let e = Entry(r.id, Some(r), Some(policy), status_at(r, now))
             let d = case flag(r, "nationalRegistrationRequired") {
               True -> require_facet(d, e, NationalRegistration, ma, state_of)
               False -> d
@@ -500,7 +513,7 @@ pub fn approach_adult(
         let e = rule_at(policies, rule_id, now)
         case e.rule, e.status {
           None, _ -> d
-          Some(r), Known(rule_status.Active) -> {
+          Some(r), rule_status.Active -> {
             let window =
               {
                 list.key_find(r.counts, "exclusivityWindowMonths")
@@ -533,12 +546,12 @@ pub fn approach_adult(
                 )
             }
           }
-          Some(_), Known(rule_status.Suspended) ->
+          Some(_), rule_status.Suspended ->
             Decision(
               ..d,
               reasons: list.append(d.reasons, [reason_of("RULE_SUSPENDED", e)]),
             )
-          Some(_), Known(rule_status.PendingImplementation) ->
+          Some(_), rule_status.PendingImplementation ->
             Decision(
               ..d,
               reasons: list.append(d.reasons, [
@@ -590,8 +603,8 @@ pub fn approach_minor(
     )
   let approach = rule_at(policies, "FIFA-13.1", now)
   let d = case approach.status {
-    Known(rule_status.Active) -> d
-    Known(rule_status.Unknown) ->
+    rule_status.Active -> d
+    rule_status.Unknown ->
       Decision(
         ..d,
         reasons: list.append(d.reasons, [
@@ -618,7 +631,7 @@ pub fn approach_minor(
         _, Ok(policy) -> {
           let ma = Some(policy.row.jurisdiction)
           list.fold(policy.rules, d, fn(d, r) {
-            let e = Entry(r.id, Some(r), Some(policy), Known(status_at(r, now)))
+            let e = Entry(r.id, Some(r), Some(policy), status_at(r, now))
             let d = case flag(r, "nationalRegistrationRequired") {
               True -> require_facet(d, e, NationalRegistration, ma, state_of)
               False -> d
@@ -698,7 +711,84 @@ pub fn reason_fields(r: Reason) -> List(#(String, json.Json)) {
     #("ruleId", json.nullable(r.rule_id, json.string)),
     #("ruleStatus", rule_status.to_json(r.rule_status)),
     #("regulator", json.nullable(r.regulator, json.string)),
-    #("jurisdiction", json.nullable(r.jurisdiction, jurisdiction.to_json)),
+    #("jurisdiction", json.nullable(r.jurisdiction, json.string)),
     #("policyVersion", json.nullable(r.policy_version, id.policy_json)),
   ]
+}
+
+// ------------------------------------------------------------------------------------------ representation scope
+
+/// Why an agreement doesn't authorise an act in a context.
+pub type ScopeProblem {
+  /// No agreement, or one not active and confirmed by its client (with its id and effective status, when there is one).
+  RepresentationRequired(
+    agreement: Option(id.AgreementId),
+    status: Option(AgreementStatus),
+  )
+  RepresentationExpired(agreement: id.AgreementId)
+  /// The agreement's scope covers none of the scopes the context's type needs.
+  ScopeNotCovered(agreement: id.AgreementId, needed: List(Scope))
+  /// The agreement is for one national association and the context is in another: `required` is every member
+  /// association the context names.
+  JurisdictionNotCovered(agreement: id.AgreementId, required: List(String))
+}
+
+/// The agreement scopes that cover each context type (CONTEXT_TYPE_SCOPES).
+pub fn scopes_for(t: ContextType) -> List(Scope) {
+  case t {
+    context_type.EmploymentContract -> [agreement_scopes.Employment]
+    context_type.Transfer | context_type.Loan -> [
+      agreement_scopes.Transfer,
+      agreement_scopes.Employment,
+    ]
+    context_type.OtherServices -> [
+      agreement_scopes.OtherServices,
+      agreement_scopes.Commercial,
+    ]
+  }
+}
+
+/// policy.mjs `representationScopeProblem`: whether `agreement`, at its effective `status` and `confirmed` by its
+/// client, authorises an act in a context of type `t` naming `mas`. An agreement for one national association does
+/// not authorise an act in another; INT covers only the international dimension.
+pub fn scope_problem(
+  agreement: Option(agent_rules.Agreement),
+  status: Option(AgreementStatus),
+  confirmed: Bool,
+  t: ContextType,
+  mas: List(String),
+) -> Option(ScopeProblem) {
+  case agreement {
+    None -> Some(RepresentationRequired(None, None))
+    Some(a) -> {
+      let id = a.row.id
+      let ma = jurisdiction.to_string(a.row.jurisdiction)
+      let needed = scopes_for(t)
+      case status, confirmed {
+        Some(agreement_status.Expired), _ -> Some(RepresentationExpired(id))
+        Some(agreement_status.Active), True ->
+          case
+            list.any(needed, list.contains(a.scope, _)),
+            list.any(mas, fn(m) {
+              m != "" && m != "INT" && ma != "INT" && m != ma
+            })
+          {
+            False, _ -> Some(ScopeNotCovered(id, needed))
+            True, True -> Some(JurisdictionNotCovered(id, mas))
+            True, False -> None
+          }
+        _, _ -> Some(RepresentationRequired(Some(id), status))
+      }
+    }
+  }
+}
+
+/// A scope problem's refusal code.
+pub fn scope_problem_code(p: ScopeProblem) -> String {
+  case p {
+    RepresentationRequired(..) -> "REPRESENTATION_REQUIRED"
+    RepresentationExpired(..) -> "REPRESENTATION_EXPIRED"
+    ScopeNotCovered(..) | JurisdictionNotCovered(..) ->
+      "REPRESENTATION_SCOPE_INSUFFICIENT"
+  }
 }

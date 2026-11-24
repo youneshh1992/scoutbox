@@ -1556,6 +1556,239 @@ const AGENT_MAP = {
   [`${AGENT}/errors.mjs#publicErrorBody`]: errorBody(ref('scoutbox/agents/core_routes', 'contract')),
 };
 
+// ------------------------------------------------------------------------------------------ compliance policy
+
+const POLICY = 'domains/agents/compliance/policy.mjs';
+const AP = 'scoutbox/agents/approach_policy';
+const ruleStatusV = vocab('scoutbox/vocab/rule_status');
+const paramName = vocab('scoutbox/rows/jurisdiction_policy_rule_params', 'name_pairs');
+
+/** A rule's parameters as `approach_policy.published` reads them back from their rows, by kind and in order: a flag,
+ *  a count, a text, and a list of sets of text (by name). An empty list or map has no item rows, so nothing. */
+const params = (p, ctx) => {
+  const flags = [];
+  const counts = [];
+  const texts = [];
+  const sets = [];
+  for (const [k, v] of Object.entries(p ?? {})) {
+    // A name the table's CHECK would refuse can't be stored: checked here, not imported.
+    paramName(k, { use: () => '' });
+    if (typeof v === 'boolean') flags.push(`#(${string(k)}, ${bool(v)})`);
+    else if (Number.isInteger(v) && v >= 0) counts.push(`#(${string(k)}, ${int(v)})`);
+    else if (typeof v === 'string') texts.push(`#(${string(k)}, ${string(v)})`);
+    else if (Array.isArray(v) && v.every((x) => Array.isArray(x))) {
+      if (v.length) sets.push([k, `#(${string(k)}, ${list(list(string))(v, ctx)})`]);
+    } else if (v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length) continue;
+    else throw new Error(`no Gleam field for the parameter ${k} ${JSON.stringify(v)}`);
+  }
+  sets.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return [
+    ['flags', `[${flags.join(', ')}]`],
+    ['counts', `[${counts.join(', ')}]`],
+    ['texts', `[${texts.join(', ')}]`],
+    ['sets', `[${sets.map(([, x]) => x).join(', ')}]`],
+  ];
+};
+
+/** A rule of a policy version, keyed by its id. Its sources, note and text status are rows no rule reads. */
+const policyRule = (ruleId) => (v, ctx) => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error(`cannot print ${JSON.stringify(v)} as a Rule`);
+  if (!('ruleStatus' in v)) throw new Error('a rule without a status: every stored rule has one');
+  const fields = [
+    ['id', string(ruleId)],
+    ['status', ruleStatusV(v.ruleStatus, ctx)],
+    ['effective_from', option(string)(v.effectiveFrom, ctx)],
+    ...params(v.params, ctx),
+    [
+      'overrides',
+      list((o) => {
+        const { jurisdiction, scope, overrideRuleId, ...rest } = o ?? {};
+        if (scope !== 'national' || Object.keys(rest).length) throw new Error(`no Gleam field for the override ${JSON.stringify(o)}`);
+        return `#(${jurisdictionV(jurisdiction, ctx)}, ${string(overrideRuleId)})`;
+      })(v.overrides ?? [], ctx),
+    ],
+  ];
+  for (const k of Object.keys(v))
+    if (!['ruleStatus', 'textStatus', 'sourceRef', 'params', 'note', 'overrides', 'effectiveFrom'].includes(k))
+      throw new Error(`Rule has no field for the JavaScript key ${k}`);
+  return `${ctx.use(AP)}.Rule(${fields.map(([k, x]) => `${k}: ${x}`).join(', ')})`;
+};
+
+const policyStatus = vocab('scoutbox/rows/jurisdiction_policies', 'status_pairs');
+/** A policy version's row. Who published it is its own table, which no rule reads. */
+const policyRow = record({
+  module: 'scoutbox/rows/jurisdiction_policies',
+  constructor: 'Row',
+  base: call(BASE, 'policy'),
+  fields: {
+    id: ['id', ident('policy')],
+    regulator: ['regulator', string],
+    jurisdiction: ['jurisdiction', jurisdictionV],
+    policyVersion: ['policy_version', int],
+    supersedes: ['supersedes_id', option(ident('policy'))],
+    effectiveFrom: ['effective_from_date', string],
+    effectiveTo: ['effective_to_date', option(string)],
+    // A published version has a publication time (the table's CHECK); a proposed one has none.
+    status: (v, ctx) => [
+      ['status', policyStatus(v, ctx)],
+      ['published_at', v === 'published' ? 'Some(0)' : 'None'],
+    ],
+  },
+  ignore: ['publishedBy', 'rules'],
+});
+const policy = (v, ctx) => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error(`cannot print ${JSON.stringify(v)} as a Policy`);
+  const rules = Object.entries(v.rules ?? {}).map(([id, r]) => policyRule(id)(r, ctx));
+  return `${ctx.use(AP)}.Policy(row: ${policyRow(v, ctx)}, rules: [${rules.join(', ')}])`;
+};
+
+const reasonP = (v, ctx) => {
+  const { code: c, ruleId, ruleStatus, regulator, jurisdiction, policyVersion, facet: f, memberAssociation, state, ...rest } = v;
+  if (Object.keys(rest).length) throw new Error(`Reason has no field for ${Object.keys(rest)}`);
+  return `${ctx.use(AP)}.Reason(code: ${string(c)}, rule_id: ${option(string)(ruleId, ctx)}, rule_status: ${ruleStatusV(ruleStatus, ctx)}, regulator: ${option(string)(regulator, ctx)}, jurisdiction: ${option(string)(jurisdiction, ctx)}, policy_version: ${option(ident('policy'))(policyVersion, ctx)}, facet: ${option(facetV)(f, ctx)}, member_association: ${option(jurisdictionV)(memberAssociation, ctx)}, state: ${option(facetState)(state, ctx)})`;
+};
+const facetGapP = (v, ctx) =>
+  `${ctx.use(AP)}.FacetGap(facet: ${facetV(v.facet, ctx)}, member_association: ${option(jurisdictionV)(v.memberAssociation, ctx)}, state: ${facetState(v.state, ctx)}, code: ${string(v.code)})`;
+
+/** The facet states evaluatePolicy is handed (`{ fifa_licence: state, <facet>: { <MA>: state } }`), as the
+ *  `state_of` lookup the Gleam evaluations take: anything not named is UNVERIFIED. */
+const stateOf = (v, ctx) => {
+  const arms = [];
+  const stateText = (x) => (typeof x === 'string' ? x : (x?.state ?? 'UNVERIFIED'));
+  for (const [f, x] of Object.entries(v ?? {})) {
+    if (!x) continue;
+    if (f === 'fifa_licence') arms.push(`${facetV(f, ctx)}, _ -> ${facetState(stateText(x), ctx)}`);
+    else for (const [ma, g] of Object.entries(x)) arms.push(`${facetV(f, ctx)}, Some(${jurisdictionV(ma, ctx)}) -> ${facetState(stateText(g), ctx)}`);
+  }
+  return `fn(facet, ma) { case facet, ma { ${[...arms, `_, _ -> ${facetState('UNVERIFIED', ctx)}`].join(' ')} } }`;
+};
+
+/** The flags of a decision that Gleam derives from its facet gaps: each is set exactly when a gap names its facet. */
+const FLAG_FACETS = {
+  requiresNationalRegistration: 'national_registration',
+  requiresDomesticAuthorisation: 'domestic_authorisation',
+  requiresMinorAccreditation: 'minors_authorisation',
+};
+const decisionP = (v, ctx) => {
+  for (const [k, f] of Object.entries(FLAG_FACETS))
+    if (v[k] !== v.facetGaps.some((g) => g.facet === f)) throw new Error(`Decision has no field for ${k} without a ${f} gap`);
+  if (v.requiresConsent || v.requiresGuardian) throw new Error('Decision has no field for a consent or guardian requirement');
+  // policyVersions, ruleIds and ruleStatuses are the set's ids and the reasons' rules, which each route writes from them.
+  return `${ctx.use(AP)}.Decision(blocked: ${bool(v.blocked)}, requires_manual_review: ${bool(v.requiresManualReview)}, reasons: ${list(reasonP)(v.reasons, ctx)}, facet_gaps: ${list(facetGapP)(v.facetGaps, ctx)})`;
+};
+
+/** An agreement as representationScopeProblem reads it: its id, scope and jurisdiction. The rest of the row is the
+ *  base's, which the rule doesn't read. */
+const scopedAgreement = (v, ctx) => {
+  const { id, scope, jurisdiction, ...rest } = v ?? {};
+  if (v === null || typeof v !== 'object' || Object.keys(rest).length) throw new Error(`no Gleam field for the agreement ${JSON.stringify(v)}`);
+  return `${ctx.use(AR)}.Agreement(row: ${agreementRowOf({ id, jurisdiction }, ctx)}, scope: ${list(scopeV)(Array.isArray(scope) ? scope : [], ctx)}, policy_versions: [], history: [])`;
+};
+const scopeProblemP = (v, ctx) => {
+  const ap = ctx.use(AP);
+  if (v.error === 'REPRESENTATION_REQUIRED')
+    return `${ap}.RepresentationRequired(${option(ident('agreement'))(v.agreementId, ctx)}, ${option(agreementStatus)(v.status, ctx)})`;
+  if (v.error === 'REPRESENTATION_EXPIRED') return `${ap}.RepresentationExpired(${ident('agreement')(v.agreementId, ctx)})`;
+  if (v.error === 'REPRESENTATION_SCOPE_INSUFFICIENT' && Array.isArray(v.required)) {
+    // Scopes are lowercase vocabulary values, member associations three capitals.
+    if (v.required.every((x) => /^[a-z_]+$/.test(x)))
+      return `${ap}.ScopeNotCovered(${ident('agreement')(v.agreementId, ctx)}, ${list(scopeV)(v.required, ctx)})`;
+    return `${ap}.JurisdictionNotCovered(${ident('agreement')(v.agreementId, ctx)}, ${list(string)(v.required, ctx)})`;
+  }
+  throw new Error(`no ScopeProblem for ${JSON.stringify(v)}`);
+};
+
+const scopeP = (v, ctx) => {
+  const C = ctx.use('scoutbox/agents/conflict');
+  if (v.scope === 'unknown') return `${C}.Unresolved`;
+  if (v.scope === 'national') return `${C}.National(${string(v.nationalMa)})`;
+  return `${C}.International(${list(string)(v.memberAssociations, ctx)})`;
+};
+
+/** A jurisdiction named by text. The Gleam callers hold each context's jurisdictions as text, never as objects. */
+const maText = (v) => {
+  if (typeof v !== 'string') throw new Error(`a jurisdiction entry here is text, not ${JSON.stringify(v)}`);
+  return string(v);
+};
+
+const POLICY_MAP = {
+  [`${POLICY}#selectPolicyVersion`]: {
+    module: AP,
+    now: true,
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(AP)}.select_version(${list(policy)(c.args[0] ?? [], ctx)}, ${jurisdictionV(c.args[1], ctx)}, ${nowArg(c.args[2], ctx)})`,
+        option(policy)(c.result, ctx),
+      ),
+  },
+  [`${POLICY}#applicablePolicySet`]: {
+    module: AP,
+    now: true,
+    // `memberAssociations` (the associations it looked up) is read by no caller.
+    test: (c, ctx) =>
+      eq(
+        `${ctx.use(AP)}.applicable(${list(policy)(c.args[0] ?? [], ctx)}, ${list(maText)(c.args[1] ?? [], ctx)}, ${nowArg(c.args[2], ctx)})`,
+        `${ctx.use(AP)}.PolicySet(policies: ${list(policy)(c.result.policies, ctx)}, missing: ${list(string)(c.result.missing, ctx)})`,
+      ),
+  },
+  [`${POLICY}#ruleStatusAt`]: {
+    module: AP,
+    now: true,
+    test: (c, ctx) => {
+      const [entry, now] = c.args;
+      if (!entry?.rule) throw new Error('an entry without a rule: every caller passes the rule find_rule found');
+      return eq(`${ctx.use(AP)}.status_at(${policyRule('rule')(entry.rule, ctx)}, ${nowArg(now, ctx)})`, ruleStatusV(c.result, ctx));
+    },
+  },
+  [`${POLICY}#ruleAt`]: {
+    module: AP,
+    now: true,
+    test: (c, ctx) => {
+      const [set, ruleId, now] = c.args;
+      const r = c.result;
+      return eq(
+        `${ctx.use(AP)}.rule_at(${list(policy)(set ?? [], ctx)}, ${string(ruleId)}, ${nowArg(now, ctx)})`,
+        `${ctx.use(AP)}.Entry(rule_id: ${string(r.ruleId)}, rule: ${option(policyRule(r.ruleId))(r.rule, ctx)}, policy: ${option(policy)(r.policy, ctx)}, status: ${ruleStatusV(r.status, ctx)})`,
+      );
+    },
+  },
+  [`${POLICY}#resolveScope`]: {
+    module: 'scoutbox/agents/conflict',
+    test: (c, ctx) => eq(`${ctx.use('scoutbox/agents/conflict')}.resolve_scope(${list(maText)(c.args[0], ctx)})`, scopeP(c.result, ctx)),
+  },
+  [`${POLICY}#evaluatePolicy`]: {
+    module: AP,
+    now: true,
+    test: (c, ctx) => {
+      const { action, memberAssociations = [], facets = {}, policySet = [], missingPolicies = [], otherExclusiveAgreements = [], now, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`evaluatePolicy has no argument for ${Object.keys(rest)}`);
+      const ap = ctx.use(AP);
+      const set = `${ap}.PolicySet(policies: ${list(policy)(policySet, ctx)}, missing: ${list(string)(missingPolicies ?? [], ctx)})`;
+      const common = `${set}, ${list(maText)(memberAssociations, ctx)}, ${stateOf(facets, ctx)}`;
+      const n = nowArg(now, ctx);
+      const ends = list((a) => option(int)(typeof a?.endAt === 'number' ? a.endAt : null, ctx))(otherExclusiveAgreements ?? [], ctx);
+      const calls = {
+        approach_adult: `${ap}.approach_adult(${common}, ${ends}, ${n})`,
+        declare_representation: `${ap}.declare_representation(${common}, ${n})`,
+        approach_minor: `${ap}.approach_minor(${common}, ${n})`,
+      };
+      if (!calls[action]) throw new Error(`no Gleam evaluation for the action ${JSON.stringify(action)}`);
+      return `let d = ${calls[action]}\n  assert d == ${decisionP(c.result, ctx)}\n  assert ${ap}.allowed(d) == ${bool(c.result.allowed)}`;
+    },
+  },
+  [`${POLICY}#representationScopeProblem`]: {
+    module: AP,
+    test: (c, ctx) => {
+      const { agreement: ag, effectiveStatus, confirmed, contextType, memberAssociations = [], ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`representationScopeProblem has no argument for ${Object.keys(rest)}`);
+      return eq(
+        `${ctx.use(AP)}.scope_problem(${option(scopedAgreement)(ag, ctx)}, ${option(agreementStatus)(effectiveStatus, ctx)}, ${bool(confirmed)}, ${vocab('scoutbox/vocab/context_type')(contextType, ctx)}, ${list(maText)(memberAssociations, ctx)})`,
+        option(scopeProblemP)(c.result, ctx),
+      );
+    },
+  },
+};
+
 // -------------------------------------------------------------------------------------------------- passport
 
 const PASSPORT = 'domains/passport/shared.mjs';
@@ -5135,6 +5368,7 @@ export const MAP = {
   ...PASSPORT_MAP,
   ...TRUST_MAP,
   ...AGENT_MAP,
+  ...POLICY_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
@@ -5245,6 +5479,14 @@ export const NO_COUNTERPART = {
     "No whole component is adult-only, so every weight is eligible (the policy's, proved equal to the snapshot); the agency facet a minor's relationships drop is each profile's context.adultOnlyFacetsExcluded, which calculateTrustScore's cases compare.",
   [`${TRUST}#trustChangeReasons`]:
     'No route reports change reasons on either server: they appear in no response, and the trust_recalculation_reason counter is never counted.',
+  // The minors gate: no TypeScript route evaluates a minor, and the minor pathway is closed in every jurisdiction
+  // (DR-49). The agent's own minor readiness is approach_policy.approach_minor, generated with evaluatePolicy.
+  ...Object.fromEntries(
+    ['evaluateMinorGate', 'isRegulatoryMinor', 'earliestPermittedApproachAt'].map((f) => [
+      `${POLICY}#${f}`,
+      "No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule.",
+    ]),
+  ),
   [`${AGENT}/shared.mjs#tiersOf`]:
     "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
 };
@@ -5422,6 +5664,15 @@ export const HAND_PORTED = {
     [`${TRUST}#safeTrustProjection`, 'domains/agents/core/shared.mjs#agreementInForce'].map((f) => [
       f,
       'test/scoutbox/passport/trust_rules_test.gleam',
+    ]),
+  ),
+  // A jurisdiction ScoutBox has no policy for, a boundary that isn't a stored day, an entry without a rule, an action
+  // or context type outside the closed sets and jurisdictions passed as objects: the file's header says where each is
+  // refused.
+  ...Object.fromEntries(
+    ['selectPolicyVersion', 'ruleStatusAt', 'evaluatePolicy', 'representationScopeProblem', 'resolveScope'].map((f) => [
+      `${POLICY}#${f}`,
+      'test/scoutbox/agents/approach_policy_test.gleam',
     ]),
   ),
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',

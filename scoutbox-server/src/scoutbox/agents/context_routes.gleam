@@ -43,7 +43,6 @@ import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
 import scoutbox/vocab/context_type.{type ContextType}
 import scoutbox/vocab/declared_representation_status as rep_status
-import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party_role.{type PartyRole}
 import scoutbox/vocab/subject_kind.{type SubjectKind}
@@ -693,13 +692,6 @@ fn representation_record(r: rep_row.Row) -> Json {
   ])
 }
 
-const context_type_scopes = [
-  #(context_type.EmploymentContract, ["employment"]),
-  #(context_type.Transfer, ["transfer", "employment"]),
-  #(context_type.Loan, ["transfer", "employment"]),
-  #(context_type.OtherServices, ["other_services", "commercial"]),
-]
-
 /// policy.mjs `representationScopeProblem`, as the refusal it answers.
 fn scope_problem(
   ag: agent_rules.Agreement,
@@ -710,50 +702,44 @@ fn scope_problem(
   let status = agent_rules.effective_status(ag.row, now)
   let confirmed =
     ag.row.confirmed_at != None && agent_rules.grants_access(ag.row, agent, now)
-  let agreement = #("agreementId", id.agreement_json(ag.row.id))
-  let scope_refusal = fn(required) {
+  let required_message =
+    "No active, client-confirmed relationship covers this party."
+  let scope_refusal = fn(agreement, required) {
     compliance.refusal(
       "REPRESENTATION_SCOPE_INSUFFICIENT",
       "The relationship does not cover this action's scope or jurisdiction.",
-      [agreement, #("required", required)],
+      [#("agreementId", id.agreement_json(agreement)), #("required", required)],
     )
   }
-  let required_message =
-    "No active, client-confirmed relationship covers this party."
-  case status, confirmed {
-    agreement_status.Expired, _ ->
-      Some(
+  approach_policy.scope_problem(
+    Some(ag),
+    Some(status),
+    confirmed,
+    c.row.type_,
+    c.jurisdictions,
+  )
+  |> option.map(fn(problem) {
+    case problem {
+      approach_policy.RepresentationExpired(agreement) ->
         compliance.refusal("REPRESENTATION_EXPIRED", required_message, [
+          #("agreementId", id.agreement_json(agreement)),
+        ])
+      approach_policy.ScopeNotCovered(agreement, needed) ->
+        scope_refusal(
           agreement,
-        ]),
-      )
-    agreement_status.Active, True -> {
-      let needed =
-        list.key_find(context_type_scopes, c.row.type_) |> result.unwrap([])
-      let scope = list.map(ag.scope, agreement_scope_row.scope_to_string)
-      let ma = jurisdiction.to_string(ag.row.jurisdiction)
-      case list.any(needed, list.contains(scope, _)) {
-        False -> Some(scope_refusal(json.array(needed, json.string)))
-        True ->
-          case
-            list.any(c.jurisdictions, fn(m) {
-              m != "INT" && ma != "INT" && m != ma
-            })
-          {
-            True ->
-              Some(scope_refusal(json.array(c.jurisdictions, json.string)))
-            False -> None
-          }
-      }
-    }
-    _, _ ->
-      Some(
+          json.array(needed, fn(s) {
+            json.string(agreement_scope_row.scope_to_string(s))
+          }),
+        )
+      approach_policy.JurisdictionNotCovered(agreement, required) ->
+        scope_refusal(agreement, json.array(required, json.string))
+      approach_policy.RepresentationRequired(_, _) ->
         compliance.refusal("REPRESENTATION_REQUIRED", required_message, [
-          agreement,
+          #("agreementId", id.agreement_json(ag.row.id)),
           #("status", agreement_status.to_json(status)),
-        ]),
-      )
-  }
+        ])
+    }
+  })
 }
 
 /// `POST /org/agent/compliance/contexts/:id/representations`: the agent records that they act for a party here.

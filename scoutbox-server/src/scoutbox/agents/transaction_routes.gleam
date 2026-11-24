@@ -61,7 +61,6 @@ import scoutbox/rows/transaction_representations as rep_row
 import scoutbox/rows/transaction_terms_versions as terms_row
 import scoutbox/verification/records
 import scoutbox/vocab/agent_facet
-import scoutbox/vocab/agreement_status
 import scoutbox/vocab/audience
 import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
@@ -2610,45 +2609,23 @@ type RepresentationBody {
   )
 }
 
-/// What the agent's scope must cover, by the transaction's type (CONTEXT_TYPE_SCOPES).
-fn needed_scopes(t: ContextType) -> List(String) {
-  case t {
-    context_type.EmploymentContract -> ["employment"]
-    context_type.Transfer | context_type.Loan -> ["transfer", "employment"]
-    context_type.OtherServices -> ["other_services", "commercial"]
-  }
-}
-
-/// `representationScopeProblem`: the refusal code, or none. An agreement for one national association does not
-/// authorise an act in another; INT covers only the international dimension.
+/// `representationScopeProblem`: the refusal code, or none.
 fn scope_problem(
   a: agent_rules.Agreement,
   agent: id.OrgUserId,
   t: Transaction,
   now: Int,
 ) -> Option(String) {
-  let status = agent_rules.effective_status(a.row, now)
   let confirmed =
     a.row.confirmed_at != None && agent_rules.grants_access(a.row, agent, now)
-  let scope = list.map(a.scope, agreement_scope_row.scope_to_string)
-  let ma = jurisdiction.to_string(a.row.jurisdiction)
-  case status, confirmed {
-    agreement_status.Expired, _ -> Some("REPRESENTATION_EXPIRED")
-    agreement_status.Active, True ->
-      case list.any(needed_scopes(t.row.type_), list.contains(scope, _)) {
-        False -> Some("REPRESENTATION_SCOPE_INSUFFICIENT")
-        True ->
-          case
-            list.any(t.jurisdictions, fn(m) {
-              m != "INT" && ma != "INT" && m != ma
-            })
-          {
-            True -> Some("REPRESENTATION_SCOPE_INSUFFICIENT")
-            False -> None
-          }
-      }
-    _, _ -> Some("REPRESENTATION_REQUIRED")
-  }
+  approach_policy.scope_problem(
+    Some(a),
+    Some(agent_rules.effective_status(a.row, now)),
+    confirmed,
+    t.row.type_,
+    t.jurisdictions,
+  )
+  |> option.map(approach_policy.scope_problem_code)
 }
 
 /// `POST /org/agent/transactions/:id/representations`: an agreement active for this player is not by itself

@@ -36,6 +36,7 @@ import scoutbox/rows/development_evidence_links
 import scoutbox/rows/development_goals
 import scoutbox/rows/development_reviews
 import scoutbox/rows/id
+import scoutbox/rows/jurisdiction_policies
 import scoutbox/rows/offer_responses
 import scoutbox/rows/offer_revisions
 import scoutbox/rows/orgs
@@ -237,6 +238,23 @@ pub fn agreement() -> representation_agreements.Row {
     disclosure_trial_visibility: False,
     created_at: 0,
     rev: 1,
+  )
+}
+
+/// A policy version: FIFA's first, published and in effect from 2025, open-ended.
+pub fn policy() -> jurisdiction_policies.Row {
+  jurisdiction_policies.Row(
+    ..jurisdiction_policies.new(
+      id: id.policy("p"),
+      regulator: "FIFA",
+      jurisdiction: jurisdiction.INT,
+      policy_version: 1,
+      effective_from_date: "2025-01-01",
+      status: jurisdiction_policies.Published,
+      created_at: 0,
+      rev: 1,
+    ),
+    published_at: Some(0),
   )
 }
 
