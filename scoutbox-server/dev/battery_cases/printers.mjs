@@ -22,7 +22,8 @@ function pairsConst(module, name) {
   const at = src.indexOf(`pub const ${name} = [`);
   if (at < 0) throw new Error(`${module} has no ${name}`);
   const body = src.slice(at, src.indexOf(']', at));
-  return new Map([...body.matchAll(/#\("((?:[^"\\]|\\.)*)",\s*(\w+)\)/g)].map((m) => [m[1], m[2]]));
+  // `gleam format` splits a long pair over lines, with a trailing comma.
+  return new Map([...body.matchAll(/#\(\s*"((?:[^"\\]|\\.)*)",\s*(\w+),?\s*\)/g)].map((m) => [m[1], m[2]]));
 }
 
 /** text → constructor, from the arms `Constructor -> "TEXT"` of `pub fn <name>(…) -> String` in `module`. */

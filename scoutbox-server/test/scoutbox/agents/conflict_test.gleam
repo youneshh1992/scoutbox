@@ -2,6 +2,18 @@
 //// test/fixtures/conflict_cases.json (written by `node dev/conflict_cases.mjs`), over the seeded policy versions
 //// as this server stores them: the outcome, every reason, the outstanding consents, the policy versions and the
 //// input hash.
+////
+//// Below them, the engine's checks the recorder can't turn into generated cases, ported by hand from the TypeScript
+//// rules suites of agents/compliance and platform/dates (scripts/rules/):
+////
+//// - A grant time that isn't an integer (text, a flag, an object, NaN, ±Infinity; platform/dates K11) can't reach
+////   the engine: `consent_store.answer` writes the clock's instant, into an INTEGER column of a STRICT table. A
+////   granted consent with no time (K11's null and undefined) is generated: only a CHECK forbids one.
+//// - A context type outside the four (`offer`, K4) can't be held (the closed vocabulary): approach_policy_test's
+////   J8 shows it. K4's other half, an unresolved scope, is generated.
+//// - Other services and declared interests (N5, N6, N7) are no input to the Gleam engine: no route on either
+////   server records them, and the TypeScript route hands its engine both empty (compliance/shared.mjs
+////   `engineInput`). They have to be ported with the first route that records one.
 
 import gleam/dict
 import gleam/dynamic/decode
@@ -304,4 +316,27 @@ pub fn the_ported_engine_agrees_with_typescript_on_every_case_test() {
         int.to_string(list.length(failures)) <> " mismatches; first " <> first
       }
   }
+}
+
+fn read_one(s: store.Store, sql: String, decoder: decode.Decoder(a)) -> a {
+  let assert Ok(Ok(v)) =
+    store.read(s, fn(read) { store.one(read, sql, [], decoder) })
+  v
+}
+
+// platform/dates K11: a stored grant time is an integer or nothing.
+pub fn a_stored_grant_time_is_always_an_integer_test() {
+  let s = support.fresh_store(fn(_) { Nil })
+  assert read_one(
+      s,
+      "SELECT strict FROM pragma_table_list WHERE name = 'regulatory_consents'",
+      decode.at([0], decode.int),
+    )
+    == 1
+  assert read_one(
+      s,
+      "SELECT type FROM pragma_table_info('regulatory_consents') WHERE name = 'granted_at'",
+      decode.at([0], decode.string),
+    )
+    == "INTEGER"
 }

@@ -43,21 +43,21 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#inputHashOf",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#mostSevere",
         "calls": 33,
         "cases": 25,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
@@ -172,35 +172,39 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#evaluateConflict",
         "calls": 44,
-        "cases": 36,
-        "handPort": {},
-        "status": "pending"
+        "cases": 32,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"offer\" as a value of scoutbox/vocab/context_type.pairs": 1,
+          "Gleam's types can't hold its arguments: no route records declared interests": 1,
+          "Gleam's types can't hold its arguments: no route records other services": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#inputHashOf",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/conflict.mjs#mostSevere",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/errors.mjs#publicErrorBody",
@@ -315,7 +319,7 @@
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#applicablePolicySet",
@@ -2130,13 +2134,22 @@
       {
         "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
         "calls": 31,
-        "cases": 13,
+        "cases": 4,
         "handPort": {
           "args[].grantedAt is -Infinity": 2,
           "args[].grantedAt is Infinity": 2,
-          "args[].grantedAt is NaN": 3
+          "args[].grantedAt is NaN": 3,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 2,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 2
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/compliance/policy.mjs#earliestPermittedApproachAt",

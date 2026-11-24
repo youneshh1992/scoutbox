@@ -10,6 +10,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/agents/conflict
+import scoutbox/agents/context_view
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/key_order
@@ -70,6 +72,7 @@ import scoutbox/vocab/jurisdiction
 import scoutbox/vocab/offer_status
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party
+import scoutbox/vocab/party_role
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/signing_party_type
 import scoutbox/vocab/trial_session_kind
@@ -1008,4 +1011,36 @@ pub fn counted() -> decisions.Counted {
     confidence: #(0, 0, 0),
     evidence_refs: 0,
   )
+}
+
+/// What a stored evaluation adds on read (conflict.mjs `derivedOfEvaluation`, less the rule statuses), as JSON in the
+/// engine result's key order: the alias, the required actions and the missing evidence, worked out from the
+/// engine's own answer as `context_view` works them out from the stored one.
+pub fn conflict_derived(e: conflict.Evaluation) -> String {
+  let codes = list.map(e.reasons, fn(r) { r.code })
+  let outstanding =
+    list.map(e.consents_outstanding, fn(o) {
+      context_view.Outstanding(
+        party_role: party_role.to_string(o.party_role),
+        agent_user_id: Some(o.agent_user_id),
+        consent_kind: o.consent_kind,
+        reason_code: o.reason_code,
+      )
+    })
+  json.object([
+    #("alias", json.nullable(context_view.alias(e.outcome), json.string)),
+    #(
+      "requiredActions",
+      json.preprocessed_array(context_view.required_actions(
+        e.outcome,
+        codes,
+        outstanding,
+      )),
+    ),
+    #(
+      "missingEvidence",
+      json.array(context_view.missing_evidence(codes), json.string),
+    ),
+  ])
+  |> json.to_string
 }

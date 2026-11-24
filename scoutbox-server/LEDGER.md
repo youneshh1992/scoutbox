@@ -17,12 +17,12 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 289 / 314 | 83 / 98 | 6 to go |
+| agents | 9 | 9 | 9 | 359 / 239 | 87 / 102 | 5 to go |
 | development | 3 | 3 | 3 | 127 / 0 | 45 / 45 | **ported** |
 | discovery | 3 | 3 | 3 | 323 / 0 | 2 / 2 | **ported** |
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
-| platform | 15 | 15 | 14 | 2207 / 27 | 256 / 288 | 2 to go |
+| platform | 15 | 15 | 14 | 2211 / 14 | 281 / 306 | 2 to go |
 | recruitment | 19 | 19 | 19 | 4428 / 0 | 537 / 537 | **ported** |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -34,9 +34,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 42 / 53 | 31 / 35 | 53 cases pending; 4 hand-port calls |
-| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 44 / 46 | 6 / 8 | 46 cases pending; 2 hand-port calls |
-| `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 1 / 1 |  | 1 cases pending |
+| `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 73 / 22 | 31 / 35 | 22 cases pending; 4 hand-port calls |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 82 / 3 | 10 / 12 | 3 cases pending; 2 hand-port calls |
+| `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 2 / 0 |  | **done** |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
 | `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 14 / 83 | 9 / 17 | 83 cases pending; 8 hand-port calls |
@@ -59,7 +59,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 245 | 17 | +64 added | yes | 22 / 0 |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 50 / 0 | 6 / 6 | **done** |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2086 / 27 | 219 / 251 | 27 cases pending; 32 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2090 / 14 | 244 / 269 | 14 cases pending; 25 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/liveDelivery` | neutral | 0 → 0 | 0 | 7 |  | +7 added | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
@@ -177,6 +177,7 @@ ported by hand to a gleeunit test.
 | `agents/adversarial` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 2 | args[].endAt is NaN; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#normaliseDisclosure` | 1 | args[].clubPresence is NaN | to do |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#termMonthsOf` | 1 | args[] is NaN | to do |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#evaluateConflict` | 4 | Gleam's types can't hold its arguments: cannot print "offer" as a value of scoutbox/vocab/context_type.pairs; Gleam's types can't hold its arguments: no route records declared interests; Gleam's types can't hold its arguments: no route records other services | `test/scoutbox/agents/conflict_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/errors.mjs#publicErrorBody` | 1 | Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped | `test/scoutbox/agents/error_bodies_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluatePolicy` | 1 | Gleam's types can't hold its arguments: no Gleam evaluation for the action "bribe" | `test/scoutbox/agents/approach_policy_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#representationScopeProblem` | 1 | Gleam's types can't hold its arguments: cannot print "offer" as a value of scoutbox/vocab/context_type.pairs | `test/scoutbox/agents/approach_policy_test.gleam` |
@@ -227,7 +228,7 @@ ported by hand to a gleeunit test.
 | `platform/dates` | `domain.ts#ageOn` | 14 | args[] is NaN; args[] is undefined; result is NaN | `test/scoutbox/rules/age_test.gleam` |
 | `platform/dates` | `domain.ts#isAdult` | 16 | args[].dob is NaN; Gleam's types can't hold its arguments: cannot print "02/03/2010" as a Day; Gleam's types can't hold its arguments: cannot print "2010-02-30" as a Day; Gleam's types can't hold its arguments: cannot print "2011-04-31" as a Day; Gleam's types can't hold its arguments: cannot print "2019-02-29" as a Day; Gleam's types can't hold its arguments: cannot print "2023-00-10" as a Day; Gleam's types can't hold its arguments: cannot print "2023-01-00" as a Day; Gleam's types can't hold its arguments: cannot print "2023-01-32" as a Day; Gleam's types can't hold its arguments: cannot print "2023-13-01" as a Day; Gleam's types can't hold its arguments: cannot print 0 as a Day; Gleam's types can't hold its arguments: cannot print 20100101 as a Day; Gleam's types can't hold its arguments: cannot print false as a Day; Gleam's types can't hold its arguments: cannot print null as a Day; Gleam's types can't hold its arguments: cannot print undefined as a Day | `test/scoutbox/rules/age_test.gleam` |
 | `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | `test/scoutbox/platform/temporal_test.gleam` |
-| `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 7 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN | to do |
+| `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 25 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/conflict_test.gleam` |
 | `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 2 | Gleam's types can't hold its arguments: cannot print 1790078400000 as a String; Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/agents/approach_policy_test.gleam` |
 | `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 26 | args[].endedAt is -Infinity; args[].endedAt is Infinity; args[].endedAt is NaN; args[].startedAt is -Infinity; args[].startedAt is Infinity; args[].startedAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "2030-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 25 | args[].endAt is -Infinity; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is -Infinity; args[].startAt is Infinity; args[].startAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -371,19 +372,10 @@ mapped, then `npm run cases`.
 
 | Battery | Function | Cases |
 |---|---|---|
-| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#canonicalJson` | 2 |
-| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 4 |
-| `agents/adversarial` | `domains/agents/compliance/conflict.mjs#mostSevere` | 25 |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#agreementTermCoversNow` | 3 |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#normaliseDisclosure` | 18 |
 | `agents/adversarial` | `domains/agents/integration/integration.mjs#agentClientBasis` | 1 |
-| `agents/compliance` | `domains/agents/compliance/conflict.mjs#conflictSummaryForParty` | 1 |
-| `agents/compliance` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
-| `agents/compliance` | `domains/agents/compliance/conflict.mjs#evaluateConflict` | 36 |
-| `agents/compliance` | `domains/agents/compliance/conflict.mjs#inputHashOf` | 2 |
-| `agents/compliance` | `domains/agents/compliance/conflict.mjs#mostSevere` | 3 |
 | `agents/compliance` | `domains/agents/compliance/provider.mjs#facetFromProviderAnswer` | 3 |
-| `agents/compliancePersistence` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 1 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#agentClientBasis` | 9 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#agentSurfaceDecision` | 29 |
 | `agents/crossApp` | `domains/agents/integration/integration.mjs#clubAgentPresence` | 2 |
@@ -414,7 +406,6 @@ mapped, then `npm run cases`.
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
 | `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
-| `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 13 |
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
 
 ## Cases closed: no Gleam counterpart
@@ -427,6 +418,7 @@ their role, so their recorded calls get no test.
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 8 | No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule. |
 | `agents/adversarial` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 12 | No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule. |
 | `agents/adversarial` | `domains/agents/core/shared.mjs#termMonthsOf` | 7 | No TypeScript route calls it. Both request routes refuse a term that is not a whole number of months in range, and default an absent one. |
+| `agents/compliance` | `domains/agents/compliance/conflict.mjs#conflictSummaryForParty` | 1 | No TypeScript route calls it. A party is shown an evaluation's outcome, distinct codes and policy versions where the route builds them (context_view's linked evaluation), which the batteries compare. |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 4 | No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule. |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 17 | No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule. |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 4 | No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule. |

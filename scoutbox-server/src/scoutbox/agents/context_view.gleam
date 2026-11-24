@@ -358,24 +358,32 @@ fn outstanding_json(o: Outstanding) -> Json {
   ])
 }
 
-fn codes_among(reasons: List(Reason), wanted: List(String)) -> List(String) {
-  reasons
-  |> list.map(fn(r) { r.row.code })
+fn codes_among(codes: List(String), wanted: List(String)) -> List(String) {
+  codes
   |> list.filter(list.contains(wanted, _))
   |> list.unique
 }
 
-/// conflict.mjs `requiredActionsFor`.
-fn required_actions(e: Evaluation) -> List(Json) {
-  let codes = fn(action, wanted) {
+fn codes_of(e: Evaluation) -> List(String) {
+  list.map(e.reasons, fn(r) { r.row.code })
+}
+
+/// conflict.mjs `requiredActionsFor`, over an evaluation's outcome, its reasons' codes in order, and its
+/// outstanding consents.
+pub fn required_actions(
+  outcome: ContextOutcome,
+  codes: List(String),
+  outstanding: List(Outstanding),
+) -> List(Json) {
+  let action = fn(action, wanted) {
     json.object([
       #("action", json.string(action)),
-      #("reasonCodes", json.array(codes_among(e.reasons, wanted), json.string)),
+      #("reasonCodes", json.array(codes_among(codes, wanted), json.string)),
     ])
   }
-  case e.row.outcome {
+  case outcome {
     context_outcome.PermittedDualRepresentationConsentRequired ->
-      list.map(e.outstanding, fn(o) {
+      list.map(outstanding, fn(o) {
         json.object([
           #("action", json.string("obtain_consent")),
           #("partyRole", json.string(o.party_role)),
@@ -384,16 +392,29 @@ fn required_actions(e: Evaluation) -> List(Json) {
         ])
       })
     context_outcome.ManualRegulatoryReviewRequired -> [
-      codes("attributed_regulatory_review", review_codes),
+      action("attributed_regulatory_review", review_codes),
     ]
     context_outcome.InsufficientData -> [
-      codes("supply_missing_facts", supply_codes),
+      action("supply_missing_facts", supply_codes),
     ]
     context_outcome.ProhibitedConflict -> [
-      codes("withdraw_a_representation", withdraw_codes),
+      action("withdraw_a_representation", withdraw_codes),
     ]
     context_outcome.Clear -> []
   }
+}
+
+/// conflict.mjs `missingEvidenceOf`: the codes that name a missing fact, in order, repeats kept.
+pub fn missing_evidence(codes: List(String)) -> List(String) {
+  list.filter(codes, list.contains(missing_evidence_codes, _))
+}
+
+fn evaluation_actions(e: Evaluation) -> Json {
+  json.preprocessed_array(required_actions(
+    e.row.outcome,
+    codes_of(e),
+    e.outstanding,
+  ))
 }
 
 /// `Object.fromEntries` over each rule a reason names: a rule named twice keeps its first place and its last
@@ -454,17 +475,8 @@ pub fn evaluation_json_fields(e: Evaluation) -> List(#(String, Json)) {
     #("alias", opt(alias(r.outcome))),
     #("reasons", json.array(e.reasons, reason_json)),
     #("consentsOutstanding", json.array(e.outstanding, outstanding_json)),
-    #("requiredActions", json.preprocessed_array(required_actions(e))),
-    #(
-      "missingEvidence",
-      json.array(
-        list.filter(e.reasons, fn(x) {
-          list.contains(missing_evidence_codes, x.row.code)
-        })
-          |> list.map(fn(x) { x.row.code }),
-        json.string,
-      ),
-    ),
+    #("requiredActions", evaluation_actions(e)),
+    #("missingEvidence", json.array(missing_evidence(codes_of(e)), json.string)),
     #("policyVersions", json.array(e.policy_versions, id.policy_json)),
     #("evaluatedAt", json.int(r.evaluated_at)),
     #("inputHash", json.string(r.input_hash)),
@@ -610,13 +622,7 @@ pub fn event_fields(
               #("outcome", context_outcome.to_json(e.row.outcome)),
               #(
                 "reasonCodes",
-                json.array(
-                  codes_among(
-                    e.reasons,
-                    list.map(e.reasons, fn(x) { x.row.code }),
-                  ),
-                  json.string,
-                ),
+                json.array(list.unique(codes_of(e)), json.string),
               ),
               #("policyVersions", json.array(e.policy_versions, id.policy_json)),
             ]
@@ -745,7 +751,7 @@ pub fn for_agent(read: Read, c: Context, now: Int) -> Result(Json, Fail(e)) {
           #("alias", opt(alias(e.row.outcome))),
           #("reasons", json.array(e.reasons, reason_json)),
           #("consentsOutstanding", json.array(e.outstanding, outstanding_json)),
-          #("requiredActions", json.preprocessed_array(required_actions(e))),
+          #("requiredActions", evaluation_actions(e)),
           #("policyVersions", json.array(e.policy_versions, id.policy_json)),
           #("evaluatedAt", json.int(e.row.evaluated_at)),
           #("inputHash", json.string(e.row.input_hash)),

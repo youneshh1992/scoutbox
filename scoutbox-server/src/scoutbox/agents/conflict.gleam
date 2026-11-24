@@ -208,11 +208,14 @@ pub fn resolve_scope(jurisdictions: List(String)) -> Scope {
 
 // ------------------------------------------------------------------------------------------------- consents
 
-/// Whether a dual-representation consent suffices: unrevoked, granted in advance of the agent's first act for the
-/// other party, by the party itself (or its signatory), naming a policy version in which the deciding rule was
-/// active, and, where the rule asks, with full particulars and the legal-advice offer.
-fn sufficiency(
+/// Whether a dual-representation consent suffices (conflict.mjs `consentSufficiency`): unrevoked, granted in advance
+/// of the agent's first act for the other party, for this context, agent and party, by the party itself (or its
+/// signatory), naming a policy version in which the deciding rule was active, and, where the rule asks, with full
+/// particulars and the legal-advice offer. A refusal is its reason code.
+pub fn consent_sufficiency(
   c: Consent,
+  party_role: PartyRole,
+  agent_user_id: String,
   context_id: String,
   first_act_at: Option(Int),
   require_particulars: Bool,
@@ -221,6 +224,7 @@ fn sufficiency(
   let granted = c.status == "granted" && option.is_some(c.granted_at)
   case c.kind == "dual_representation" {
     False -> Error("CONSENT_MISSING")
+    // A revocation is reported before anything else.
     True if c.revoked_at != None || c.status == "revoked" ->
       Error("CONSENT_REVOKED")
     True if !granted ->
@@ -229,7 +233,7 @@ fn sufficiency(
         _ -> Error("CONSENT_MISSING")
       }
     True if c.context_id != context_id -> Error("CONSENT_WRONG_CONTEXT")
-    True if c.signatory == Some(False) -> Error("SIGNATORY_REQUIRED")
+    True if c.agent_user_id != agent_user_id -> Error("CONSENT_WRONG_AGENT")
     True -> {
       let late = case first_act_at, c.granted_at {
         Some(first), Some(at) -> at > first
@@ -239,6 +243,9 @@ fn sufficiency(
         active_policy_ids != []
         && !list.any(c.policy_versions, list.contains(active_policy_ids, _))
       case late, stale, require_particulars {
+        _, _, _ if c.party_role != Some(party_role) ->
+          Error("CONSENT_WRONG_PARTY")
+        _, _, _ if c.signatory == Some(False) -> Error("SIGNATORY_REQUIRED")
         True, _, _ -> Error("CONSENT_NOT_IN_ADVANCE")
         _, True, _ -> Error("CONSENT_POLICY_VERSION_STALE")
         _, _, True if !c.full_particulars -> Error("PARTICULARS_MISSING")
@@ -812,8 +819,10 @@ fn decided(
             })
             |> list.fold_until(Error("CONSENT_MISSING"), fn(best, c) {
               case
-                sufficiency(
+                consent_sufficiency(
                   c,
+                  role,
+                  c.agent_user_id,
                   input.context_id,
                   dual_at,
                   require_particulars,
@@ -951,8 +960,12 @@ pub fn input_hash(input: Input) -> String {
     #("missingPolicies", canonical.strings(input.missing)),
     #("now", canonical.Int(input.now)),
   ])
-  |> canonical.to_string
-  |> secrets.sha256_hex
+  |> hash_of
+}
+
+/// The SHA-256 of a value's canonical JSON (conflict.mjs `inputHashOf`).
+pub fn hash_of(value: Value) -> String {
+  value |> canonical.to_string |> secrets.sha256_hex
 }
 
 fn consent_value(c: Consent) -> Value {

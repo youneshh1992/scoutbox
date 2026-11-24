@@ -222,8 +222,29 @@ commit. In this order:
    is closed in every jurisdiction (DR-49). It has to be ported when that pathway opens. The calls Gleam's types
    can't hold (an unsupported jurisdiction, a boundary that isn't a stored day, an unknown action or context type,
    jurisdictions as objects) are in `approach_policy_test.gleam`.
-2. **conflict** (`compliance/conflict.mjs`, `conflict`): `evaluateConflict` 44, `mostSevere` 36,
-   `consentSufficiency` 33, `inputHashOf` and `canonicalJson` (`conflict.input_hash`), `conflictSummaryForParty`.
+2. **conflict** [**done**] (`compliance/conflict.mjs`, `conflict`): `evaluateConflict` 44, `mostSevere` 36,
+   `consentSufficiency` 33, `inputHashOf` and `canonicalJson`, `conflictSummaryForParty`. The engine's input is
+   printed as the route hands it over, and a consent as `consent_store.engine_consents` reads it from its row. No
+   difference turned up in the engine:
+   - `consent_sufficiency` is public now, and checks the agent and the party as the TypeScript rule does (the engine
+     always passes matching ones). `hash_of` is the hashing `input_hash` ends in.
+   - A case doesn't compare the input hash: a recorded call leaves out fields the route always sends.
+     `inputHashOf`'s cases prove the hashing, and `conflict_test` the hash over the route's inputs.
+   - A case also checks what a stored evaluation adds on read (`alias`, `requiredActions`, `missingEvidence`).
+     `context_view.required_actions` and `missing_evidence` now take plain codes (`base.conflict_derived`). The
+     TypeScript engine's own `requiredActions` repeats a consent that each connected agent owes. No route sends
+     that list: every route answers the stored evaluation read back through `derivedOfEvaluation`, which lists each
+     consent once. So a case compares the list deduplicated, as the routes send it.
+   - `printers.mjs` missed a vocabulary pair that `gleam format` had split over several lines
+     (`PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED`), which quietly made those calls hand ports. No other
+     vocabulary was affected.
+
+   `conflictSummaryForParty` has no TypeScript caller and is closed in `NO_COUNTERPART`. `conflict_test`'s header
+   closes three kinds of call:
+   - grant times that aren't integers (the column is INTEGER in a STRICT table)
+   - the `offer` type
+   - other services and declared interests (N5–N7). No route on either server records them, so the Gleam engine has
+     no input for them. They have to be ported with the first route that records one.
 3. **integration** (`integration/integration.mjs`, `integration`): `agentSurfaceDecision` 30,
    `effectiveHandoffStatus` 21, `agentClientBasis` 13, `handoffBlockers` 12, `surfaceIsRegulated` 12,
    `normaliseDisclosure` (both modules), `contactRouting`, and `duplicateTransactionOf` (closure calls).

@@ -1789,6 +1789,119 @@ const POLICY_MAP = {
   },
 };
 
+// ----------------------------------------------------------------------------------------------- conflict engine
+
+const CONFLICT = 'domains/agents/compliance/conflict.mjs';
+const CF = 'scoutbox/agents/conflict';
+const partyRoleV = vocab('scoutbox/vocab/party_role');
+const subjectKindV = vocab('scoutbox/vocab/subject_kind');
+const outcomeV = vocab('scoutbox/vocab/context_outcome');
+
+const fieldsOf = (what, v, keys) => {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new Error(`cannot print ${JSON.stringify(v)} as ${what}`);
+  const extra = Object.keys(v).filter((k) => !keys.includes(k));
+  if (extra.length) throw new Error(`${what} has no field for ${extra.join(', ')}`);
+  return v;
+};
+/** A flag the engine reads for its truth: absent is false. */
+const flag = (v) => (v === undefined ? 'False' : bool(v));
+
+/** A consent as `consent_store.engine_consents` reads it from its row. A grant time is the INTEGER column's; the
+ *  grantor's signatory flag is its own nullable column. Only a CHECK keeps a granted consent from having no grant
+ *  time, so a consent is printed as the engine holds it even then. */
+const consentP = (v, ctx) => {
+  fieldsOf('a Consent', v, ['kind', 'status', 'grantedAt', 'revokedAt', 'contextId', 'agentUserId', 'partyRole', 'grantedBy', 'subject', 'policyVersions', 'particulars']);
+  fieldsOf('a grantor', v.grantedBy ?? {}, ['kind', 'id', 'signatory']);
+  fieldsOf('particulars', v.particulars ?? {}, ['fullParticularsProvided', 'legalAdviceOffered', 'proposedFeeDisclosed']);
+  return `${ctx.use(CF)}.Consent(kind: ${string(v.kind)}, status: ${string(v.status)}, revoked_at: ${option(int)(v.revokedAt, ctx)}, granted_at: ${option(int)(v.grantedAt, ctx)}, context_id: ${string(v.contextId)}, agent_user_id: ${string(v.agentUserId)}, party_role: ${option(partyRoleV)(v.partyRole, ctx)}, subject_id: ${option(string)(v.subject?.id, ctx)}, signatory: ${option(bool)(v.grantedBy?.signatory, ctx)}, policy_versions: ${list(ident('policy'))(Array.isArray(v.policyVersions) ? v.policyVersions : [], ctx)}, full_particulars: ${flag(v.particulars?.fullParticularsProvided)}, legal_advice: ${flag(v.particulars?.legalAdviceOffered)})`;
+};
+
+const partyP = (v, ctx) => {
+  fieldsOf('a Party', v, ['partyRole', 'subjectKind', 'subjectId', 'removed', 'isMinor']);
+  return `${ctx.use(CF)}.Party(party_role: ${partyRoleV(v.partyRole, ctx)}, subject_kind: ${subjectKindV(v.subjectKind, ctx)}, subject_id: ${string(v.subjectId)}, removed: ${flag(v.removed)}, is_minor: ${flag(v.isMinor)})`;
+};
+
+const representationP = (v, ctx) => {
+  fieldsOf('a Representation', v, ['agentUserId', 'partyRole', 'agreementId', 'declaredOnly', 'status', 'firstActAt', 'viaColleague']);
+  return `${ctx.use(CF)}.Representation(agent_user_id: ${string(v.agentUserId)}, party_role: ${partyRoleV(v.partyRole, ctx)}, agreement_id: ${option(string)(v.agreementId, ctx)}, declared_only: ${flag(v.declaredOnly)}, status: ${string(v.status)}, first_act_at: ${option(int)(v.firstActAt, ctx)}, via_colleague: ${flag(v.viaColleague)})`;
+};
+
+const agentsP = (v, ctx) =>
+  `[${Object.entries(fieldsOf('agents', v ?? {}, Object.keys(v ?? {})))
+    .map(([agentId, a]) => {
+      fieldsOf('an Agent', a, ['licenceState', 'connectedAgentUserIds']);
+      return `#(${string(agentId)}, ${ctx.use(CF)}.Agent(licence_state: ${string(a.licenceState)}, connected: ${list(string)(a.connectedAgentUserIds ?? [], ctx)}))`;
+    })
+    .join(', ')}]`;
+
+/** A context's jurisdiction as the route hands it over (`{ memberAssociation }`): the engine holds the text. */
+const contextMa = (v) => string(fieldsOf('a jurisdiction', v, ['memberAssociation', 'role']).memberAssociation);
+
+const conflictReasonP = (v, ctx) => {
+  fieldsOf('a Reason', v, ['code', 'ruleId', 'ruleStatus', 'regulator', 'jurisdiction', 'policyVersion', 'overrideRuleId', 'agentUserId', 'partyRole', 'state', 'partyRoles', 'jurisdictions', 'viaConnectedAgent']);
+  return `${ctx.use(CF)}.Reason(code: ${string(v.code)}, rule_id: ${option(string)(v.ruleId, ctx)}, rule_status: ${ruleStatusV(v.ruleStatus, ctx)}, regulator: ${option(string)(v.regulator, ctx)}, jurisdiction: ${option(string)(v.jurisdiction, ctx)}, policy_version: ${option(ident('policy'))(v.policyVersion, ctx)}, override_rule_id: ${option(string)(v.overrideRuleId, ctx)}, agent_user_id: ${option(string)(v.agentUserId, ctx)}, party_role: ${option(partyRoleV)(v.partyRole, ctx)}, state: ${option(string)(v.state, ctx)}, party_roles: ${option(list(partyRoleV))(v.partyRoles, ctx)}, jurisdictions: ${option(list(string))(v.jurisdictions, ctx)}, via_connected_agent: ${flag(v.viaConnectedAgent)})`;
+};
+
+const outstandingP = (v, ctx) =>
+  `${ctx.use(CF)}.ConsentOutstanding(party_role: ${partyRoleV(v.partyRole, ctx)}, agent_user_id: ${string(v.agentUserId)}, consent_kind: ${string(v.consentKind)}, reason_code: ${string(v.reasonCode)})`;
+
+const CONFLICT_MAP = {
+  [`${CONFLICT}#mostSevere`]: plainIn(CF)('most_severe', [outcomeV, outcomeV], outcomeV),
+  [`${CONFLICT}#canonicalJson`]: {
+    module: 'scoutbox/platform/canonical',
+    test: (c, ctx) => eq(`${ctx.use('scoutbox/platform/canonical')}.to_string(${canonicalValue(c.args[0], ctx)})`, string(c.result)),
+  },
+  [`${CONFLICT}#inputHashOf`]: {
+    module: CF,
+    test: (c, ctx) => eq(`${ctx.use(CF)}.hash_of(${canonicalValue(c.args[0], ctx)})`, string(c.result)),
+  },
+  [`${CONFLICT}#consentSufficiency`]: {
+    module: CF,
+    test: (c, ctx) => {
+      const [consent, opts] = c.args;
+      const { partyRole, agentUserId, contextId, firstActAt = null, requireParticulars = false, activePolicyIds = [], ...rest } = opts;
+      if (Object.keys(rest).length) throw new Error(`consentSufficiency has no argument for ${Object.keys(rest)}`);
+      const r = c.result;
+      return eq(
+        `${ctx.use(CF)}.consent_sufficiency(${consentP(consent, ctx)}, ${partyRoleV(partyRole, ctx)}, ${string(agentUserId)}, ${string(contextId)}, ${option(int)(firstActAt, ctx)}, ${bool(requireParticulars)}, ${list(ident('policy'))(activePolicyIds, ctx)})`,
+        r.ok ? 'Ok(Nil)' : `Error(${string(r.reasonCode)})`,
+      );
+    },
+  },
+  [`${CONFLICT}#evaluateConflict`]: {
+    module: CF,
+    now: true,
+    // The input hash is not compared: it is the hash of the input as the route shapes it, and a recorded call leaves
+    // out fields the route always sends (a party's `removed`, a representation's `declaredOnly`). inputHashOf's
+    // cases prove the hashing; conflict_test proves the hash over the route's inputs.
+    test: (c, ctx) => {
+      const { transaction: t = {}, agents = {}, consents = [], interests = [], policySet = [], missingPolicies = [], now, ...rest } = c.args[0];
+      if (Object.keys(rest).length) throw new Error(`evaluateConflict has no argument for ${Object.keys(rest)}`);
+      fieldsOf('a transaction', t, ['id', 'type', 'jurisdictions', 'parties', 'representations', 'otherServices', 'evaluateAgentUserIds']);
+      // Neither server records other services or declared interests: the TypeScript route passes both empty.
+      if ((t.otherServices ?? []).length) throw new Error('no route records other services');
+      if (interests.length) throw new Error('no route records declared interests');
+      const cf = ctx.use(CF);
+      const input = `${cf}.Input(context_id: ${string(t.id)}, context_type: ${vocab('scoutbox/vocab/context_type')(t.type, ctx)}, jurisdictions: ${list(contextMa)(t.jurisdictions ?? [], ctx)}, parties: ${list(partyP)(t.parties ?? [], ctx)}, representations: ${list(representationP)(t.representations ?? [], ctx)}, evaluate_agent_user_ids: ${list(string)(t.evaluateAgentUserIds ?? [], ctx)}, agents: ${agentsP(agents, ctx)}, consents: ${list(consentP)(consents, ctx)}, policies: ${list(policy)(policySet, ctx)}, missing: ${list(string)(missingPolicies, ctx)}, now: ${nowArg(now, ctx)})`;
+      const r = c.result;
+      const { alias, missingEvidence } = r;
+      // Every route answers the stored evaluation read back (derivedOfEvaluation), whose consent actions come from
+      // the outstanding consents once each: the engine's own list repeats a consent every connected agent owes.
+      const requiredActions = r.requiredActions.filter(
+        (a, i, all) =>
+          a.action !== 'obtain_consent' ||
+          all.findIndex((x) => x.action === a.action && x.partyRole === a.partyRole && x.consentKind === a.consentKind) === i,
+      );
+      const want = `${cf}.Evaluation(outcome: ${outcomeV(r.outcome, ctx)}, reasons: ${list(conflictReasonP)(r.reasons, ctx)}, consents_outstanding: ${list(outstandingP)(r.consentsOutstanding, ctx)}, policy_versions: ${list(ident('policy'))(r.policyVersions, ctx)}, evaluated_at: ${int(r.evaluatedAt)}, input_hash: "")`;
+      return [
+        `let e = ${cf}.evaluate(${input})`,
+        `  assert ${cf}.Evaluation(..e, input_hash: "") == ${want}`,
+        `  assert ${ctx.use(BASE)}.conflict_derived(e) == ${string(JSON.stringify({ alias, requiredActions, missingEvidence }))}`,
+      ].join('\n');
+    },
+  },
+};
+
 // -------------------------------------------------------------------------------------------------- passport
 
 const PASSPORT = 'domains/passport/shared.mjs';
@@ -5369,6 +5482,7 @@ export const MAP = {
   ...TRUST_MAP,
   ...AGENT_MAP,
   ...POLICY_MAP,
+  ...CONFLICT_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
@@ -5487,6 +5601,8 @@ export const NO_COUNTERPART = {
       "No TypeScript route calls it: no route lets an agency approach or see a minor, and the minor pathway is closed in every jurisdiction (DR-49). The agent's own readiness for a minor pathway is approach_policy.approach_minor, whose cases are evaluatePolicy's; the timing rule it names is minor_timing_rule.",
     ]),
   ),
+  [`${CONFLICT}#conflictSummaryForParty`]:
+    "No TypeScript route calls it. A party is shown an evaluation's outcome, distinct codes and policy versions where the route builds them (context_view's linked evaluation), which the batteries compare.",
   [`${AGENT}/shared.mjs#tiersOf`]:
     "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
 };
@@ -5674,6 +5790,11 @@ export const HAND_PORTED = {
       `${POLICY}#${f}`,
       'test/scoutbox/agents/approach_policy_test.gleam',
     ]),
+  ),
+  // A grant time that isn't an integer, a context type outside the four, and other services and declared interests,
+  // which no route records: the file's header says where each is refused.
+  ...Object.fromEntries(
+    ['evaluateConflict', 'consentSufficiency'].map((f) => [`${CONFLICT}#${f}`, 'test/scoutbox/agents/conflict_test.gleam']),
   ),
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
