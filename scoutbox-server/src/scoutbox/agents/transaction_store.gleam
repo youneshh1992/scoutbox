@@ -190,13 +190,28 @@ pub fn duplicate_of(
   releasing: Option(String),
 ) -> Result(Option(Transaction), Fail(e)) {
   use live <- result.map(live_for_individual(read, individual, type_))
+  duplicate_in(live, individual, type_, engaging, releasing)
+}
+
+/// `duplicateTransactionOf`: a duplicate only when the individual, the type and both clubs match and the earlier
+/// one is live, each read from its parties that aren't removed. A loan beside a transfer, or two clubs competing for
+/// one player, are separate transactions. `live_for_individual` narrows the candidates in SQL; this is the rule.
+pub fn duplicate_in(
+  transactions: List(Transaction),
+  individual: String,
+  type_: ContextType,
+  engaging: Option(String),
+  releasing: Option(String),
+) -> Option(Transaction) {
   let subject = fn(t: Transaction, role) {
     list.find(t.parties, fn(p) { !p.removed && p.party_role == role })
     |> option.from_result
     |> option.map(fn(p) { p.subject_id })
   }
-  list.find(live, fn(t) {
-    subject(t, party_role.Individual) == Some(individual)
+  list.find(transactions, fn(t) {
+    t.row.type_ == type_
+    && transaction_rules.is_live(t.row.status)
+    && subject(t, party_role.Individual) == Some(individual)
     && subject(t, party_role.EngagingEntity) == engaging
     && subject(t, party_role.ReleasingEntity) == releasing
   })

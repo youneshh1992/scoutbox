@@ -33,6 +33,7 @@ import scoutbox/rows/assessments
 import scoutbox/rows/case_budget_fx_assumptions
 import scoutbox/rows/case_budget_lines
 import scoutbox/rows/case_history
+import scoutbox/rows/case_transaction_handoffs
 import scoutbox/rows/development_actions
 import scoutbox/rows/development_evidence_links
 import scoutbox/rows/development_goals
@@ -240,6 +241,20 @@ pub fn agreement() -> representation_agreements.Row {
     disclosure_contact_routing: False,
     disclosure_trial_visibility: False,
     created_at: 0,
+    rev: 1,
+  )
+}
+
+/// A handoff, invited at 0 and still standing.
+pub fn handoff() -> case_transaction_handoffs.Row {
+  case_transaction_handoffs.new(
+    case_id: id.recruitment_case("c"),
+    id: id.handoff("h"),
+    org_id: id.org("o"),
+    player_id: id.player("p"),
+    status: case_transaction_handoffs.Invited,
+    invited_at: 0,
+    represented_at_invitation: False,
     rev: 1,
   )
 }

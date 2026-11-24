@@ -387,6 +387,48 @@ pub fn routing_view(
 pub const routing_honest =
   "Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then."
 
+/// `contactRouting`: the player is always a target, and the agent is added beside them only when `both` was asked
+/// for and the agent decision allowed them (`agent` is their ids, or the code it refused with). A refused agent
+/// falls back to the player rather than failing the contact. A minor's route is the guardian's; an agent is never
+/// substituted for one.
+pub fn routing(
+  minor: Bool,
+  mode: ContactMode,
+  agent: Result(RoutedAgent, String),
+) -> Routing {
+  case minor, mode, agent {
+    True, _, _ ->
+      Routing(contact_mode.PlayerOnly, None, Some("MINOR_PATHWAY_DISABLED"))
+    False, contact_mode.Both, Ok(a) -> Routing(contact_mode.Both, Some(a), None)
+    False, _, Error(code) -> Routing(contact_mode.PlayerOnly, None, Some(code))
+    False, contact_mode.PlayerOnly, Ok(_) ->
+      Routing(contact_mode.PlayerOnly, None, None)
+  }
+}
+
+/// Who was validly routed when a contact was sent (`contactTargetSnapshot`); a later relationship change does not
+/// rewrite it. Its words are `routing_honest`.
+pub type Snapshot {
+  Snapshot(
+    at: Int,
+    mode: ContactMode,
+    /// The recipient is always the player or their guardian.
+    player: Bool,
+    guardian: Bool,
+    agent: Option(RoutedAgent),
+  )
+}
+
+pub fn snapshot(routing: Routing, recipient: party.Party, at: Int) -> Snapshot {
+  Snapshot(
+    at:,
+    mode: routing.mode,
+    player: True,
+    guardian: recipient == party.Guardian,
+    agent: routing.agent,
+  )
+}
+
 // ---------------------------------------------------------------------------------------------- external record
 
 pub type External {

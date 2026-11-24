@@ -442,7 +442,7 @@ pub fn record_delivery(
   acted: Acted,
 ) -> Result(Contact, Fail(e)) {
   let at = acted.at
-  let guardian = d.recipient.kind == party.Guardian
+  let snap = contact_rules.snapshot(d.routing, d.recipient.kind, at)
   use _ <- result.try(add_attempt(tx, contact_id, at, True, None))
   move(
     tx,
@@ -463,25 +463,18 @@ pub fn record_delivery(
           #("delivered_at", sqlight.int(at)),
           #("failed_at", sqlight.null()),
           #("failure_code", sqlight.null()),
-          #("routing_at", sqlight.int(at)),
-          #(
-            "routing_mode",
-            sqlight.text(contact_mode.to_string(d.routing.mode)),
-          ),
-          #("routing_player", sqlight.bool(True)),
-          #("routing_guardian", sqlight.bool(guardian)),
+          #("routing_at", sqlight.int(snap.at)),
+          #("routing_mode", sqlight.text(contact_mode.to_string(snap.mode))),
+          #("routing_player", sqlight.bool(snap.player)),
+          #("routing_guardian", sqlight.bool(snap.guardian)),
           #(
             "routing_agent_user_id",
-            option.map(d.routing.agent, fn(a) {
-              id.org_user_sql(a.agent_user_id)
-            })
+            option.map(snap.agent, fn(a) { id.org_user_sql(a.agent_user_id) })
               |> option.unwrap(sqlight.null()),
           ),
           #(
             "routing_agent_agreement_id",
-            option.map(d.routing.agent, fn(a) {
-              id.agreement_sql(a.agreement_id)
-            })
+            option.map(snap.agent, fn(a) { id.agreement_sql(a.agreement_id) })
               |> option.unwrap(sqlight.null()),
           ),
           #("routing_honest", sqlight.text(contact_rules.routing_honest)),

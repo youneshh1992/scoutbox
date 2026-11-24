@@ -118,7 +118,7 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#can",
@@ -144,7 +144,7 @@
         "handPort": {
           "args[].clubPresence is NaN": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/core/shared.mjs#termMonthsOf",
@@ -158,9 +158,11 @@
       {
         "function": "domains/agents/integration/integration.mjs#agentClientBasis",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 1
+        },
+        "status": "generated"
       }
     ]
   },
@@ -628,37 +630,49 @@
       {
         "function": "domains/agents/integration/integration.mjs#agentClientBasis",
         "calls": 12,
-        "cases": 9,
-        "handPort": {},
-        "status": "pending"
+        "cases": 7,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print null as a String": 3
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#agentSurfaceDecision",
         "calls": 30,
-        "cases": 29,
-        "handPort": {},
-        "status": "pending"
+        "cases": 25,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a regulatory minor's agreement: the request route refuses one before it exists": 1,
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a value of scoutbox/agents/integration.surfaces": 1,
+          "Gleam's types can't hold its arguments: cannot print \"nope\" as a value of scoutbox/agents/integration.surfaces": 2
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#clubAgentPresence",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/integration/integration.mjs#contactRouting",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: an allowed decision naming no agent: Allowed holds the agreement": 1,
+          "Gleam's types can't hold its arguments: cannot print \"agent_only\" as a value of scoutbox/vocab/contact_mode.pairs": 1,
+          "Gleam's types can't hold its arguments: no recipient: the route refuses the contact before it routes one": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#contactTargetSnapshot",
         "calls": 4,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a send always has a routing: the route refuses the contact first": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#duplicateTransactionOf",
@@ -672,16 +686,20 @@
       {
         "function": "domains/agents/integration/integration.mjs#effectiveHandoffStatus",
         "calls": 3,
-        "cases": 3,
-        "handPort": {},
-        "status": "pending"
+        "cases": 2,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a handoff without its invitation time (an INTEGER NOT NULL column)": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#handoffBlockers",
         "calls": 12,
-        "cases": 11,
-        "handPort": {},
-        "status": "pending"
+        "cases": 10,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a handoff without a case status: every handoff is a Room's": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#normaliseDisclosure",
@@ -690,21 +708,21 @@
         "handPort": {
           "args[] is a Object": 1
         },
-        "status": "pending"
+        "status": "closed"
       },
       {
         "function": "domains/agents/integration/integration.mjs#surfaceIsRegulated",
         "calls": 12,
         "cases": 12,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/integration/integration.mjs#surfaceScopes",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/lifecycle/contact.mjs#contactIntegrity",
@@ -2278,13 +2296,25 @@
       {
         "function": "domains/agents/integration/integration.mjs#effectiveHandoffStatus",
         "calls": 18,
-        "cases": 14,
+        "cases": 2,
         "handPort": {
           "args[].invitedAt is -Infinity": 1,
           "args[].invitedAt is Infinity": 1,
-          "args[].invitedAt is NaN": 2
+          "args[].invitedAt is NaN": 2,
+          "Gleam's types can't hold its arguments: a handoff without its invitation time (an INTEGER NOT NULL column)": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"yesterday\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print null as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/development/hub/shared.mjs#parseDate",

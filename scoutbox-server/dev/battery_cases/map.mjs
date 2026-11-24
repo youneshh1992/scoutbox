@@ -1902,6 +1902,183 @@ const CONFLICT_MAP = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------ integration
+
+const INTEGRATION = 'domains/agents/integration/integration.mjs';
+const IG = 'scoutbox/agents/integration';
+const HO = 'scoutbox/agents/handoffs';
+const CRULES = 'scoutbox/recruitment/contact_rules';
+const surfaceV = vocab(IG, 'surfaces');
+const contactModeV = vocab('scoutbox/vocab/contact_mode');
+
+/** An agreement as the seam holds it: the row, and its scopes beside it. */
+const heldAgreement = (row, scope, ctx) =>
+  `${ctx.use(AR)}.Agreement(row: ${row}, scope: ${list(scopeV)(scope ?? [], ctx)}, policy_versions: [], history: [])`;
+
+/** The active basis's agreement: the decision reads its id, agent, agency and scopes. */
+const basisAgreement = (v, ctx) => {
+  fieldsOf('a basis', v, ['ok', 'agentUserId', 'agreementId', 'scope', 'agencyOrgId', 'status', 'isRegulatoryMinor']);
+  // The request route refuses a minor before an agreement exists (agentCore.mjs: "is always false").
+  if (v.isRegulatoryMinor === true) throw new Error("a regulatory minor's agreement: the request route refuses one before it exists");
+  if (v.status !== 'active') throw new Error(`an active basis with the status ${JSON.stringify(v.status)}`);
+  const row = `${ctx.use('scoutbox/rows/representation_agreements')}.Row(..${ctx.use(BASE)}.agreement(), id: ${ident('agreement')(v.agreementId, ctx)}, agent_user_id: ${ident('org_user')(v.agentUserId, ctx)}, agency_org_id: ${ident('org')(v.agencyOrgId, ctx)})`;
+  return heldAgreement(row, v.scope, ctx);
+};
+const surfaceBasis = (v, ctx) => {
+  const ig = ctx.use(IG);
+  if (v === null || v === undefined) return `${ig}.Basis(agreement: None, status: None)`;
+  if (v.ok !== true) return `${ig}.Basis(agreement: None, status: ${option(agreementStatus)(v.status, ctx)})`;
+  return `${ig}.Basis(agreement: Some(${basisAgreement(v, ctx)}), status: Some(${agreementStatus('active', ctx)}))`;
+};
+
+/** A routing as the route holds it: the mode, the agent beside the recipient and the refusal. Its targets are the
+ *  recipient and that agent, which the printer checks rather than prints. */
+const routedAgent = (v, ctx) => {
+  fieldsOf('a routed agent', v, ['type', 'agentUserId', 'agreementId', 'minor']);
+  return `${ctx.use(CRULES)}.RoutedAgent(${ident('org_user')(v.agentUserId, ctx)}, ${ident('agreement')(v.agreementId, ctx)})`;
+};
+const routingP = (v, ctx) => {
+  fieldsOf('a Routing', v, ['ok', 'mode', 'targets', 'agent', 'agentRefusal']);
+  if (v.targets.length !== (v.agent ? 2 : 1) || (v.agent && JSON.stringify(v.targets[1]) !== JSON.stringify(v.agent)))
+    throw new Error(`a routing whose targets aren't its recipient and agent ${JSON.stringify(v)}`);
+  return `${ctx.use(CRULES)}.Routing(mode: ${contactModeV(v.mode, ctx)}, agent: ${option(routedAgent)(v.agent, ctx)}, agent_refusal: ${option(string)(v.agentRefusal, ctx)})`;
+};
+
+const INTEGRATION_MAP = {
+  [`${INTEGRATION}#agentSurfaceDecision`]: {
+    module: IG,
+    test: (c, ctx) => {
+      const {
+        surface,
+        basis = null,
+        subjectPresent = false,
+        isAdult = false,
+        minorPathwayOpen = false,
+        blocked = false,
+        disclosure = null,
+        shared = false,
+        licenceCurrent = false,
+        complianceClear = null,
+        ...rest
+      } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`agentSurfaceDecision has no argument for ${Object.keys(rest)}`);
+      if (minorPathwayOpen !== false) throw new Error('an open minor pathway: no jurisdiction enables one (DR-49)');
+      const ig = ctx.use(IG);
+      // No recorded answer is not consent: the column's default, False.
+      const facts = `${ig}.Facts(subject_present: ${bool(subjectPresent)}, is_adult: ${bool(isAdult)}, blocked: ${bool(blocked)}, disclosed: ${bool(disclosure ?? false)}, shared: ${bool(shared)}, licence_current: ${bool(licenceCurrent)}, compliance_clear: ${option(bool)(complianceClear, ctx)})`;
+      const r = c.result;
+      const want = r.allowed ? `${ig}.Allowed(${basisAgreement(r.basis, ctx)})` : `${ig}.Denied(${string(r.code)}, ${string(r.rule)})`;
+      return eq(`${ig}.judge(${surfaceV(surface, ctx)}, ${surfaceBasis(basis, ctx)}, ${facts})`, want);
+    },
+  },
+  [`${INTEGRATION}#agentClientBasis`]: {
+    module: IG,
+    now: true,
+    test: (c, ctx) => {
+      const { agreements = [], agentUserId = null, clientId = null, now, ...rest } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`agentClientBasis has no argument for ${Object.keys(rest)}`);
+      const held = (a) => heldAgreement(grantee(a, ctx), a.scope, ctx);
+      const ig = ctx.use(IG);
+      const r = c.result;
+      let want;
+      if (r.ok) {
+        const a = agreements.find((x) => x.id === r.agreementId);
+        want = `${ig}.Basis(agreement: Some(${held(a)}), status: Some(${agreementStatus('active', ctx)}))`;
+      } else want = `${ig}.Basis(agreement: None, status: ${option(agreementStatus)(r.status, ctx)})`;
+      return eq(`${ig}.basis([${agreements.map(held).join(', ')}], ${ident('org_user')(agentUserId, ctx)}, ${string(clientId)}, ${nowArg(now, ctx)})`, want);
+    },
+  },
+  [`${INTEGRATION}#surfaceIsRegulated`]: {
+    module: IG,
+    test: (c, ctx) => eq(`${ctx.use(IG)}.is_regulated(${surfaceV(c.args[0], ctx)})`, bool(c.result)),
+  },
+  [`${INTEGRATION}#surfaceScopes`]: {
+    module: IG,
+    test: (c, ctx) => eq(`${ctx.use(IG)}.scopes(${surfaceV(c.args[0], ctx)})`, option(list(scopeV))(c.result, ctx)),
+  },
+  [`${INTEGRATION}#contactRouting`]: {
+    module: CRULES,
+    test: (c, ctx) => {
+      const { recipient = null, agentDecision = null, requestedMode = 'player_only', ...rest } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`contactRouting has no argument for ${Object.keys(rest)}`);
+      if (!recipient) throw new Error('no recipient: the route refuses the contact before it routes one');
+      fieldsOf('a recipient', recipient, ['type', 'playerId', 'guardianId', 'minor']);
+      let agent;
+      if (agentDecision?.allowed === true) {
+        const b = agentDecision.basis;
+        if (typeof b?.agentUserId !== 'string') throw new Error('an allowed decision naming no agent: Allowed holds the agreement');
+        agent = `Ok(${ctx.use(CRULES)}.RoutedAgent(${ident('org_user')(b.agentUserId, ctx)}, ${ident('agreement')(b.agreementId, ctx)}))`;
+      } else agent = `Error(${string(agentDecision?.code ?? 'NO_REPRESENTATION')})`;
+      const r = c.result;
+      if (r.targets[0] !== undefined && JSON.stringify(r.targets[0]) !== JSON.stringify(recipient))
+        throw new Error('a routing that does not lead with its recipient');
+      return eq(`${ctx.use(CRULES)}.routing(${bool(recipient.minor)}, ${contactModeV(requestedMode, ctx)}, ${agent})`, routingP(r, ctx));
+    },
+  },
+  [`${INTEGRATION}#contactTargetSnapshot`]: {
+    module: CRULES,
+    test: (c, ctx) => {
+      const [routing, at] = c.args;
+      if (!routing?.ok) throw new Error('a send always has a routing: the route refuses the contact first');
+      const r = c.result;
+      fieldsOf('a Snapshot', r, ['at', 'mode', 'player', 'guardian', 'agent', 'honest']);
+      const cr = ctx.use(CRULES);
+      const agent = r.agent
+        ? `Some(${cr}.RoutedAgent(${ident('org_user')(r.agent.agentUserId, ctx)}, ${ident('agreement')(r.agent.agreementId, ctx)}))`
+        : 'None';
+      return [
+        `assert ${cr}.snapshot(${routingP(routing, ctx)}, ${vocab('scoutbox/vocab/party')(routing.targets[0].type, ctx)}, ${int(at)}) == ${cr}.Snapshot(at: ${int(r.at)}, mode: ${contactModeV(r.mode, ctx)}, player: ${bool(r.player)}, guardian: ${bool(r.guardian)}, agent: ${agent})`,
+        `  assert ${cr}.routing_honest == ${string(r.honest)}`,
+      ].join('\n');
+    },
+  },
+  [`${INTEGRATION}#effectiveHandoffStatus`]: {
+    module: HO,
+    now: true,
+    test: (c, ctx) => {
+      const [h, now] = c.args;
+      fieldsOf('a handoff', h, ['status', 'invitedAt']);
+      if (!('invitedAt' in h)) throw new Error('a handoff without its invitation time (an INTEGER NOT NULL column)');
+      const row = record({
+        module: 'scoutbox/rows/case_transaction_handoffs',
+        constructor: 'Row',
+        base: call(BASE, 'handoff'),
+        fields: {
+          status: ['status', vocab('scoutbox/rows/case_transaction_handoffs', 'status_pairs')],
+          invitedAt: ['invited_at', int],
+        },
+      })(h, ctx);
+      return eq(`${ctx.use(HO)}.effective_status(${row}, ${nowArg(now, ctx)})`, string(c.result));
+    },
+  },
+  [`${INTEGRATION}#handoffBlockers`]: {
+    module: HO,
+    test: (c, ctx) => {
+      const {
+        canWrite = false,
+        hasFinalProgressDecision = false,
+        caseStatus = null,
+        eligibleCaseStatuses,
+        subjectPresent = false,
+        isAdult = false,
+        minorPathwayOpen = false,
+        blocked = false,
+        existingHandoffStatus = null,
+        liveTransactionId = null,
+        complianceEvaluable = false,
+        ...rest
+      } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`handoffBlockers has no argument for ${Object.keys(rest)}`);
+      if (eligibleCaseStatuses !== undefined) throw new Error('eligible case statuses other than the route\'s');
+      if (minorPathwayOpen !== false) throw new Error('an open minor pathway: no jurisdiction enables one (DR-49)');
+      if (caseStatus === null) throw new Error('a handoff without a case status: every handoff is a Room\'s');
+      if (liveTransactionId !== null && typeof liveTransactionId !== 'string') throw new Error(`a live transaction id ${JSON.stringify(liveTransactionId)}`);
+      const facts = `${ctx.use(HO)}.Facts(can_write: ${bool(canWrite)}, has_final_progress_decision: ${bool(hasFinalProgressDecision)}, case_status: ${vocab('scoutbox/vocab/room_status')(caseStatus, ctx)}, subject_present: ${bool(subjectPresent)}, is_adult: ${bool(isAdult)}, blocked: ${bool(blocked)}, existing_status: ${option(string)(existingHandoffStatus, ctx)}, live_transaction: ${bool(!!liveTransactionId)}, compliance_evaluable: ${bool(complianceEvaluable)})`;
+      return eq(`${ctx.use(HO)}.blockers(${facts})`, list(string)(c.result, ctx));
+    },
+  },
+};
+
 // -------------------------------------------------------------------------------------------------- passport
 
 const PASSPORT = 'domains/passport/shared.mjs';
@@ -5483,6 +5660,7 @@ export const MAP = {
   ...AGENT_MAP,
   ...POLICY_MAP,
   ...CONFLICT_MAP,
+  ...INTEGRATION_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
@@ -5603,6 +5781,16 @@ export const NO_COUNTERPART = {
   ),
   [`${CONFLICT}#conflictSummaryForParty`]:
     "No TypeScript route calls it. A party is shown an evaluation's outcome, distinct codes and policy versions where the route builds them (context_view's linked evaluation), which the batteries compare.",
+  [`${INTEGRATION}#clubAgentPresence`]:
+    'Its only caller, the seam\'s clubPresenceFor, is called by nothing: no route on either server shows a club the "represented by" badge.',
+  ...Object.fromEntries(
+    [`${INTEGRATION}#normaliseDisclosure`, `${AGENT}/shared.mjs#normaliseDisclosure`].map((f) => [
+      f,
+      "The disclosure is three NOT NULL boolean columns, each False until the client turns it on, and the sharing route's shape refuses any value that isn't a boolean (core_routes' sharing; crossAppAdversarial RG1, crossApp #32b), so there is nothing to clean.",
+    ]),
+  ),
+  [`${AGENT}/shared.mjs#agreementTermCoversNow`]:
+    'No TypeScript code calls it. Whether an agreement is in force, its start included, is agreementInForce (agent_rules.grants_access), whose cases are generated.',
   [`${AGENT}/shared.mjs#tiersOf`]:
     "A membership's roles are typed as they are read from the table (the schema refuses unknown ones), and a missing membership is None where it is used.",
 };
@@ -5727,8 +5915,6 @@ export const HAND_PORTED = {
       'domains/recruitment/lifecycle/contact.mjs#cooldownFor',
     ].map((f) => [f, 'test/scoutbox/platform/temporal_test.gleam']),
   ),
-  // Development throws on an emitted name the registry doesn't know; here no event can carry one (live_test).
-  ['domains/platform/eventRegistry.mjs#assertEventRegistry']: 'test/scoutbox/live_test.gleam',
   ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',
   // A role or need read from text, words that aren't text, stored values no contact row can hold and fixtures leaving
   // out NOT NULL columns; the views run over a complete row.
@@ -5795,6 +5981,14 @@ export const HAND_PORTED = {
   // which no route records: the file's header says where each is refused.
   ...Object.fromEntries(
     ['evaluateConflict', 'consentSufficiency'].map((f) => [`${CONFLICT}#${f}`, 'test/scoutbox/agents/conflict_test.gleam']),
+  ),
+  // An unknown surface, a regulatory minor's agreement, an agent or agreement that names nobody, a recipient or routing
+  // the route never routes, junk invitation times and a case status a Room can't hold, and duplicateTransactionOf's
+  // closure calls: the file's header says where each is refused.
+  ...Object.fromEntries(
+    ['agentSurfaceDecision', 'agentClientBasis', 'contactRouting', 'contactTargetSnapshot', 'effectiveHandoffStatus', 'handoffBlockers', 'duplicateTransactionOf'].map(
+      (f) => [`${INTEGRATION}#${f}`, 'test/scoutbox/agents/integration_test.gleam'],
+    ),
   ),
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',

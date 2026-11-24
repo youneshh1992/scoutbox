@@ -245,17 +245,38 @@ commit. In this order:
    - the `offer` type
    - other services and declared interests (N5–N7). No route on either server records them, so the Gleam engine has
      no input for them. They have to be ported with the first route that records one.
-3. **integration** (`integration/integration.mjs`, `integration`): `agentSurfaceDecision` 30,
-   `effectiveHandoffStatus` 21, `agentClientBasis` 13, `handoffBlockers` 12, `surfaceIsRegulated` 12,
-   `normaliseDisclosure` (both modules), `contactRouting`, and `duplicateTransactionOf` (closure calls).
+3. **integration** [**done**] (`integration/integration.mjs`, `integration`): `agentSurfaceDecision` 30,
+   `effectiveHandoffStatus` 21, `agentClientBasis` 13, `handoffBlockers` 12, `surfaceIsRegulated` 12, and the rest.
+   No difference turned up. Four rules came out of inline code so that a case can call them:
+   - `integration.decide` is a fetch and a pure `judge(surface, basis, Facts)`, in `agentSurfaceDecision`'s rule
+     order. `is_regulated`, `scopes` and `disclosed` are public, and `surfaces` is the seam's list of names.
+   - `contactRouting` comes out of `contact_routes.route_for` (`contact_rules.routing`). The route keeps the
+     TypeScript `routeFor`'s player-only short cut, so the composed answer is unchanged.
+   - `contactTargetSnapshot` comes out of `contacts.deliver`'s columns (`contact_rules.snapshot`).
+   - `transaction_store.duplicate_of` is a fetch that narrows the candidates in SQL, then the pure `duplicate_in`,
+     which checks type, live status and the unremoved parties as `duplicateTransactionOf` does. Its closure calls
+     (Q-p1 to Q-p7) are ported over `Transaction` values in `integration_test.gleam`.
+
+   The file's header closes what Gleam's types can't hold:
+   - an unknown surface
+   - a regulatory minor's agreement (the request route refuses one)
+   - an agent or agreement naming nobody
+   - a recipient or routing the route never routes
+   - junk handoff times, and a handoff without a case status
+
+   `clubAgentPresence` is closed in `NO_COUNTERPART`: its only caller, `clubPresenceFor`, has none. So is
+   `normaliseDisclosure`: the disclosure is three NOT NULL booleans, and the sharing route refuses anything else
+   (crossAppAdversarial RG1).
 4. **transactions** (`transactions/transaction.mjs`, `transaction_rules`): `canSeeVisibility` 36 and
    `actorTransitionAllowed` 14 look like matrix candidates. Then `timelineVisible` 15, `complianceStateFrom`,
    `partyRevisionOf` and the rest.
 5. **The provider** (`compliance/provider.mjs`, `verification_provider`): `facetFromProviderAnswer`, and
    `createVerificationProvider`'s closure calls.
-6. **The rest of the agent core** (`core/shared.mjs`, `agent_rules`): `agreementTermCoversNow`, `termMonthsOf`,
-   `newFacets` and `tiersOf` still have pending calls (46 with `normaliseDisclosure`, which goes with integration).
-   Take them with integration.
+6. **The rest of the agent core** [**done**, with integration] (`core/shared.mjs`, `agent_rules`): `termMonthsOf`,
+   `newFacets` and `tiersOf` were already closed. `agreementTermCoversNow` has no caller, and `normaliseDisclosure`
+   closes with integration's; both are in `NO_COUNTERPART`. A function closed there has no counterpart for its
+   hand-port calls either, so the ledger counts them as closed with it (the minors gate's and `termMonthsOf`'s, which
+   no TypeScript route reaches).
 7. **The transaction audit** (`transactions/audit.mjs`): `transactionAuditRows` (1). Take it with transactions.
 
 When C and D are done, platform/dates closes too, and only platform/uploads is left (step 5).

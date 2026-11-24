@@ -330,23 +330,22 @@ fn route_for(
   recipient: Recipient,
   mode: ContactMode,
 ) -> Result(Routing, Fail(e)) {
-  let player_only = fn(refusal) {
-    Routing(contact_mode.PlayerOnly, None, refusal)
-  }
   let now = clock.now_ms()
   let client = id.player_to_string(room.row.player_id)
   case mode, recipient.minor {
-    contact_mode.PlayerOnly, _ -> Ok(player_only(None))
-    _, True -> Ok(player_only(Some("MINOR_PATHWAY_DISABLED")))
+    // As the TypeScript route's: a player-only send asks nothing about an agent, so it names no refusal.
+    contact_mode.PlayerOnly, _ ->
+      Ok(Routing(contact_mode.PlayerOnly, None, None))
+    _, True -> Ok(contact_rules.routing(True, mode, Error("NO_REPRESENTATION")))
     contact_mode.Both, False -> {
       use #(sole, ambiguous) <- result.try(representation.sole_active(
         read,
         client,
         now,
       ))
-      case sole, ambiguous {
-        None, True -> Ok(player_only(Some("REPRESENTATION_AMBIGUOUS")))
-        None, False -> Ok(player_only(Some("NO_REPRESENTATION")))
+      use agent <- result.map(case sole, ambiguous {
+        None, True -> Ok(Error("REPRESENTATION_AMBIGUOUS"))
+        None, False -> Ok(Error("NO_REPRESENTATION"))
         Some(agreement), _ -> {
           use decision <- result.map(integration.decide(
             read,
@@ -358,18 +357,15 @@ fn route_for(
           ))
           case decision {
             integration.Allowed(basis) ->
-              Routing(
-                contact_mode.Both,
-                Some(contact_rules.RoutedAgent(
-                  basis.row.agent_user_id,
-                  basis.row.id,
-                )),
-                None,
-              )
-            integration.Denied(code, _) -> player_only(Some(code))
+              Ok(contact_rules.RoutedAgent(
+                basis.row.agent_user_id,
+                basis.row.id,
+              ))
+            integration.Denied(code, _) -> Error(code)
           }
         }
-      }
+      })
+      contact_rules.routing(False, mode, agent)
     }
   }
 }

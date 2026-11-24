@@ -69,6 +69,7 @@ for (const [fn, file] of Object.entries(HAND_PORTED)) {
   if (!fs.existsSync(path.join(ROOT, file))) problems.push(`HAND_PORTED puts ${fn} in ${file}, which doesn't exist`);
   const recorded = [...report.values()].flat().filter((f) => f.function === fn);
   if (!recorded.some((f) => handPortCalls(f) > 0)) problems.push(`HAND_PORTED lists ${fn}, which has no calls to port by hand`);
+  if (NO_COUNTERPART[fn]) problems.push(`HAND_PORTED lists ${fn}, which NO_COUNTERPART closes: its calls need no port`);
 }
 for (const fn of Object.keys(NO_COUNTERPART)) {
   if (MAP[fn]) problems.push(`NO_COUNTERPART lists ${fn}, which MAP maps`);
@@ -95,7 +96,8 @@ function gleamSide(r) {
     pendingFns: fns.filter((f) => f.status === 'pending' && f.cases > 0),
     closedFns: fns.filter((f) => f.status === 'closed' && f.cases > 0),
     hand,
-    handDone: sum(hand.filter((f) => HAND_PORTED[f.function]), handPortCalls),
+    // A function closed in NO_COUNTERPART has nothing to port its calls to, the hand-port ones included.
+    handDone: sum(hand.filter((f) => HAND_PORTED[f.function] || NO_COUNTERPART[f.function]), handPortCalls),
     handAll: sum(hand, handPortCalls),
     // A move to another battery (e2e/…) is that battery's to answer, so only moves to a unit suite need a verdict.
     moved: r.checks.moved
@@ -178,7 +180,7 @@ for (const r of rowsWith)
       `\`${f.function}\``,
       handPortCalls(f),
       Object.keys(f.handPort).join('; '),
-      HAND_PORTED[f.function] ? `\`${HAND_PORTED[f.function]}\`` : 'to do',
+      HAND_PORTED[f.function] ? `\`${HAND_PORTED[f.function]}\`` : NO_COUNTERPART[f.function] ? 'closed: no counterpart' : 'to do',
     ]);
 
 const pendingRows = rowsWith.flatMap((r) =>
@@ -229,7 +231,7 @@ ${addedRows.length ? table(['Battery', 'Checks', 'Why'], addedRows) : 'None.'}
 ## Calls to port by hand
 
 Recorded calls whose arguments or results aren't plain data (closures, stateful stores): each function's checks are
-ported by hand to a gleeunit test.
+ported by hand to a gleeunit test, or closed with its function when that has no Gleam counterpart (below).
 
 ${handRows.length ? table(['Battery', 'Function', 'Calls', 'Why', 'Ported in'], handRows) : 'None.'}
 
