@@ -2434,6 +2434,15 @@ pub fn timeline(
   side: Option(PartyRole),
 ) -> Result(Json, Fail(e)) {
   use events <- result.map(transaction_store.events(read, t.row.id))
+  timeline_of(events, roles, side)
+}
+
+/// `timelineFor` over the fetched entries: the newest 200 these roles may see, newest first.
+pub fn timeline_of(
+  events: List(transaction_store.Event),
+  roles: List(RoomRole),
+  side: Option(PartyRole),
+) -> Json {
   let visible =
     list.filter(events, fn(e) {
       transaction_rules.timeline_visible(

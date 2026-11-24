@@ -54,6 +54,8 @@ import scoutbox/rows/signing_documents
 import scoutbox/rows/signing_packages
 import scoutbox/rows/signing_revision_parties
 import scoutbox/rows/signing_revisions
+import scoutbox/rows/transaction_history
+import scoutbox/rows/transaction_parties
 import scoutbox/rows/trial_attendance
 import scoutbox/rows/trial_schedule_sessions
 import scoutbox/rows/trials
@@ -62,7 +64,9 @@ import scoutbox/rows/ver_claims
 import scoutbox/vocab/agent_facet
 import scoutbox/vocab/brief_status
 import scoutbox/vocab/claim_type
+import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/contact_mode
+import scoutbox/vocab/context_type
 import scoutbox/vocab/currency
 import scoutbox/vocab/decision_outcome.{type DecisionOutcome}
 import scoutbox/vocab/evidence_source
@@ -76,6 +80,7 @@ import scoutbox/vocab/party
 import scoutbox/vocab/party_role
 import scoutbox/vocab/room_status.{type RoomStatus}
 import scoutbox/vocab/signing_party_type
+import scoutbox/vocab/subject_kind
 import scoutbox/vocab/trial_session_kind
 import scoutbox/vocab/trial_workflow_state
 import scoutbox/vocab/ver_level
@@ -256,6 +261,36 @@ pub fn handoff() -> case_transaction_handoffs.Row {
     invited_at: 0,
     represented_at_invitation: False,
     rev: 1,
+  )
+}
+
+/// A transfer's individual: a player, added at 0, unconfirmed and still a party.
+pub fn transaction_party() -> transaction_parties.Row {
+  transaction_parties.new(
+    id: id.transaction_party("txp"),
+    transaction_id: id.transaction("atx"),
+    transaction_type: context_type.Transfer,
+    ord: 0,
+    party_role: party_role.Individual,
+    subject_kind: subject_kind.Player,
+    subject_id: "p",
+    added_at: 0,
+    added_by_id: id.org_user("u"),
+    removed: False,
+  )
+}
+
+/// A transaction's history entry: the system created it at 0, with no detail.
+pub fn transaction_event() -> transaction_history.Row {
+  transaction_history.new(
+    id: id.transaction_event("h"),
+    transaction_id: "atx",
+    ord: 0,
+    at: 0,
+    by_kind: compliance_actor_kind.System,
+    action: transaction_history.TransactionCreated,
+    has_reason_codes: False,
+    has_policy_versions: False,
   )
 }
 

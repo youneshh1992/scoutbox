@@ -106,6 +106,16 @@ const org = record({
     verified: ['verified', bool],
     suspended: ['suspended', bool],
     verificationRevokedAt: ['verification_revoked_at', option(int)],
+    // The dates suite's organisation carries an empty verification record and no closure. An organisation row has
+    // no column for either, and no claim rule reads them.
+    verification: (v) => {
+      if (JSON.stringify(v) !== '{}') throw new Error(`no Gleam field for an organisation's verification ${JSON.stringify(v)}`);
+      return [];
+    },
+    closedAt: (v) => {
+      if (v !== null) throw new Error(`no Gleam field for an organisation closed at ${JSON.stringify(v)}`);
+      return [];
+    },
   },
 });
 
@@ -2075,6 +2085,283 @@ const INTEGRATION_MAP = {
       if (liveTransactionId !== null && typeof liveTransactionId !== 'string') throw new Error(`a live transaction id ${JSON.stringify(liveTransactionId)}`);
       const facts = `${ctx.use(HO)}.Facts(can_write: ${bool(canWrite)}, has_final_progress_decision: ${bool(hasFinalProgressDecision)}, case_status: ${vocab('scoutbox/vocab/room_status')(caseStatus, ctx)}, subject_present: ${bool(subjectPresent)}, is_adult: ${bool(isAdult)}, blocked: ${bool(blocked)}, existing_status: ${option(string)(existingHandoffStatus, ctx)}, live_transaction: ${bool(!!liveTransactionId)}, compliance_evaluable: ${bool(complianceEvaluable)})`;
       return eq(`${ctx.use(HO)}.blockers(${facts})`, list(string)(c.result, ctx));
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------------------------- the provider
+
+const PROVIDER_FN = 'domains/agents/compliance/provider.mjs';
+const VP = 'scoutbox/agents/verification_provider';
+const FACET_ROWS = 'scoutbox/rows/agent_profile_facets';
+const ANSWER_STATES = {
+  VERIFIED: 'AnswerVerified',
+  NOT_VERIFIED: 'AnswerNotVerified',
+  INACTIVE: 'AnswerInactive',
+  STALE: 'AnswerStale',
+  UNAVAILABLE: 'AnswerUnavailable',
+  MANUAL_REVIEW_REQUIRED: 'AnswerManualReview',
+};
+/** The provenance an answer carries: the provider names itself, as `none` or the synthetic test double. */
+const answerSynthetic = (prov) => {
+  fieldsOf('a provenance', prov, ['provider', 'kind', 'at']);
+  if (prov.provider === 'local-synthetic-test-provider' && prov.kind === 'synthetic') return true;
+  if (prov.provider === 'none' && prov.kind === 'none') return false;
+  throw new Error(`no provider answers with the provenance ${JSON.stringify(prov)}`);
+};
+const providerAnswer = (v, ctx) => {
+  const { state, verifiedAt, recheckAt, provenance, note } = fieldsOf('a provider answer', v, ['state', 'verifiedAt', 'recheckAt', 'provenance', 'note']);
+  const ctor = ANSWER_STATES[state];
+  if (!ctor) throw new Error(`cannot print ${JSON.stringify(state)} as an AnswerState`);
+  return `${ctx.use(VP)}.Answer(state: ${ctx.use(VP)}.${ctor}, verified_at: ${option(int)(verifiedAt, ctx)}, recheck_at: ${option(int)(recheckAt, ctx)}, synthetic: ${bool(answerSynthetic(provenance))}, at: ${int(provenance.at)}, note: ${string(note)})`;
+};
+
+const PROVIDER_MAP = {
+  [`${PROVIDER_FN}#facetFromProviderAnswer`]: {
+    module: VP,
+    test: (c, ctx) => {
+      const [answer, opts] = c.args;
+      const { reference, memberAssociation = null, now } = fieldsOf("facetFromProviderAnswer's options", opts, ['reference', 'memberAssociation', 'now']);
+      // A facet with no member association is the FIFA licence, which is stored under INT.
+      const facet = memberAssociation === null ? 'fifa_licence' : null;
+      if (!facet) throw new Error('no printer yet for a facet with a member association');
+      const profile = ident('agent_profile')('ap', ctx);
+      const facetC = facetV(facet, ctx);
+      const r = c.result;
+      let want = 'None';
+      if (r !== null) {
+        fieldsOf('a facet', r, ['state', 'reference', 'memberAssociation', 'provenance', 'submittedAt', 'verifiedAt', 'recheckAt', 'note']);
+        const fr = ctx.use(FACET_ROWS);
+        want = `Some(${fr}.Row(..${fr}.new(profile_id: ${profile}, facet: ${facetC}, member_association: ${jurisdictionV('INT', ctx)}, state: ${facetState(r.state, ctx)}), reference: ${option(string)(r.reference, ctx)}, provenance_provider: Some(${vocab(FACET_ROWS, 'provenance_provider_pairs')(r.provenance.provider, ctx)}), provenance_kind: Some(${vocab(FACET_ROWS, 'provenance_kind_pairs')(r.provenance.kind, ctx)}), provenance_at: Some(${int(r.provenance.at)}), submitted_at: ${option(int)(r.submittedAt, ctx)}, verified_at: ${option(int)(r.verifiedAt, ctx)}, recheck_at: ${option(int)(r.recheckAt, ctx)}, note: ${option(string)(r.note, ctx)}))`;
+      }
+      return eq(`${ctx.use(VP)}.facet_record(${providerAnswer(answer, ctx)}, ${profile}, ${facetC}, None, ${string(reference)}, ${int(now)})`, want);
+    },
+  },
+};
+
+// ------------------------------------------------------------------------------------------------ transactions
+
+const TX_FN = 'domains/agents/transactions/transaction.mjs';
+const TXR = 'scoutbox/agents/transaction_rules';
+const TXROUTES = 'scoutbox/agents/transaction_routes';
+const contextTypeV = vocab('scoutbox/vocab/context_type');
+const txStatusV = vocab('scoutbox/vocab/transaction_status');
+const contextOutcomeV = vocab('scoutbox/vocab/context_outcome');
+const pendingReasonV = vocab('scoutbox/vocab/pending_reason');
+const stalenessV = vocab('scoutbox/vocab/staleness');
+const actorKindV = vocab('scoutbox/vocab/compliance_actor_kind');
+const txActionV = vocab('scoutbox/rows/transaction_history', 'action_pairs');
+const roomRoleV = code(TXR, 'room_role_to_string');
+
+/** A party as its row holds it. An absent `removed` is a live party, as `partiesOf`'s readers take it. */
+const txParty = record({
+  module: 'scoutbox/rows/transaction_parties',
+  constructor: 'Row',
+  base: call(BASE, 'transaction_party'),
+  fields: {
+    id: ['id', ident('transaction_party')],
+    partyRole: ['party_role', partyRoleV],
+    subjectKind: ['subject_kind', vocab('scoutbox/vocab/subject_kind')],
+    subjectId: ['subject_id', string],
+    confirmedAt: ['confirmed_at', option(int)],
+    removed: ['removed', bool],
+  },
+});
+
+/** A transaction's type and parties, which is all the party rules read. Its history is the timeline's. */
+const txTypeAndParties = (v, ctx) => {
+  fieldsOf('a transaction', v, ['type', 'parties', 'history']);
+  if ((v.history ?? []).length) throw new Error('a transaction with history: the party rules read none');
+  return [contextTypeV(v.type, ctx), list(txParty)(v.parties, ctx)];
+};
+
+/** A JSON value as the canonical hash input holds it. */
+const canonicalV = (v, ctx) => {
+  const c = ctx.use('scoutbox/platform/canonical');
+  if (v === null) return `${c}.Null`;
+  if (typeof v === 'boolean') return `${c}.Bool(${bool(v)})`;
+  if (Number.isInteger(v)) return `${c}.Int(${int(v)})`;
+  if (typeof v === 'string') return `${c}.Str(${string(v)})`;
+  if (Array.isArray(v)) return `${c}.Array(${list(canonicalV)(v, ctx)})`;
+  if (typeof v === 'object')
+    return `${c}.Object([${Object.entries(v).map(([k, x]) => `#(${string(k)}, ${canonicalV(x, ctx)})`).join(', ')}])`;
+  throw new Error(`cannot print ${JSON.stringify(v)} as a canonical Value`);
+};
+
+/** A compliance state. A key the caller leaves out is the TypeScript default: offerReadiness reads only `clear`. */
+const txState = (v, ctx) => {
+  const { outcome = null, reasonCodes = [], pendingReason = null, blocked = false, clear = false } = fieldsOf('a compliance state', v, [
+    'outcome',
+    'reasonCodes',
+    'pendingReason',
+    'blocked',
+    'clear',
+  ]);
+  return `${ctx.use(TXR)}.State(outcome: ${option(contextOutcomeV)(outcome, ctx)}, reason_codes: ${list(string)(reasonCodes, ctx)}, pending_reason: ${option(pendingReasonV)(pendingReason, ctx)}, blocked: ${bool(blocked)}, clear: ${bool(clear)})`;
+};
+
+/** A history entry's detail as its columns hold it. A key no column holds (prose, a fee) can't be stored, which is
+ *  how this server keeps it off the timeline; the keys the timeline shows each have a column. */
+const TIMELINE_DETAIL_KEYS = ['from', 'to', 'partyRole', 'subjectKind', 'status', 'outcome', 'pendingReason', 'reasonCodes', 'policyVersions', 'documentType', 'visibility', 'staleness', 'holdReasonCode', 'version', 'count'];
+const eventDetail = (d, ctx) => {
+  if (d === null || d === undefined) return [];
+  const out = [];
+  for (const [k, x] of Object.entries(d)) {
+    if (!TIMELINE_DETAIL_KEYS.includes(k)) continue;
+    if (k === 'count') out.push(['detail_count', option(int)(x, ctx)]);
+    else if (k === 'version') out.push(['detail_version', option(int)(x, ctx)]);
+    else if (k === 'visibility') out.push(['detail_visibility', option(vocab('scoutbox/vocab/document_visibility'))(x, ctx)]);
+    else if (k === 'from' || k === 'to') out.push([`detail_${k}`, option(txStatusV)(x, ctx)]);
+    else if (k === 'partyRole') out.push(['detail_party_role', option(partyRoleV)(x, ctx)]);
+    else if (k === 'outcome') out.push(['detail_outcome', option(contextOutcomeV)(x, ctx)]);
+    else if (k === 'pendingReason') out.push(['detail_pending_reason', option(pendingReasonV)(x, ctx)]);
+    else throw new Error(`no printer yet for a history detail's ${k}`);
+  }
+  return out;
+};
+const txEvent = (h, ctx) => {
+  const { id, at, action, by, detail = null } = fieldsOf('a history entry', h, ['id', 'at', 'action', 'by', 'detail']);
+  fieldsOf("a history entry's actor", by, ['kind', 'userId', 'name']);
+  const row = [
+    ['id', ident('transaction_event')(id, ctx)],
+    ['at', int(at)],
+    ['action', txActionV(action, ctx)],
+    ['by_kind', actorKindV(by.kind, ctx)],
+    ['by_id', option(string)(by.userId, ctx)],
+    ['by_name', option(string)(by.name, ctx)],
+    ...eventDetail(detail, ctx),
+  ];
+  return `${ctx.use('scoutbox/agents/transaction_store')}.Event(row: ${ctx.use('scoutbox/rows/transaction_history')}.Row(..${ctx.use(BASE)}.transaction_event(), ${row.map(([k, x]) => `${k}: ${x}`).join(', ')}), reason_codes: [], policy_versions: [])`;
+};
+
+const TRANSACTION_MAP = {
+  [`${TX_FN}#requiredPartyRoles`]: plainIn(TXR)('required_party_roles', [contextTypeV], list(partyRoleV)),
+  [`${TX_FN}#partiesConfirmed`]: {
+    module: TXR,
+    test: (c, ctx) => eq(`${ctx.use(TXR)}.parties_confirmed(${txTypeAndParties(c.args[0], ctx).join(', ')})`, bool(c.result)),
+  },
+  [`${TX_FN}#partiesAwaitingConfirmation`]: {
+    module: TXR,
+    test: (c, ctx) =>
+      eq(`${ctx.use(TXR)}.awaiting_confirmation(${txTypeAndParties(c.args[0], ctx).join(', ')})`, list(partyRoleV)(c.result, ctx)),
+  },
+  [`${TX_FN}#complianceStateFrom`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      const { outcome = null, gate = null, reasons = [], consentsOutstanding = [], representationCount = 0, partiesConfirmed = false } =
+        fieldsOf("complianceStateFrom's input", c.args[0], ['outcome', 'gate', 'reasons', 'consentsOutstanding', 'representationCount', 'partiesConfirmed']);
+      const codes = list((r, ctx) => string(typeof r === 'string' ? r : r?.code, ctx))(reasons, ctx);
+      // The state carries the engine's outstanding consents through unchanged; the routes send the engine's own list
+      // (`result.consents_outstanding`), so the Gleam state has no copy of it.
+      const { consentsOutstanding: carried, ...state } = c.result;
+      if (carried !== undefined && JSON.stringify(carried) !== JSON.stringify(consentsOutstanding))
+        throw new Error('a state whose outstanding consents are not the engine\'s');
+      return eq(
+        `${ctx.use(TXR)}.state_from(${option(contextOutcomeV)(outcome, ctx)}, ${option(pendingReasonV)(gate, ctx)}, ${codes}, ${int(representationCount)}, ${bool(partiesConfirmed)})`,
+        txState(state, ctx),
+      );
+    },
+  },
+  [`${TX_FN}#statusForComplianceState`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      if (c.args[0] === null) throw new Error('no state: every caller passes the state complianceStateFrom just made');
+      return eq(`${ctx.use(TXR)}.status_for(${txState(c.args[0], ctx)})`, txStatusV(c.result, ctx));
+    },
+  },
+  [`${TX_FN}#partyRevisionOf`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      const {
+        parties = [],
+        agentUserId,
+        representations = [],
+        consents = [],
+        facetStates = {},
+        policyVersions = [],
+        blockedSubjectIds = [],
+        minorSubjectIds = [],
+      } = fieldsOf("partyRevisionOf's input", c.args[0], ['parties', 'agentUserId', 'representations', 'consents', 'facetStates', 'policyVersions', 'blockedSubjectIds', 'minorSubjectIds']);
+      const rep = (r, ctx) => {
+        fieldsOf('a representation', r, ['agentUserId', 'partyRole', 'status', 'agreementId']);
+        return `#(${string(r.agentUserId)}, ${partyRoleV(r.partyRole, ctx)}, ${string(r.status)}, ${option(string)(r.agreementId, ctx)})`;
+      };
+      const consent = (k) => {
+        fieldsOf('a consent', k, ['id', 'status']);
+        return `#(${string(k.id)}, ${string(k.status)})`;
+      };
+      return eq(
+        `${ctx.use(TXR)}.party_revision(${list(txParty)(parties, ctx)}, ${string(agentUserId)}, ${list(rep)(representations, ctx)}, ${list(consent)(consents, ctx)}, ${canonicalV(facetStates, ctx)}, ${list(ident('policy'))(policyVersions, ctx)}, ${list(string)(blockedSubjectIds, ctx)}, ${list(string)(minorSubjectIds, ctx)})`,
+        string(c.result),
+      );
+    },
+  },
+  [`${TX_FN}#snapshotStaleness`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      const [tx, current, opts = {}] = c.args;
+      if (opts.maxAgeMs !== undefined && opts.maxAgeMs !== null)
+        throw new Error('a maximum age: no route passes one, so a snapshot is never stale by age alone');
+      const { compliance = null, reEvaluationPending = false } = fieldsOf('a transaction', tx, ['compliance', 'reEvaluationPending']);
+      let view = 'None';
+      if (compliance !== null) {
+        const { evaluationId, partyRevision, evaluatedAt = 0 } = fieldsOf('a snapshot', compliance, ['evaluationId', 'partyRevision', 'evaluatedAt']);
+        // The table's CHECKs: a snapshot names its evaluation or its gate, and has its time exactly when it does.
+        // staleness reads neither the time nor the outcome, so a snapshot that leaves the time out is printed at 0.
+        if (typeof evaluationId !== 'string') throw new Error('a snapshot naming no evaluation or gate: the table\'s CHECK');
+        view = `${ctx.use(TXR)}.snapshot_view("atx", Some(${ctx.use(TXR)}.Stored(evaluation_id: Some(${ident('evaluation')(evaluationId, ctx)}), gate: None, evaluated_at: ${int(evaluatedAt)}, pending_reason: None, party_revision: ${string(partyRevision)})), None)`;
+      }
+      return eq(`${ctx.use(TXR)}.staleness(${view}, ${string(current)}, ${bool(!!reEvaluationPending)})`, option(stalenessV)(c.result, ctx));
+    },
+  },
+  [`${TX_FN}#offerReadiness`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      const [tx, { complianceState = null, staleness = null } = {}] = c.args;
+      if (tx === null) throw new Error('no transaction: every route that reads readiness answers 404 for one it cannot find');
+      const { status, parties } = fieldsOf('a transaction', tx, ['status', 'parties']);
+      return eqJson(
+        `${ctx.use(TXR)}.readiness_json(${ctx.use(TXR)}.offer_readiness(${txStatusV(status, ctx)}, ${list(txParty)(parties, ctx)}, ${option(txState)(complianceState, ctx)}, ${option(stalenessV)(staleness, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${TX_FN}#timelineAudienceOf`]: {
+    module: TXR,
+    test: (c, ctx) =>
+      eq(`${ctx.use(TXR)}.audience_to_string(${ctx.use(TXR)}.audience_of(${txActionV(c.args[0], ctx)}))`, string(c.result)),
+  },
+  [`${TX_FN}#actorLabel`]: {
+    module: TXR,
+    test: (c, ctx) => {
+      const by = c.args[0];
+      if (by === null) throw new Error("no actor: every history row, note and document has its actor's kind (NOT NULL)");
+      fieldsOf('an actor', by, ['kind', 'userId', 'name']);
+      return eqJson(
+        `${ctx.use(TXR)}.actor_label(${ctx.use('scoutbox/vocab/compliance_actor_kind')}.to_string(${actorKindV(by.kind, ctx)}), ${option(string)(by.name, ctx)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${TX_FN}#timelineFor`]: {
+    module: TXROUTES,
+    test: (c, ctx) => {
+      const [tx, roles, side = null] = c.args;
+      fieldsOf('a transaction', tx, ['history']);
+      return eqJson(
+        `${ctx.use(TXROUTES)}.timeline_of(${list(txEvent)(tx.history, ctx)}, ${list(roomRoleV)(roles, ctx)}, ${option(partyRoleV)(side, ctx)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  ['domains/agents/transactions/audit.mjs#transactionAuditRows']: {
+    module: 'scoutbox/agents/transaction_ts_routes',
+    // The suite's one call passes neither filter. Every caller here reads one agency's feed or one transaction's.
+    test: () => {
+      throw new Error('no agency or transaction: every caller reads the feed of one (transaction_ts_routes)');
     },
   },
 };
@@ -5661,6 +5948,8 @@ export const MAP = {
   ...POLICY_MAP,
   ...CONFLICT_MAP,
   ...INTEGRATION_MAP,
+  ...TRANSACTION_MAP,
+  ...PROVIDER_MAP,
   ...ANALYTICS_MAP,
   ...DISCOVERY_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
@@ -5913,6 +6202,7 @@ export const HAND_PORTED = {
       'temporal.ts#parseLocalDateTimeWithZone',
       'domain.ts#trialReportDueAt',
       'domains/recruitment/lifecycle/contact.mjs#cooldownFor',
+      `${SHARED}#effectiveStatus`,
     ].map((f) => [f, 'test/scoutbox/platform/temporal_test.gleam']),
   ),
   ['domains/discovery/shared.mjs#briefIsLiveOn']: 'test/scoutbox/discovery/briefs_test.gleam',
@@ -5990,6 +6280,29 @@ export const HAND_PORTED = {
       (f) => [`${INTEGRATION}#${f}`, 'test/scoutbox/agents/integration_test.gleam'],
     ),
   ),
+  // A status or class that isn't one, roles that aren't a list, and a call with no arguments: the matrix test's
+  // header says where each is refused.
+  ...Object.fromEntries(
+    ['actorTransitionAllowed', 'complianceTransitionAllowed', 'canSeeVisibility'].map((f) => [
+      `${TX_FN}#${f}`,
+      'test/scoutbox/agents/transaction_matrix_test.gleam',
+    ]),
+  ),
+  // An outcome outside the engine's, no state, no transaction or no actor, an unregistered action, a maximum age and
+  // an unfiltered audit: the file's header says where each is refused.
+  ...Object.fromEntries(
+    [
+      'complianceStateFrom',
+      'statusForComplianceState',
+      'snapshotStaleness',
+      'offerReadiness',
+      'timelineAudienceOf',
+      'actorLabel',
+    ].map((f) => [`${TX_FN}#${f}`, 'test/scoutbox/agents/transaction_rules_test.gleam']),
+  ),
+  ['domains/agents/transactions/audit.mjs#transactionAuditRows']: 'test/scoutbox/agents/transaction_rules_test.gleam',
+  // The provider's closures are `answer`, called with the facet; their probes are ported over it.
+  [`${PROVIDER_FN}#createVerificationProvider`]: 'test/scoutbox/agents/verification_provider_test.gleam',
   ['domains/discovery/matching/match.mjs#matchPlayerToCriteria']: 'test/scoutbox/discovery/matching_test.gleam',
   ['domains/discovery/shared.mjs#buildSecondLookCandidate']: 'test/scoutbox/discovery/second_look_rules_test.gleam',
   ...Object.fromEntries(

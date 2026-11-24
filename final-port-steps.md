@@ -201,7 +201,7 @@ commit. In this order:
      does, at 20,000: ended entries first, then the lightest quarter (fewest hits, oldest among equals).
      `limits_test` floods the sign-in and second-factor tables and checks a lock survives.
 
-**D. Agents, one TypeScript module at a time**, the same way:
+**D. Agents, one TypeScript module at a time** [**done**], the same way:
 
 1. **compliance policy** [**done**] (`compliance/policy.mjs`, `approach_policy` and `compliance_store`):
    `evaluateMinorGate` 34, `selectPolicyVersion` 22, `isRegulatoryMinor` 19, `applicablePolicySet` 13,
@@ -267,19 +267,38 @@ commit. In this order:
    `clubAgentPresence` is closed in `NO_COUNTERPART`: its only caller, `clubPresenceFor`, has none. So is
    `normaliseDisclosure`: the disclosure is three NOT NULL booleans, and the sharing route refuses anything else
    (crossAppAdversarial RG1).
-4. **transactions** (`transactions/transaction.mjs`, `transaction_rules`): `canSeeVisibility` 36 and
-   `actorTransitionAllowed` 14 look like matrix candidates. Then `timelineVisible` 15, `complianceStateFrom`,
-   `partyRevisionOf` and the rest.
-5. **The provider** (`compliance/provider.mjs`, `verification_provider`): `facetFromProviderAnswer`, and
-   `createVerificationProvider`'s closure calls.
+4. **transactions** [**done**] (`transactions/transaction.mjs`, `transaction_rules`): no difference turned up.
+   - The state machine and the visibility classes are proved over their whole matrix (`transaction_matrix.json`,
+     `transaction_matrix_test.gleam`): `actorTransitionAllowed` and `complianceTransitionAllowed` over every pair of
+     statuses; `canSeeVisibility`, `uploadableVisibilities` and `timelineVisible` over every set of the room roles
+     this server grants × the viewer's side (× audience and entry class for the timeline). `party_guardian` is left
+     out: it is never granted.
+   - The matrix also holds `timelineAudienceOf` for every action a history row can hold. The Gleam `audience_of`
+     falls through to all parties where the TypeScript rule falls through to audit only. They agree on every
+     storable action, and the matrix now says so.
+   - The rest is generated: `complianceStateFrom`, `statusForComplianceState`, `partyRevisionOf`,
+     `snapshotStaleness` (through `snapshot_view`, as the route reads a snapshot), `offerReadiness`, the party
+     rules, `actorLabel` and `timelineFor`.
+   - `timelineFor` comes out of the timeline route (`transaction_routes.timeline_of`, over fetched entries). A detail
+     key no column holds (a fee in prose) can't be stored, which is how this server keeps it off the timeline.
+   - `transaction_rules_test`'s header closes what Gleam's types can't hold: an outcome outside the engine's, no
+     state, transaction or actor, an unregistered action, and a maximum age (no route passes one, so `EXPIRED` is
+     never answered). The header also closes the unfiltered audit (D.7).
+5. **The provider** [**done**] (`compliance/provider.mjs`, `verification_provider`): `facetFromProviderAnswer` is
+   generated against `facet_record`. `createVerificationProvider`'s closures are `answer`, called with the facet;
+   the suite's probes (G2 to I2) are ported in `verification_provider_test.gleam`.
 6. **The rest of the agent core** [**done**, with integration] (`core/shared.mjs`, `agent_rules`): `termMonthsOf`,
    `newFacets` and `tiersOf` were already closed. `agreementTermCoversNow` has no caller, and `normaliseDisclosure`
    closes with integration's; both are in `NO_COUNTERPART`. A function closed there has no counterpart for its
    hand-port calls either, so the ledger counts them as closed with it (the minors gate's and `termMonthsOf`'s, which
    no TypeScript route reaches).
-7. **The transaction audit** (`transactions/audit.mjs`): `transactionAuditRows` (1). Take it with transactions.
+7. **The transaction audit** [**done**, with transactions] (`transactions/audit.mjs`): its one call passes no filter,
+   and every caller here reads one agency's feed or one transaction's.
 
-When C and D are done, platform/dates closes too, and only platform/uploads is left (step 5).
+Agents is **ported**. platform/dates closed with it. Its last 18 calls were verification claims' `effectiveStatus`:
+five are generated now (the organisation printer drops the suite's empty `verification` and null `closedAt`, which
+no column holds and no rule reads), and the unreadable `validUntil`s are closed in `temporal_test`'s header. Only
+platform/uploads is left (step 5).
 
 **Left for later in this step:**
 

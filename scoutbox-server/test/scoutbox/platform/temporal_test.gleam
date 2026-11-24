@@ -1,7 +1,9 @@
 //// The platform/dates rules suite's calls the recorder can't keep (dev/battery_cases/report.json), ported by hand.
 //// temporal.ts reads `unknown` values and fails closed on ones it can't read; here an instant is an `Int` and a
 //// day a `Day`, so each of those values is refused where it arrives, by the reader these tests call, and no rule
-//// is ever handed one. NaN and ±Infinity can't be written in JSON at all.
+//// is ever handed one. NaN and ±Infinity can't be written in JSON at all. So a claim's `valid_until` (an INTEGER
+//// column every writer fills from a read `temporal.Due`) is never one of these, and the claim's effective status
+//// (verification claims' `effectiveStatus`) is never asked about one.
 
 import gleam/dynamic
 import gleam/dynamic/decode

@@ -9,6 +9,9 @@
 //                                         test/scoutbox/recruitment/contact_matrix_test.gleam
 //   test/fixtures/next_action_matrix.json nextActionFor (domains/recruitment/lifecycle/journeyModel.mjs), for
 //                                         test/scoutbox/recruitment/next_action_matrix_test.gleam
+//   test/fixtures/transaction_matrix.json the transaction state machine and visibility classes
+//                                         (domains/agents/transactions/transaction.mjs), for
+//                                         test/scoutbox/agents/transaction_matrix_test.gleam
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -373,4 +376,74 @@ ${finish.map((r) => `    ${line(r)}`).join(',\n')}
 `,
   );
   console.log(`next_action_matrix: ${pick.length} pick inputs (${results.length} answers), ${finish.length} finish inputs`);
+}
+
+// ------------------------------------------------------------------------------------------ the transactions
+//
+// The state machine: every status × every status, as [actorTransitionAllowed, complianceTransitionAllowed], keyed
+// `<from> <to>`.
+//
+// The visibility classes: every set of the room roles this server grants × the viewer's side (none, or each party
+// role). `party_guardian` is left out: no minor transaction pathway is enabled, so roomRolesFor never grants it and
+// the Gleam RoomRole has no such value. A set is keyed by its roles in `roles` order joined with `+` (`-` when
+// empty), then the side (`none`).
+//
+//   canSee      a character per class, in `visibilities` order: 1 when canSeeVisibility admits it
+//   uploadable  uploadableVisibilities' answer
+//   timeline    per audience too (keyed `<audience> <roles> <side>`), a character per entry detail: no class, then
+//               each class in `visibilities` order, 1 when timelineVisible shows it
+//
+// And timelineAudienceOf for every action a history row can hold (the column's vocabulary, read from its generated
+// row module).
+{
+  const T = await import(path.join(HERE, '../../../scoutbox/scoutbox-server/domains/agents/transactions/transaction.mjs'));
+  const statuses = [...T.TRANSACTION_STATUSES];
+  const transitions = [];
+  for (const from of statuses)
+    for (const to of statuses)
+      transitions.push([`${from} ${to}`, [T.actorTransitionAllowed(from, to), T.complianceTransitionAllowed(from, to)]]);
+  const visibilities = [...T.DOCUMENT_VISIBILITY];
+  const roles = T.ROOM_ROLES.filter((r) => r !== 'party_guardian');
+  const sides = [null, 'individual', 'engaging_entity', 'releasing_entity'];
+  const audiences = [...T.TIMELINE_AUDIENCES];
+  const sets = Array.from({ length: 2 ** roles.length }, (_, mask) => roles.filter((_, i) => mask & (1 << i)));
+  const setKey = (set, side) => `${set.length ? set.join('+') : '-'} ${side ?? 'none'}`;
+  const bits = (xs) => xs.map((x) => (x ? '1' : '0')).join('');
+  const canSee = [];
+  const uploadable = [];
+  const timeline = [];
+  for (const set of sets)
+    for (const side of sides) {
+      canSee.push([setKey(set, side), bits(visibilities.map((v) => T.canSeeVisibility(v, set, side)))]);
+      uploadable.push([setKey(set, side), T.uploadableVisibilities(set, side)]);
+      for (const audience of audiences)
+        timeline.push([
+          `${audience} ${setKey(set, side)}`,
+          bits([null, ...visibilities].map((v) => T.timelineVisible(audience, set, side, v === null ? {} : { visibility: v }))),
+        ]);
+    }
+  const rowModule = fs.readFileSync(path.join(HERE, '../src/scoutbox/rows/transaction_history.gleam'), 'utf8');
+  const pairs = rowModule.slice(rowModule.indexOf('pub const action_pairs = ['));
+  const actions = [...pairs.slice(0, pairs.indexOf(']')).matchAll(/#\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  const audienceOf = actions.map((a) => [a, T.timelineAudienceOf(a)]);
+  const object = (rows) => `{
+${rows.map(([k, v]) => `    ${line(k)}: ${line(v)}`).join(',\n')}
+  }`;
+  fs.writeFileSync(
+    path.join(FIXTURES, 'transaction_matrix.json'),
+    `{
+  "statuses": ${line(statuses)},
+  "transitions": ${object(transitions)},
+  "visibilities": ${line(visibilities)},
+  "roles": ${line(roles)},
+  "sides": ${line(sides)},
+  "audiences": ${line(audiences)},
+  "canSee": ${object(canSee)},
+  "uploadable": ${object(uploadable)},
+  "timeline": ${object(timeline)},
+  "audienceOf": ${object(audienceOf)}
+}
+`,
+  );
+  console.log(`transaction_matrix: ${transitions.length} transitions, ${canSee.length} role sets and sides, ${timeline.length} timeline inputs, ${actions.length} actions`);
 }

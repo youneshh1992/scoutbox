@@ -302,7 +302,7 @@
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/core/shared.mjs#can",
@@ -794,9 +794,11 @@
       {
         "function": "domains/agents/transactions/audit.mjs#transactionAuditRows",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no agency or transaction: every caller reads the feed of one (transaction_ts_routes)": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/errors.mjs#publicErrorBody",
@@ -810,116 +812,137 @@
       {
         "function": "domains/agents/transactions/transaction.mjs#actorLabel",
         "calls": 5,
-        "cases": 5,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no actor: every history row, note and document has its actor's kind (NOT NULL)": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#actorTransitionAllowed",
         "calls": 12,
-        "cases": 11,
+        "cases": 9,
         "handPort": {
-          "args[] is undefined": 1
+          "args[] is undefined": 1,
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a TransactionStatus": 1,
+          "Gleam's types can't hold its arguments: cannot print \"SOMETHING_NOBODY_WROTE\" as a TransactionStatus": 1
         },
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#canSeeVisibility",
         "calls": 36,
-        "cases": 36,
-        "handPort": {},
-        "status": "pending"
+        "cases": 32,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a DocumentVisibility": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a DocumentVisibility": 1,
+          "Gleam's types can't hold its arguments: cannot print \"NOT_A_CLASS\" as a DocumentVisibility": 1,
+          "Gleam's types can't hold its arguments: cannot print null as a List": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#complianceStateFrom",
         "calls": 14,
-        "cases": 12,
-        "handPort": {},
-        "status": "pending"
+        "cases": 11,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"SOMETHING_ELSE\" as a value of scoutbox/vocab/context_outcome.pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#complianceTransitionAllowed",
         "calls": 1,
-        "cases": 1,
-        "handPort": {},
-        "status": "pending"
+        "cases": 0,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a TransactionStatus": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#offerReadiness",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no transaction: every route that reads readiness answers 404 for one it cannot find": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#partiesAwaitingConfirmation",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#partiesConfirmed",
         "calls": 4,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#partyRevisionOf",
         "calls": 13,
         "cases": 10,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#requiredPartyRoles",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#snapshotStaleness",
         "calls": 5,
-        "cases": 5,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: a maximum age: no route passes one, so a snapshot is never stale by age alone": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#statusForComplianceState",
         "calls": 5,
-        "cases": 5,
-        "handPort": {},
-        "status": "pending"
+        "cases": 4,
+        "handPort": {
+          "Gleam's types can't hold its arguments: no state: every caller passes the state complianceStateFrom just made": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#timelineAudienceOf",
         "calls": 7,
-        "cases": 7,
-        "handPort": {},
-        "status": "pending"
+        "cases": 6,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"something_unregistered\" as a value of scoutbox/rows/transaction_history.action_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#timelineFor",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#timelineVisible",
         "calls": 15,
         "cases": 15,
         "handPort": {},
-        "status": "pending"
+        "status": "matrix"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#uploadableVisibilities",
         "calls": 4,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "matrix"
       }
     ]
   },
@@ -929,23 +952,25 @@
       {
         "function": "domains/agents/transactions/transaction.mjs#actorTransitionAllowed",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"HALF_WRITTEN\" as a TransactionStatus": 1
+        },
+        "status": "matrix"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#partyRevisionOf",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/agents/transactions/transaction.mjs#snapshotStaleness",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -2433,7 +2458,7 @@
       {
         "function": "domains/verification/claims/shared.mjs#effectiveStatus",
         "calls": 18,
-        "cases": 0,
+        "cases": 5,
         "handPort": {
           "args[].validUntil is -Infinity": 1,
           "args[].validUntil is Infinity": 1,
@@ -2447,8 +2472,7 @@
           "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
           "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
           "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
-          "Gleam's types can't hold its arguments: cannot print true as an Int": 1,
-          "Gleam's types can't hold its arguments: Row has no field for the JavaScript key verification": 5
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1
         },
         "status": "generated"
       },

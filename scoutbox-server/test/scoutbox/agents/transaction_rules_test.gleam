@@ -2,6 +2,22 @@
 //// test/fixtures/transaction_cases.json (written by `node dev/transaction_cases.mjs`): the compliance state and the
 //// status it asks for, the Offer readiness, room roles, the visibility classes a viewer may read and file into, and
 //// the party-revision hash.
+////
+//// The rules suites' recorded calls are generated into test/scoutbox/battery/agents/ (and the state machine and
+//// visibility classes proved over transaction_matrix_test). The calls Gleam's types can't hold are refused before
+//// these rules:
+////
+//// - complianceStateFrom with an outcome outside the engine's: `state_from` takes the engine's ContextOutcome, which
+////   is all `conflict.evaluate` can answer.
+//// - statusForComplianceState with no state, offerReadiness with no transaction: every caller passes the state
+////   `state_from` just made, and every route that reads readiness has found the transaction (or answered 404).
+//// - snapshotStaleness with a maximum age: no route on either server passes one, so a snapshot is never stale by age
+////   alone, and `staleness` has no such argument.
+//// - timelineAudienceOf with an unregistered action: a history row's action is a typed column whose vocabulary is
+////   the migration's CHECK, so no entry has one.
+//// - actorLabel with no actor: every history row, note and document has its actor's kind (a NOT NULL column).
+//// - transactionAuditRows with neither filter: every caller reads one agency's feed
+////   (`transaction_ts_routes.agency_rows`) or one transaction's (`audit_rows`).
 
 import gleam/dict
 import gleam/dynamic/decode

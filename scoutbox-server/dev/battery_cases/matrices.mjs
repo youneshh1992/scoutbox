@@ -183,6 +183,50 @@ function nextActionFor([p]) {
   return JSON.stringify(envelope);
 }
 
+
+// ------------------------------------------------------------------------------------------ the transactions
+
+const TXM = JSON.parse(readFileSync(new URL('../../test/fixtures/transaction_matrix.json', import.meta.url)));
+const TXM_TEST = 'test/scoutbox/agents/transaction_matrix_test.gleam';
+
+function transition(which) {
+  return (args) => {
+    if (!Array.isArray(args)) cannot(`cannot print ${JSON.stringify(args)} as a status and a status`);
+    const [from, to] = args;
+    at(TXM.statuses, from, 'a TransactionStatus');
+    at(TXM.statuses, to, 'a TransactionStatus');
+    return JSON.stringify(TXM.transitions[`${from} ${to}`][which]);
+  };
+}
+
+/** A role set's key, as the fixture writes it: its roles in the fixture's order. */
+function rolesKey(roles, side) {
+  if (!Array.isArray(roles)) cannot(`cannot print ${JSON.stringify(roles)} as a List`);
+  for (const r of roles) at(TXM.roles, r, 'a RoomRole');
+  at(TXM.sides, side ?? null, 'a PartyRole');
+  const set = TXM.roles.filter((r) => roles.includes(r));
+  return `${set.length ? set.join('+') : '-'} ${side ?? 'none'}`;
+}
+
+function canSee([visibility, roles, side = null]) {
+  const i = at(TXM.visibilities, visibility, 'a DocumentVisibility');
+  return JSON.stringify(TXM.canSee[rolesKey(roles, side)][i] === '1');
+}
+
+function uploadable([roles, side = null]) {
+  return JSON.stringify(TXM.uploadable[rolesKey(roles, side)]);
+}
+
+function timelineVisible([audience, roles, side = null, detail = null]) {
+  at(TXM.audiences, audience, 'an Audience');
+  // The Gleam rule reads the entry's class column, which holds a class or nothing.
+  const v = typeof detail?.visibility === 'string' ? detail.visibility : null;
+  const i = v === null ? 0 : at(TXM.visibilities, v, 'a DocumentVisibility') + 1;
+  return JSON.stringify(TXM.timeline[`${audience} ${rolesKey(roles, side)}`][i] === '1');
+}
+
+const TX_FN = 'domains/agents/transactions/transaction.mjs';
+
 export const MATRIX = {
   ['domains/recruitment/lifecycle/contact.mjs#canContactAction']: {
     test: 'test/scoutbox/recruitment/contact_matrix_test.gleam',
@@ -194,4 +238,9 @@ export const MATRIX = {
   },
   ['domains/recruitment/lifecycle/lifecycle.mjs#availableActions']: { test: LIFECYCLE_TEST, answer: availableActions },
   ['domains/recruitment/lifecycle/journeyModel.mjs#nextActionFor']: { test: NEXT_TEST, answer: nextActionFor },
+  [`${TX_FN}#actorTransitionAllowed`]: { test: TXM_TEST, answer: transition(0) },
+  [`${TX_FN}#complianceTransitionAllowed`]: { test: TXM_TEST, answer: transition(1) },
+  [`${TX_FN}#canSeeVisibility`]: { test: TXM_TEST, answer: canSee },
+  [`${TX_FN}#uploadableVisibilities`]: { test: TXM_TEST, answer: uploadable },
+  [`${TX_FN}#timelineVisible`]: { test: TXM_TEST, answer: timelineVisible },
 };

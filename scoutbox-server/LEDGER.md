@@ -17,12 +17,12 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 
 | Domain | Batteries | Untangled | Answered | Cases generated / pending | Hand-port done / calls | Status |
 |---|---|---|---|---|---|---|
-| agents | 9 | 9 | 9 | 422 / 134 | 113 / 116 | 3 to go |
+| agents | 9 | 9 | 9 | 541 / 0 | 131 / 131 | **ported** |
 | development | 3 | 3 | 3 | 127 / 0 | 45 / 45 | **ported** |
 | discovery | 3 | 3 | 3 | 323 / 0 | 2 / 2 | **ported** |
 | operations | 2 | 2 | 2 | 33 / 0 | 0 / 0 | **ported** |
 | passport | 2 | 2 | 2 | 133 / 0 | 7 / 7 | **ported** |
-| platform | 15 | 15 | 14 | 2213 / 0 | 300 / 318 | 2 to go |
+| platform | 15 | 15 | 14 | 2218 / 0 | 313 / 313 | 1 to go |
 | recruitment | 19 | 19 | 19 | 4428 / 0 | 537 / 537 | **ported** |
 | scouting | 1 | 1 | 1 | 0 / 0 | 0 / 0 | **ported** |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -35,14 +35,14 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | Battery | Boundary | Modules | Checks then | Battery | Rules suite | Elsewhere | Answered | Cases | Hand-port | Left |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `agents/adversarial` | neutral | 11 → 0 | 174 | 75 | 99 |  | yes | 73 / 0 | 36 / 36 | **done** |
-| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 82 / 3 | 10 / 12 | 3 cases pending; 2 hand-port calls |
+| `agents/compliance` | neutral | 14 → 0 | 342 | 235 | 108 | +1 added | yes | 85 / 0 | 12 / 12 | **done** |
 | `agents/compliancePersistence` | neutral | 8 → 0 | 76 | 74 | 2 |  | yes | 2 / 0 |  | **done** |
 | `agents/core` | neutral | 9 → 0 | 353 | 250 | 103 |  | yes | 182 / 0 | 27 / 27 | **done** |
 | `agents/corePersistence` | neutral | 4 → 0 | 47 | 42 | 5 |  | yes | 0 / 0 | 8 / 8 | **done** |
 | `agents/crossApp` | neutral | 13 → 0 | 380 | 240 | 141 | +1 added | yes | 77 / 0 | 30 / 30 | **done** |
 | `agents/crossAppAdversarial` | neutral | 2 → 0 | 94 | 92 | 2 |  | yes | 0 / 0 | 1 / 1 | **done** |
-| `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 6 / 126 | 1 / 2 | 126 cases pending; 1 hand-port calls |
-| `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 0 / 5 |  | 5 cases pending |
+| `agents/transactions` | neutral | 11 → 0 | 370 | 247 | 123 |  | yes | 118 / 0 | 16 / 16 | **done** |
+| `agents/transactionsPersistence` | neutral | 4 → 0 | 58 | 54 | 4 |  | yes | 4 / 0 | 1 / 1 | **done** |
 | `development/boxCam` | neutral | 3 → 0 | 150 | 146 | 40 | +36 added | yes | 40 / 0 |  | **done** |
 | `development/boxCamCvProvider` | TypeScript only | 8 → 8 | 89 | 89 |  |  |  |  |  | TypeScript only |
 | `development/boxCamCvRobustness` | TypeScript only | 8 → 8 | 48 | 48 |  |  |  |  |  | TypeScript only |
@@ -59,7 +59,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/api` | neutral | 0 → 0 | 198 | 245 | 17 | +64 added | yes | 22 / 0 |  | **done** |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  | yes |  |  | **done** |
 | `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added | yes | 50 / 0 | 6 / 6 | **done** |
-| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2092 / 0 | 263 / 281 | 18 hand-port calls |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  | yes | 2097 / 0 | 276 / 276 | **done** |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  | yes |  |  | **done** |
 | `platform/liveDelivery` | neutral | 0 → 0 | 0 | 7 |  | +7 added | yes |  |  | **done** |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  | yes |  |  | **done** |
@@ -183,7 +183,7 @@ ported by hand to a gleeunit test, or closed with its function when that has no 
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#evaluatePolicy` | 1 | Gleam's types can't hold its arguments: no Gleam evaluation for the action "bribe" | `test/scoutbox/agents/approach_policy_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#representationScopeProblem` | 1 | Gleam's types can't hold its arguments: cannot print "offer" as a value of scoutbox/vocab/context_type.pairs | `test/scoutbox/agents/approach_policy_test.gleam` |
 | `agents/compliance` | `domains/agents/compliance/policy.mjs#resolveScope` | 3 | Gleam's types can't hold its arguments: a jurisdiction entry here is text, not {"memberAssociation":"ENG"}; Gleam's types can't hold its arguments: a jurisdiction entry here is text, not {"memberAssociation":"INT"}; Gleam's types can't hold its arguments: cannot print null as a List | `test/scoutbox/agents/approach_policy_test.gleam` |
-| `agents/compliance` | `domains/agents/compliance/provider.mjs#createVerificationProvider` | 2 | result.verifyFifaLicence is a function | to do |
+| `agents/compliance` | `domains/agents/compliance/provider.mjs#createVerificationProvider` | 2 | result.verifyFifaLicence is a function | `test/scoutbox/agents/verification_provider_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#affiliationActive` | 2 | Gleam's types can't hold its arguments: an affiliation without a start {"endedAt":null}; Gleam's types can't hold its arguments: an affiliation without a start null | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForAgent` | 4 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
 | `agents/core` | `domains/agents/core/shared.mjs#agreementForClient` | 2 | Gleam's types can't hold its arguments: an Agreement always has jurisdiction | `test/scoutbox/agents/agent_rules_test.gleam` |
@@ -214,8 +214,18 @@ ported by hand to a gleeunit test, or closed with its function when that has no 
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactMilestone` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
 | `agents/crossApp` | `domains/recruitment/lifecycle/contact.mjs#contactView` | 1 | Gleam's types can't hold its arguments: the fixture leaves out the columns every contact row has | `test/scoutbox/recruitment/contact_rules_test.gleam` |
 | `agents/crossAppAdversarial` | `domains/agents/core/shared.mjs#agreementInForce` | 1 | Gleam's types can't hold its arguments: cannot print null as a String | `test/scoutbox/passport/trust_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 | Gleam's types can't hold its arguments: no agency or transaction: every caller reads the feed of one (transaction_ts_routes) | `test/scoutbox/agents/transaction_rules_test.gleam` |
 | `agents/transactions` | `domains/agents/transactions/errors.mjs#publicErrorBody` | 1 | Gleam's types can't hold its arguments: publicErrorBody with reasons: the Gleam routes write them already shaped | `test/scoutbox/agents/error_bodies_test.gleam` |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | args[] is undefined | to do |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 1 | Gleam's types can't hold its arguments: no actor: every history row, note and document has its actor's kind (NOT NULL) | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 3 | args[] is undefined; Gleam's types can't hold its arguments: cannot print "__proto__" as a TransactionStatus; Gleam's types can't hold its arguments: cannot print "SOMETHING_NOBODY_WROTE" as a TransactionStatus | `test/scoutbox/agents/transaction_matrix_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#canSeeVisibility` | 4 | Gleam's types can't hold its arguments: cannot print "__proto__" as a DocumentVisibility; Gleam's types can't hold its arguments: cannot print "constructor" as a DocumentVisibility; Gleam's types can't hold its arguments: cannot print "NOT_A_CLASS" as a DocumentVisibility; Gleam's types can't hold its arguments: cannot print null as a List | `test/scoutbox/agents/transaction_matrix_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceStateFrom` | 1 | Gleam's types can't hold its arguments: cannot print "SOMETHING_ELSE" as a value of scoutbox/vocab/context_outcome.pairs | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "constructor" as a TransactionStatus | `test/scoutbox/agents/transaction_matrix_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#offerReadiness` | 1 | Gleam's types can't hold its arguments: no transaction: every route that reads readiness answers 404 for one it cannot find | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 1 | Gleam's types can't hold its arguments: a maximum age: no route passes one, so a snapshot is never stale by age alone | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#statusForComplianceState` | 1 | Gleam's types can't hold its arguments: no state: every caller passes the state complianceStateFrom just made | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineAudienceOf` | 1 | Gleam's types can't hold its arguments: cannot print "something_unregistered" as a value of scoutbox/rows/transaction_history.action_pairs | `test/scoutbox/agents/transaction_rules_test.gleam` |
+| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 1 | Gleam's types can't hold its arguments: cannot print "HALF_WRITTEN" as a TransactionStatus | `test/scoutbox/agents/transaction_matrix_test.gleam` |
 | `development/hub` | `domains/development/hub/evidence.mjs#recordBelongsToPlayer` | 1 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
 | `development/hub` | `domains/development/hub/evidence.mjs#resolveEvidenceLink` | 16 | args[].reads.trials.byId is a function | `test/scoutbox/development/hub_evidence_test.gleam` |
 | `development/hub` | `domains/development/hub/permissions.mjs#canAssign` | 5 | args[].staffById is a function | `test/scoutbox/development/hub_assignee_test.gleam` |
@@ -245,7 +255,7 @@ ported by hand to a gleeunit test, or closed with its function when that has no 
 | `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 16 | args[].invitedAt is -Infinity; args[].invitedAt is Infinity; args[].invitedAt is NaN; Gleam's types can't hold its arguments: a handoff without its invitation time (an INTEGER NOT NULL column); Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print "yesterday" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/agents/integration_test.gleam` |
 | `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 | args[][].deliveredAt is -Infinity; args[][].deliveredAt is Infinity; args[][].deliveredAt is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "answered" as a value of scoutbox/rows/recruitment_contacts.status_pairs; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 8 | args[].mintId is a function | `test/scoutbox/recruitment/trial_rules_test.gleam` |
-| `platform/dates` | `domains/verification/claims/shared.mjs#effectiveStatus` | 18 | args[].validUntil is -Infinity; args[].validUntil is Infinity; args[].validUntil is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "garbage" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int; Gleam's types can't hold its arguments: Row has no field for the JavaScript key verification | to do |
+| `platform/dates` | `domains/verification/claims/shared.mjs#effectiveStatus` | 13 | args[].validUntil is -Infinity; args[].validUntil is Infinity; args[].validUntil is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "garbage" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `temporal.ts#isActiveAt` | 2 | Gleam's types can't hold its arguments: a window that is not there is no window; Gleam's types can't hold its arguments: cannot print "x" as an Int | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `temporal.ts#isDayWithin` | 1 | Gleam's types can't hold its arguments: cannot print "garbage" as a Day | `test/scoutbox/platform/temporal_test.gleam` |
 | `platform/dates` | `temporal.ts#isEffectiveAt` | 26 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print null as an Int; Gleam's types can't hold its arguments: cannot print true as an Int | `test/scoutbox/platform/temporal_test.gleam` |
@@ -377,29 +387,7 @@ ported by hand to a gleeunit test, or closed with its function when that has no 
 Rules the suites call that have no entry in `dev/battery_cases/map.mjs` yet: each needs its Gleam rule ported and
 mapped, then `npm run cases`.
 
-| Battery | Function | Cases |
-|---|---|---|
-| `agents/compliance` | `domains/agents/compliance/provider.mjs#facetFromProviderAnswer` | 3 |
-| `agents/transactions` | `domains/agents/transactions/audit.mjs#transactionAuditRows` | 1 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorLabel` | 5 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 11 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#canSeeVisibility` | 36 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceStateFrom` | 12 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#complianceTransitionAllowed` | 1 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#offerReadiness` | 7 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partiesAwaitingConfirmation` | 1 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partiesConfirmed` | 4 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 10 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#requiredPartyRoles` | 2 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 5 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#statusForComplianceState` | 5 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineAudienceOf` | 7 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineFor` | 1 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#timelineVisible` | 15 |
-| `agents/transactions` | `domains/agents/transactions/transaction.mjs#uploadableVisibilities` | 3 |
-| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#actorTransitionAllowed` | 2 |
-| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#partyRevisionOf` | 1 |
-| `agents/transactionsPersistence` | `domains/agents/transactions/transaction.mjs#snapshotStaleness` | 2 |
+None.
 
 ## Cases closed: no Gleam counterpart
 
