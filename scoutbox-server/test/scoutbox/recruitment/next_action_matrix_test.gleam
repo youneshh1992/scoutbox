@@ -1,11 +1,15 @@
-//// The next action (journey_model.pick and finish) agrees with the TypeScript one (nextActionFor) on every input in
-//// test/fixtures/next_action_matrix.json, written by `node dev/matrix_cases.mjs`. nextActionFor is finish(pick(…)),
-//// and so is journey_model.next_action, so each half is checked over its own matrix:
+//// The next action (journey_model.pick and finish) gives the blessed answer on every input in
+//// test/fixtures/next_action_matrix.json (first blessed from the TypeScript nextActionFor). journey_model.next_action
+//// is finish(pick(…)), so each half is checked over its own matrix:
 ////
 //// - pick: every status with every combination of the facts it reads, and with every value of each other fact,
 ////   one at a time. The code and the resources are compared, as JSON.
 //// - finish: every code × no role and every Room role × blocked × subject removed × integrity error. The envelope
 ////   is compared whole, as JSON.
+////
+//// The inputs are frozen in the fixture: each row's numbers index its axes (`statuses`, `values`, `codes`, `roles`)
+//// and its last number is its answer's index in `results` or `finishResults`. The axes are inputs, so a new status
+//// or fact value needs rows written for it; the_matrix_covers_what_this_server_has_test says when.
 
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode.{type Dynamic}
@@ -14,7 +18,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import scoutbox/matrix
+import scoutbox/blessed
 import scoutbox/recruitment/journey_model.{
   NextContact, NextFacts, NextOffer, NextSigning, NextTrial,
 }
@@ -34,17 +38,9 @@ type Matrix {
     statuses: List(String),
     dims: List(String),
     values: Dict(String, List(Dynamic)),
-    results: Dict(Int, String),
-    pick: List(List(Int)),
     codes: List(String),
     roles: List(Option(String)),
-    finish_results: Dict(Int, String),
-    finish: List(List(Int)),
   )
-}
-
-fn indexed(items: List(a)) -> Dict(Int, a) {
-  list.index_map(items, fn(x, i) { #(i, x) }) |> dict.from_list
 }
 
 fn matrix() -> Matrix {
@@ -57,29 +53,18 @@ fn matrix() -> Matrix {
       "values",
       decode.dict(decode.string, decode.list(decode.dynamic)),
     )
-    use results <- decode.field("results", decode.list(decode.string))
-    use pick <- decode.field("pick", decode.list(decode.list(decode.int)))
     use codes <- decode.field("codes", decode.list(decode.string))
     use roles <- decode.field(
       "roles",
       decode.list(decode.optional(decode.string)),
     )
-    use finish_results <- decode.field(
-      "finishResults",
-      decode.list(decode.string),
-    )
-    use finish <- decode.field("finish", decode.list(decode.list(decode.int)))
     decode.success(Matrix(
       now:,
       statuses:,
       dims:,
       values:,
-      results: indexed(results),
-      pick:,
       codes:,
       roles:,
-      finish_results: indexed(finish_results),
-      finish:,
     ))
   }
   let assert Ok(m) = json.parse(text, decoder)
@@ -244,37 +229,48 @@ pub fn the_matrix_covers_what_this_server_has_test() {
   assert list.length(signings) == 1 + 7 * 8
 }
 
-pub fn pick_agrees_with_the_typescript_rule_test() {
+fn rows(f: blessed.Fixture, name: String) -> List(#(List(Int), blessed.Item)) {
+  blessed.items(blessed.field(blessed.root(f), name))
+  |> list.map(fn(item) { #(blessed.read(item, decode.list(decode.int)), item) })
+}
+
+pub fn pick_is_blessed_test() {
+  let f = blessed.load("next_action_matrix")
   let m = matrix()
-  list.map(m.pick, fn(row) {
+  let results = blessed.pool(blessed.field(blessed.root(f), "results"))
+  list.map(rows(f, "pick"), fn(r) {
+    let #(row, item) = r
     let assert [status, ..rest] = row
-    let #(facts_row, answer) = #(list.take(rest, 8), at(rest, 8))
+    let facts_row = list.take(rest, 8)
     let status = at(statuses(), status)
-    let assert Ok(expected) = dict.get(m.results, answer)
-    matrix.Row(
-      what: room_status.to_string(status) <> " " <> row_text(facts_row),
-      expected:,
-      actual: fn() {
-        let #(code, refs) =
-          journey_model.pick(status, facts(m, facts_row), m.now)
+    let #(code, refs) = journey_model.pick(status, facts(m, facts_row), m.now)
+    blessed.answer(
+      blessed.index(item, 9),
+      room_status.to_string(status) <> " " <> row_text(facts_row),
+      json.string(
         json.to_string(
           json.object([
             #("code", json.string(code)),
             #("resources", json.object(refs)),
           ]),
-        )
-      },
+        ),
+      ),
     )
+    |> blessed.interned(results)
   })
-  |> matrix.check("nextActionFor (pick)")
+  |> blessed.check(f, _)
 }
 
-pub fn finish_agrees_with_the_typescript_rule_test() {
+pub fn finish_is_blessed_test() {
+  let f = blessed.load("next_action_matrix")
   let m = matrix()
-  list.map(m.finish, fn(row) {
-    let assert [code, role, blocked, removed, integrity, answer] = row
-    let assert Ok(expected) = dict.get(m.finish_results, answer)
-    matrix.Row(what: row_text(row), expected:, actual: fn() {
+  let results = blessed.pool(blessed.field(blessed.root(f), "finishResults"))
+  list.map(rows(f, "finish"), fn(r) {
+    let #(row, item) = r
+    let assert [code, role, blocked, removed, integrity, _] = row
+    blessed.answer(
+      blessed.index(item, 5),
+      row_text(list.take(row, 5)),
       journey_model.finish(
         at(m.codes, code),
         [],
@@ -283,8 +279,10 @@ pub fn finish_agrees_with_the_typescript_rule_test() {
         removed == 1,
         integrity == 1,
       )
-      |> json.to_string
-    })
+        |> json.to_string
+        |> json.string,
+    )
+    |> blessed.interned(results)
   })
-  |> matrix.check("nextActionFor (finish)")
+  |> blessed.check(f, _)
 }

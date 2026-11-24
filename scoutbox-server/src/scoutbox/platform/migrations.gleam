@@ -1,8 +1,8 @@
 //// Numbered migrations: `priv/migrations/NNNN_name.sql`, each applied once, in order, in its own unit, and
-//// recorded in `data_migrations`. They are the TypeScript server's own migrations, recorded as SQL by
-//// `dev/migrations_sql.mjs`, so a database either server creates is the same file. `__NOW__` in a file is the
-//// clock and `__SESSION_TTL_MS__` the session lifetime; a file marked `-- foreign_keys: off` rebuilds a table
-//// others reference, so it runs with foreign keys off and must leave `foreign_key_check` empty.
+//// recorded in `data_migrations`. They began as the TypeScript server's migrations, recorded as SQL, and are the
+//// schema's source now, edited here directly. `__NOW__` in a file is the clock and `__SESSION_TTL_MS__` the session
+//// lifetime; a file marked `-- foreign_keys: off` rebuilds a table others reference, so it runs with foreign keys
+//// off and must leave `foreign_key_check` empty.
 
 import gleam/dynamic/decode
 import gleam/int

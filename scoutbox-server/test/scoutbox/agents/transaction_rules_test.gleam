@@ -1,5 +1,5 @@
-//// The ported transaction rules agree with domains/agents/transactions/transaction.mjs on every case in
-//// test/fixtures/transaction_cases.json (written by `node dev/transaction_cases.mjs`): the compliance state and the
+//// The transaction rules give the blessed answers on every case in test/fixtures/transaction_cases.json (first
+//// blessed from the TypeScript server's domains/agents/transactions/transaction.mjs): the compliance state and the
 //// status it asks for, the Offer readiness, room roles, the visibility classes a viewer may read and file into, and
 //// the party-revision hash.
 ////
@@ -22,13 +22,13 @@
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
-import gleam/json
+import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
 import scoutbox/agents/transaction_rules.{
-  AgencyViewer, ClubViewer, PlayerViewer, ReviewerViewer, State,
+  AgencyViewer, ClubViewer, PlayerViewer, ReviewerViewer,
 }
+import scoutbox/blessed
 import scoutbox/platform/canonical
 import scoutbox/rows/id
 import scoutbox/rows/transaction_parties as party_row
@@ -40,7 +40,6 @@ import scoutbox/vocab/pending_reason
 import scoutbox/vocab/staleness
 import scoutbox/vocab/subject_kind
 import scoutbox/vocab/transaction_status
-import simplifile
 
 fn party() -> decode.Decoder(party_row.Row) {
   use role <- decode.field("partyRole", party_role.decoder())
@@ -111,8 +110,9 @@ fn facet_states() -> decode.Decoder(canonical.Value) {
   )
 }
 
+/// A case's answers, each with the field it is blessed in.
 type Case {
-  Case(checks: List(#(String, Bool, String)))
+  Case(answers: List(#(String, Json)))
 }
 
 fn case_decoder() -> decode.Decoder(Case) {
@@ -137,43 +137,10 @@ fn case_decoder() -> decode.Decoder(Case) {
     ["stateInput", "partiesConfirmed"],
     decode.bool,
   )
-  use want_state <- decode.field("state", {
-    use outcome <- decode.field(
-      "outcome",
-      decode.optional(context_outcome.decoder()),
-    )
-    use codes <- decode.field("reasonCodes", decode.list(decode.string))
-    use pending <- decode.field(
-      "pendingReason",
-      decode.optional(pending_reason.decoder()),
-    )
-    use blocked <- decode.field("blocked", decode.bool)
-    use clear <- decode.field("clear", decode.bool)
-    decode.success(State(outcome, codes, pending, blocked, clear))
-  })
-  use status_for <- decode.field("statusFor", transaction_status.decoder())
   use status <- decode.field("status", transaction_status.decoder())
   use stale <- decode.field("staleness", decode.optional(staleness.decoder()))
   use sees_state <- decode.field("readinessSeesState", decode.bool)
-  use can_start <- decode.subfield(
-    ["readiness", "canStartOfferWorkflow"],
-    decode.bool,
-  )
-  use blockers <- decode.subfield(
-    ["readiness", "blockers"],
-    decode.list(decode.string),
-  )
   use viewer <- decode.field("viewer", viewer())
-  use roles <- decode.field("roles", decode.list(decode.string))
-  use side <- decode.field("partyRole", decode.optional(party_role.decoder()))
-  use can_see <- decode.field(
-    "canSee",
-    decode.list(document_visibility.decoder()),
-  )
-  use uploadable <- decode.field(
-    "uploadable",
-    decode.list(document_visibility.decoder()),
-  )
   use parties <- decode.subfield(
     ["revisionInput", "parties"],
     decode.list(party()),
@@ -213,7 +180,6 @@ fn case_decoder() -> decode.Decoder(Case) {
     ["revisionInput", "minorSubjectIds"],
     decode.list(decode.string),
   )
-  use revision <- decode.field("revision", decode.string)
 
   let state =
     transaction_rules.state_from(outcome, gate, reasons, rep_count, confirmed)
@@ -245,67 +211,69 @@ fn case_decoder() -> decode.Decoder(Case) {
       blocked_ids,
       minor_ids,
     )
+  let visibilities = fn(vs) { json.array(vs, document_visibility.to_json) }
   decode.success(
     Case([
-      #("state", state == want_state, string.inspect(#(state, want_state))),
       #(
-        "status",
-        transaction_rules.status_for(state) == status_for,
-        string.inspect(transaction_rules.status_for(state)),
+        "state",
+        json.object([
+          #("outcome", json.nullable(state.outcome, context_outcome.to_json)),
+          #("reasonCodes", json.array(state.reason_codes, json.string)),
+          #(
+            "pendingReason",
+            json.nullable(state.pending_reason, pending_reason.to_json),
+          ),
+          #("blocked", json.bool(state.blocked)),
+          #("clear", json.bool(state.clear)),
+        ]),
+      ),
+      #(
+        "statusFor",
+        transaction_status.to_json(transaction_rules.status_for(state)),
       ),
       #(
         "readiness",
-        readiness.can_start == can_start && readiness.blockers == blockers,
-        string.inspect(#(readiness, blockers)),
+        json.object([
+          #("canStartOfferWorkflow", json.bool(readiness.can_start)),
+          #("blockers", json.array(readiness.blockers, json.string)),
+        ]),
       ),
       #(
         "roles",
-        list.map(got_roles, transaction_rules.room_role_to_string) == roles,
-        string.inspect(#(got_roles, roles)),
+        json.array(got_roles, fn(r) {
+          json.string(transaction_rules.room_role_to_string(r))
+        }),
       ),
-      #("side", got_side == side, string.inspect(#(got_side, side))),
+      #("partyRole", json.nullable(got_side, party_role.to_json)),
       #(
-        "can see",
+        "canSee",
         list.filter(document_visibility.pairs |> list.map(fn(p) { p.1 }), fn(v) {
           transaction_rules.can_see(v, got_roles, got_side)
         })
-          == can_see,
-        string.inspect(can_see),
+          |> visibilities,
       ),
       #(
         "uploadable",
-        transaction_rules.uploadable(got_roles, got_side) == uploadable,
-        string.inspect(uploadable),
+        visibilities(transaction_rules.uploadable(got_roles, got_side)),
       ),
-      #(
-        "revision",
-        got_revision == revision,
-        string.inspect(#(got_revision, revision)),
-      ),
+      #("revision", json.string(got_revision)),
     ]),
   )
 }
 
-pub fn the_ported_rules_agree_with_typescript_on_every_case_test() {
-  let assert Ok(text) = simplifile.read("test/fixtures/transaction_cases.json")
-  let assert Ok(cases) = json.parse(text, decode.list(case_decoder()))
-  let failures =
-    cases
-    |> list.index_map(fn(c, i) {
-      list.filter_map(c.checks, fn(check) {
-        case check.1 {
-          True -> Error(Nil)
-          False ->
-            Ok("case " <> int.to_string(i) <> ": " <> check.0 <> " " <> check.2)
-        }
-      })
+pub fn the_rules_give_the_blessed_answers_test() {
+  let f = blessed.load("transaction_cases")
+  blessed.items(blessed.root(f))
+  |> list.index_map(fn(item, i) {
+    let c = blessed.read(item, case_decoder())
+    list.map(c.answers, fn(a) {
+      blessed.answer(
+        blessed.field(item, a.0),
+        "case " <> int.to_string(i) <> " " <> a.0,
+        a.1,
+      )
     })
-    |> list.flatten
-  case failures {
-    [] -> Nil
-    [first, ..] ->
-      panic as {
-        int.to_string(list.length(failures)) <> " mismatches; first " <> first
-      }
-  }
+  })
+  |> list.flatten
+  |> blessed.check(f, _)
 }

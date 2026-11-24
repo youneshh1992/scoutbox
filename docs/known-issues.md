@@ -46,7 +46,7 @@ handoff entries), the TypeScript projector (`domains/recruitment/lifecycle/journ
 entry records a named staff member. Decision, Offer and trial lines are unaffected: those records do carry `by`.
 
 **Where it is in the port.** `scoutbox-server/src/scoutbox/recruitment/journey.gleam` writes `by: null` for those
-lines, with a comment, so the batteries and `dev/shape_diff.mjs` agree with the TypeScript server.
+lines, with a comment, so the batteries agree with the TypeScript server.
 
 **Fix.** Read `h.byName` in `timelineFor` on the TypeScript side, then name the actor in the Gleam projection too.
 Check that no client or battery relies on the null first.
@@ -319,5 +319,5 @@ builds every other verb as `action + 'ed'`. Sending a delivered contact has its 
 **Where it is in the port.** `contact_rules.can_act` (`scoutbox-server/src/scoutbox/recruitment/contact_rules.gleam`)
 writes "sended", and `test/fixtures/contact_matrix.json` records it.
 
-**Fix.** Spell out "sent" in `canContactAction`, then in `can_act`, and regenerate the fixture
-(`node dev/matrix_cases.mjs`). The `contacts` battery (D4b) checks only the code, so no battery changes.
+**Fix.** Spell out "sent" in `can_act` (and in `canContactAction` while the TypeScript server lives), then re-bless
+the fixture (`npm run fixtures:bless`) and check that only those messages changed. The `contacts` battery (D4b) checks only the code, so no battery changes.

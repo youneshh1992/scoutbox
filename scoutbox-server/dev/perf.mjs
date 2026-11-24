@@ -1,5 +1,5 @@
-// Latency of the slice's hot paths on both servers, with the TypeScript server's perf population
-// (scripts/perfPopulation.mjs) written as plain SQL into each server's own migrated database:
+// Latency of the hot paths, with the synthetic population of dev/perf_population.mjs (once the TypeScript server's
+// scripts/perfPopulation.mjs) written as plain SQL into the server's own migrated database:
 //   - GET /org/players/:id (the org player view: visibility, blocks, the record and its lists, a ledger write)
 //   - POST /admin/reports/:id/resolve (the resolution unit: the report, the organisation, the reporter's notice)
 // Each is timed one request at a time, then with 32 concurrent clients.
@@ -11,20 +11,16 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const TS = path.resolve(process.env.SCOUTBOX_TS_SERVER ?? path.join(HERE, '../../../scoutbox/scoutbox-server'));
 const GL = path.resolve(HERE, '..');
-const { syntheticPopulation } = await import(path.join(TS, 'scripts/perfPopulation.mjs'));
+const { syntheticPopulation } = await import(path.join(HERE, 'perf_population.mjs'));
 const PLAYERS = Number(process.argv[2] ?? 10000);
 const REPORTS = 3000;
 const SEQUENTIAL = 1000;
 const CONCURRENT = { clients: 32, requests: 2000 };
 
-const ONLY = process.env.PERF_ONLY;
-const all = {
-  typescript: { cmd: 'node', args: ['server.mjs'], cwd: TS },
+const servers = {
   gleam: { cmd: path.join(GL, 'build/erlang-shipment/entrypoint.sh'), args: ['run'], cwd: GL },
 };
-const servers = Object.fromEntries(Object.entries(all).filter(([k]) => !ONLY || k === ONLY));
 
 async function boot(server, data, port) {
   const child = spawn(server.cmd, server.args, {
@@ -43,7 +39,7 @@ async function boot(server, data, port) {
 }
 const stop = (child) => new Promise((r) => (child.once('exit', r), child.kill('SIGTERM')));
 
-/** The population as rows, in the columns both schemas share. */
+/** The population as rows. */
 function populate(file, now) {
   const pop = syntheticPopulation({ players: PLAYERS, now });
   const db = new DatabaseSync(file);

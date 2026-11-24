@@ -1,6 +1,6 @@
-//// The SQL distance rules agree with domain.ts on every case in test/fixtures/distance_cases.json (written by
-//// `node dev/distance_cases.mjs` from the TypeScript rule): random pairs, and pairs a hair either side of the
-//// 50 km radius and of each rounding edge.
+//// The SQL distance rules agree with the haversine distance on every case in test/fixtures/distance_cases.json
+//// (computed by the TypeScript server's domain.ts, and kept as it is: it checks arithmetic, not a design of ours):
+//// random pairs, and pairs a hair either side of the 50 km radius and of each rounding edge.
 
 import gleam/dynamic/decode
 import gleam/float

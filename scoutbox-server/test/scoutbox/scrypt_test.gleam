@@ -1,5 +1,5 @@
-//// scrypt agrees with Node's `crypto.scryptSync` on every key in test/fixtures/scrypt_cases.json (written by
-//// dev/scrypt_cases.mjs), and verifies hashes the TypeScript server's `hashPassword` stored.
+//// scrypt agrees with Node's `crypto.scryptSync` on every key in test/fixtures/scrypt_cases.json (test vectors,
+//// kept as they are), and verifies hashes the TypeScript server's `hashPassword` stored.
 
 import gleam/bit_array
 import gleam/dynamic/decode

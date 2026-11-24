@@ -1,5 +1,5 @@
-//// The ported safeguarding rules agree with domain.ts on every case in test/fixtures/rule_cases.json (written
-//// by `node dev/rule_cases.mjs` from the TypeScript rules themselves).
+//// The safeguarding rules give the blessed answers on every case in test/fixtures/rule_cases.json (first blessed
+//// from the TypeScript server's domain.ts): who may see a player, and what moderation flags in a text.
 
 import gleam/dynamic/decode
 import gleam/int
@@ -7,6 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import scoutbox/blessed
 import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/moderation_flags
@@ -16,7 +17,6 @@ import scoutbox/rules/age
 import scoutbox/rules/moderation
 import scoutbox/rules/visibility
 import scoutbox/vocab/org_type
-import simplifile
 import sqlight
 
 type VisibilityCase {
@@ -27,37 +27,44 @@ type VisibilityCase {
     level: String,
     location: Option(#(Float, Float)),
     org: String,
-    visible: Bool,
   )
 }
 
 type ModerationCase {
-  ModerationCase(text: String, flags: List(String), severity: Option(String))
+  ModerationCase(text: String)
 }
 
 fn number() -> decode.Decoder(Float) {
   decode.one_of(decode.float, [decode.int |> decode.map(int.to_float)])
 }
 
-fn cases() -> #(List(VisibilityCase), List(ModerationCase)) {
-  let assert Ok(text) = simplifile.read("test/fixtures/rule_cases.json")
+fn fixture() -> blessed.Fixture {
+  blessed.load("rule_cases")
+}
+
+/// Each case's input, with the item that holds it.
+fn cases(
+  f: blessed.Fixture,
+) -> #(
+  List(#(VisibilityCase, blessed.Item)),
+  List(#(ModerationCase, blessed.Item)),
+) {
   let point = {
     use lat <- decode.field("lat", number())
     use lng <- decode.field("lng", number())
     decode.success(#(lat, lng))
   }
-  let assert Ok(cases) =
-    json.parse(text, {
-      use visibility <- decode.field(
-        "visibility",
-        decode.list({
+  let visibility =
+    blessed.items(blessed.field(blessed.root(f), "visibility"))
+    |> list.map(fn(item) {
+      #(
+        blessed.read(item, {
           use now <- decode.field("now", decode.int)
           use dob <- decode.field("dob", decode.string)
           use country <- decode.field("country", decode.string)
           use level <- decode.field("level", decode.string)
           use location <- decode.field("location", decode.optional(point))
           use org <- decode.field("org", decode.string)
-          use visible <- decode.field("visible", decode.bool)
           decode.success(VisibilityCase(
             now:,
             dob:,
@@ -65,28 +72,26 @@ fn cases() -> #(List(VisibilityCase), List(ModerationCase)) {
             level:,
             location:,
             org:,
-            visible:,
           ))
         }),
+        item,
       )
-      use moderation <- decode.field(
-        "moderation",
-        decode.list({
-          use text <- decode.field("text", decode.string)
-          use flags <- decode.field("flags", decode.list(decode.string))
-          use severity <- decode.field(
-            "severity",
-            decode.optional(decode.string),
-          )
-          decode.success(ModerationCase(text:, flags:, severity:))
-        }),
-      )
-      decode.success(#(visibility, moderation))
     })
-  cases
+  let moderation =
+    blessed.items(blessed.field(blessed.root(f), "moderation"))
+    |> list.map(fn(item) {
+      #(
+        blessed.read(item, {
+          use text <- decode.field("text", decode.string)
+          decode.success(ModerationCase(text:))
+        }),
+        item,
+      )
+    })
+  #(visibility, moderation)
 }
 
-/// The organisations dev/rule_cases.mjs names.
+/// The organisations the fixture names.
 fn org(name: String) -> org_row.Row {
   let base =
     org_row.new(
@@ -134,46 +139,46 @@ fn org(name: String) -> org_row.Row {
   org_row.Row(..base, type_:, verified:, level: Some(level), lat:, lng:)
 }
 
-pub fn visibility_agrees_with_domain_ts_test() {
+pub fn visibility_is_blessed_test() {
   use conn <- sqlight.with_connection(":memory:")
-  let #(all, _) = cases()
-  let wrong =
-    list.filter(all, fn(c) {
-      let rule = visibility.visible_sql(org(c.org), c.now)
-      let assert Ok([visible]) =
-        sqlight.query(
-          "SELECT "
-            <> rule.sql
-            <> " FROM (SELECT ? AS birth_date, ? AS country, ? AS level, ? AS lat, ? AS lng) p",
-          conn,
-          list.append(rule.args, [
-            sqlight.text(c.dob),
-            sqlight.text(c.country),
-            sqlight.text(c.level),
-            sqlight.nullable(
-              sqlight.float,
-              option.map(c.location, fn(l) { l.0 }),
-            ),
-            sqlight.nullable(
-              sqlight.float,
-              option.map(c.location, fn(l) { l.1 }),
-            ),
-          ]),
-          decode.at([0], sqlight.decode_bool()),
-        )
-      visible != c.visible
-    })
+  let f = fixture()
+  let #(all, _) = cases(f)
   assert list.length(all) > 5000
-  assert list.take(wrong, 5) == []
+  list.index_map(all, fn(pair, i) {
+    let #(c, item) = pair
+    let rule = visibility.visible_sql(org(c.org), c.now)
+    let assert Ok([visible]) =
+      sqlight.query(
+        "SELECT "
+          <> rule.sql
+          <> " FROM (SELECT ? AS birth_date, ? AS country, ? AS level, ? AS lat, ? AS lng) p",
+        conn,
+        list.append(rule.args, [
+          sqlight.text(c.dob),
+          sqlight.text(c.country),
+          sqlight.text(c.level),
+          sqlight.nullable(sqlight.float, option.map(c.location, fn(l) { l.0 })),
+          sqlight.nullable(sqlight.float, option.map(c.location, fn(l) { l.1 })),
+        ]),
+        decode.at([0], sqlight.decode_bool()),
+      )
+    blessed.answer(
+      blessed.field(item, "visible"),
+      "visibility " <> int.to_string(i) <> ": " <> c.org <> " sees " <> c.dob,
+      json.bool(visible),
+    )
+  })
+  |> blessed.check(f, _)
 }
 
 /// The Gleam form of adulthood agrees with the SQL form the visibility rule uses, over every case whose birth
 /// date is a day (a stored one always is).
 pub fn adulthood_in_gleam_agrees_with_sql_test() {
   use conn <- sqlight.with_connection(":memory:")
-  let #(all, _) = cases()
+  let #(all, _) = cases(fixture())
   let days =
-    list.filter_map(all, fn(c) {
+    list.filter_map(all, fn(pair) {
+      let #(c, _) = pair
       temporal.parse_day(c.dob) |> result.map(fn(birth) { #(c, birth) })
     })
   assert list.length(days) > 5000
@@ -195,21 +200,33 @@ pub fn adulthood_in_gleam_agrees_with_sql_test() {
   assert wrong == []
 }
 
-pub fn moderation_agrees_with_domain_ts_test() {
-  let #(_, all) = cases()
-  let wrong =
-    list.filter(all, fn(c) {
-      let got = case moderation.check(c.text) {
-        Ok(Nil) -> #([], None)
-        Error(hit) -> #(
-          list.map(hit.flags, moderation_flags.flag_to_string),
-          Some(moderation_log.severity_to_string(hit.severity)),
-        )
-      }
-      got != #(c.flags, c.severity)
-    })
+pub fn moderation_is_blessed_test() {
+  let f = fixture()
+  let #(_, all) = cases(f)
   assert list.length(all) > 40
-  assert wrong == []
+  list.flat_map(all, fn(pair) {
+    let #(c, item) = pair
+    let #(flags, severity) = case moderation.check(c.text) {
+      Ok(Nil) -> #([], None)
+      Error(hit) -> #(
+        list.map(hit.flags, moderation_flags.flag_to_string),
+        Some(moderation_log.severity_to_string(hit.severity)),
+      )
+    }
+    [
+      blessed.answer(
+        blessed.field(item, "flags"),
+        "flags of " <> json.to_string(json.string(c.text)),
+        json.array(flags, json.string),
+      ),
+      blessed.answer(
+        blessed.field(item, "severity"),
+        "severity of " <> json.to_string(json.string(c.text)),
+        json.nullable(severity, json.string),
+      ),
+    ]
+  })
+  |> blessed.check(f, _)
 }
 
 /// A 29 February birthday counts on 1 March in other years.

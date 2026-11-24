@@ -1,4 +1,4 @@
-//// The Second Look rules' checks that the recorded cases can't carry (dev/battery_cases/map.mjs HAND_PORTED).
+//// The Second Look rules' checks that couldn't be recorded as cases, ported by hand.
 
 import gleam/option.{None, Some}
 import scoutbox/discovery/second_look_rules as rules

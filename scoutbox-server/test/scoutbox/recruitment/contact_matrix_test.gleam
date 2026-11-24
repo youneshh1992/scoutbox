@@ -1,59 +1,27 @@
-//// The contact validator (contact_rules.can_act) agrees with the TypeScript one (canContactAction) on every input
-//// in test/fixtures/contact_matrix.json, written by `node dev/matrix_cases.mjs`: every contact status × action ×
-//// role. The club's actions (edit, send, cancel) are compared whole, as JSON.
+//// The contact validator (contact_rules.can_act) gives the blessed answer on every input in
+//// test/fixtures/contact_matrix.json (first blessed from the TypeScript canContactAction): every contact status ×
+//// action × role. The club's actions (edit, send, cancel) are compared whole, as JSON text.
 ////
-//// `respond` is the recipient's act. No TypeScript route asks canContactAction about it (it is listed so the
-//// transition graph is total); here the recipient's answer moves a contact only in a state that
-//// contact_rules.accepts_response allows, and leaves any other alone rather than refusing. So its rows are
-//// compared on whether the answer moves the contact, and to what.
+//// `respond` is the recipient's act. The recipient's answer moves a contact only in a state that
+//// contact_rules.accepts_response allows, and leaves any other alone rather than refusing. So its rows bless only
+//// whether the answer moves the contact, and to what.
 ////
 //// The recorded calls Gleam's types can't hold are refused before the validator: a contact's status is a typed
 //// column (its vocabulary is generated from the migration's CHECK, so text outside it neither decodes nor is
 //// stored), each route names its own action, and a Room role is decided from membership, never read from text
 //// (see case_lifecycle_test).
 
-import gleam/dict.{type Dict}
-import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/battery/base
-import scoutbox/matrix
+import scoutbox/blessed
 import scoutbox/recruitment/contact_rules
 import scoutbox/recruitment/room_rules.{
   Contributor, RecruitmentAdmin, RoomLead, Viewer,
 }
 import scoutbox/rows/recruitment_contacts as row
-import simplifile
-
-type Fixture {
-  Fixture(
-    statuses: List(String),
-    actions: List(String),
-    roles: List(Option(String)),
-    answers: Dict(String, String),
-  )
-}
-
-fn fixture() -> Fixture {
-  let assert Ok(text) = simplifile.read("test/fixtures/contact_matrix.json")
-  let assert Ok(f) =
-    json.parse(text, {
-      use statuses <- decode.field("statuses", decode.list(decode.string))
-      use actions <- decode.field("actions", decode.list(decode.string))
-      use roles <- decode.field(
-        "roles",
-        decode.list(decode.optional(decode.string)),
-      )
-      use answers <- decode.field(
-        "answers",
-        decode.dict(decode.string, decode.string),
-      )
-      decode.success(Fixture(statuses:, actions:, roles:, answers:))
-    })
-  f
-}
 
 const roles = [
   None,
@@ -81,31 +49,6 @@ fn key(status: row.Status, action: String, role: Option(room_rules.RoomRole)) {
   <> option.map(role, room_rules.role_code) |> option.unwrap("none")
 }
 
-fn expected(f: Fixture, key: String) -> String {
-  let assert Ok(answer) = dict.get(f.answers, key)
-  answer
-}
-
-/// An answer as `{ok, to}` only: whether it moves the contact, and to what.
-fn outcome(answer: String) -> String {
-  let assert Ok(#(ok, to)) =
-    json.parse(answer, {
-      use ok <- decode.field("ok", decode.bool)
-      use to <- decode.optional_field(
-        "to",
-        None,
-        decode.optional(decode.string),
-      )
-      decode.success(#(ok, to))
-    })
-  json.to_string(
-    json.object([
-      #("ok", json.bool(ok)),
-      #("to", json.nullable(to, json.string)),
-    ]),
-  )
-}
-
 fn verdict_json(verdict: Result(row.Status, contact_rules.Refusal)) -> String {
   json.to_string(case verdict {
     Ok(to) ->
@@ -120,45 +63,65 @@ fn verdict_json(verdict: Result(row.Status, contact_rules.Refusal)) -> String {
   })
 }
 
-pub fn the_matrix_covers_what_this_server_has_test() {
-  let f = fixture()
-  assert f.statuses == list.map(row.status_pairs, fn(p) { p.0 })
-  assert f.actions == ["edit", "send", "cancel", "respond"]
-  assert f.roles == list.map(roles, option.map(_, room_rules.role_code))
-  assert dict.size(f.answers)
-    == list.length(f.statuses) * list.length(f.actions) * list.length(f.roles)
+pub fn the_axes_are_blessed_test() {
+  let f = blessed.load("contact_matrix")
+  let at = fn(name) { blessed.field(blessed.root(f), name) }
+  [
+    blessed.answer(
+      at("statuses"),
+      "statuses",
+      json.array(row.status_pairs, fn(p) { json.string(p.0) }),
+    ),
+    blessed.answer(
+      at("actions"),
+      "actions",
+      json.array(["edit", "send", "cancel", "respond"], json.string),
+    ),
+    blessed.answer(
+      at("roles"),
+      "roles",
+      json.array(roles, fn(r) {
+        json.nullable(option.map(r, room_rules.role_code), json.string)
+      }),
+    ),
+  ]
+  |> blessed.check(f, _)
 }
 
-pub fn can_act_agrees_with_can_contact_action_test() {
-  let f = fixture()
-  {
+/// The club's actions, and the recipient's response, all under `answers`.
+pub fn can_act_is_blessed_test() {
+  let f = blessed.load("contact_matrix")
+  let answers = blessed.table(blessed.field(blessed.root(f), "answers"))
+  let club = {
     use status <- list.flat_map(statuses())
     use #(name, action) <- list.flat_map(actions)
     use role <- list.map(roles)
-    let k = key(status, name, role)
     let c = base.contact()
     let c = contact_rules.Contact(..c, row: row.Row(..c.row, status:))
-    matrix.Row(what: k, expected: expected(f, k), actual: fn() {
-      verdict_json(contact_rules.can_act(c, action, role))
-    })
+    blessed.entry(
+      answers,
+      key(status, name, role),
+      json.string(verdict_json(contact_rules.can_act(c, action, role))),
+    )
   }
-  |> matrix.check("canContactAction")
-}
-
-pub fn a_response_moves_a_contact_as_can_contact_action_says_test() {
-  let f = fixture()
-  {
+  let respond = {
     use status <- list.flat_map(statuses())
     use role <- list.map(roles)
-    let k = key(status, "respond", role)
-    matrix.Row(what: k, expected: outcome(expected(f, k)), actual: fn() {
-      outcome(case contact_rules.accepts_response(status) {
-        True -> verdict_json(Ok(row.Responded))
-        False -> "{\"ok\":false}"
-      })
-    })
+    let outcome = case contact_rules.accepts_response(status) {
+      True ->
+        json.object([
+          #("ok", json.bool(True)),
+          #("to", row.status_to_json(row.Responded)),
+        ])
+      False -> json.object([#("ok", json.bool(False)), #("to", json.null())])
+    }
+    blessed.entry(
+      answers,
+      key(status, "respond", role),
+      json.string(json.to_string(outcome)),
+    )
   }
-  |> matrix.check("canContactAction's respond")
+  blessed.check(f, list.append(club, respond))
 }
 
 pub fn text_that_is_not_a_contact_status_does_not_decode_as_one_test() {

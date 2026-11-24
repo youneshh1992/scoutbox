@@ -1,7 +1,7 @@
-//// The ported conflict engine agrees with domains/agents/compliance/conflict.mjs on every case in
-//// test/fixtures/conflict_cases.json (written by `node dev/conflict_cases.mjs`), over the seeded policy versions
-//// as this server stores them: the outcome, every reason, the outstanding consents, the policy versions and the
-//// input hash.
+//// The conflict engine gives the blessed answers on every case in test/fixtures/conflict_cases.json (first blessed
+//// from the TypeScript server's domains/agents/compliance/conflict.mjs), over the seeded policy versions as this
+//// server stores them: the missing policies, the outcome, every reason, the outstanding consents, the policy
+//// versions and the input hash.
 ////
 //// Below them, the engine's checks the recorder can't turn into generated cases, ported by hand from the TypeScript
 //// rules suites of agents/compliance and platform/dates (scripts/rules/):
@@ -18,14 +18,12 @@
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
-import gleam/json
+import gleam/json.{type Json}
 import gleam/list
-import gleam/option.{type Option, None, Some}
-import gleam/string
+import gleam/option.{type Option, Some}
 import scoutbox/agents/approach_policy.{type Policy, Policy}
-import scoutbox/agents/conflict.{
-  Agent, Consent, ConsentOutstanding, Input, Party, Reason, Representation,
-}
+import scoutbox/agents/conflict.{Agent, Consent, Input, Party, Representation}
+import scoutbox/blessed
 import scoutbox/platform/store
 import scoutbox/rows/id
 import scoutbox/support
@@ -34,16 +32,12 @@ import scoutbox/vocab/context_type
 import scoutbox/vocab/party_role
 import scoutbox/vocab/rule_status
 import scoutbox/vocab/subject_kind
-import simplifile
 
 type Case {
   Case(
     statuses: List(#(String, rule_status.RuleStatus)),
     jurisdictions: List(String),
     input: fn(List(Policy), List(String)) -> conflict.Input,
-    missing: List(String),
-    expected: conflict.Evaluation,
-    hash: Option(String),
   )
 }
 
@@ -115,47 +109,6 @@ fn consent() -> decode.Decoder(conflict.Consent) {
   ))
 }
 
-fn reason() -> decode.Decoder(conflict.Reason) {
-  let text = decode.optional(decode.string)
-  use code <- decode.field("code", decode.string)
-  use rule_id <- decode.field("ruleId", text)
-  use status <- decode.field("ruleStatus", rule_status.decoder())
-  use regulator <- decode.field("regulator", text)
-  use jurisdiction <- decode.field("jurisdiction", text)
-  use version <- decode.field(
-    "policyVersion",
-    decode.optional(id.policy_decoder()),
-  )
-  use override <- decode.field("overrideRuleId", text)
-  use agent <- decode.field("agentUserId", text)
-  use role <- decode.field("partyRole", decode.optional(party_role.decoder()))
-  use state <- decode.field("state", text)
-  use roles <- decode.field(
-    "partyRoles",
-    decode.optional(decode.list(party_role.decoder())),
-  )
-  use mas <- decode.field(
-    "jurisdictions",
-    decode.optional(decode.list(decode.string)),
-  )
-  use via <- decode.field("viaConnectedAgent", decode.bool)
-  decode.success(Reason(
-    code,
-    rule_id,
-    status,
-    regulator,
-    jurisdiction,
-    version,
-    override,
-    agent,
-    role,
-    state,
-    roles,
-    mas,
-    via,
-  ))
-}
-
 fn case_decoder() -> decode.Decoder(Case) {
   use statuses <- decode.field(
     "statuses",
@@ -198,30 +151,10 @@ fn case_decoder() -> decode.Decoder(Case) {
     }),
   )
   use consents <- decode.subfield(["input", "consents"], decode.list(consent()))
-  use outcome <- decode.field("outcome", context_outcome.decoder())
-  use reasons <- decode.field("reasons", decode.list(reason()))
-  use outstanding <- decode.field(
-    "consentsOutstanding",
-    decode.list({
-      use role <- decode.field("partyRole", party_role.decoder())
-      use agent <- decode.field("agentUserId", decode.string)
-      use kind <- decode.field("consentKind", decode.string)
-      use code <- decode.field("reasonCode", decode.string)
-      decode.success(ConsentOutstanding(role, agent, kind, code))
-    }),
-  )
-  use versions <- decode.field(
-    "policyVersions",
-    decode.list(id.policy_decoder()),
-  )
-  use missing <- decode.field("missing", decode.list(decode.string))
-  use hash <- decode.field("inputHash", decode.optional(decode.string))
   // A dict loses the object's key order; the hash sorts keys and the engine looks agents up, so it doesn't matter.
   let agents = dict.to_list(agents)
-  decode.success(Case(
-    statuses:,
-    jurisdictions:,
-    input: fn(policies, missing) {
+  decode.success(
+    Case(statuses:, jurisdictions:, input: fn(policies, missing) {
       Input(
         context_id:,
         context_type: kind,
@@ -235,18 +168,8 @@ fn case_decoder() -> decode.Decoder(Case) {
         missing:,
         now:,
       )
-    },
-    missing:,
-    expected: conflict.Evaluation(
-      outcome:,
-      reasons:,
-      consents_outstanding: outstanding,
-      policy_versions: versions,
-      evaluated_at: now,
-      input_hash: option.unwrap(hash, ""),
-    ),
-    hash:,
-  ))
+    }),
+  )
 }
 
 fn with_statuses(
@@ -268,54 +191,78 @@ fn with_statuses(
   })
 }
 
-pub fn the_ported_engine_agrees_with_typescript_on_every_case_test() {
-  let assert Ok(text) = simplifile.read("test/fixtures/conflict_cases.json")
-  let assert Ok(cases) = json.parse(text, decode.list(case_decoder()))
+fn text(v: Option(String)) -> Json {
+  json.nullable(v, json.string)
+}
+
+fn reason_json(r: conflict.Reason) -> Json {
+  json.object([
+    #("code", json.string(r.code)),
+    #("ruleId", text(r.rule_id)),
+    #("ruleStatus", rule_status.to_json(r.rule_status)),
+    #("regulator", text(r.regulator)),
+    #("jurisdiction", text(r.jurisdiction)),
+    #("policyVersion", json.nullable(r.policy_version, id.policy_json)),
+    #("overrideRuleId", text(r.override_rule_id)),
+    #("agentUserId", text(r.agent_user_id)),
+    #("partyRole", json.nullable(r.party_role, party_role.to_json)),
+    #("state", text(r.state)),
+    #(
+      "partyRoles",
+      json.nullable(r.party_roles, json.array(_, party_role.to_json)),
+    ),
+    #(
+      "jurisdictions",
+      json.nullable(r.jurisdictions, json.array(_, json.string)),
+    ),
+    #("viaConnectedAgent", json.bool(r.via_connected_agent)),
+  ])
+}
+
+fn outstanding_json(o: conflict.ConsentOutstanding) -> Json {
+  json.object([
+    #("partyRole", party_role.to_json(o.party_role)),
+    #("agentUserId", json.string(o.agent_user_id)),
+    #("consentKind", json.string(o.consent_kind)),
+    #("reasonCode", json.string(o.reason_code)),
+  ])
+}
+
+pub fn the_engine_gives_the_blessed_answers_test() {
+  let f = blessed.load("conflict_cases")
   let s = support.fresh_store(fn(_) { Nil })
   let assert Ok(published) = store.read(s, approach_policy.published)
-  let failures =
-    list.index_map(cases, fn(c, i) {
-      let set =
-        approach_policy.applicable(
-          with_statuses(published, c.statuses),
-          c.jurisdictions,
-          now,
-        )
-      let got = conflict.evaluate(c.input(set.policies, set.missing))
-      let want = c.expected
-      let checks = [
-        #("missing", set.missing == c.missing),
-        #("outcome", got.outcome == want.outcome),
-        #("reasons", got.reasons == want.reasons),
-        #("consents", got.consents_outstanding == want.consents_outstanding),
-        #("versions", got.policy_versions == want.policy_versions),
-        #("hash", c.hash == None || Some(got.input_hash) == c.hash),
-      ]
-      list.filter_map(checks, fn(check) {
-        case check.1 {
-          True -> Error(Nil)
-          False ->
-            Ok(
-              "case "
-              <> int.to_string(i)
-              <> ": "
-              <> check.0
-              <> "\n  got:  "
-              <> string.inspect(got)
-              <> "\n  want: "
-              <> string.inspect(want),
-            )
-        }
-      })
-    })
-    |> list.flatten
-  case failures {
-    [] -> Nil
-    [first, ..] ->
-      panic as {
-        int.to_string(list.length(failures)) <> " mismatches; first " <> first
-      }
-  }
+  blessed.items(blessed.root(f))
+  |> list.index_map(fn(item, i) {
+    let c = blessed.read(item, case_decoder())
+    let set =
+      approach_policy.applicable(
+        with_statuses(published, c.statuses),
+        c.jurisdictions,
+        now,
+      )
+    let got = conflict.evaluate(c.input(set.policies, set.missing))
+    let answer = fn(name, actual) {
+      blessed.answer(
+        blessed.field(item, name),
+        "case " <> int.to_string(i) <> " " <> name,
+        actual,
+      )
+    }
+    [
+      answer("missing", json.array(set.missing, json.string)),
+      answer("outcome", context_outcome.to_json(got.outcome)),
+      answer("reasons", json.array(got.reasons, reason_json)),
+      answer(
+        "consentsOutstanding",
+        json.array(got.consents_outstanding, outstanding_json),
+      ),
+      answer("policyVersions", json.array(got.policy_versions, id.policy_json)),
+      answer("inputHash", json.string(got.input_hash)),
+    ]
+  })
+  |> list.flatten
+  |> blessed.check(f, _)
 }
 
 fn read_one(s: store.Store, sql: String, decoder: decode.Decoder(a)) -> a {

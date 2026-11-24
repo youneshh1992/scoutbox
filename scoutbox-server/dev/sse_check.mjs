@@ -1,4 +1,4 @@
-// The server-sent events check, on both servers: does the event stream behave as platform/connectedMode reads it,
+// The server-sent events check: does the event stream behave as platform/connectedMode reads it,
 // and how does it hold up with many open streams?
 //
 //   1. Behaviour, with the battery's own frame reader: tickets are required, a stream is scoped to its holder,
@@ -9,23 +9,19 @@
 //      The server's resident memory before, with the streams open, and after they close.
 //
 //   gleam export erlang-shipment && node dev/sse_check.mjs [streams=100,1000] [messages=20]
-//   SSE_ONLY=gleam|typescript runs one.
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const TS = path.resolve(process.env.SCOUTBOX_TS_SERVER ?? path.join(HERE, '../../../scoutbox/scoutbox-server'));
 const GL = path.resolve(HERE, '..');
 const FANOUT = (process.argv[2] ?? '100,1000').split(',').map(Number);
 const MESSAGES = Number(process.argv[3] ?? 20);
 
-const all = {
-  typescript: { cmd: 'node', args: ['server.mjs'], cwd: TS },
+const servers = Object.entries({
   gleam: { cmd: path.join(GL, 'build/erlang-shipment/entrypoint.sh'), args: ['run'], cwd: GL },
-};
-const servers = Object.entries(all).filter(([k]) => !process.env.SSE_ONLY || k === process.env.SSE_ONLY);
+});
 
 let failures = 0;
 const check = (cond, name) => {

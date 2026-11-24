@@ -28,25 +28,19 @@ answers every battery in `e2e/batteries.mjs` unchanged.
 ```sh
 npm run esqlite        # once after cloning (Gleam can't resolve the project without it): the patched esqlite
 gleam check            # type-check (fast)
-gleam test             # unit tests, the generator's snapshots, and the rules proved against domain.ts
+gleam test             # unit tests, the generator's snapshots, and the rules against their blessed fixtures
 gleam run              # the server on PORT (default 4000), data in DATA_DIR (default ./data)
 npm run e2e            # build the Erlang release, then run the batteries against it
-npm run e2e:sync       # re-copy the batteries from ../../scoutbox/scoutbox-server/e2e
-npm run e2e:check      # fail if a copied battery, a generated rule test or LEDGER.md differs from its source,
-                       # or a query fails sql:check
-npm run cases          # from the frozen calls of the TypeScript rules suites (dev/battery_cases/recordings.json.gz),
-                       # write dev/battery_cases/report.json and the generated tests in test/scoutbox/battery/
-                       # (mapping: dev/battery_cases/map.mjs)
-npm run cases:record   # record those calls again from ../../scoutbox/scoutbox-server, then do the same
-npm run ledger         # write LEDGER.md: every TypeScript battery, where its checks went, which domains are ported
+npm run e2e:check      # fail if a battery reaches outside e2e/ or isn't listed, or codegen:check or sql:check fails
+npm run fixtures:bless # rewrite the blessed answers in test/fixtures/ from the rules, and print the ones that changed
 npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
 npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
 npm run sql:check      # prepare every query the source spells out against the migrated schema, and check its
                        # placeholders against its arguments and each argument against the column it binds
                        # (`gleam dev sql-check --verbose` lists the queries it can't read and the arguments
                        # bound as plain text to an id or vocabulary column)
-node dev/perf.mjs      # latency of the hot paths on both servers (after `gleam export erlang-shipment`)
-node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 and 1000 streams, on both servers
+node dev/perf.mjs      # latency of the hot paths (after `gleam export erlang-shipment`)
+node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 and 1000 streams (after the same)
 ```
 
 Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default
@@ -68,11 +62,11 @@ through Expo, one call per registered device token; unset, the push log is the d
   format), `sql` (fragments that carry their arguments), `temporal` (days, instants and their refusals, read once
   where they arrive: a `Day` is always a real one), `zones` (a `Zone` is always one the offsets table knows, from
   `priv/zone_offsets.json`), `distance`, `keyset` and `paging`/`pages`, `http`, `ids`, migrations, limits, config.
-- `src/scoutbox/rules/`: the pure rules, each proved against the TypeScript one: `age`, `visibility` (one SQL
+- `src/scoutbox/rules/`: the pure rules, each checked against its blessed fixture: `age`, `visibility` (one SQL
   expression for every read), `moderation`, `journey`.
 - `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`,
-  `verification/`, `enterprise/`: the domains. `verification/claims` holds the pure rules, proved by the generated
-  tests in `test/scoutbox/battery/verification/`.
+  `verification/`, `enterprise/`: the domains. `verification/claims` holds the pure rules, checked by the tests
+  in `test/scoutbox/battery/verification/`.
 - `vendor/esqlite.patch`: our change to esqlite, the NIF under sqlight. `npm run esqlite` (`dev/esqlite.mjs`)
   fetches the pinned Hex tarball, checks it, applies the patch and compiles the NIF into `vendor/esqlite/` (not
   committed), which `gleam.toml` takes as a path dependency in place of the Hex copy. The patch adds `fetchmany`
@@ -81,12 +75,15 @@ through Expo, one call per registered device token; unset, the push log is the d
   done, and runs a statement's next batch on the dirty scheduler while its batches meet a step slower than a
   millisecond. Stock esqlite runs every row's `step` on the dirty schedulers, which made reads several times slower
   than Node and stopped them scaling; building a large result in one dirty call stopped large reads scaling too. An upgrade is a new pin and checksum in `dev/esqlite.mjs` and the patch reapplied.
-- `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
-  seed, dumped by `dev/seed_sql.mjs`.
-- `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,
-  `distance_cases.mjs` and `rule_cases.mjs` (test cases from domain.ts), `zone_offsets.mjs`, `shape_diff.mjs` (the
-  same requests of both servers, compared shape by shape) and `perf.mjs`.
-- `e2e/`: batteries copied by `e2e/sync.mjs` (do not edit them), and the helpers they import.
+- `priv/migrations/`: the tables, one numbered SQL file each (first recorded from the TypeScript server's
+  migrations), edited directly. `priv/seed.sql`: the demo world, edited directly.
+- `test/fixtures/`: inputs and their blessed answers (`test/scoutbox/blessed.gleam`), one case per line, except
+  `scrypt_cases`, `distance_cases` and `proxy_cases`, which pin outside facts and are kept as they are.
+- `dev/`: the generator (`scoutbox_dev.gleam`), `bless.mjs`, `esqlite.mjs`, `zone_offsets.mjs` (the zone offsets
+  from Node's ICU; re-bless `zone_cases` after running it), and `perf.mjs` and `sse_check.mjs` with
+  `perf_population.mjs`.
+- `e2e/`: the batteries, the server's behavioural specification, and the helpers they import. Change a battery,
+  then the code.
 
 ## Routes
 

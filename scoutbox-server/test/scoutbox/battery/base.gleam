@@ -1,6 +1,6 @@
-//// The records the generated battery tests (test/scoutbox/battery/<domain>/) start from. A recorded JavaScript
-//// record names only some fields; the test updates one of these with them. Each field here stands for "not given":
-//// None, False, zero or a placeholder, whichever the TypeScript rule reads an absent field as.
+//// The records the battery tests (test/scoutbox/battery/<domain>/) start from. A test names only the fields its
+//// case sets and updates one of these with them. Each field here stands for "not given": None, False, zero or a
+//// placeholder, whichever the rule reads an absent field as.
 
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode

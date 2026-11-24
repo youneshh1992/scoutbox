@@ -1,7 +1,6 @@
-//// The demo world a first development boot loads: `priv/seed.sql`, the TypeScript server's own seed for the
-//// tables this server has (written by `node dev/seed_sql.mjs`). Its timestamps are `NOW_MS + offset`, so the
-//// world is as fresh on a first boot here as there. Staff accounts are not seeded; a demo organisation's first
-//// sign-in under a name creates the account.
+//// The demo world a first development boot loads: `priv/seed.sql` (first dumped from the TypeScript server's seed),
+//// edited by hand. Its timestamps are `NOW_MS + offset`, so the world is as fresh on every first boot. Staff
+//// accounts are not seeded; a demo organisation's first sign-in under a name creates the account.
 
 import gleam/dynamic/decode
 import gleam/int

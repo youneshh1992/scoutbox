@@ -1,5 +1,16 @@
 {
-  "statuses": ["DRAFT","PARTIES_CONFIRMED","COMPLIANCE_PENDING","COMPLIANCE_BLOCKED","READY","ACTIVE","ON_HOLD","CANCELLED","CLOSED","ARCHIVED"],
+  "statuses": [
+    "DRAFT",
+    "PARTIES_CONFIRMED",
+    "COMPLIANCE_PENDING",
+    "COMPLIANCE_BLOCKED",
+    "READY",
+    "ACTIVE",
+    "ON_HOLD",
+    "CANCELLED",
+    "CLOSED",
+    "ARCHIVED"
+  ],
   "transitions": {
     "DRAFT DRAFT": [false,false],
     "DRAFT PARTIES_CONFIRMED": [true,false],
@@ -102,10 +113,39 @@
     "ARCHIVED CLOSED": [false,false],
     "ARCHIVED ARCHIVED": [false,false]
   },
-  "visibilities": ["AGENT_PRIVATE","PLAYER_PRIVATE","ENGAGING_CLUB_PRIVATE","RELEASING_CLUB_PRIVATE","PLAYER_AGENT_SHARED","ENGAGING_AGENT_SHARED","RELEASING_AGENT_SHARED","ALL_TRANSACTION_PARTIES","T_AND_S_ONLY"],
-  "roles": ["representing_agent","party_individual","party_club_signatory","party_club_member","agency_admin_observer","trust_safety"],
-  "sides": [null,"individual","engaging_entity","releasing_entity"],
-  "audiences": ["all_parties","agent_only","player_and_agent","club_side","per_document","audit_only"],
+  "visibilities": [
+    "AGENT_PRIVATE",
+    "PLAYER_PRIVATE",
+    "ENGAGING_CLUB_PRIVATE",
+    "RELEASING_CLUB_PRIVATE",
+    "PLAYER_AGENT_SHARED",
+    "ENGAGING_AGENT_SHARED",
+    "RELEASING_AGENT_SHARED",
+    "ALL_TRANSACTION_PARTIES",
+    "T_AND_S_ONLY"
+  ],
+  "roles": [
+    "representing_agent",
+    "party_individual",
+    "party_club_signatory",
+    "party_club_member",
+    "agency_admin_observer",
+    "trust_safety"
+  ],
+  "sides": [
+    null,
+    "individual",
+    "engaging_entity",
+    "releasing_entity"
+  ],
+  "audiences": [
+    "all_parties",
+    "agent_only",
+    "player_and_agent",
+    "club_side",
+    "per_document",
+    "audit_only"
+  ],
   "canSee": {
     "- none": "000000000",
     "- individual": "000000000",

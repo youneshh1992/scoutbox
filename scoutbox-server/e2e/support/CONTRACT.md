@@ -1,13 +1,10 @@
 # What the batteries need from a server
 
-Besides its routes, a server under test must honour the settings, development routes and header below, because the
-batteries rely on them. A port of the server implements all of them, or its batteries can't run unchanged.
-`node scripts/e2eContract.mjs` prints which batteries use each one. `testE2ESupport` fails when a battery uses a
-setting, development route or header that this page doesn't name.
+Besides its routes, the server under test must honour the settings, development routes and header below, because the
+batteries rely on them. A battery that comes to rely on another adds it here.
 
-Development-only means unavailable when `NODE_ENV` is `production`. Where the TypeScript server also refuses to boot
-in production with the setting present (`productionConfigProblems` in `domains/platform/capabilities.mjs`), that's
-noted.
+Development-only means unavailable when `NODE_ENV` is `production`. Where the server also refuses to boot in
+production with the setting present (`config.problems` in `src/scoutbox/platform/config.gleam`), that's noted.
 
 ## Starting the server
 
@@ -76,7 +73,7 @@ Synthetic stand-ins for outside services, development only. None of them makes a
 ## Under load
 
 A server may refuse a request it can't serve in time with 503 `SERVER_BUSY`, retryable, with a `Retry-After`; nothing
-was written, so a retry is safe. The TypeScript server queues instead and never answers it, and no battery expects it.
+was written, so a retry is safe. No battery expects it.
 
 ## Time
 

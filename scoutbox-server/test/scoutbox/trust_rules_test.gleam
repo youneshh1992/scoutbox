@@ -1,28 +1,18 @@
-//// The ported Trust Score agrees with domains/passport/trust/shared.mjs on every case in
-//// test/fixtures/trust_cases.json (written by `node dev/trust_cases.mjs`): the player's own projection, a club's,
-//// and the snapshot a Recruitment Room records.
+//// The Trust Score gives the blessed answers on every case in test/fixtures/trust_cases.json (first blessed from
+//// the TypeScript server's domains/passport/trust/shared.mjs): the player's own projection, a club's, and the
+//// snapshot a Recruitment Room records.
 
-import gleam/dict
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
+import scoutbox/blessed
 import scoutbox/passport/trust_rules.{
   AgencyRelationship, AssessmentSource, Authoritative, BoxSession,
   ClubRelationship, CoachRelationship, CombineAttempt, EvidenceItem, HistoryRow,
   Input, OrganisationAttested, ProClubViewer, Reference, Relationship,
   ScoutboxDocumentReview, SelfViewer,
-}
-import simplifile
-
-type Case {
-  Case(
-    input: trust_rules.Input,
-    self: String,
-    club: String,
-    snapshot: #(Int, String, String, List(#(String, String))),
-  )
 }
 
 fn input() -> decode.Decoder(trust_rules.Input) {
@@ -119,49 +109,39 @@ fn input() -> decode.Decoder(trust_rules.Input) {
   ))
 }
 
-fn cases() -> List(Case) {
-  let assert Ok(text) = simplifile.read("test/fixtures/trust_cases.json")
-  let snapshot = {
-    use score <- decode.field("score", decode.int)
-    use band <- decode.field("band", decode.string)
-    use hash <- decode.field("hash", decode.string)
-    use levels <- decode.field(
-      "levels",
-      decode.dict(decode.string, decode.string),
-    )
-    decode.success(#(score, band, hash, dict.to_list(levels)))
-  }
-  let assert Ok(cases) =
-    json.parse(
-      text,
-      decode.list({
-        use input <- decode.field("input", input())
-        use self <- decode.field("self", decode.string)
-        use club <- decode.field("club", decode.string)
-        use snapshot <- decode.field("snapshot", snapshot)
-        decode.success(Case(input, self, club, snapshot))
-      }),
-    )
-  cases
-}
-
-pub fn every_case_scores_and_projects_as_the_typescript_rule_does_test() {
-  let cases = cases()
+pub fn every_case_scores_and_projects_as_blessed_test() {
+  let f = blessed.load("trust_cases")
+  let cases = blessed.items(blessed.root(f))
   assert list.length(cases) == 600
-  list.each(cases, fn(c) {
-    let p = trust_rules.calculate(c.input)
-    assert json.to_string(trust_rules.projection(p, SelfViewer)) == c.self
-    assert json.to_string(trust_rules.projection(p, ProClubViewer)) == c.club
+  list.index_map(cases, fn(c, i) {
+    let p =
+      trust_rules.calculate(blessed.read(blessed.field(c, "input"), input()))
     let s = trust_rules.snapshot(p)
-    let #(score, band, hash, levels) = c.snapshot
-    assert #(s.score, s.band, s.hash) == #(score, band, hash)
-    assert list.sort(
-        list.map(s.component_levels, fn(l) { #(l.0, json.to_string(l.1)) }),
-        fn(a, b) { string.compare(a.0, b.0) },
-      )
-      == list.sort(
-        list.map(levels, fn(l) { #(l.0, json.to_string(json.string(l.1))) }),
-        fn(a, b) { string.compare(a.0, b.0) },
-      )
+    let what = "case " <> int.to_string(i)
+    [
+      blessed.answer(
+        blessed.field(c, "self"),
+        what <> " self",
+        json.string(json.to_string(trust_rules.projection(p, SelfViewer))),
+      ),
+      blessed.answer(
+        blessed.field(c, "club"),
+        what <> " club",
+        json.string(json.to_string(trust_rules.projection(p, ProClubViewer))),
+      ),
+      blessed.answer(
+        blessed.field(c, "snapshot"),
+        what <> " snapshot",
+        json.object([
+          #("score", json.int(s.score)),
+          #("band", json.string(s.band)),
+          #("policyVersion", json.int(s.policy_version)),
+          #("hash", json.string(s.hash)),
+          #("levels", json.object(s.component_levels)),
+        ]),
+      ),
+    ]
   })
+  |> list.flatten
+  |> blessed.check(f, _)
 }

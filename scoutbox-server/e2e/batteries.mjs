@@ -1,5 +1,5 @@
-// The batteries this server answers, copied from the TypeScript server by e2e/sync.mjs. Add one when its
-// routes are ported.
+// The batteries `npm run e2e` runs, one per file under e2e/<domain>/. Add a new battery here;
+// `npm run e2e:check` fails when a battery file isn't listed.
 export const BATTERIES = [
   'platform/staff',
   'platform/liveDelivery',

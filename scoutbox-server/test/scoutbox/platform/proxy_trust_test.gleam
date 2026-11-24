@@ -1,6 +1,7 @@
-//// SCOUTBOX_TRUST_PROXY and the client address agree with the TypeScript server on every case in
-//// test/fixtures/proxy_cases.json (written by `node dev/proxy_cases.mjs` from httpTrust.mjs and Express's own
-//// proxy-addr): each setting's state and capability note, and the address each request settles on.
+//// SCOUTBOX_TRUST_PROXY and the client address agree with Express's proxy-addr on every case in
+//// test/fixtures/proxy_cases.json (written from the TypeScript server's httpTrust.mjs and proxy-addr, and kept as it
+//// is: it pins the behaviour of the proxy the deployments sit behind): each setting's state and capability note, and
+//// the address each request settles on.
 
 import gleam/dynamic/decode
 import gleam/json

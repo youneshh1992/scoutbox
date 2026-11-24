@@ -1,6 +1,6 @@
-//// The specification tables this server declares in Gleam equal the TypeScript server's, as snapshotted in
-//// e2e/support/spec/ (written by its scripts/specSnapshot.mjs and copied here by e2e/sync.mjs). A table ported
-//// in part is checked entry by entry, so a ported entry can't drift.
+//// The specification tables this server declares in Gleam equal the snapshots in e2e/support/spec/ (first written
+//// by the TypeScript server's scripts/specSnapshot.mjs), which the batteries read too. A table ported in part is
+//// checked entry by entry, so a ported entry can't drift. To change a table, change both, in one commit.
 
 import gleam/dict
 import gleam/dynamic

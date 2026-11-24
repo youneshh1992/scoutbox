@@ -1,75 +1,22 @@
-//// The lifecycle validator (case_lifecycle.check and available) agrees with the TypeScript one
-//// (canTransitionRecruitmentCase and availableActions) on every input in test/fixtures/lifecycle_matrix.json,
-//// written by `node dev/matrix_cases.mjs`: every status × action × role × mode × evidence, and for resumeCase
-//// every state the case was held from. Each answer is compared whole, as JSON: the code, the message, and the
-//// allowed moves or the evidence asked for.
+//// The lifecycle validator (case_lifecycle.check and available) gives the blessed answer on every input in
+//// test/fixtures/lifecycle_matrix.json (first blessed from the TypeScript canTransitionRecruitmentCase and
+//// availableActions): every status × action × role × mode × evidence, and for resumeCase every state the case was
+//// held from. Each answer is compared whole, as JSON text: the code, the message, and the allowed moves or the
+//// evidence asked for. The inputs are this server's vocabularies, so a new status or action gains its rows at the
+//// next bless; the axes are blessed too, so the change shows.
 
-import gleam/dict.{type Dict}
-import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import scoutbox/battery/base
-import scoutbox/matrix
+import scoutbox/blessed
 import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/room_rules.{
   Contributor, RecruitmentAdmin, RoomLead, Viewer,
 }
 import scoutbox/vocab/room_status.{type RoomStatus}
-import simplifile
-
-type Matrix {
-  Matrix(
-    statuses: List(String),
-    actions: List(String),
-    roles: List(Option(String)),
-    modes: List(String),
-    evidence: List(String),
-    held: List(Option(String)),
-    results: Dict(Int, String),
-    check: Dict(String, List(Int)),
-    available: List(Int),
-  )
-}
-
-fn matrix() -> Matrix {
-  let assert Ok(text) = simplifile.read("test/fixtures/lifecycle_matrix.json")
-  let decoder = {
-    use statuses <- decode.field("statuses", decode.list(decode.string))
-    use actions <- decode.field("actions", decode.list(decode.string))
-    use roles <- decode.field(
-      "roles",
-      decode.list(decode.optional(decode.string)),
-    )
-    use modes <- decode.field("modes", decode.list(decode.string))
-    use evidence <- decode.field("evidence", decode.list(decode.string))
-    use held <- decode.field(
-      "held",
-      decode.list(decode.optional(decode.string)),
-    )
-    use results <- decode.field("results", decode.list(decode.string))
-    use check <- decode.field(
-      "check",
-      decode.dict(decode.string, decode.list(decode.int)),
-    )
-    use available <- decode.field("available", decode.list(decode.int))
-    decode.success(Matrix(
-      statuses:,
-      actions:,
-      roles:,
-      modes:,
-      evidence:,
-      held:,
-      results: list.index_map(results, fn(r, i) { #(i, r) }) |> dict.from_list,
-      check:,
-      available:,
-    ))
-  }
-  let assert Ok(m) = json.parse(text, decoder)
-  m
-}
 
 const roles = [
   None,
@@ -128,85 +75,108 @@ fn held_text(held: Option(RoomStatus)) -> String {
   option.map(held, room_status.to_string) |> option.unwrap("none")
 }
 
-/// The rows for these inputs, each with the fixture's answer at its index.
-fn rows(
-  m: Matrix,
-  inputs: List(#(String, fn() -> String)),
-  indexes: List(Int),
-) -> List(matrix.Row) {
-  assert list.length(inputs) == list.length(indexes)
-  list.zip(inputs, indexes)
-  |> list.map(fn(pair) {
-    let #(#(what, answer), i) = pair
-    let assert Ok(expected) = dict.get(m.results, i)
-    matrix.Row(what:, expected:, actual: answer)
-  })
+fn strings(items: List(String)) -> json.Json {
+  json.array(items, json.string)
 }
 
-pub fn the_matrix_covers_what_this_server_has_test() {
-  let m = matrix()
-  assert m.statuses == list.map(room_status.pairs, fn(p) { p.0 })
-  assert m.actions == list.map(lifecycle.actions, fn(a) { a.name })
-  assert m.roles == list.map(roles, option.map(_, room_rules.role_code))
-  assert m.modes == list.map(modes, fn(x) { x.0 })
-  assert m.evidence == list.map(providers(), fn(p) { p.0 })
-  assert m.held == list.map(held(), option.map(_, room_status.to_string))
-  assert dict.keys(m.check) |> list.sort(string.compare)
-    == list.sort(m.actions, string.compare)
+fn nullable_strings(items: List(Option(String))) -> json.Json {
+  json.array(items, json.nullable(_, json.string))
 }
 
-pub fn check_agrees_with_the_typescript_validator_test() {
-  let m = matrix()
-  list.flat_map(lifecycle.actions, fn(action) {
+pub fn the_axes_are_blessed_test() {
+  let f = blessed.load("lifecycle_matrix")
+  let at = fn(name) { blessed.field(blessed.root(f), name) }
+  [
+    blessed.answer(
+      at("statuses"),
+      "statuses",
+      strings(list.map(room_status.pairs, fn(p) { p.0 })),
+    ),
+    blessed.answer(
+      at("actions"),
+      "actions",
+      strings(list.map(lifecycle.actions, fn(a) { a.name })),
+    ),
+    blessed.answer(
+      at("roles"),
+      "roles",
+      nullable_strings(list.map(roles, option.map(_, room_rules.role_code))),
+    ),
+    blessed.answer(
+      at("modes"),
+      "modes",
+      strings(list.map(modes, fn(x) { x.0 })),
+    ),
+    blessed.answer(
+      at("evidence"),
+      "evidence",
+      strings(list.map(providers(), fn(p) { p.0 })),
+    ),
+    blessed.answer(
+      at("held"),
+      "held",
+      nullable_strings(list.map(held(), option.map(_, room_status.to_string))),
+    ),
+  ]
+  |> blessed.check(f, _)
+}
+
+pub fn check_is_blessed_test() {
+  let f = blessed.load("lifecycle_matrix")
+  let results = blessed.pool(blessed.field(blessed.root(f), "results"))
+  let answers = blessed.table(blessed.field(blessed.root(f), "check"))
+  {
+    use action <- list.flat_map(lifecycle.actions)
     let held = case action.name {
       "resumeCase" -> held()
       _ -> [None]
     }
-    let inputs = {
-      use h <- list.flat_map(held)
-      use status <- list.flat_map(statuses())
-      use role <- list.flat_map(roles)
-      use #(mode, reasons, for_availability) <- list.flat_map(modes)
-      use #(ev, provider) <- list.map(providers())
-      let what =
-        string.join(
-          [
-            action.name,
-            room_status.to_string(status),
-            role_text(role),
-            mode,
-            ev,
-            "held from " <> held_text(h),
-          ],
-          " / ",
-        )
-      #(what, fn() {
-        let assert Ok(verdict) =
-          case_lifecycle.check(
-            room(status, h),
-            action,
-            role,
-            reasons,
-            for_availability,
-            provider,
-          )
-        json.to_string(case_lifecycle.verdict_json(verdict))
-      })
-    }
-    let assert Ok(indexes) = dict.get(m.check, action.name)
-    rows(m, inputs, indexes)
-  })
-  |> matrix.check("canTransitionRecruitmentCase")
+    use h <- list.flat_map(held)
+    use status <- list.flat_map(statuses())
+    use role <- list.flat_map(roles)
+    use #(mode, reasons, for_availability) <- list.flat_map(modes)
+    use #(ev, provider) <- list.map(providers())
+    let key =
+      string.join(
+        [
+          action.name,
+          room_status.to_string(status),
+          role_text(role),
+          mode,
+          ev,
+          "held from " <> held_text(h),
+        ],
+        " / ",
+      )
+    let assert Ok(verdict) =
+      case_lifecycle.check(
+        room(status, h),
+        action,
+        role,
+        reasons,
+        for_availability,
+        provider,
+      )
+    blessed.entry(
+      answers,
+      key,
+      json.string(json.to_string(case_lifecycle.verdict_json(verdict))),
+    )
+    |> blessed.interned(results)
+  }
+  |> blessed.check(f, _)
 }
 
-pub fn available_agrees_with_the_typescript_validator_test() {
-  let m = matrix()
-  let inputs = {
+pub fn available_is_blessed_test() {
+  let f = blessed.load("lifecycle_matrix")
+  let results = blessed.pool(blessed.field(blessed.root(f), "results"))
+  let answers = blessed.table(blessed.field(blessed.root(f), "available"))
+  {
     use h <- list.flat_map(held())
     use status <- list.flat_map(statuses())
     use role <- list.flat_map(roles)
     use #(ev, provider) <- list.map(providers())
-    let what =
+    let key =
       string.join(
         [
           room_status.to_string(status),
@@ -216,11 +186,10 @@ pub fn available_agrees_with_the_typescript_validator_test() {
         ],
         " / ",
       )
-    #(what, fn() {
-      let assert Ok(names) =
-        case_lifecycle.available(room(status, h), role, provider)
-      json.to_string(json.array(names, json.string))
-    })
+    let assert Ok(names) =
+      case_lifecycle.available(room(status, h), role, provider)
+    blessed.entry(answers, key, json.string(json.to_string(strings(names))))
+    |> blessed.interned(results)
   }
-  rows(m, inputs, m.available) |> matrix.check("availableActions")
+  |> blessed.check(f, _)
 }

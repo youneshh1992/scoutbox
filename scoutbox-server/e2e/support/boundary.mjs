@@ -3,7 +3,7 @@
 // support/server.mjs. `boundaryProblems(text)` lists the lines that reach outside: an import or path climbing two
 // levels (out of e2e/<domain>/), or a mention of server.mjs other than the launcher's.
 //
-// Pure, with no imports, so any repository that copies the batteries can run the same check.
+// Pure, with no imports. `node e2e/check.mjs` (part of `npm run e2e:check`) runs it over every file under e2e/.
 
 const OUTSIDE = [
   { why: 'imports from outside e2e/', re: /(?:\bfrom\s*|\bimport\s*\(\s*)['"`]\.\.\/\.\.\// },
@@ -23,5 +23,5 @@ export function boundaryProblems(text) {
   return out;
 }
 
-/** The files (relative to e2e/) the check doesn't apply to: the launcher, which a port replaces, and this file. */
+/** The files (relative to e2e/) the check doesn't apply to: the launcher, which starts the server, and this file. */
 export const EXEMPT = ['support/server.mjs', 'support/boundary.mjs'];

@@ -1,4 +1,4 @@
-//// The platform/dates rules suite's calls the recorder can't keep (dev/battery_cases/report.json), ported by hand.
+//// The platform/dates rules suite's calls that couldn't be recorded as cases, ported by hand.
 //// temporal.ts reads `unknown` values and fails closed on ones it can't read; here an instant is an `Int` and a
 //// day a `Day`, so each of those values is refused where it arrives, by the reader these tests call, and no rule
 //// is ever handed one. NaN and ±Infinity can't be written in JSON at all. So a claim's `valid_until` (an INTEGER

@@ -2,8 +2,8 @@
 // `npm run e2e` compiles first (`gleam build`, incremental), so a battery's boot is the BEAM's, not a compile. erl
 // `exec`s the emulator, so the child a battery kills is the BEAM itself.
 //
-// This is the one file under e2e/support/ that this repository writes: the TypeScript server's own launcher starts
-// its server.mjs, and e2e/sync.mjs copies everything else verbatim.
+// The batteries start the server only through this file (e2e/boundary.mjs checks that), so they stay independent of
+// how the server is built.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

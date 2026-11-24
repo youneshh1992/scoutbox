@@ -1,9 +1,10 @@
 # ScoutBox in Gleam
 
-A pilot port of the ScoutBox server (`../scoutbox/scoutbox-server`, Node/TypeScript) to Gleam on the BEAM, with
-SQLite through `sqlight`. The TypeScript server is the reference: its e2e batteries are the behavioural
-specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
-`../scoutbox/docs/architecture.md` for the product rules; they apply here too.
+The ScoutBox server in Gleam on the BEAM, with SQLite through `sqlight`. It began as a port of the TypeScript server
+(`../scoutbox/scoutbox-server`), which it is replacing (`final-port-steps.md`). This server is the reference now:
+its own e2e batteries (`scoutbox-server/e2e/`) are its behavioural specification, and its blessed fixtures pin its
+rules. Nothing here reads the TypeScript tree. Read `../scoutbox/CLAUDE.md` and `../scoutbox/docs/architecture.md`
+for the product rules; they apply here too.
 
 - `scoutbox-server/`: the Gleam server. How to run it and what is ported: its `README.md`.
 - `.claude/docs/gleam/html/everything.html`: the whole Gleam language tour on one page. Read it when unsure of
@@ -25,8 +26,7 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - `list.range` no longer exists. Use `list.repeat`, or recurse.
   - A function bound with `let` is not generic. If it's used at two types, make it a top-level `fn`.
   - `bit_array.slice` fails on bit strings that aren't whole bytes. Match with `<<b:bytes-size(n), _:bits>>`.
-  - JavaScript's `length` counts UTF-16 units. Text limits use `input.utf16_length` so they agree with the
-    TypeScript server and the apps.
+  - JavaScript's `length` counts UTF-16 units. Text limits use `input.utf16_length` so they agree with the apps.
   - `wisp_ewe` is not on Hex. It is vendored and adapted in `platform/wisp_ewe.gleam`.
   - esqlite is patched (`vendor/esqlite.patch`, built by `npm run esqlite`). After a fresh clone or a change to the
     patch, run it before any `gleam` command; `npm run e2e` runs it itself. Don't edit `vendor/esqlite/`: it is
@@ -59,8 +59,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 
 ## Writing the data layer here
 
-- Tables come from `priv/migrations`; their Gleam is generated (`npm run codegen`). Shared vocabularies are declared
-  once in `dev/scoutbox_dev.gleam`.
+- Tables come from `priv/migrations`, numbered SQL files edited directly; their Gleam is generated
+  (`npm run codegen`, checked by `codegen:check` in `e2e:check`). The demo world is `priv/seed.sql`, also edited
+  directly. Shared vocabularies are declared once in `dev/scoutbox_dev.gleam`.
 - Ids are typed: each table declared `Ided` in `dev/scoutbox_dev.gleam` has an opaque `<Name>Id` in the generated
   `scoutbox/rows/id`, with `<name>_sql`, `<name>_json`, `<name>_decoder`, `<name>_to_string` and, given a prefix,
   `next_<name>(tx)` to mint one. Functions take and return the typed id. `id.<name>(text)` makes one only at a
@@ -75,7 +76,8 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   fails the read: every writer has already checked it.
 - The match facts (`player_match_facts`, read by Nobody Missed) are a projection the migration's triggers mark dirty
   and `discovery/match_facts.drain` re-derives inside every unit, just before COMMIT (`store.with_before_commit`,
-  installed at boot). A new input to the facts needs a trigger in the TypeScript migration, not a call from the act.
+  installed at boot). A new input to the facts needs a trigger in an SQL migration in `priv/migrations`, not a call
+  from the act.
   A store opened in a test has no hook: install it there when the test reads the facts.
 - SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
   columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
@@ -85,25 +87,22 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   constants, row modules' `columns`/`table`/`qualified`, `let`s, and calls to helpers in the same module; SQL
   built with `string.join` or passed in from another module isn't read (`gleam dev sql-check --verbose` lists
   those). Prefer building a query from these, so it is checked.
-- A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
-  TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
-- A battery's checks of the rules themselves live in the TypeScript tree's `scripts/rules/<domain>/<battery>.mjs`.
-  Their calls to the rules were recorded (with the clock frozen) into `dev/battery_cases/recordings.json.gz`, so no
-  TypeScript tree is needed; `npm run cases:record` records them again while it exists. `npm run cases` reads the
-  recordings; `dev/battery_cases/map.mjs` maps each ported rule to its Gleam and generates a gleeunit test per call
-  into `test/scoutbox/battery/` (never edit those).
-  `dev/battery_cases/report.json` lists each function's cases (generated or pending) and the calls to port by hand,
-  which go in `test/scoutbox/<domain>/`. A rule this server has nothing to play the role of (it refuses what the rule
-  cleans, or its types hold what the rule repairs) is closed in `NO_COUNTERPART` with its reason, not left pending.
-  `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
-- A rule over a small finite domain (the lifecycle validator) is proved over its whole matrix instead: a
-  `dev/*_cases.mjs` fixture holds the TypeScript rule's answer for every input, one Gleam test loops over every row,
-  and `dev/battery_cases/matrices.mjs` checks that each recorded call is a row with the same answer (status
-  `matrix` in the report).
-- `LEDGER.md` (`npm run ledger`, checked by `e2e:check`) says, per TypeScript battery, where its checks went and what
-  is left, and which domains are ported. Record a hand port in `HAND_PORTED` (`dev/battery_cases/map.mjs`).
+- A rule over many inputs is pinned by a fixture in `test/fixtures/`: its inputs and the answers this server gave
+  when they were last blessed. The test compares through `test/scoutbox/blessed.gleam`, which fails naming every
+  answer that differs. To change such a rule on purpose: change the code, run `npm run fixtures:bless` (it rewrites
+  the answers and prints the inputs whose answer changed), review those changes, and commit them with the code. A
+  failing fixture test is never fixed by re-blessing until the changed answers have been read and are meant. Re-bless
+  `zone_cases` after a tzdb update (`node dev/zone_offsets.mjs`). When a rule is redesigned rather than adjusted,
+  replace its fixture with named examples (and property tests where they fit) instead of re-blessing it.
+  `scrypt_cases`, `distance_cases` and `proxy_cases` pin outside facts (test vectors, arithmetic, proxy-addr), are
+  not blessed, and don't change with a rule.
+- A matrix fixture over a vocabulary (the lifecycle validator, contacts, the transaction state machine) keys each
+  answer by its input's name and blesses its axes too, so a new status or action gains its rows at the next bless and
+  shows in the diff.
+- `test/scoutbox/battery/` holds tests first generated from the TypeScript rules suites' recorded calls. They are
+  ordinary tests now: change them with the rule.
 
-## Server rules (as in the TypeScript server, enforced by types where possible)
+## Server rules (enforced by types where possible)
 
 - Writes need a `store.Tx`, and only `store.unit` makes one. Pass the `Tx` to join a unit. Never call `unit`
   inside a unit.
@@ -125,18 +124,19 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   format; never coerce.
   A vocabulary's accepted values come from its generated `pairs` (`input.one_of(v.pairs)`, or
   `input.one_of_these(v.pairs, [...])` for some of them); never type a value's text by hand.
-- Responses are explicit `json.object` allowlists in the TypeScript server's key order. Batteries compare key
-  order. A vocabulary value is written with its generated `to_json` (`claim_row.status_to_json`).
-- Tables come from numbered migrations in `scoutbox-server/priv/migrations/`, copied from the TypeScript
-  server's schema.
+- Responses are explicit `json.object` allowlists in the key order the apps and batteries expect. Batteries compare
+  key order. A vocabulary value is written with its generated `to_json` (`claim_row.status_to_json`).
+- Tables come from numbered migrations in `scoutbox-server/priv/migrations/`.
 - Behaviour not ported yet is marked `Not ported yet:` in a comment. Grep for it. Behaviour that stays out of scope
   (video analysis, and uploads until they move to object storage) is marked `Out of scope:`.
 
 ## Batteries
 
-`scoutbox-server/e2e/` holds copies made by `e2e/sync.mjs`. Never edit a copy: edit the source battery in the
-TypeScript tree and re-sync. To port a battery, port its routes, add it to `e2e/batteries.mjs`, run
-`npm run e2e:sync`, then `npm run e2e`. `npm run e2e:check` fails when a copy has drifted from its source.
+`scoutbox-server/e2e/` holds the batteries, the server's behavioural specification, owned here. To change
+behaviour, change the battery first, then the code. A new battery goes in `e2e/batteries.mjs`. A battery imports only
+Node and `e2e/`, and starts the server only through `e2e/support/server.mjs`; `npm run e2e:check` checks that, and
+that every battery is listed. What the batteries need from the server besides its routes is in
+`e2e/support/CONTRACT.md`.
 
 While developing, run only the batteries the change touches: `npm run e2e -- platform/staff`, or a whole domain
 with `npm run e2e -- recruitment`. Run every battery (`npm run e2e`) once, just before committing.
