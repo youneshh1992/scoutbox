@@ -69,14 +69,38 @@ Make this repository its own reference:
 1. **Migrations and seed.** `priv/migrations/*.sql` and `priv/seed.sql` become the source of truth: edit them
    directly and drop the generator. This includes the match-facts triggers: `CLAUDE.md`'s "a new input to the
    facts needs a trigger in the TypeScript migration" changes to the SQL migration here.
-2. **Test fixtures.** Freeze everything under `test/fixtures/` and the generated `test/scoutbox/battery/` tests as
-   owned files. Retire the generators, or keep them only behind a flag for as long as the tag is checked out.
+2. **Test fixtures.** The fixtures under `test/fixtures/` say "agrees with the TypeScript rule". Once that rule is
+   deleted, a fixture can't be regenerated, and nobody can edit a 5 MB JSON file by hand, so an intended change to a
+   rule would leave it either failing or deleted. Give each one a way to change before the oracle goes:
+   - **Re-bless** (the matrices, and the generated-input cases: `trust`, `conflict`, `rule`, `transaction`, `zone`):
+     keep the inputs and add one command (`npm run fixtures:bless`, say) that rewrites the expected answers from the
+     Gleam rule and prints which inputs changed answer. To change a rule: change the code, re-bless, review the
+     changed answers, then commit them together. `zone_cases` is re-blessed after a tzdb update too.
+   - **Keep as they are**, since they check outside facts rather than a design of ours: `scrypt_cases` (test
+     vectors), `distance_cases` and `proxy_cases`.
+   - **Replace when a rule is redesigned rather than adjusted**: delete its fixture and write named examples, plus
+     property tests where they fit.
+
+   Failure messages in `test/scoutbox/matrix.gleam` and the fixture tests should name the blessed answer, not
+   "the TypeScript rule".
+
+   The generated `test/scoutbox/battery/` tests become ordinary owned tests: drop their "Don't edit" header and
+   retire the generator. Folding the near-duplicates (`_2`, `_3`, …) into table-driven tests is optional. Do it
+   only if their volume gets in the way of a change.
 3. **Batteries.** `scoutbox-server/e2e/` becomes owned here, with no more sync. Remove `e2e/sync.mjs` and the
    "never edit a copy" rule. The launcher `e2e/support/server.mjs` is the only file that needs to change.
 4. **Checks.** Retire `ledger.mjs`, `cases:check` and `LEDGER.md` once step 3 is closed. Keep `sql:check` and
    `codegen:check` in `e2e:check`.
-5. **Docs.** Rewrite `CLAUDE.md`'s opening ("a pilot port… the TypeScript server is the reference") and the
-   sections on batteries and rules suites to match.
+5. **Docs.** This is when to rewrite this repository's `CLAUDE.md`, in the same commit as items 1–4, because those
+   items make several of its rules false, and an agent following them would resist the changes this step allows:
+   - The opening ("a pilot port… the TypeScript server is the reference") says that this server is now the
+     reference.
+   - "A new input to the facts needs a trigger in the TypeScript migration" names the SQL migration here.
+   - The rules-suite and ledger paragraphs, and "never edit those", give way to the re-bless workflow above.
+   - The batteries section drops the sync and the "never edit a copy" rule: edit a battery, then the code.
+
+   Two parts wait for later steps: the git rules until step 10 decides where the server lives, and anything that
+   still describes the Node server until step 11.
 
 ## 5. Uploads through object storage
 
@@ -191,5 +215,6 @@ through PRs).
 1. Review `scoutbox-server/README.md`'s "Known differences from the TypeScript server" once, and confirm that none
    matters to a user.
 2. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
-3. Update `../scoutbox/docs/architecture.md`, `scoutbox-server/OPERATIONS.md`, `README.md` and `CLAUDE.md`,
-   which all describe the Node server.
+3. Update `../scoutbox/docs/architecture.md`, `scoutbox-server/OPERATIONS.md`, `README.md` and
+   `../scoutbox/CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in
+   step 4. Here it needs only its git rules from step 10, and any remaining mention of the Node server.
