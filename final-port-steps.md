@@ -191,10 +191,15 @@ commit. In this order:
 
    A foreign club's case is the route's 404 (`room_routes.with_room`), which the batteries check over HTTP. An unknown
    history action and a stage that disagrees with the status are storable, so they are ported.
-   `canTransitionRecruitmentCase` is in `HAND_PORTED`. Every recruitment hand-port call is done (537 / 537). What
-   keeps the domain from **ported** is journeyAdversarial's two checks moved to TypeScript unit suites (U5's
-   rate-limit eviction, M8a's malformed date of birth), which still need a reviewer's verdict in `dev/ledger.mjs`'s
-   `ACCEPTED`.
+   `canTransitionRecruitmentCase` is in `HAND_PORTED`. Every recruitment hand-port call is done (537 / 537).
+   journeyAdversarial's two checks moved to TypeScript unit suites have verdicts in `dev/ledger.mjs`'s `ACCEPTED`, so
+   recruitment is **ported**:
+   - M8a (a malformed date of birth) is held by the types: `players.birth_date` is a `temporal.Day`, writers read it
+     with `age.parse_dob` (`age_test`), and `rows/players` has no generic update.
+   - U5 (eviction without resetting a live budget) found a real defect. `platform/table` emptied a table past
+     10,000 keys, so a flood of made-up sign-in names reset every lock. It now evicts as the TypeScript provider
+     does, at 20,000: ended entries first, then the lightest quarter (fewest hits, oldest among equals).
+     `limits_test` floods the sign-in and second-factor tables and checks a lock survives.
 
 **D. Agents, one TypeScript module at a time**, the same way:
 

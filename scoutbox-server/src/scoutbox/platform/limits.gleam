@@ -476,13 +476,55 @@ fn action_policy(action: Action) -> Policy {
 
 const login_policy = Policy(max: 20, window_ms: 900_000)
 
+/// Each table evicts at its cap (`platform/table`): an ended window goes first, then the fewest hits, oldest
+/// among equals. A second-factor lock weighs its five wrong codes and holds until it ends.
 pub fn start() -> Result(Limits, String) {
-  use auth <- result.try(table.start())
-  use login <- result.try(table.start())
-  use mfa <- result.try(table.start())
-  use acts <- result.map(table.start())
+  use auth <- result.try(table.start(windows(fn(_) { Ok(auth_policy) })))
+  use login <- result.try(table.start(windows(fn(_) { Ok(login_policy) })))
+  use mfa <- result.try(
+    table.start(table.Bounded(expired: codes_expired, weight: codes_weight)),
+  )
+  use acts <- result.map(table.start(windows(act_policy)))
   Limits(auth:, login:, mfa:, acts:)
 }
+
+/// The eviction of a table of windows, each under the policy `policy_of` gives its key (Error: a key no policy
+/// knows, which is never treated as ended).
+fn windows(
+  policy_of: fn(String) -> Result(Policy, Nil),
+) -> table.Bound(Window) {
+  table.Bounded(
+    expired: fn(key, w: Window, now) {
+      case policy_of(key) {
+        Ok(p) -> now - w.started >= p.window_ms
+        Error(Nil) -> False
+      }
+    },
+    weight: fn(w: Window, _) { #(w.count, w.started) },
+  )
+}
+
+/// The policy of an acts key (`<action>:<owner>`).
+fn act_policy(key: String) -> Result(Policy, Nil) {
+  use #(action, _) <- result.try(string.split_once(key, ":"))
+  list.key_find(
+    [#(action_name(BoxDispute), box_dispute_policy), ..policy],
+    action,
+  )
+}
+
+fn codes_expired(_key: String, c: Codes, now: Int) -> Bool {
+  c.fails == 0 && c.locked_until <= now
+}
+
+fn codes_weight(c: Codes, now: Int) -> #(Int, Int) {
+  case c.locked_until > now {
+    True -> #(c.fails + mfa_max_fails, c.locked_until)
+    False -> #(c.fails, c.locked_until)
+  }
+}
+
+const mfa_max_fails = 5
 
 fn current(window: option.Option(Window), now: Int, length: Int) -> Window {
   case window {
@@ -497,7 +539,7 @@ pub fn auth_request(
   address: String,
   now: Int,
 ) -> Result(Nil, Int) {
-  table.update(limits.auth, address, fn(entry) {
+  table.update(limits.auth, address, now, fn(entry) {
     let w = current(entry, now, auth_policy.window_ms)
     let w = Window(..w, count: w.count + 1)
     let answer = case w.count > auth_policy.max {
@@ -516,7 +558,7 @@ pub fn limited(
   now: Int,
 ) -> Bool {
   let p = action_policy(action)
-  table.update(limits.acts, action_name(action) <> ":" <> owner, fn(entry) {
+  table.update(limits.acts, action_name(action) <> ":" <> owner, now, fn(entry) {
     let w = current(entry, now, p.window_ms)
     let w = Window(..w, count: w.count + 1)
     #(Some(w), w.count > p.max)
@@ -527,7 +569,7 @@ pub fn limited(
 /// limiter's `peek(…).remaining === 0`): for an act where only a failure is charged.
 pub fn spent(limits: Limits, action: Action, owner: String, now: Int) -> Bool {
   let p = action_policy(action)
-  table.update(limits.acts, action_name(action) <> ":" <> owner, fn(entry) {
+  table.update(limits.acts, action_name(action) <> ":" <> owner, now, fn(entry) {
     let w = current(entry, now, p.window_ms)
     #(entry, w.count >= p.max)
   })
@@ -577,21 +619,21 @@ pub fn login_key(identifier: String) -> String {
 /// True when the identifier's wrong-guess budget is spent: as the TypeScript limiter's `peek`, once more than `max`
 /// wrong guesses are in the window, so the guess that spends the last of it is still answered.
 pub fn login_locked(limits: Limits, identifier: String, now: Int) -> Bool {
-  table.update(limits.login, login_key(identifier), fn(entry) {
+  table.update(limits.login, login_key(identifier), now, fn(entry) {
     let w = current(entry, now, login_policy.window_ms)
     #(entry, w.count > login_policy.max)
   })
 }
 
 pub fn login_failed(limits: Limits, identifier: String, now: Int) -> Nil {
-  table.update(limits.login, login_key(identifier), fn(entry) {
+  table.update(limits.login, login_key(identifier), now, fn(entry) {
     let w = current(entry, now, login_policy.window_ms)
     #(Some(Window(..w, count: w.count + 1)), Nil)
   })
 }
 
 pub fn mfa_locked(limits: Limits, user_id: id.OrgUserId, now: Int) -> Bool {
-  table.update(limits.mfa, id.org_user_to_string(user_id), fn(entry) {
+  table.update(limits.mfa, id.org_user_to_string(user_id), now, fn(entry) {
     #(entry, case entry {
       Some(c) -> c.locked_until > now
       None -> False
@@ -600,10 +642,10 @@ pub fn mfa_locked(limits: Limits, user_id: id.OrgUserId, now: Int) -> Bool {
 }
 
 pub fn mfa_failed(limits: Limits, user_id: id.OrgUserId, now: Int) -> Nil {
-  table.update(limits.mfa, id.org_user_to_string(user_id), fn(entry) {
+  table.update(limits.mfa, id.org_user_to_string(user_id), now, fn(entry) {
     let c = option.unwrap(entry, Codes(0, 0))
     let fails = c.fails + 1
-    let c = case fails >= 5 {
+    let c = case fails >= mfa_max_fails {
       True -> Codes(fails: 0, locked_until: now + 300_000)
       False -> Codes(..c, fails:)
     }
@@ -612,7 +654,8 @@ pub fn mfa_failed(limits: Limits, user_id: id.OrgUserId, now: Int) -> Nil {
 }
 
 pub fn mfa_clear(limits: Limits, user_id: id.OrgUserId) -> Nil {
-  table.update(limits.mfa, id.org_user_to_string(user_id), fn(_) {
+  // Removes the entry, so the time never matters.
+  table.update(limits.mfa, id.org_user_to_string(user_id), 0, fn(_) {
     #(None, Nil)
   })
 }

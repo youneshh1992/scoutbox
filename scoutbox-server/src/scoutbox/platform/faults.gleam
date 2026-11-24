@@ -54,7 +54,7 @@ pub fn start(enabled: Bool, spec: String) -> Result(Faults, String) {
     True -> parse(spec)
     False -> Ok([])
   })
-  use t <- result.map(table.start())
+  use t <- result.map(table.start(table.Unbounded))
   let faults = Faults(enabled:, rules: t)
   set(faults, rules)
   faults
@@ -65,11 +65,11 @@ pub fn enabled(faults: Faults) -> Bool {
 }
 
 fn set(faults: Faults, rules: List(Rule)) -> Nil {
-  table.update(faults.rules, key, fn(_) { #(Some(rules), Nil) })
+  table.update(faults.rules, key, 0, fn(_) { #(Some(rules), Nil) })
 }
 
 pub fn rules(faults: Faults) -> List(Rule) {
-  table.update(faults.rules, key, fn(entry) {
+  table.update(faults.rules, key, 0, fn(entry) {
     #(entry, option.unwrap(entry, []))
   })
 }
@@ -136,7 +136,7 @@ pub fn for_path(faults: Faults, path: String) -> Outcome {
   case faults.enabled {
     False -> Pass
     True ->
-      table.update(faults.rules, key, fn(entry) {
+      table.update(faults.rules, key, 0, fn(entry) {
         let rules = option.unwrap(entry, [])
         case
           list.find(rules, fn(r) {
@@ -195,7 +195,7 @@ pub fn should_fail(faults: Faults, step: String) -> Bool {
   case faults.enabled {
     False -> False
     True ->
-      table.update(faults.rules, key, fn(entry) {
+      table.update(faults.rules, key, 0, fn(entry) {
         let rules = option.unwrap(entry, [])
         case
           list.find(rules, fn(r) { r.kind == Internal && r.pattern == step })

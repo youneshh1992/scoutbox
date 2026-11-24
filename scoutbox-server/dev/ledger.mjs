@@ -34,6 +34,12 @@ const REPORT = path.join(HERE, 'battery_cases', 'report.json');
  * `{ none: '<why>' }` where it tests something this server doesn't have.
  */
 const ACCEPTED = {
+  // U5: limits_test floods the sign-in and second-factor tables past the cap and checks a lock survives; table.gleam
+  // evicts ended entries, then the lightest quarter, as the TypeScript provider. It used to clear when full.
+  'recruitment/journeyAdversarial → scripts/testPlatformHelpers.mjs': { gleam: 'test/scoutbox/limits_test.gleam' },
+  // M8a: players.birth_date is a temporal.Day, so a malformed date of birth can't be written through the row
+  // module, every writer reads it with age.parse_dob first, and rows/players has no generic update.
+  'recruitment/journeyAdversarial → scripts/testIdentityRepositories.mjs': { gleam: 'test/scoutbox/rules/age_test.gleam' },
   'platform/storeGuarantees → scripts/testDataLayer.mjs': { gleam: 'test/scoutbox/ids_test.gleam' },
   // The runner's order, idempotence, single records and rollback of a failing migration, and the latest id alone
   // not counting as up to date.
