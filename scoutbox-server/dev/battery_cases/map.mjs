@@ -5268,6 +5268,14 @@ export const HAND_PORTED = {
     ['agents/compliance', 'agents/transactions'].map((d) => [`domains/${d}/errors.mjs#publicErrorBody`, 'test/scoutbox/agents/error_bodies_test.gleam']),
   ),
   ['domains/recruitment/lifecycle/errors.mjs#sendDomainError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
+  // The provider and the projector read the store through SQL, so their calls run against rows written for each. A
+  // missing store, an unknown evidence kind or viewer, and case values the schema can't hold have no counterpart
+  // (the files' headers say which); a foreign club's case is the route's 404, checked over HTTP.
+  ['domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider']: 'test/scoutbox/recruitment/evidence_test.gleam',
+  ['domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney']: 'test/scoutbox/recruitment/journey_test.gleam',
+  // Its calls Gleam's types can't hold are refused before the validator (case_lifecycle_test); those whose provider
+  // always says yes are rows of the matrix; those passing the fixture provider run against stored rows.
+  ['domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase']: 'test/scoutbox/recruitment/evidence_test.gleam',
   ['domains/recruitment/offers/errors.mjs#sendOfferError']: 'test/scoutbox/recruitment/domain_errors_test.gleam',
   // Junk statuses, expiries, types and pointers can't be stored or decoded; the views' fixtures leave out columns every
   // stored row has, so the views are proved over the same Offer as stored.

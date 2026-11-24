@@ -177,8 +177,24 @@ commit. In this order:
 
    journeyAdversarial's three `journeyEvidenceFunnel` calls (T7) are ported over `Sources` in `analytics_test`.
    What is left on the journey batteries is item 8's, and the lifecycle's `SIGNEDX`.
-8. **The journey builder and the evidence provider.** `buildRecruitmentJourney` (94 hand-port calls, store-backed,
-   including `storeGuarantees`' 19) and `createEvidenceProvider` (51), as below.
+8. **The journey builder and the evidence provider** [**done**]: `buildRecruitmentJourney` (94 hand-port calls,
+   including `storeGuarantees`' 19), `createEvidenceProvider` (51), and the 21 `canTransitionRecruitmentCase` calls
+   that pass the fixture provider. None of them has recorded arguments, so each is ported from its rules-suite
+   section. `evidence_test.gleam` runs `case_lifecycle.evidence`, and the validator over the real provider, against
+   rows written for each call. Where the suite changes one field between calls, the test does too, with an UPDATE.
+   `journey_test.gleam` does the same for `journey.build` and `for_recipient`. Both share their rows through
+   `case_records.gleam`. No difference turned up. Closed with a reason in each file's header:
+   - a missing or malformed store (one SQL store)
+   - an unknown evidence kind or viewer kind
+   - a cancelled signing (a `signings` row has no cancellation)
+   - case values the schema can't hold
+
+   A foreign club's case is the route's 404 (`room_routes.with_room`), which the batteries check over HTTP. An unknown
+   history action and a stage that disagrees with the status are storable, so they are ported.
+   `canTransitionRecruitmentCase` is in `HAND_PORTED`. Every recruitment hand-port call is done (537 / 537). What
+   keeps the domain from **ported** is journeyAdversarial's two checks moved to TypeScript unit suites (U5's
+   rate-limit eviction, M8a's malformed date of birth), which still need a reviewer's verdict in `dev/ledger.mjs`'s
+   `ACCEPTED`.
 
 **D. Agents, one TypeScript module at a time**, the same way:
 
@@ -200,7 +216,7 @@ When C and D are done, platform/dates closes too, and only platform/uploads is l
 
 **Left for later in this step:**
 
-- **The lifecycle's evidence calls go with `createEvidenceProvider`.** 21 of `canTransitionRecruitmentCase`'s calls
+- **The lifecycle's evidence calls go with `createEvidenceProvider`** [**done**, with C.8]. 21 of `canTransitionRecruitmentCase`'s calls
   pass the TypeScript fixture provider (`createEvidenceProvider` over plain records: lifecycle H1, H5 and the
   inbound-to-signed sweep; contacts' draft and delivered contact; decisions P15–P19 and the rest of its sweep; offers
   A82–A85; offersAdversarial R-p11). They test which records count as evidence, which here is the SQL in
