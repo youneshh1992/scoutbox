@@ -17,6 +17,7 @@ import scoutbox/development/benchmarks
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players.{type Player}
+import scoutbox/media/uploads
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/ids
@@ -31,6 +32,7 @@ import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/player_drill_results as drill_result_row
 import scoutbox/rows/players as row
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rules/journey
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
@@ -651,22 +653,18 @@ const media_title_max = 160
 
 const media_kind_max = 20
 
-/// A data URL's length the TypeScript server accepts: about 12MB of video.
-const data_url_max = 16_000_000
-
 type NewMedia {
   NewMedia(
     title: Option(String),
     kind: Option(String),
-    data_url: Option(String),
+    upload_id: Option(id.UploadIntentId),
     attendance_id: Option(String),
   )
 }
 
-/// `POST /player/media`: a clip, and with an attendance of the player's own, the Verified Clip seal.
-///
-/// Out of scope: the upload itself (`dataUrl`, which the storage adapter writes to disk), and so the Verified Clip
-/// seal, which needs the footage.
+/// `POST /player/media`: a clip. With an upload (`uploadId`, from `POST /player/uploads`) it carries its file, and
+/// with an attendance of the player's own as well, the Verified Clip seal, which needs the footage. Naming an
+/// upload already made into a clip answers with that clip.
 pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use title <- input.field(
@@ -674,15 +672,15 @@ pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
       input.nullish(input.text(media_title_max)),
     )
     use kind <- input.field("kind", input.optional(input.text(media_kind_max)))
-    use data_url <- input.field(
-      "dataUrl",
-      input.nullish(input.text(data_url_max * 2)),
+    use upload_id <- input.field(
+      "uploadId",
+      input.nullish(uploads.upload_id_field()),
     )
     use attendance_id <- input.field(
       "attendanceId",
       input.nullish(input.text(80)),
     )
-    input.done(NewMedia(title:, kind:, data_url:, attendance_id:))
+    input.done(NewMedia(title:, kind:, upload_id:, attendance_id:))
   }
   use body <- http.body(req, shape, [])
   let player_id = p.player.row.id
@@ -703,49 +701,67 @@ pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           request_id: None,
         ),
       )
-      case
-        option.unwrap(body.data_url, ""),
-        option.unwrap(body.attendance_id, "")
-      {
-        "", "" ->
-          add_media(ctx, player_id, title, option.unwrap(body.kind, "video"))
-        "", attendance_id ->
+      let attendance = case option.unwrap(body.attendance_id, "") {
+        "" -> Ok(None)
+        named ->
+          list.find(p.player.attendance, fn(a) {
+            id.attendance_to_string(a.id) == named
+          })
+          |> result.map(fn(a) { Some(a.id) })
+      }
+      case attendance, body.upload_id {
+        Error(Nil), _ ->
+          http.error_message(
+            400,
+            "ATTENDANCE_NOT_FOUND",
+            "A verified clip must link one of YOUR verified attendances.",
+          )
+        Ok(None), None ->
+          add_media(
+            ctx,
+            player_id,
+            title,
+            option.unwrap(body.kind, "video"),
+            None,
+          )
+        Ok(Some(_)), None ->
+          http.error_message(
+            400,
+            "FILE_REQUIRED_FOR_VERIFIED_CLIP",
+            "Attach the actual footage to claim the Verified Clip seal.",
+          )
+        Ok(verified), Some(upload_id) ->
           case
-            list.any(p.player.attendance, fn(a) {
-              id.attendance_to_string(a.id) == attendance_id
-            })
+            uploads.verify(
+              ctx,
+              upload_id,
+              upload_row.PlayerClip,
+              uploads.Player(player_id),
+            )
           {
-            False ->
-              http.error_message(
-                400,
-                "ATTENDANCE_NOT_FOUND",
-                "A verified clip must link one of YOUR verified attendances.",
+            Error(refusal) -> uploads.refused(refusal)
+            Ok(uploads.AlreadyUsed(record_id)) ->
+              stored_clip(ctx, player_id, id.media(record_id))
+            Ok(uploads.Fresh(upload:, ..)) -> {
+              let kind = case string.starts_with(upload.mime, "video/") {
+                True -> "video"
+                False -> "image"
+              }
+              add_media(
+                ctx,
+                player_id,
+                title,
+                kind,
+                Some(#(
+                  upload.id,
+                  players.ClipFile(
+                    blob_key: id.upload_intent_to_string(upload.id),
+                    size_bytes: upload.size_bytes,
+                    verified:,
+                  ),
+                )),
               )
-            True ->
-              http.error_message(
-                400,
-                "FILE_REQUIRED_FOR_VERIFIED_CLIP",
-                "Attach the actual footage to claim the Verified Clip seal.",
-              )
-          }
-        data_url, _ ->
-          case
-            string.starts_with(data_url, "data:"),
-            string.length(data_url) > data_url_max
-          {
-            False, _ -> http.error(400, "BAD_DATA_URL")
-            True, True ->
-              http.error_message(
-                413,
-                "FILE_TOO_LARGE",
-                "Uploads are capped at ~12MB in this prototype.",
-              )
-            True, False ->
-              http.error_message(
-                501,
-                "NOT_PORTED",
-                "Uploads are not supported by this server yet.",
-              )
+            }
           }
       }
     }
@@ -929,6 +945,7 @@ fn add_media(
   player_id: id.PlayerId,
   title: String,
   kind: String,
+  upload: Option(#(id.UploadIntentId, players.ClipFile)),
 ) -> Response {
   let now = clock.now_ms()
   let added =
@@ -939,14 +956,20 @@ fn add_media(
         title:,
         kind:,
         uploaded_at: clock.iso(now),
+        file: option.map(upload, fn(u) { u.1 }),
       ))
+      use _ <- result.try(case upload {
+        Some(#(upload_id, _)) ->
+          uploads.mark_used(tx, upload_id, id.media_to_string(clip.id), now)
+        None -> Ok(Nil)
+      })
       use _ <- result.try(store.seam(tx, "media.after_row"))
       use p <- result.map(activity.record(tx, player_id, now))
       live_pings.player(tx, player_id)
       #(clip, p)
     })
-  case added {
-    Ok(#(clip, p)) ->
+  case added, upload {
+    Ok(#(clip, p)), None ->
       http.json(
         201,
         json.object([
@@ -967,6 +990,36 @@ fn add_media(
           #("trustScore", json.int(players.profile_signal(p))),
         ]),
       )
+    Ok(#(clip, p)), Some(_) -> clip_answer(p, clip.id)
+    Error(store.Lost(what)), _ -> http.stale(what)
+    Error(failure), _ -> http.internal(failure)
+  }
+}
+
+/// A clip with its file, as the player's record shows it: what naming its upload answers, the first time or again.
+fn clip_answer(p: Player, media_id: id.MediaId) -> Response {
+  case list.find(p.media, fn(m) { m.clip.id == media_id }) {
+    // The upload's clip is gone: removed since, so the upload names nothing now.
+    Error(Nil) -> http.error(404, "UPLOAD_NOT_FOUND")
+    Ok(m) ->
+      http.json(
+        201,
+        json.object([
+          #("media", players.media_json(m)),
+          #("trustScore", json.int(players.profile_signal(p))),
+        ]),
+      )
+  }
+}
+
+fn stored_clip(
+  ctx: Ctx,
+  player_id: id.PlayerId,
+  media_id: id.MediaId,
+) -> Response {
+  case store.read(ctx.store, players.by_id(_, player_id)) {
+    Ok(Some(p)) -> clip_answer(p, media_id)
+    Ok(None) -> http.error(404, "UPLOAD_NOT_FOUND")
     Error(failure) -> http.internal(failure)
   }
 }

@@ -8,6 +8,7 @@
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/agents/agent_store
@@ -17,6 +18,7 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/pairing
+import scoutbox/platform/blobs
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -26,7 +28,6 @@ import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/recruitment/signing_packages
 import scoutbox/rows/id
 import scoutbox/rows/players as row
-import simplifile
 import sqlight
 import wisp.{type Response}
 
@@ -313,12 +314,18 @@ pub fn erase(
   use media <- result.map(
     store.unit(ctx.store, fn(tx) {
       let p = id.player_sql(player_id)
-      use media <- result.try(store.query(
-        store.reading(tx),
-        "SELECT m.id FROM player_media m JOIN players p ON p.id = m.player_id WHERE m.player_id = ? AND p.deleted_at IS NULL ORDER BY m.position",
-        [p],
-        decode.at([0], decode.string),
-      ))
+      use media <- result.try(
+        store.query(
+          store.reading(tx),
+          "SELECT m.id, m.blob_key FROM player_media m JOIN players p ON p.id = m.player_id WHERE m.player_id = ? AND p.deleted_at IS NULL ORDER BY m.position",
+          [p],
+          {
+            use media_id <- decode.field(0, decode.string)
+            use blob_key <- decode.field(1, decode.optional(decode.string))
+            decode.success(#(media_id, blob_key))
+          },
+        ),
+      )
       use live <- result.try(store.one(
         store.reading(tx),
         "SELECT 1 FROM players WHERE id = ? AND deleted_at IS NULL",
@@ -333,8 +340,13 @@ pub fn erase(
             list.try_each(media, fn(m) {
               run(
                 tx,
-                "INSERT OR IGNORE INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)",
-                [sqlight.text(m), p, sqlight.int(at)],
+                "INSERT OR IGNORE INTO media_deletions (media_id, player_id, queued_at, blob_key) VALUES (?, ?, ?, ?)",
+                [
+                  sqlight.text(m.0),
+                  p,
+                  sqlight.int(at),
+                  sqlight.nullable(sqlight.text, m.1),
+                ],
               )
             }),
           )
@@ -359,6 +371,14 @@ pub fn erase(
           use _ <- result.try(
             run(tx, "DELETE FROM upload_sessions WHERE player_id = ?", [p]),
           )
+          // An upload never made into a clip expires now, so the sweep removes whatever was sent to it.
+          use _ <- result.try(
+            run(
+              tx,
+              "UPDATE upload_intents SET status = 'expired', expires_at = ? WHERE owner_kind = 'player' AND owner_id = ? AND status = 'open'",
+              [sqlight.int(at), p],
+            ),
+          )
           use _ <- result.map(redact(tx, player_id, at))
           Ok(media)
         }
@@ -367,23 +387,28 @@ pub fn erase(
   )
   case media {
     Error(Nil) -> False
-    Ok(ids) -> {
-      // The filesystem boundary, after COMMIT: a file that cannot be removed keeps its queue entry.
-      list.each(ids, fn(m) { remove_file(ctx, m) })
+    Ok(media) -> {
+      // The storage boundary, after COMMIT: a file that cannot be removed keeps its queue entry.
+      list.each(media, fn(m) { remove_file(ctx, m.0, m.1) })
       True
     }
   }
 }
 
-fn remove_file(ctx: Ctx, media_id: String) -> Nil {
-  let base = ctx.config.data_dir <> "/media/" <> media_id <> "."
-  let gone =
-    list.all(["webm", "mp4", "bin"], fn(ext) {
-      case simplifile.delete(base <> ext) {
-        Ok(Nil) | Error(simplifile.Enoent) -> True
-        Error(_) -> False
+fn remove_file(ctx: Ctx, media_id: String, blob_key: Option(String)) -> Nil {
+  let gone = case blob_key {
+    None -> True
+    Some(key) ->
+      case blobs.delete(ctx.config.blobs, key, clock.now_ms()) {
+        Ok(Nil) -> True
+        Error(problem) -> {
+          wisp.log_error(
+            "erasure: clip " <> media_id <> ": " <> string.inspect(problem),
+          )
+          False
+        }
       }
-    })
+  }
   case gone {
     True -> {
       let _ =

@@ -607,7 +607,8 @@ pub fn stats_json(s: Option(Stats)) -> Json {
   })
 }
 
-fn media_json(m: Media) -> Json {
+/// A clip as the player's record shows it.
+pub fn media_json(m: Media) -> Json {
   let c = m.clip
   json.object(
     list.flatten([
@@ -1442,12 +1443,19 @@ pub fn add_attendance(
 }
 
 /// Appends a clip with no footage yet (an upload is not ported). Returns the stored clip and record.
+/// A clip's file, uploaded to storage. `verified`: the player's own attendance it was filmed at, sealing it a
+/// Verified Clip.
+pub type ClipFile {
+  ClipFile(blob_key: String, size_bytes: Int, verified: Option(id.AttendanceId))
+}
+
 pub fn add_media(
   tx: Tx,
   player_id: id.PlayerId,
   title title: String,
   kind kind: String,
   uploaded_at uploaded_at: String,
+  file file: Option(ClipFile),
 ) -> Result(#(media_row.Row, Player), Fail(e)) {
   use media_id <- result.try(id.next_media(tx))
   use position <- result.try(next_position(tx, media_row.table, player_id))
@@ -1457,6 +1465,17 @@ pub fn add_media(
       kind: Some(kind),
       uploaded_at: Some(uploaded_at),
     )
+  let clip = case file {
+    None -> clip
+    Some(f) ->
+      media_row.Row(
+        ..clip,
+        url: Some("/media/" <> id.media_to_string(media_id)),
+        size_bytes: Some(f.size_bytes),
+        blob_key: Some(f.blob_key),
+        verified_clip_attendance_id: f.verified,
+      )
+  }
   use _ <- result.try(media_row.insert(tx, clip))
   use p <- result.map(refreshed(tx, player_id))
   #(clip, p)

@@ -4,6 +4,8 @@
 //   A declaring: each audience opens the purposes it may upload; junk is refused by field, not coerced
 //   B storage: the URL takes exactly the declared bytes with exactly its headers, once
 //   C limits: an owner holds at most ten open uploads
+//   D clips: an upload named to /player/media becomes a clip with its file, once; the Verified Clip needs one; the
+//     media link redirects to storage for whoever may see the clip; erasure removes the file
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -11,7 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { freePort } from '../support/testPort.mjs';
-import { declare, opener, put, sha256Hex } from '../support/uploads.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { declare, opener, put, sha256Hex, upload } from '../support/uploads.mjs';
 
 const PORT = await freePort();
 const API = `http://localhost:${PORT}`;
@@ -174,6 +177,99 @@ r = await declare(API, asMaria, { purpose: 'signing_document', bytes: Buffer.all
 neg(r.status === 429 && r.body.error === 'TOO_MANY_OPEN_UPLOADS', 'an eleventh open upload is refused');
 r = await declare(API, asKola, { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
 ok(r.status === 201, "another owner's uploads don't count");
+
+section('D clips');
+const CARVALHO = (await j('POST', '/auth/player/login', { playerId: 'pl-carvalho' })).body.token;
+const clipId = await upload(API, asKola, { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+r = await j('POST', '/player/media', { title: 'Uploaded training clip', uploadId: clipId }, KOLA);
+ok(
+  r.status === 201 &&
+    r.body.media.kind === 'video' &&
+    r.body.media.sizeBytes === clip.length &&
+    /^\/media\/media-[0-9]+\?e=\d+&s=[\w-]+&v=[\w-]+$/.test(r.body.media.url) &&
+    typeof r.body.trustScore === 'number',
+  'naming the upload makes a clip with its file and a signed link',
+);
+const made = r.body.media;
+r = await j('POST', '/player/media', { title: 'Uploaded training clip', uploadId: clipId }, KOLA);
+ok(r.status === 201 && r.body.media.id === made.id, 'naming it again answers the same clip');
+r = await j('GET', '/player/me', undefined, KOLA);
+ok(r.body.media.filter((m) => m.title === 'Uploaded training clip').length === 1, 'and there is exactly one');
+r = await j('POST', '/player/media', { title: 'Not mine', uploadId: clipId }, CARVALHO);
+neg(r.status === 404 && r.body.error === 'UPLOAD_NOT_FOUND', "another player can't name Kola's upload");
+r = await j('POST', '/player/media', { title: 'Nothing sent', uploadId: opened.uploadId.replace(/.$/, '0') }, KOLA);
+neg(r.status === 404, 'an upload id nobody declared names nothing');
+r = await declare(API, asKola, { purpose: 'player_clip', bytes: Buffer.from('never sent'), mime: 'video/webm' });
+r = await j('POST', '/player/media', { title: 'Never sent', uploadId: r.body.uploadId }, KOLA);
+neg(r.status === 409 && r.body.error === 'UPLOAD_NOT_RECEIVED', 'an upload whose file never arrived makes no clip');
+r = await fetch(`${API}${made.url}`, { redirect: 'manual' });
+ok(r.status === 302 && r.headers.get('location').startsWith('/blobs/'), 'the media link redirects to storage');
+r = await fetch(`${API}${made.url}`);
+ok(r.ok && Buffer.from(await r.arrayBuffer()).equals(clip), 'which serves the uploaded bytes');
+r = await fetch(`${API}${made.url}`, { headers: { range: 'bytes=100-199' } });
+ok(
+  r.status === 206 && Buffer.from(await r.arrayBuffer()).equals(clip.subarray(100, 200)),
+  'a byte range of it, so a video can be seeked',
+);
+r = await fetch(`${API}/media/${made.id}`, { redirect: 'manual' });
+neg(r.status === 401, 'a bare media id without signature or session is refused, before any redirect');
+r = await j('GET', '/org/players/pl-adeyemi', undefined, MARIA);
+const clubLink = r.body.media.find((m) => m.id === made.id)?.url;
+r = await fetch(`${API}${clubLink}`);
+ok(r.ok && Buffer.from(await r.arrayBuffer()).equals(clip), 'a club that may see the player watches the clip');
+
+const attendanceId = (await j('GET', '/player/me', undefined, KOLA)).body.attendance[0].id;
+r = await j('POST', '/player/media', { title: 'Cup final', attendanceId }, KOLA);
+neg(r.status === 400 && r.body.error === 'FILE_REQUIRED_FOR_VERIFIED_CLIP', 'the Verified Clip needs the footage');
+const sealedId = await upload(API, asKola, { purpose: 'player_clip', bytes: clip.subarray(0, 4096), mime: 'video/webm' });
+r = await j('POST', '/player/media', { title: 'Cup final', uploadId: sealedId, attendanceId: 'att-507075353' }, KOLA);
+neg(r.status === 400 && r.body.error === 'ATTENDANCE_NOT_FOUND', "another player's attendance seals nothing");
+r = await j('POST', '/player/media', { title: 'Cup final', uploadId: sealedId, attendanceId }, KOLA);
+ok(r.status === 201 && r.body.media.verifiedClip === attendanceId, 'with it, the clip is sealed to the attendance');
+
+r = await j(
+  'POST',
+  `/player/media/${made.id}/captions`,
+  { vtt: 'WEBVTT\n\n00:00.000 --> 00:04.000\nCoach: two cones, thirty metres.' },
+  KOLA,
+);
+ok(r.status === 200, 'a caption track is added to the clip');
+r = await fetch(`${API}/media/${made.id}/captions`, { headers: { authorization: `Bearer ${MARIA}` } });
+ok(r.status === 200 && (r.headers.get('content-type') ?? '').includes('text/vtt'), 'the club reads it as text/vtt');
+r = await fetch(`${API}/media/${made.id}/captions`);
+neg(r.status === 401, 'anonymously, not at all');
+
+// A deleted player's clip files go with the account, and an upload never named expires.
+r = await j('POST', '/auth/player/signup', {
+  name: 'Leaving Uploader',
+  dob: '2000-02-02',
+  country: 'GB',
+  position: 'CM',
+  password: 'longenough1',
+});
+const leaver = r.body.token;
+const asLeaver = opener.player(leaver);
+const leaverClip = await upload(API, asLeaver, { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+r = await j('POST', '/player/media', { title: 'Leaving clip', uploadId: leaverClip }, leaver);
+ok(r.status === 201, 'fixture: the leaver has a clip');
+const halfSent = await upload(API, asLeaver, { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+const stored = (key) => fs.existsSync(path.join(DATA, 'media', key));
+ok(stored(leaverClip) && stored(halfSent), 'fixture: both files are in storage');
+r = await j('DELETE', '/player/account', undefined, leaver);
+ok(r.status === 200, 'the leaver deletes their account');
+ok(!stored(leaverClip), "the clip's file is removed");
+{
+  const db = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true });
+  try {
+    ok(db.prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n === 0, 'and its removal is not left queued');
+    ok(
+      db.prepare('SELECT status FROM upload_intents WHERE id = ?').get(halfSent).status === 'expired',
+      'the upload never made into a clip has expired, for the sweep to remove',
+    );
+  } finally {
+    db.close();
+  }
+}
 
 r = await fetch(`${API}/media/whatever?e=soon&s=x&v=y`, { headers: { authorization: `Bearer ${MARIA}` } });
 neg(r.status === 400, 'a media link with an expiry that is not a number is refused');

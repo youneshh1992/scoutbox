@@ -98,8 +98,9 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    - The shared part is `uploads.verify`, before the unit because it calls storage: the intent is the caller's,
      open and of this purpose, and `head` finds the object with its size and type (for evidence, `read_range` also
      checks its magic bytes). It never reads the whole object: storage has already checked the SHA-256 (3). Inside the unit `uploads.use` moves the intent from `open` to `used` with the record it made; a
-     retry finds it used for that record and answers the same, and a race answers `store.stale`. The record's
-     `media_id` is the blob key.
+     retry finds it used for that record and answers the same, and a race answers `store.stale`. The record
+     keeps the blob key: a clip in `player_media.blob_key` (its own id comes from the counter, which a re-seed
+     restarts), evidence in `ver_evidence.media_id`.
 3. **Integrity.** **Decided:** this server never hashes an upload. The presigned PUT signs `content-length`,
    `content-type`, `x-amz-checksum-sha256` (the declared digest) and `If-None-Match: *` into its URL, so the
    client can't drop or change them. Storage refuses bytes whose digest differs, and a successful PUT means the

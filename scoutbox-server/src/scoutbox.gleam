@@ -94,7 +94,7 @@ fn boot() -> Result(Nil, String) {
     store,
     clock.now_ms(),
     demo: config.seed_demo,
-    data_dir: config.data_dir,
+    blobs: config.blobs,
   ))
   use _ <- result.try(
     dev_reviewers.seed(store, clock.now_ms(), dev_logins: config.dev_logins)

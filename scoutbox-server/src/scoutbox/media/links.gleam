@@ -5,7 +5,6 @@
 
 import gleam/bit_array
 import gleam/bool
-import gleam/bytes_tree
 import gleam/crypto
 import gleam/dynamic/decode
 import gleam/int
@@ -17,10 +16,10 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/identity/sessions.{type Session}
+import scoutbox/platform/blobs
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/media
 import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/rows/id
 import sqlight
@@ -28,6 +27,9 @@ import wisp.{type Request, type Response}
 
 /// Short on purpose: clients refetch constantly, so links are re-minted long before they expire.
 const ttl_ms = 900_000
+
+/// How long the storage link `/media/<id>` redirects to lives: a player opens it at once, and seeks within it.
+const storage_link_seconds = 60
 
 const signature_max = 128
 
@@ -171,12 +173,22 @@ pub fn serve(ctx: Ctx, req: Request, media_id: String) -> Response {
             "Media links are short-lived and tied to your login — refetch the profile for a fresh link.",
           )
         Ok(True) ->
-          case media.read(ctx.config.data_dir, media_id) {
-            Error(Nil) -> http.error(404, "MEDIA_NOT_FOUND")
-            Ok(#(content_type, bytes)) ->
-              wisp.response(200)
-              |> wisp.set_header("content-type", content_type)
-              |> wisp.set_body(wisp.Bytes(bytes_tree.from_bit_array(bytes)))
+          case store.read(ctx.store, blob_key(_, id.media(media_id))) {
+            Error(failure) -> http.internal(failure)
+            Ok(None) -> http.error(404, "MEDIA_NOT_FOUND")
+            // Storage serves the bytes, byte ranges included, on a link that outlives only the redirect.
+            Ok(Some(key)) ->
+              wisp.response(302)
+              |> wisp.set_header(
+                "location",
+                blobs.presign_get(
+                  ctx.config.blobs,
+                  key,
+                  expires_seconds: storage_link_seconds,
+                  now_ms: now,
+                ),
+              )
+              |> wisp.set_header("cache-control", "private, no-store")
           }
       }
     }
@@ -261,6 +273,20 @@ fn owner_of(
     decode.at([0], id.player_decoder()),
   )
   |> result.map(option.from_result)
+}
+
+/// The object in storage that holds a clip's file, if it has one.
+fn blob_key(
+  read: Read,
+  media_id: id.MediaId,
+) -> Result(Option(String), Fail(e)) {
+  store.one(
+    read,
+    "SELECT blob_key FROM player_media WHERE id = ?",
+    [id.media_sql(media_id)],
+    decode.at([0], decode.optional(decode.string)),
+  )
+  |> result.map(fn(found) { option.flatten(option.from_result(found)) })
 }
 
 fn deletion_queued(read: Read, media_id: String) -> Result(Bool, Fail(e)) {

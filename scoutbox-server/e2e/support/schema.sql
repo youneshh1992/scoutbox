@@ -147,7 +147,7 @@ CREATE TABLE media_deletions (
       attempts        INTEGER NOT NULL DEFAULT 0,
       last_attempt_at INTEGER,
       last_error      TEXT
-    ) STRICT;
+    , blob_key TEXT CHECK (blob_key IS NULL OR length(blob_key) > 0 AND length(blob_key) <= 80)) STRICT;
 CREATE TABLE player_season_history (
   player_id           TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   position            INTEGER NOT NULL,
@@ -209,7 +209,7 @@ CREATE TABLE player_media (
   size_bytes                  INTEGER,
   captured_by                 TEXT CHECK (captured_by IS NULL OR captured_by IN ('box_cam')),
   box_session_id              TEXT
-) STRICT;
+, blob_key TEXT CHECK (blob_key IS NULL OR length(blob_key) > 0 AND length(blob_key) <= 80)) STRICT;
 CREATE TABLE player_media_tags (
   media_id TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,
@@ -5610,6 +5610,7 @@ INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0038_operations', __
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0039_retire_blob', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0040_match_facts', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0041_upload_intents', __NOW__);
+INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0042_clip_blobs', __NOW__);
 INSERT INTO "meta" ("key", "value") VALUES ('sessionTtlMs', '2592000000');
 INSERT INTO "meta" ("key", "value") VALUES ('orgsInit', 'pending');
 INSERT INTO "meta" ("key", "value") VALUES ('coreIdentityInit', 'pending');

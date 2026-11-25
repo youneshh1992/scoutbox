@@ -13,10 +13,10 @@ pub const table = "player_media"
 
 /// Every column, in `Row` order.
 pub const columns =
-  "id, player_id, position, title, kind, uploaded_at, url, views, verified_clip_attendance_id, captions, size_bytes, captured_by, box_session_id"
+  "id, player_id, position, title, kind, uploaded_at, url, views, verified_clip_attendance_id, captions, size_bytes, captured_by, box_session_id, blob_key"
 
 /// How many columns `columns` names: an extra column selected after them is read at this index.
-pub const width = 13
+pub const width = 14
 
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
@@ -75,6 +75,7 @@ pub type Row {
     size_bytes: Option(Int),
     captured_by: Option(CapturedBy),
     box_session_id: Option(id.BoxSessionId),
+    blob_key: Option(String),
   )
 }
 
@@ -99,6 +100,7 @@ pub fn new(
     size_bytes: None,
     captured_by: None,
     box_session_id: None,
+    blob_key: None,
   )
 }
 
@@ -123,6 +125,7 @@ pub fn decoder() -> decode.Decoder(Row) {
     12,
     decode.optional(id.box_session_decoder()),
   )
+  use blob_key <- decode.field(13, decode.optional(decode.string))
   decode.success(Row(
     id:,
     player_id:,
@@ -137,11 +140,12 @@ pub fn decoder() -> decode.Decoder(Row) {
     size_bytes:,
     captured_by:,
     box_session_id:,
+    blob_key:,
   ))
 }
 
 pub const insert_sql =
-  "INSERT INTO player_media (id, player_id, position, title, kind, uploaded_at, url, views, verified_clip_attendance_id, captions, size_bytes, captured_by, box_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  "INSERT INTO player_media (id, player_id, position, title, kind, uploaded_at, url, views, verified_clip_attendance_id, captions, size_bytes, captured_by, box_session_id, blob_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
@@ -162,6 +166,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       row.captured_by,
     ),
     sqlight.nullable(id.box_session_sql, row.box_session_id),
+    sqlight.nullable(sqlight.text, row.blob_key),
   ]
 }
 

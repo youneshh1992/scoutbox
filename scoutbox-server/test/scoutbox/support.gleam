@@ -2,6 +2,7 @@
 
 import gleam/result
 import scoutbox/identity/sessions
+import scoutbox/platform/blobs
 import scoutbox/platform/effect.{type Effect}
 import scoutbox/platform/migrations
 import scoutbox/platform/secrets
@@ -17,7 +18,12 @@ pub fn fresh_store(dispatch: fn(Effect) -> Nil) -> Store {
   let assert Ok(s) = store.open(path:, readers: 2, dispatch:)
   let assert Ok(_) = migrations.run(s, session_ttl_ms: sessions.default_ttl_ms)
   let assert Ok(True) =
-    seed.run(s, 1_000_000, demo: True, data_dir: name)
+    seed.run(
+      s,
+      1_000_000,
+      demo: True,
+      blobs: blobs.LocalDisk(dir: name <> "/media", secret: "test"),
+    )
     |> result.map_error(fn(e) { e })
   s
 }

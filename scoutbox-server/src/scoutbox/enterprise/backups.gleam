@@ -76,7 +76,8 @@ pub fn conflicts(read: Read) -> Result(List(Conflict), Fail(e)) {
 fn queued_media(read: Read) -> Result(List(String), Fail(e)) {
   store.query(
     read,
-    "SELECT media_id FROM media_deletions",
+    // A file in the media directory is named by its media id (an evidence file) or its blob key (a clip).
+    "SELECT media_id FROM media_deletions UNION ALL SELECT blob_key FROM media_deletions WHERE blob_key IS NOT NULL",
     [],
     decode.at([0], decode.string),
   )
@@ -333,7 +334,7 @@ pub fn write_backup(
   #(manifest, list.length(files), left_out)
 }
 
-/// A media file is named `<id>.<ext>`.
+/// A media file is named `<id>.<ext>`, or a stored object `<key>` with its record `<key>.json`.
 fn media_id_of(name: String) -> String {
   case string.split(name, ".") {
     [only] -> only

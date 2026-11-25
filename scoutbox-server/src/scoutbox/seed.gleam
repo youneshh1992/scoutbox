@@ -7,7 +7,7 @@ import gleam/int
 import gleam/list
 import gleam/result
 import gleam/string
-import scoutbox/platform/media
+import scoutbox/platform/blobs.{type Blobs}
 import scoutbox/platform/store.{type Store}
 import scoutbox/rows/id
 import simplifile
@@ -21,7 +21,7 @@ pub fn run(
   store: Store,
   now: Int,
   demo demo: Bool,
-  data_dir data_dir: String,
+  blobs blobs: Blobs,
 ) -> Result(Bool, String) {
   use priv <- result.try(
     wisp.priv_directory("scoutbox") |> result.replace_error("no priv directory"),
@@ -55,16 +55,22 @@ pub fn run(
   |> result.map_error(fn(e) { "seed: " <> string.inspect(e) })
   |> result.map(fn(seeded) {
     case seeded {
-      True -> install_sample_clips(store, priv, data_dir)
+      True -> install_sample_clips(store, priv, blobs, now)
       False -> Nil
     }
     seeded
   })
 }
 
-/// Three demo players' sample clips (sampleClips.mjs), stored as their seeded `/media/<id>` rows expect. The
-/// files are optional: without one, that clip's link answers 404.
-fn install_sample_clips(store: Store, priv: String, data_dir: String) -> Nil {
+/// Three demo players' sample clips (sampleClips.mjs), stored where their seeded `/media/<id>` rows say. The
+/// files are optional: without one, that clip's link answers 404. A clip's key is the seed's own, so seeding again
+/// against the same bucket finds the file already there.
+fn install_sample_clips(
+  store: Store,
+  priv: String,
+  blobs: Blobs,
+  now: Int,
+) -> Nil {
   use #(file, player_id, title) <- list.each([
     #("clip-sprint.webm", "pl-adeyemi", "Sprint & finishing session"),
     #("clip-passing.webm", "pl-carvalho", "Passing range compilation"),
@@ -76,13 +82,27 @@ fn install_sample_clips(store: Store, priv: String, data_dir: String) -> Nil {
         read,
         "SELECT id FROM player_media WHERE player_id = ? AND title = ?",
         [id.player_sql(id.player(player_id)), sqlight.text(title)],
-        decode.at([0], decode.string),
+        decode.at([0], id.media_decoder()),
       )
     })
   case media_id, simplifile.read_bits(priv <> "/sample_clips/" <> file) {
     Ok(Ok(media_id)), Ok(bytes) -> {
-      let _ = media.save(data_dir, media_id, "video/webm", bytes)
-      Nil
+      let key = "seed-" <> id.media_to_string(media_id)
+      case blobs.put(blobs, key, "video/webm", bytes, now) {
+        Ok(Nil) | Error(blobs.AlreadyExists) -> {
+          let _ =
+            store.unit(store, fn(tx) {
+              store.run(
+                tx,
+                "UPDATE player_media SET blob_key = ? WHERE id = ?",
+                [sqlight.text(key), id.media_sql(media_id)],
+              )
+            })
+          Nil
+        }
+        Error(blobs.Unavailable(why)) ->
+          wisp.log_error("seed: sample clip " <> file <> ": " <> why)
+      }
     }
     _, _ -> Nil
   }
