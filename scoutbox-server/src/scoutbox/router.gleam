@@ -75,6 +75,7 @@ import scoutbox/integrations/api_keys
 import scoutbox/integrations/imports
 import scoutbox/integrations/webhooks
 import scoutbox/media/links
+import scoutbox/media/uploads
 import scoutbox/messaging/channel_routes as threads
 import scoutbox/messaging/delivery
 import scoutbox/messaging/delivery_prefs
@@ -208,6 +209,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             applications.confirm_email(ctx, req, id.root_request(request_id))
           })
+        ["org", "verification", "apply", request_id, "uploads"] ->
+          only(req, Post, fn() {
+            applications.upload(ctx, req, id.root_request(request_id))
+          })
         ["org", "verification", "apply", request_id, "evidence"] ->
           only(req, Post, fn() {
             applications.evidence(ctx, req, id.root_request(request_id))
@@ -252,6 +257,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["development", ..path] ->
           hub_routes.handle(ctx, req, hub_routes.AsOrg(org), path)
         ["verification", ..path] -> verification_org(ctx, req, org, path)
+        ["uploads"] -> only(req, Post, fn() { uploads.for_org(ctx, req, org) })
         ["rooms", ..path] -> rooms(ctx, req, org, path)
         ["agent", ..path] -> agent_org(ctx, req, org, path)
         ["offers", oid] ->
@@ -1701,6 +1707,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["drills", did, "complete"] ->
           only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
         ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
+        ["uploads"] ->
+          only(req, Post, fn() { uploads.for_player(ctx, req, player) })
         ["media", mid, "captions"] ->
           only(req, Post, fn() { record.captions(ctx, req, player, mid) })
         ["medical", "records"] ->

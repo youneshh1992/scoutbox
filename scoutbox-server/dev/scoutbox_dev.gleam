@@ -669,6 +669,7 @@ pub const tables = [
   "trials",
   "ts_reviewer_history",
   "ts_reviewers",
+  "upload_intents",
   "vacancies",
   "ver_admins",
   "ver_claim_codes",
@@ -849,6 +850,9 @@ pub const ided = [
   Ided("ver_domain_requests", "DomainRequest", Some("vdom")),
   Ided("ver_events", "VerEvent", Some("vevt")),
   Ided("ver_evidence", "Evidence", Some("vevd")),
+  // Minted at random by `media/uploads`, not from the counter: an id is also an object's key in storage, which
+  // must never repeat, even after a re-seed against the same bucket.
+  Ided("upload_intents", "UploadIntent", None),
   Ided("ver_player_invites", "PlayerInvite", Some("vpin")),
   Ided("ver_references", "Reference", Some("vref")),
   Ided("ver_root_requests", "RootRequest", Some("vroot")),
@@ -1603,6 +1607,14 @@ pub const id_columns = [
   ),
   Untyped("message_attachments.report_id", "its table is not ported yet"),
   Untyped("ver_evidence.media_id", "its table is not ported yet"),
+  Untyped(
+    "upload_intents.owner_id",
+    "polymorphic: its kind is in another column",
+  ),
+  Untyped(
+    "upload_intents.record_id",
+    "polymorphic: a clip or an evidence record, by purpose",
+  ),
   Untyped("detail_media_id", "its table is not ported yet"),
   Untyped("detail_assignment_id", "its table is not ported yet"),
   Untyped("detail_challenge_id", "its table is not ported yet"),

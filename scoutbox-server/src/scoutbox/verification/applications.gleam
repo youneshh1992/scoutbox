@@ -18,6 +18,7 @@ import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/orgs
 import scoutbox/identity/staff
+import scoutbox/media/uploads
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
@@ -25,6 +26,7 @@ import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/orgs as org_row
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
@@ -635,6 +637,29 @@ pub fn confirm_email(
         }
       }
     }
+  }
+}
+
+/// `POST /auth/org/verification/apply/:id/uploads`: an applicant's document, to name to the evidence route.
+pub fn upload(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+) -> Response {
+  let shape = {
+    use secret <- input.field("applicantSecret", input.nullish(input.text(64)))
+    use d <- uploads.declared([upload_row.VerificationEvidence])
+    input.done(#(secret, d))
+  }
+  use #(secret, d) <- http.body(req, shape, uploads.codes)
+  case
+    store.read(ctx.store, fn(read) {
+      with_secret(read, req, request_id, secret)
+    })
+  {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> not_found()
+    Ok(Some(a)) -> uploads.open(ctx, uploads.Applicant(a.id), d)
   }
 }
 

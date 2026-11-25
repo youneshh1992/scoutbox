@@ -6,6 +6,7 @@ export const BATTERIES = [
   'platform/safeguarding',
   'platform/playersAndGuardians',
   'platform/storeGuarantees',
+  'platform/uploads',
   'platform/messaging',
   'platform/notifications',
   'platform/delivery',

@@ -5427,6 +5427,33 @@ pub fn next_trial_staff(tx: Tx) -> Result(TrialStaffId, Fail(e)) {
   ids.next(tx, "stf") |> result.map(TrialStaffId)
 }
 
+/// An id of `upload_intents`.
+pub opaque type UploadIntentId {
+  UploadIntentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn upload_intent(text: String) -> UploadIntentId {
+  UploadIntentId(text)
+}
+
+pub fn upload_intent_to_string(id: UploadIntentId) -> String {
+  let UploadIntentId(text) = id
+  text
+}
+
+pub fn upload_intent_sql(id: UploadIntentId) -> sqlight.Value {
+  sqlight.text(upload_intent_to_string(id))
+}
+
+pub fn upload_intent_json(id: UploadIntentId) -> Json {
+  json.string(upload_intent_to_string(id))
+}
+
+pub fn upload_intent_decoder() -> decode.Decoder(UploadIntentId) {
+  decode.map(decode.string, UploadIntentId)
+}
+
 /// An id of `vacancies`.
 pub opaque type VacancyId {
   VacancyId(String)

@@ -60,7 +60,9 @@ for the product rules; they apply here too.
 ## Writing the data layer here
 
 - Tables come from `priv/migrations`, numbered SQL files edited directly; their Gleam is generated
-  (`npm run codegen`, checked by `codegen:check` in `e2e:check`). The demo world is `priv/seed.sql`, also edited
+  (`npm run codegen`, checked by `codegen:check` in `e2e:check`), and so is the batteries' fixture schema,
+  `e2e/support/schema.sql` (`dev/fixture_schema.mjs`, also checked by `e2e:check`). Keep comments outside a
+  `CREATE TABLE`'s column list: the generator reads the columns' CHECK lists from it. The demo world is `priv/seed.sql`, also edited
   directly. Shared vocabularies are declared once in `dev/scoutbox_dev.gleam`.
 - Ids are typed: each table declared `Ided` in `dev/scoutbox_dev.gleam` has an opaque `<Name>Id` in the generated
   `scoutbox/rows/id`, with `<name>_sql`, `<name>_json`, `<name>_decoder`, `<name>_to_string` and, given a prefix,
