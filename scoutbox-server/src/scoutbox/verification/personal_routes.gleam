@@ -13,6 +13,7 @@ import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
+import scoutbox/media/uploads
 import scoutbox/platform/clock
 import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
@@ -21,6 +22,7 @@ import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/platform/temporal
 import scoutbox/rows/id
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_disputes as dispute_row
 import scoutbox/rows/ver_events as event_row
@@ -231,7 +233,7 @@ pub fn identity(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
 
 type Upload {
   Upload(
-    data_url: Option(String),
+    upload_id: Option(id.UploadIntentId),
     filename: Option(String),
     note: Option(String),
   )
@@ -270,16 +272,13 @@ pub fn evidence(
               )
             True -> {
               let shape = {
-                use data_url <- input.field(
-                  "dataUrl",
-                  input.nullish(input.text(100_000_000)),
-                )
+                use upload_id <- input.field("uploadId", core.upload_field())
                 use filename <- input.field(
                   "filename",
                   input.nullish(input.text(120)),
                 )
                 use note <- input.field("note", input.nullish(input.text(400)))
-                input.done(Upload(data_url:, filename:, note:))
+                input.done(Upload(upload_id:, filename:, note:))
               }
               use body <- http.body(req, shape, [])
               add_evidence(ctx, req, access, claim, body, now)
@@ -298,12 +297,16 @@ fn add_evidence(
   now: Int,
 ) -> Response {
   let note = input.filled(body.note)
-  let file = case body.data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, body.filename))
-    _ -> None
-  }
+  let file =
+    option.map(body.upload_id, core.evidence_upload(
+      ctx,
+      _,
+      upload_row.VerificationEvidence,
+      uploads.OrgUser(access.user.id),
+      body.filename,
+    ))
   case file, note {
-    Some(Error(code)), _ -> http.error(422, code)
+    Some(Error(refusal)), _ -> core.file_refused(refusal)
     None, None ->
       http.error_message(
         400,
@@ -358,6 +361,7 @@ fn add_evidence(
         actor,
         now,
       ))
+      use _ <- result.try(core.file_used(tx, file, ev, now))
       use _ <- result.try(case dup {
         True ->
           records.add_codes(tx, claim.id, records.RiskFlags, [

@@ -28,9 +28,6 @@ import wisp.{type Request, type Response}
 /// Short on purpose: clients refetch constantly, so links are re-minted long before they expire.
 const ttl_ms = 900_000
 
-/// How long the storage link `/media/<id>` redirects to lives: a player opens it at once, and seeks within it.
-const storage_link_seconds = 60
-
 const signature_max = 128
 
 const session_id_max = 128
@@ -184,7 +181,7 @@ pub fn serve(ctx: Ctx, req: Request, media_id: String) -> Response {
                 blobs.presign_get(
                   ctx.config.blobs,
                   key,
-                  expires_seconds: storage_link_seconds,
+                  expires_seconds: blobs.link_seconds,
                   now_ms: now,
                 ),
               )

@@ -10,6 +10,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { opener, upload } from '../support/uploads.mjs';
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -87,9 +88,15 @@ const REV = {
   'x-admin-reviewer-name': 'Ana Blake',
   'x-request-id': 'req-m141-attr',
 };
-const PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const b64 = (s) => Buffer.from(s).toString('base64');
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+/** Bytes uploaded as evidence under a declared type, by an organisation user or an application's applicant. */
+const evidence = (token, bytes = PNG, mime = 'image/png') =>
+  upload(BASE, opener.org(token), { purpose: 'verification_evidence', bytes, mime });
+const applicantEvidence = (requestId, secret) =>
+  upload(BASE, opener.applicant(requestId, secret), { purpose: 'verification_evidence', bytes: PNG, mime: 'image/png' });
 async function mailWith(to, re) {
   const r = await j('GET', '/admin/outbox', undefined, null, A);
   const mail = (r.body?.items ?? []).find((m) => m.to === to);
@@ -158,7 +165,7 @@ let provisionedSamId;
     await j('POST', `/auth/org/verification/apply/${requestId}/confirm-email`, { applicantSecret, code });
     await j('POST', `/auth/org/verification/apply/${requestId}/evidence`, {
       applicantSecret,
-      dataUrl: PNG,
+      uploadId: await applicantEvidence(requestId, applicantSecret),
       filename: 'letterhead.png',
       note: 'club letterhead',
     });
@@ -284,7 +291,7 @@ section('H2+H5 — licence assurance over HTTP + reviewer attribution');
       issuer: 'UEFA',
       identifier: 'NO-MATCH-XX',
       holderName: 'Rita Vale',
-      dataUrl: PNG,
+      uploadId: await evidence(rita.token),
       filename: 'licence.png',
     },
     rita.token,
@@ -399,7 +406,7 @@ section('H3 — spoofed evidence over HTTP');
     'POST',
     `/org/verification/claims/${idClaim.id}/evidence`,
     {
-      dataUrl: `data:application/pdf;base64,${b64('<!doctype html><h1>fake passport</h1>')}`,
+      uploadId: await evidence(tom.token, Buffer.from('<!doctype html><h1>fake passport</h1>'), 'application/pdf'),
       filename: 'passport.pdf',
     },
     tom.token,
@@ -411,7 +418,10 @@ section('H3 — spoofed evidence over HTTP');
   r = await j(
     'POST',
     `/org/verification/claims/${idClaim.id}/evidence`,
-    { dataUrl: `data:image/png;base64,${b64('%PDF-1.7 not actually a png padockpad')}`, filename: 'scan.png' },
+    {
+      uploadId: await evidence(tom.token, Buffer.from('%PDF-1.7 not actually a png padockpad'), 'image/png'),
+      filename: 'scan.png',
+    },
     tom.token,
   );
   ok(
@@ -421,7 +431,7 @@ section('H3 — spoofed evidence over HTTP');
   r = await j(
     'POST',
     `/org/verification/claims/${idClaim.id}/evidence`,
-    { dataUrl: PNG, filename: 'passport.png' },
+    { uploadId: await evidence(tom.token), filename: 'passport.png' },
     tom.token,
   );
   ok(

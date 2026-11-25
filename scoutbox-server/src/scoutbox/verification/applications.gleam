@@ -640,6 +640,24 @@ pub fn confirm_email(
   }
 }
 
+fn applicant_or_not_found(
+  ctx: Ctx,
+  req: Request,
+  request_id: id.RootRequestId,
+  secret: Option(String),
+  next: fn() -> Response,
+) -> Response {
+  case
+    store.read(ctx.store, fn(read) {
+      with_secret(read, req, request_id, secret)
+    })
+  {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> not_found()
+    Ok(Some(_)) -> next()
+  }
+}
+
 /// `POST /auth/org/verification/apply/:id/uploads`: an applicant's document, to name to the evidence route.
 pub fn upload(
   ctx: Ctx,
@@ -652,15 +670,8 @@ pub fn upload(
     input.done(#(secret, d))
   }
   use #(secret, d) <- http.body(req, shape, uploads.codes)
-  case
-    store.read(ctx.store, fn(read) {
-      with_secret(read, req, request_id, secret)
-    })
-  {
-    Error(failure) -> http.internal(failure)
-    Ok(None) -> not_found()
-    Ok(Some(a)) -> uploads.open(ctx, uploads.Applicant(a.id), d)
-  }
+  use <- applicant_or_not_found(ctx, req, request_id, secret)
+  uploads.open(ctx, uploads.Applicant(request_id), d)
 }
 
 /// `POST /auth/org/verification/apply/:id/evidence`.
@@ -671,21 +682,24 @@ pub fn evidence(
 ) -> Response {
   let shape = {
     use secret <- input.field("applicantSecret", input.nullish(input.text(64)))
-    use data_url <- input.field(
-      "dataUrl",
-      input.nullish(input.text(100_000_000)),
-    )
+    use upload_id <- input.field("uploadId", core.upload_field())
     use filename <- input.field("filename", input.nullish(input.text(120)))
     use note <- input.field("note", input.nullish(input.text(400)))
-    input.done(#(secret, data_url, filename, note))
+    input.done(#(secret, upload_id, filename, note))
   }
-  use #(secret, data_url, filename, note) <- http.body(req, shape, [])
+  use #(secret, upload_id, filename, note) <- http.body(req, shape, [])
   let now = clock.now_ms()
   let note = input.filled(note)
-  let file = case data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, filename))
-    _ -> None
-  }
+  // The secret first: without it, nothing about an upload is told. The unit checks it again.
+  use <- applicant_or_not_found(ctx, req, request_id, secret)
+  let file =
+    option.map(upload_id, core.evidence_upload(
+      ctx,
+      _,
+      upload_row.VerificationEvidence,
+      uploads.Applicant(request_id),
+      filename,
+    ))
   use tx <- act(ctx)
   let read = store.reading(tx)
   use found <- result.try(with_secret(read, req, request_id, secret))
@@ -693,9 +707,9 @@ pub fn evidence(
     None -> stop(not_found())
     Some(a) ->
       case a.status, file, note {
-        row.CollectingEvidence, Some(Error(code)), _
-        | row.RequiresHumanReview, Some(Error(code)), _
-        -> stop(http.error(422, code))
+        row.CollectingEvidence, Some(Error(refusal)), _
+        | row.RequiresHumanReview, Some(Error(refusal)), _
+        -> stop(core.file_refused(refusal))
         row.CollectingEvidence, None, None
         | row.RequiresHumanReview, None, None
         -> stop(http.error(400, "EVIDENCE_REQUIRED"))
@@ -733,6 +747,7 @@ pub fn evidence(
             core.system_actor(Some(req)),
             now,
           ))
+          use _ <- result.try(core.file_used(tx, file, ev, now))
           use _ <- result.try(case dup {
             True ->
               add_codes(tx, a.id, code_row.RiskFlag, [

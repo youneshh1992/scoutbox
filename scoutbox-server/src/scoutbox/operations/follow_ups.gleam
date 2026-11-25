@@ -851,7 +851,7 @@ pub fn admin_due_at(ctx: Ctx, req: Request, fid: id.FollowUpId) -> Response {
 
 /// `POST /admin/sweep`: runs the scheduled work now. It changes when things happen, never what.
 ///
-/// Out of scope: the TypeScript sweep's clean-up of abandoned upload sessions.
+/// The objects of expired uploads aren't removed by the sweep yet (final-port-steps.md step 5.5).
 pub fn admin_sweep(ctx: Ctx, req: Request) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()

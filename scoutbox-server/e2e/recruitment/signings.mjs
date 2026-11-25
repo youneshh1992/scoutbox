@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readRows } from '../support/sqlRows.mjs';
+import { fileBytes, signingDocument } from '../support/uploads.mjs';
 import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
 import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
 import signingErrorsSpec from '../support/spec/recruitment/signings/errors.json' with { type: 'json' };
@@ -88,7 +89,7 @@ const pdf = (text) =>
     `%PDF-1.4\n%âãÏÓ\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n% ${text}\ntrailer << /Root 1 0 R >>\n%%EOF\n`,
     'latin1',
   );
-const dataUrl = (buf, mime = 'application/pdf') => `data:${mime};base64,${buf.toString('base64')}`;
+const doc = (buf, token = maria.token) => signingDocument(BASE, token, buf);
 const DOC_A = pdf('Contract of employment — revision A');
 const DOC_B = pdf('Contract of employment — revision B (amended clause 4)');
 const SHA_A = sha256(DOC_A);
@@ -399,11 +400,11 @@ const start = (OID, body = {}, token = maria.token, h = at(T0)) =>
 const sGet = (SID, token = maria.token, h = at(T0)) => j('GET', `/org/signings/${SID}`, undefined, token, h);
 const sHist = (SID, token = maria.token) => j('GET', `/org/signings/${SID}/history`, undefined, token);
 const sDoc = (SID, token = maria.token, q = '') => j('GET', `/org/signings/${SID}/document${q}`, undefined, token);
-const attach = (SID, buf, expectedRev, token = maria.token, h = at(T0), filename = 'contract.pdf') =>
+const attach = async (SID, buf, expectedRev, token = maria.token, h = at(T0), filename = 'contract.pdf') =>
   j(
     'POST',
     `/org/signings/${SID}/document`,
-    { dataUrl: dataUrl(buf), filename, label: 'Contract', expectedRev },
+    { uploadId: await doc(buf, token), filename, label: 'Contract', expectedRev },
     token,
     h,
   );
@@ -411,11 +412,11 @@ const ready = (SID, body = {}, token = maria.token, h = at(T0)) =>
   j('POST', `/org/signings/${SID}/ready`, body, token, h);
 const clubSign = (SID, body = {}, token = maria.token, h = at(T0)) =>
   j('POST', `/org/signings/${SID}/parties/club/complete`, body, token, h);
-const executed = (SID, buf, expectedRev, token = maria.token, h = at(T0)) =>
+const executed = async (SID, buf, expectedRev, token = maria.token, h = at(T0)) =>
   j(
     'POST',
     `/org/signings/${SID}/executed-document`,
-    { dataUrl: dataUrl(buf), filename: 'executed.pdf', expectedRev },
+    { uploadId: await doc(buf, token), filename: 'executed.pdf', expectedRev },
     token,
     h,
   );
@@ -626,8 +627,8 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   // Input is valid as sent or refused by name, before anything is stored.
   const refusedAs = (r, code, field, problem) =>
     expect(r, 400, code) && r.body.field === field && r.body.problem === problem;
-  const docBody = (extra) => ({
-    dataUrl: dataUrl(DOC_A),
+  const docBody = async (extra) => ({
+    uploadId: await doc(DOC_A),
     filename: 'contract.pdf',
     expectedRev: K.rev,
     ...extra,
@@ -635,7 +636,7 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   const patch = (body) => j('PATCH', `/org/signings/${K.SID}`, body, maria.token, at(T0));
   neg(
     refusedAs(
-      await j('POST', `/org/signings/${K.SID}/document`, docBody({ filename: { name: 'a.pdf' } }), maria.token, at(T0)),
+      await j('POST', `/org/signings/${K.SID}/document`, await docBody({ filename: { name: 'a.pdf' } }), maria.token, at(T0)),
       'SIGNING_INPUT_INVALID',
       'filename',
       'not_text',
@@ -645,7 +646,7 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   const longLabel = await j(
     'POST',
     `/org/signings/${K.SID}/document`,
-    docBody({ label: 'x'.repeat(121) }),
+    await docBody({ label: 'x'.repeat(121) }),
     maria.token,
     at(T0),
   );
@@ -655,7 +656,7 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   neg(
     refusedAs(
-      await j('POST', `/org/signings/${K.SID}/document`, docBody({ sha256: 'f'.repeat(64) }), maria.token, at(T0)),
+      await j('POST', `/org/signings/${K.SID}/document`, await docBody({ sha256: 'f'.repeat(64) }), maria.token, at(T0)),
       'SIGNING_INPUT_INVALID',
       'sha256',
       'unknown_field',
@@ -779,14 +780,14 @@ section('G — documents: the exact bytes, their digest, who may read them and w
       await j(
         'POST',
         `/org/signings/${K.SID}/document`,
-        { dataUrl: 'not-a-data-url', expectedRev: K.rev },
+        { uploadId: { not: 'an id' }, expectedRev: K.rev },
         maria.token,
         at(T0),
       ),
       400,
       'SIGNING_DOCUMENT_INVALID',
     ),
-    'G3 a non data-URL is refused',
+    'G3 an upload id that is not text is refused',
   );
   neg(
     expect(await ready(K.SID, { expectedRev: K.rev, clientKey: key() }), 422, 'SIGNING_DOCUMENT_REQUIRED'),
@@ -815,7 +816,7 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   const cd = await sDoc(K.SID);
   ok(
-    cd.status === 200 && cd.body.document.sha256 === SHA_A && Buffer.from(cd.body.file.base64, 'base64').equals(DOC_A),
+    cd.status === 200 && cd.body.document.sha256 === SHA_A && (await fileBytes(BASE, cd.body))?.equals(DOC_A),
     'G7 the club reads its own document back byte-identical',
   );
   neg(
@@ -838,7 +839,7 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   const pd = await pDoc(K.SID, P['pl-adeyemi'].token);
   ok(
-    pd.status === 200 && pd.body.document.sha256 === SHA_A && Buffer.from(pd.body.file.base64, 'base64').equals(DOC_A),
+    pd.status === 200 && pd.body.document.sha256 === SHA_A && (await fileBytes(BASE, pd.body))?.equals(DOC_A),
     'G12 the player reads the exact presented bytes',
   );
   neg(

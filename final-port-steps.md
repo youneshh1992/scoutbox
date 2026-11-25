@@ -83,10 +83,11 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
 
    Clients use the same protocol against both, so the demo takes the production path. The seed writes its clips
    through `blobs` too.
-2. **Upload intents, then the domain route.** One `upload_intents` table: the id (also the blob key, random and
+2. **Upload intents, then the domain route** [**done**]. One `upload_intents` table: the id (also the blob key, random and
    never reused), purpose, owner, size, type, declared SHA-256, status (`open`, `used`, `expired`), expiry, and the
    record it produced. Each purpose (`player_clip`, `verification_evidence`, `signing_document`, later `box_cam`)
-   has its own policy: who may upload, the size cap and the allowed types.
+   has its own policy: who may upload, the size cap and the allowed types. An owner holds at most ten open
+   uploads.
    - Each audience asks where it already authenticates: `POST /player/uploads` (clips), `POST /org/uploads`
      (evidence and signing documents), and `POST /auth/org/verification/apply/:id/uploads` (an applicant, by
      `applicantSecret`). The body is `{purpose, size, mime, sha256}`; the answer `{uploadId, put: {url, headers},
@@ -97,8 +98,10 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
      document `{uploadId, label}`), so each keeps its own checks, moderation and response.
    - The shared part is `uploads.verify`, before the unit because it calls storage: the intent is the caller's,
      open and of this purpose, and `head` finds the object with its size and type (for evidence, `read_range` also
-     checks its magic bytes). It never reads the whole object: storage has already checked the SHA-256 (3). Inside the unit `uploads.use` moves the intent from `open` to `used` with the record it made; a
-     retry finds it used for that record and answers the same, and a race answers `store.stale`. The record
+     checks its magic bytes). It never reads the whole object: storage has already checked the SHA-256 (3).
+     Inside the unit `uploads.mark_used` moves the intent from `open` to `used` with the record it made, and a
+     race answers `store.stale`. **Decided:** a clip named again answers the same clip; an evidence or signing
+     upload named again answers `409 UPLOAD_ALREADY_USED` with the evidence id, and the client refetches. The record
      keeps the blob key: a clip in `player_media.blob_key` (its own id comes from the counter, which a re-seed
      restarts), evidence in `ver_evidence.media_id`.
 3. **Integrity.** **Decided:** this server never hashes an upload. The presigned PUT signs `content-length`,
@@ -106,7 +109,11 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    client can't drop or change them. Storage refuses bytes whose digest differs, and a successful PUT means the
    stored bytes are the declared ones; nothing needs to read the checksum back (R2 doesn't list
    `x-amz-checksum-mode` on HeadObject). `If-None-Match: *` is applied atomically, so a key is never overwritten.
-   Signing's `bytes_mismatch` compares the digest recorded at upload instead of re-reading the file. `LocalDisk`
+   **Decided:** storage is trusted with the bytes. A signing document's check compares the digests the revision
+   and the vault row record, and that the object is still there (`head`), and never re-reads it: a document
+   whose bytes changed in storage after upload is no longer detected. The batteries tamper with the recorded
+   digest and remove the object instead. An R2 bucket lock against deletes and overwrites is the later backstop.
+   `LocalDisk`
    enforces the same on `PUT /blobs/<token>`, hashing as it writes. The client computes the digest (WebCrypto in
    the portals, `expo-crypto`'s `digest` in the player app).
 
@@ -118,8 +125,9 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    again (expecting `412`), and a wrong length or type. If R2 doesn't refuse the wrong digest, fall back to a
    small Cloudflare Worker as the upload endpoint: it checks a token this server issues and stores through the R2
    binding's `put(key, body, {sha256})`, whose check is documented. Clients keep the same protocol.
-4. **Reads.** `/media/<id>` keeps its session-bound link and live standing check, and answers `302` to a signed GET
-   that lives about 60 seconds. **Decided:** the responses that carry a file as base64 (signing documents, offer
+4. **Reads** [**done**]. `/media/<id>` keeps its session-bound link and live standing check, and answers `302`
+   to a signed GET that lives 15 minutes (**decided**: a video player keeps seeking on the link it was redirected
+   to, so a minute was too short). **Decided:** the responses that carry a file as base64 (signing documents, offer
    documents, the admin and organisation evidence views) carry `file: {mime, url}` instead, the URL a signed GET
    of the same lifetime.
 5. **Clean-up.** The sweep deletes the objects of expired intents. The `media_deletions` queue calls

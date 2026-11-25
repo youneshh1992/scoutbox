@@ -18,7 +18,7 @@
 
 import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -27,6 +27,7 @@ import { openFixture } from '../support/sqlFixture.mjs';
 import { readRows, rows } from '../support/sqlRows.mjs';
 import { copySigning, insertPackage, PACKAGE_TABLES, setRow } from '../support/signingRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { fileBytes, signingDocument } from '../support/uploads.mjs';
 // The table migrations a new database records, and its tables, as the migrated schema lists them.
 const [MIGRATIONS, SCHEMA_TABLES] = (() => {
   const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23sp-schema-')));
@@ -68,7 +69,6 @@ const H = 3_600_000;
 const DAY = 24 * H;
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const pdf = (text) => Buffer.from(`%PDF-1.4\n%âãÏÓ\n1 0 obj << /Type /Catalog >> endobj\n% ${text}\n%%EOF\n`, 'latin1');
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 const DOC = pdf('persistence contract');
 const SHA = sha256(DOC);
 const DOC2 = pdf('persistence contract, amended');
@@ -138,7 +138,7 @@ async function bootOn(dataDir, port) {
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
     return storedRows(dataDir);
   };
-  return { up, j, stop, log: () => log };
+  return { up, j, base, stop, log: () => log };
 }
 
 /** The stored rows a stopped server left in `dir` that this battery reads, table by table. */
@@ -430,11 +430,11 @@ const R = {};
   }
   const start = (OID, k) =>
     j('POST', `/org/offers/${OID}/signing`, { internalNote: S_NOTE, clientKey: k }, maria.token, at(T0));
-  const attach = (SID, buf, rev, clock = T0) =>
+  const attach = async (SID, buf, rev, clock = T0) =>
     j(
       'POST',
       `/org/signings/${SID}/document`,
-      { dataUrl: dataUrl(buf), filename: 'contract.pdf', expectedRev: rev },
+      { uploadId: await signingDocument(s.base, maria.token, buf), filename: 'contract.pdf', expectedRev: rev },
       maria.token,
       at(clock),
     );
@@ -693,10 +693,12 @@ section('3 — after the reboot: identical views, keys replay, completion refuse
     "3.5 Kim's recipient view is byte-identical",
   );
   const doc = (await j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kim, at(T0 + 3 * H))).body;
+  const docBytes = await fileBytes(s.base, doc);
   ok(
     doc.document.sha256 === SHA &&
-      sha256(Buffer.from(doc.file.base64, 'base64')) === SHA &&
-      doc.file.base64 === R.before.kimDoc.file.base64,
+      !!docBytes &&
+      sha256(docBytes) === SHA &&
+      JSON.stringify(doc.document) === JSON.stringify(R.before.kimDoc.document),
     "3.6 the signed document's bytes are still there and still hash to the recorded digest",
   );
   ok(
@@ -1018,16 +1020,16 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
 
 // --------------------------------------------------------- 5 — hardening
 section(
-  '5 — bytes, rows and evidence edited on disk fail closed after a restart; a completion interrupted by a restart converges',
+  '5 — the vault, rows and evidence edited on disk fail closed after a restart; a completion interrupted by a restart converges',
 );
 {
   const db = R.db; // after section 4's stop: the seven planted rows are still there (never repaired), the genuine ones sound
-  const mediaFile = (mediaId) => path.join(DIR, 'media', `${mediaId}.bin`);
+  // The local store (platform/blobs) keeps an object under its key.
+  const stored = (key) => path.join(DIR, 'media', key);
   const kimEv = db.ver_evidence.find(
     (e) => e.signing_package_id === R.kim.SID && e.signing_document_kind === 'signing',
   );
-  ok(!!kimEv?.media_id && existsSync(mediaFile(kimEv.media_id)), "5.0 Kim's signed document sits in the vault on disk");
-  const originalBytes = readFileSync(mediaFile(kimEv.media_id));
+  ok(!!kimEv?.media_id && existsSync(stored(kimEv.media_id)), "5.0 Kim's signed document sits in storage");
   const kimRow = db.signings.find((x) => x.signing_package_id === R.kim.SID);
   const login = async (j) =>
     (
@@ -1059,11 +1061,12 @@ section(
     const after = await s.stop();
     return after;
   };
-  // 5.1 the vault bytes swapped after a restart: the document is not served, the completed record and package still read
+  // 5.1 the vault's digest swapped after a restart: the document is not served, the completed record and package still
+  // read. Storage refused any bytes but the declared ones and never overwrites, so the vault's digest stands for them.
   await cycle(
     '1a',
-    () => {
-      writeFileSync(mediaFile(kimEv.media_id), DOC2);
+    (F) => {
+      setRow(F, 'ver_evidence', { id: kimEv.id }, { sha256: SHA2 });
     },
     async (s, tok) => {
       const kim = (await s.j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
@@ -1072,26 +1075,24 @@ section(
           'SIGNING_STATE_UNKNOWN' &&
           (await s.j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kim, at(T0 + 3 * H))).body?.error ===
             'SIGNING_STATE_UNKNOWN',
-        '5.1 the bytes on disk no longer hash to the digest every party confirmed: nobody is served them',
+        '5.1 the vault no longer records the digest every party confirmed: nobody is served the document',
       );
       ok(
         (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body.signing?.status ===
           'COMPLETED' && (await s.j('GET', '/org/signings', undefined, tok)).body.items.some((x) => x.id === kimRow.id),
-        '5.1b the completed record and the package still read: the swap is on the bytes, the record is untouched',
+        '5.1b the completed record and the package still read: the swap is on the vault, the record is untouched',
       );
     },
   );
   await cycle(
     '1b',
-    () => {
-      writeFileSync(mediaFile(kimEv.media_id), originalBytes);
+    (F) => {
+      setRow(F, 'ver_evidence', { id: kimEv.id }, { sha256: SHA });
     },
     async (s, tok) => {
       const d = (await s.j('GET', `/org/signings/${R.kim.SID}/document`, undefined, tok)).body;
-      ok(
-        d?.file && sha256(Buffer.from(d.file.base64, 'base64')) === SHA,
-        '5.1c the original bytes back: served again, nothing was repaired',
-      );
+      const bytes = await fileBytes(s.base, d);
+      ok(!!bytes && sha256(bytes) === SHA, '5.1c the original digest back: served again, nothing was repaired');
     },
   );
   // 5.2 a duplicate completion row on disk
@@ -1279,7 +1280,7 @@ section(
     const at1 = await j(
       'POST',
       `/org/signings/${SID}/document`,
-      { dataUrl: dataUrl(DOC), filename: 'contract.pdf', expectedRev: st.body.signing.rev },
+      { uploadId: await signingDocument(s.base, tok, DOC), filename: 'contract.pdf', expectedRev: st.body.signing.rev },
       tok,
       at(T0 + 4 * H),
     );

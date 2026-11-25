@@ -3,7 +3,6 @@
 //// The admin surface may authenticate with one shared key, which identifies no individual. A request may declare
 //// its reviewer in headers; with none declared, events say `shared_admin_key` rather than invent a person.
 
-import gleam/bit_array
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/int
@@ -16,15 +15,16 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/identity/staff
+import scoutbox/media/uploads
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/media
 import scoutbox/platform/store
 import scoutbox/platform/temporal
 import scoutbox/rows/id
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rows/ver_admins as admin_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_disputes as dispute_row
@@ -291,7 +291,7 @@ type NewLicence {
     holder_name: Option(String),
     issue_date: Option(temporal.Due),
     expiry: Option(temporal.Due),
-    data_url: Option(String),
+    upload_id: Option(id.UploadIntentId),
     filename: Option(String),
   )
 }
@@ -308,10 +308,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
     use holder_name <- input.field("holderName", input.nullish(input.text(80)))
     use issue_date <- input.field("issueDate", input.optional(input.due_date()))
     use expiry <- input.field("expiry", input.optional(input.due_date()))
-    use data_url <- input.field(
-      "dataUrl",
-      input.nullish(input.text(100_000_000)),
-    )
+    use upload_id <- input.field("uploadId", core.upload_field())
     use filename <- input.field("filename", input.nullish(input.text(120)))
     input.done(NewLicence(
       licence_type:,
@@ -320,7 +317,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
       holder_name:,
       issue_date: option.flatten(issue_date),
       expiry: option.flatten(expiry),
-      data_url:,
+      upload_id:,
       filename:,
     ))
   }
@@ -341,10 +338,14 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   // A day-only expiry covers the whole day.
   let expires = option.map(body.expiry, temporal.end)
   let issued = option.map(body.issue_date, temporal.start)
-  let file = case body.data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, body.filename))
-    _ -> None
-  }
+  let file =
+    option.map(body.upload_id, core.evidence_upload(
+      ctx,
+      _,
+      upload_row.VerificationEvidence,
+      uploads.OrgUser(access.user.id),
+      body.filename,
+    ))
   case missing, issued, expires, file {
     [_, ..], _, _, _ ->
       http.json(
@@ -369,7 +370,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         ]),
       )
     // The file is checked first, so a refused file leaves no claim behind.
-    _, _, _, Some(Error(code)) -> http.error(422, code)
+    _, _, _, Some(Error(refusal)) -> core.file_refused(refusal)
     _, _, _, _ -> {
       let now = clock.now_ms()
       let actor = core.staff_actor(access, req)
@@ -405,8 +406,8 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         now,
       ))
       use _ <- result.try(case file {
-        Some(Ok(f)) ->
-          core.add_evidence(
+        Some(Ok(f)) -> {
+          use ev <- result.try(core.add_evidence(
             tx,
             fn(id) {
               evidence_row.Row(
@@ -425,8 +426,9 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             [claim.id],
             actor,
             now,
-          )
-          |> result.replace(Nil)
+          ))
+          core.file_used(tx, Some(f), ev, now)
+        }
         _ -> Ok(Nil)
       })
       reply(http.json(
@@ -827,17 +829,7 @@ pub fn admin_evidence(
         200,
         json.object([
           #("evidence", record),
-          #(
-            "file",
-            case option.map(ev.media_id, media.read(ctx.config.data_dir, _)) {
-              Some(Ok(#(content_type, bytes))) ->
-                json.object([
-                  #("mime", json.string(content_type)),
-                  #("base64", json.string(bit_array.base64_encode(bytes, True))),
-                ])
-              _ -> json.null()
-            },
-          ),
+          #("file", core.file_link(ctx, ev)),
         ]),
       ))
     }

@@ -16,13 +16,16 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/staff
+import scoutbox/media/uploads
 import scoutbox/messaging/notifications
+import scoutbox/platform/blobs
+import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
-import scoutbox/platform/media
 import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rows/ver_claims.{type Status} as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_evidence as evidence_row
@@ -475,66 +478,134 @@ pub fn blank_evidence(
   )
 }
 
-/// A file sent as a data URL, checked and ready to store.
+/// An uploaded file an evidence route names, checked by the evidence rules: its record is written by the route's
+/// unit, which marks the upload used (`file_used`).
 pub type File {
   File(
+    upload_id: id.UploadIntentId,
+    /// The object in storage that holds it: the upload's id.
     media_id: String,
-    bytes: BitArray,
+    bytes: Int,
     mime: evidence_row.Mime,
     sha256: String,
     filename: String,
   )
 }
 
-/// A data URL's file, if it is one the evidence rules accept, stored under an id of our own (storeEvidenceFile):
-/// before the unit that records it, as the TypeScript server does. Error: the refusal's code.
-pub fn evidence_file(
+pub type FileRefusal {
+  /// The upload itself: not the caller's, not arrived, expired, or storage didn't answer.
+  UploadRefused(uploads.Refusal)
+  /// Already made into this evidence record.
+  AlreadyUsed(evidence_id: String)
+  /// The evidence rules refused the file: the code says why (`FILE_SIGNATURE_MISMATCH`, …).
+  FileRefused(code: String)
+}
+
+/// Before the unit: the upload `upload_id` names, if `owner` may make evidence of it for `purpose` and the evidence
+/// rules accept it. Its leading bytes must be the type declared; the type and size were checked when it was declared,
+/// and storage refused any bytes other than the declared ones.
+pub fn evidence_upload(
   ctx: Ctx,
-  data_url: String,
+  upload_id: id.UploadIntentId,
+  purpose: upload_row.Purpose,
+  owner: uploads.Owner,
   filename: Option(String),
-) -> Result(File, String) {
-  let assert Ok(shape) = regexp.from_string("^data:([\\w/+.-]+);base64,(.+)$")
-  case regexp.scan(shape, data_url) {
-    [regexp.Match(submatches: [Some(mime), Some(payload)], ..)] ->
-      case bit_array.base64_decode(payload) {
-        Error(Nil) -> Error("BAD_DATA_URL")
-        Ok(bytes) -> {
-          let name = option.unwrap(filename, "evidence")
-          case
-            claims.evidence_file_problem(claims.File(
-              mime:,
-              bytes: bit_array.byte_size(bytes),
-              filename: name,
-              buffer: Some(bytes),
-            ))
-          {
-            Some(problem) -> Error(claims.file_problem_code(problem))
-            None -> {
-              let assert Ok(m) = list.key_find(evidence_row.mime_pairs, mime)
-                as "an accepted file has an accepted type"
-              let media_id =
-                "vfil-"
-                <> string.lowercase(
-                  bit_array.base16_encode(crypto.strong_random_bytes(8)),
-                )
-              // A file the disk refuses is a broken store, not the sender's fault.
-              let assert Ok(Nil) =
-                media.save(ctx.config.data_dir, media_id, mime, bytes)
-                as "the media directory accepts files"
-              Ok(File(
-                media_id:,
-                bytes:,
-                mime: m,
-                sha256: string.lowercase(
-                  bit_array.base16_encode(crypto.hash(crypto.Sha256, bytes)),
-                ),
-                filename: input.utf16_take(option.unwrap(filename, ""), 120),
-              ))
-            }
-          }
+) -> Result(File, FileRefusal) {
+  case uploads.verify(ctx, upload_id, purpose, owner) {
+    Error(refusal) -> Error(UploadRefused(refusal))
+    Ok(uploads.AlreadyUsed(record_id)) -> Error(AlreadyUsed(record_id))
+    Ok(uploads.Fresh(upload:, leading:)) ->
+      case
+        claims.evidence_file_problem(claims.File(
+          mime: upload.mime,
+          bytes: upload.size_bytes,
+          filename: option.unwrap(filename, "evidence"),
+          buffer: Some(leading),
+        ))
+      {
+        Some(problem) -> Error(FileRefused(claims.file_problem_code(problem)))
+        None -> {
+          let assert Ok(mime) =
+            list.key_find(evidence_row.mime_pairs, upload.mime)
+            as "an accepted file has an accepted type"
+          Ok(File(
+            upload_id: upload.id,
+            media_id: id.upload_intent_to_string(upload.id),
+            bytes: upload.size_bytes,
+            mime:,
+            sha256: upload.sha256,
+            filename: input.utf16_take(option.unwrap(filename, ""), 120),
+          ))
         }
       }
-    _ -> Error("BAD_DATA_URL")
+  }
+}
+
+/// The answer refusing an upload named as evidence. `FileRefused` is a 422 with the rules' code.
+pub fn file_refused(refusal: FileRefusal) -> Response {
+  case refusal {
+    UploadRefused(r) -> uploads.refused(r)
+    AlreadyUsed(evidence_id) ->
+      http.json(
+        409,
+        json.object([
+          #("error", json.string("UPLOAD_ALREADY_USED")),
+          #("evidenceId", json.string(evidence_id)),
+          #(
+            "message",
+            json.string(
+              "That upload is already evidence: fetch the record it was added to.",
+            ),
+          ),
+        ]),
+      )
+    FileRefused(code) -> http.error(422, code)
+  }
+}
+
+/// Inside the unit that wrote `ev` with `file`: the upload is used, once.
+pub fn file_used(
+  tx: Tx,
+  file: Option(File),
+  ev: Evidence,
+  now: Int,
+) -> Result(Nil, Fail(e)) {
+  case file {
+    None -> Ok(Nil)
+    Some(f) ->
+      uploads.mark_used(tx, f.upload_id, id.evidence_to_string(ev.id), now)
+  }
+}
+
+/// The `uploadId` an evidence route takes in place of the file.
+pub fn upload_field() -> input.Rule(Option(id.UploadIntentId)) {
+  input.nullish(uploads.upload_id_field())
+}
+
+/// An evidence record's file, for a caller already allowed to see it: `{mime, url}`, the URL a short-lived link
+/// to it in storage, or null when the record holds no file.
+pub fn file_link(ctx: Ctx, ev: Evidence) -> Json {
+  case ev.media_id {
+    None -> json.null()
+    Some(key) ->
+      json.object([
+        #(
+          "mime",
+          json.nullable(
+            option.map(ev.mime, evidence_row.mime_to_string),
+            json.string,
+          ),
+        ),
+        #(
+          "url",
+          json.string(blobs.presign_get(
+            ctx.config.blobs,
+            key,
+            expires_seconds: blobs.link_seconds,
+            now_ms: clock.now_ms(),
+          )),
+        ),
+      ])
   }
 }
 
@@ -545,7 +616,7 @@ pub fn with_file(ev: Evidence, file: File) -> Evidence {
     media_id: Some(file.media_id),
     sha256: Some(file.sha256),
     mime: Some(file.mime),
-    bytes: Some(bit_array.byte_size(file.bytes)),
+    bytes: Some(file.bytes),
     filename: Some(file.filename),
     check_content_signature: Some(evidence_row.MatchedClaimedType),
   )
@@ -977,6 +1048,8 @@ pub fn act(ctx: Ctx, work: fn(Tx) -> Done) -> Response {
   case store.unit(ctx.store, work) {
     Ok(response) -> response
     Error(store.Refused(response)) -> response
+    // A lost race: run again from the top under `http.rerun_on_stale`.
+    Error(store.Lost(what)) -> http.stale(what)
     Error(failure) -> http.internal(failure)
   }
 }

@@ -215,6 +215,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["org", "verification", "apply", request_id, "evidence"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             applications.evidence(ctx, req, id.root_request(request_id))
           })
         ["org", "verification", "apply", request_id, "submit"] ->
@@ -1706,7 +1707,11 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["drills"] -> only(req, Get, fn() { record_reads.drills(player) })
         ["drills", did, "complete"] ->
           only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
-        ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
+        ["media"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            record.media(ctx, req, player)
+          })
         ["uploads"] ->
           only(req, Post, fn() { uploads.for_player(ctx, req, player) })
         ["media", mid, "captions"] ->
@@ -2651,7 +2656,10 @@ fn verification_org(
     ["me"] -> only(req, Get, fn() { personal.me(ctx, org) })
     ["identity"] -> only(req, Post, fn() { personal.identity(ctx, req, org) })
     ["claims", id, "evidence"] ->
-      only(req, Post, fn() { personal.evidence(ctx, req, org, id.claim(id)) })
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        personal.evidence(ctx, req, org, id.claim(id))
+      })
     ["claims", id, "submit"] ->
       only(req, Post, fn() { personal.submit(ctx, req, org, id.claim(id)) })
     ["claims", id, "dispute"] ->
@@ -2704,7 +2712,11 @@ fn verification_org(
       }
     ["licence-providers"] ->
       only(req, Get, fn() { review.licence_providers(ctx) })
-    ["licence"] -> only(req, Post, fn() { review.new_licence(ctx, req, org) })
+    ["licence"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        review.new_licence(ctx, req, org)
+      })
     ["licence", id, "submit"] ->
       only(req, Post, fn() {
         review.submit_licence(ctx, req, org, id.claim(id))

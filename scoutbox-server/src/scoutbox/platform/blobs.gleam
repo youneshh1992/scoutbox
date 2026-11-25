@@ -61,6 +61,10 @@ pub type Problem {
   Unavailable(String)
 }
 
+/// How long a link to read an object lives, handed to a caller allowed to see it now: long enough to watch a clip
+/// and seek in it, because a player keeps using the link it was redirected to.
+pub const link_seconds = 900
+
 /// How long a URL the server signs for its own request lives.
 const own_request_seconds = 60
 

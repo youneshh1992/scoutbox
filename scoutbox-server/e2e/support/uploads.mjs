@@ -59,3 +59,22 @@ export function fileOf(mime, size = 64) {
   }[mime] ?? Buffer.alloc(0);
   return Buffer.concat([head, crypto.randomBytes(Math.max(size - head.length, 0))]);
 }
+
+/**
+ * A PDF uploaded as a signing document by `token`'s user: its `uploadId`. When the upload itself is refused (a
+ * session that no longer signs in, say), an id that names nothing, so the route answers as it does for that caller.
+ */
+export async function signingDocument(api, token, bytes) {
+  try {
+    return await upload(api, opener.org(token), { purpose: 'signing_document', bytes, mime: 'application/pdf' });
+  } catch {
+    return 'upl-000000000000000000000000';
+  }
+}
+
+/** The bytes a response's `file: {mime, url}` links to, or null when it has none or storage refuses. */
+export async function fileBytes(api, body) {
+  if (!body?.file?.url) return null;
+  const res = await fetch(new URL(body.file.url, api));
+  return res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+}

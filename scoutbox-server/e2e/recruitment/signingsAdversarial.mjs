@@ -22,7 +22,7 @@
 import { freePort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, existsSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openFixture, plantCase } from '../support/sqlFixture.mjs';
@@ -40,6 +40,7 @@ import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { fileBytes, signingDocument } from '../support/uploads.mjs';
 
 const { RATE_LIMIT_POLICY } = rateLimitSpec;
 
@@ -83,7 +84,7 @@ const pdf = (text) =>
     `%PDF-1.4\n%âãÏÓ\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n% ${text}\ntrailer << /Root 1 0 R >>\n%%EOF\n`,
     'latin1',
   );
-const dataUrl = (buf, mime = 'application/pdf') => `data:${mime};base64,${buf.toString('base64')}`;
+const doc = (buf, token) => signingDocument(BASE, token, buf);
 const DOC_A = pdf('Contract of employment — hardening A');
 const SHA_A = sha256(DOC_A);
 const DOC_B = pdf('Contract of employment — hardening B');
@@ -188,7 +189,8 @@ async function offline(mutate) {
   server = await boot();
   return refused;
 }
-const mediaFile = (mediaId) => path.join(DATA_DIR, 'media', `${mediaId}.bin`);
+// The local store's record of an object (platform/blobs): without it, the object is not there.
+const storedRecord = (key) => path.join(DATA_DIR, 'media', `${key}.json`);
 // ================================================================ actors
 const login = async (orgId, scoutName, role, platform) =>
   (
@@ -350,8 +352,8 @@ const sRoom = (RID, token, h = at(T0)) => j('GET', `/org/rooms/${RID}/signing`, 
 const start = (OID, body, token, h = at(T0)) => j('POST', `/org/offers/${OID}/signing`, body, token, h);
 const sGet = (SID, token, h = at(T0)) => j('GET', `/org/signings/${SID}`, undefined, token, h);
 const sDoc = (SID, token, q = '', h = at(T0)) => j('GET', `/org/signings/${SID}/document${q}`, undefined, token, h);
-const attach = (SID, buf, expectedRev, token, h = at(T0), filename = 'contract.pdf', label = 'Contract') =>
-  j('POST', `/org/signings/${SID}/document`, { dataUrl: dataUrl(buf), filename, label, expectedRev }, token, h);
+const attach = async (SID, buf, expectedRev, token, h = at(T0), filename = 'contract.pdf', label = 'Contract') =>
+  j('POST', `/org/signings/${SID}/document`, { uploadId: await doc(buf, token), filename, label, expectedRev }, token, h);
 const ready = (SID, body, token, h = at(T0)) => j('POST', `/org/signings/${SID}/ready`, body, token, h);
 const clubSign = (SID, body, token, h = at(T0)) =>
   j('POST', `/org/signings/${SID}/parties/club/complete`, body, token, h);
@@ -424,9 +426,11 @@ async function bothSigned(token, playerId, opts = {}) {
 }
 const race = (thunks) => Promise.all(thunks.map((f) => f()));
 
-// ================================================================ B — document substitution (HTTP + the vault on disk)
+// ================================================================ B — document substitution (HTTP + the vault row)
+// Storage refused any bytes but the declared ones and never overwrites an object, so the vault row's digest stands for
+// the bytes: what can be substituted is the digest the vault row records, or the object can go missing.
 section(
-  'B — document substitution: the bytes on disk, the digest on the revision and the vault row must agree, or nothing proceeds',
+  'B — document substitution: the digest on the revision and the vault row must agree, and the file be in storage, or nothing proceeds',
 );
 const B = await presented(maria.token, 'pl-carvalho');
 {
@@ -439,7 +443,7 @@ const B = await presented(maria.token, 'pl-carvalho');
   ok(ps.status === 200, 'B1 Mateus confirms document A');
   ok(
     (await pDoc(B.SID, P['pl-carvalho'].token)).body.document.sha256 === SHA_A &&
-      (await sDoc(B.SID, maria.token)).body.file.base64 === DOC_A.toString('base64'),
+      (await fileBytes(BASE, (await sDoc(B.SID, maria.token)).body))?.equals(DOC_A),
     'B2 both sides read exactly A',
   );
   neg(
@@ -450,24 +454,21 @@ const B = await presented(maria.token, 'pl-carvalho');
     sha256(DOC_A_SAME_SIZE) !== SHA_A && DOC_A_SAME_SIZE.length === DOC_A.length,
     'B4 same filename, same MIME, same size, one byte different → a different digest (pure)',
   );
-  // The attacker with a shell swaps the bytes on disk for B.
-  let mediaId = null;
-  let original = null;
+  // The attacker with the database swaps the vault row's digest for B's.
+  let evidenceId = null;
+  let blobKey = null;
   await offline((F) => {
     const ev = evidenceOfPackage(F, B.SID);
-    mediaId = ev?.media_id ?? null;
-    original = readFileSync(mediaFile(mediaId));
-    writeFileSync(mediaFile(mediaId), DOC_B);
+    evidenceId = ev?.id ?? null;
+    blobKey = ev?.media_id ?? null;
+    setRow(F, 'ver_evidence', { id: evidenceId }, { sha256: SHA_B });
   });
   await relogin();
-  ok(
-    !!mediaId && existsSync(mediaFile(mediaId)),
-    `B5 the vault file for B was located and overwritten with B's bytes (${mediaId})`,
-  );
+  ok(!!evidenceId && !!blobKey, `B5 the vault row for B was located and its digest replaced with B's (${evidenceId})`);
   neg(
     expect(await sDoc(B.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') &&
-      !has((await sDoc(B.SID, maria.token)).body, 'base64'),
-    'B6 the club cannot fetch the document: the bytes no longer hash to the digest, nothing is served',
+      !(await sDoc(B.SID, maria.token)).body.file,
+    'B6 the club cannot fetch the document: the vault no longer agrees with the digest confirmed, nothing is served',
   );
   neg(expect(await pDoc(B.SID, P['pl-carvalho'].token), 500, 'SIGNING_STATE_UNKNOWN'), 'B7 nor can the player');
   neg(
@@ -485,7 +486,7 @@ const B = await presented(maria.token, 'pl-carvalho');
       500,
       'SIGNING_STATE_UNKNOWN',
     ),
-    'B8 the club signatory cannot confirm against swapped bytes',
+    'B8 the club signatory cannot confirm against a swapped digest',
   );
   neg(
     expect(
@@ -503,17 +504,28 @@ const B = await presented(maria.token, 'pl-carvalho');
   );
   ok(
     (await sGet(B.SID, maria.token)).status === 200 && sv(await sGet(B.SID, maria.token)).status === 'IN_PROGRESS',
-    'B11 the package itself still reads (the swap is on the bytes, not the record) — the club can still cancel or supersede',
+    'B11 the package itself still reads (the swap is on the vault, not the package) — the club can still cancel or supersede',
   );
-  // Restore the bytes: detection is byte-based and needs no repair.
+  // The digest back, and the file gone from storage instead.
+  await offline((F) => {
+    setRow(F, 'ver_evidence', { id: evidenceId }, { sha256: SHA_A });
+    renameSync(storedRecord(blobKey), `${storedRecord(blobKey)}.away`);
+  });
+  await relogin();
+  neg(
+    expect(await sDoc(B.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') &&
+      expect(await pDoc(B.SID, P['pl-carvalho'].token), 500, 'SIGNING_STATE_UNKNOWN'),
+    'B12a with the file missing from storage, neither side is served the document',
+  );
   await offline(() => {
-    writeFileSync(mediaFile(mediaId), original);
+    renameSync(`${storedRecord(blobKey)}.away`, storedRecord(blobKey));
   });
   await relogin();
   ok(
-    (await sDoc(B.SID, maria.token)).status === 200 &&
+    existsSync(storedRecord(blobKey)) &&
+      (await sDoc(B.SID, maria.token)).status === 200 &&
       (await pDoc(B.SID, P['pl-carvalho'].token)).body.document.sha256 === SHA_A,
-    'B12 with the original bytes back, the document reads again — nothing was repaired or rewritten',
+    'B12 with the digest and the file back, the document reads again — nothing was repaired or rewritten',
   );
   const cs = await clubSign(
     B.SID,
@@ -1481,7 +1493,7 @@ section('M — rev: a stale expectedRev is a 409 on every club mutation');
       j(
         'POST',
         `/org/signings/${M.SID}/executed-document`,
-        { dataUrl: dataUrl(DOC_A), filename: 'x.pdf', expectedRev: stale },
+        { uploadId: await doc(DOC_A, rita.token), filename: 'x.pdf', expectedRev: stale },
         rita.token,
       ),
     ]);
@@ -2004,7 +2016,7 @@ section('T — the signed document: who may read the bytes');
     'POST',
     `/org/signings/${globalThis.__Q.SID}/executed-document`,
     {
-      dataUrl: dataUrl(DOC_B),
+      uploadId: await doc(DOC_B, rita.token),
       filename: 'executed.pdf',
       expectedRev: await rev(globalThis.__Q.SID, rita.token),
     },

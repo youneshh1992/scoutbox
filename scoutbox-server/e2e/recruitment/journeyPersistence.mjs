@@ -35,6 +35,7 @@ import {
 } from '../support/sqlFixture.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { signingDocument } from '../support/uploads.mjs';
 
 let passed = 0;
 let negatives = 0;
@@ -61,7 +62,6 @@ const H = 3_600_000;
 const DAY = 24 * H;
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const pdf = (text) => Buffer.from(`%PDF-1.4\n%âãÏÓ\n1 0 obj << /Type /Catalog >> endobj\n% ${text}\n%%EOF\n`, 'latin1');
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 const DOC = pdf('journey persistence contract');
 const SHA = sha256(DOC);
 const S_DEC = 'PRIVATE_JOURNEY_PERSIST_DECISION_4410';
@@ -367,7 +367,12 @@ const SID = st.body.signing.id;
 const a1 = await S.j(
   'POST',
   `/org/signings/${SID}/document`,
-  { dataUrl: dataUrl(DOC), filename: 'contract.pdf', label: 'Contract', expectedRev: st.body.signing.rev },
+  {
+    uploadId: await signingDocument(`http://localhost:${PORT}`, maria.token, DOC),
+    filename: 'contract.pdf',
+    label: 'Contract',
+    expectedRev: st.body.signing.rev,
+  },
   maria.token,
   at(T0),
 );

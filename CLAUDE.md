@@ -130,7 +130,7 @@ for the product rules; they apply here too.
   key order. A vocabulary value is written with its generated `to_json` (`claim_row.status_to_json`).
 - Tables come from numbered migrations in `scoutbox-server/priv/migrations/`.
 - Behaviour not ported yet is marked `Not ported yet:` in a comment. Grep for it. Behaviour that stays out of scope
-  (video analysis, and uploads until they move to object storage) is marked `Out of scope:`.
+  (video analysis) is marked `Out of scope:`.
 
 ## Batteries
 

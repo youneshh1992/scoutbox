@@ -7,8 +7,6 @@
 //// someone else, and no body field names the actor, their role or a time. Every route reads "now" from the request
 //// clock (`clock.request_ms`).
 
-import gleam/bit_array
-import gleam/crypto
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
@@ -26,7 +24,9 @@ import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs as org_store
 import scoutbox/identity/players.{type Player}
 import scoutbox/identity/roles
+import scoutbox/media/uploads
 import scoutbox/messaging/notifications
+import scoutbox/platform/blobs
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
 import scoutbox/platform/effect
@@ -37,7 +37,6 @@ import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
-import scoutbox/platform/media
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
@@ -63,6 +62,7 @@ import scoutbox/rows/signing_packages as pkg_row
 import scoutbox/rows/signing_revision_parties as party_row
 import scoutbox/rows/signing_revisions as rev_row
 import scoutbox/rows/signings as signing_row
+import scoutbox/rows/upload_intents as upload_row
 import scoutbox/rows/ver_evidence as evidence_row
 import scoutbox/safety/audit
 import scoutbox/verification/core
@@ -150,7 +150,7 @@ fn limited(
 pub const input_codes = [
   #("contract.*", "SIGNING_CONTRACT_DATES_INVALID"),
   #("expiresAt", "SIGNING_EXPIRY_INVALID"),
-  #("dataUrl", "SIGNING_DOCUMENT_INVALID"),
+  #("uploadId", "SIGNING_DOCUMENT_INVALID"),
   #("method", "SIGNING_METHOD_UNKNOWN"),
   #("expectedRev", "SIGNING_REV_REQUIRED"),
   #("expectedVersion", "SIGNING_REV_REQUIRED"),
@@ -595,12 +595,6 @@ fn packages_of_case(read: Read, room: Room) -> Result(List(Package), Fail(e)) {
 
 // -------------------------------------------------------------------------------------------- documents
 
-fn sha256_hex(bits: BitArray) -> String {
-  crypto.hash(crypto.Sha256, bits)
-  |> bit_array.base16_encode
-  |> string.lowercase
-}
-
 fn vault_record(
   read: Read,
   evidence_id: id.EvidenceId,
@@ -643,17 +637,16 @@ fn document_bytes_problem(
         None -> Some("evidence_missing")
         Some(e) if e.signing_package_id != mine -> Some("foreign")
         Some(e) if e.sha256 != digest -> Some("digest_mismatch")
+        // Storage refused any bytes but the declared ones and never overwrites an object, so the recorded digest
+        // stands for the bytes: what is left to check is that the object is still there.
         Some(e) ->
-          case
-            option.then(e.media_id, fn(m) {
-              media.read(ctx.config.data_dir, m) |> option.from_result
-            })
-          {
+          case e.media_id {
             None -> Some("bytes_missing")
-            Some(#(_, bits)) ->
-              case sha256_hex(bits) == d.sha256 {
-                True -> None
-                False -> Some("bytes_mismatch")
+            Some(key) ->
+              case blobs.head(ctx.config.blobs, key, clock.now_ms()) {
+                Ok(Some(_)) -> None
+                Ok(None) -> Some("bytes_missing")
+                Error(_) -> Some("bytes_unavailable")
               }
           }
       }
@@ -671,15 +664,7 @@ fn document_file(
   case ev {
     None -> None
     Some(e) -> {
-      let blob =
-        option.then(e.media_id, fn(m) {
-          media.read(ctx.config.data_dir, m) |> option.from_result
-        })
-      let mime =
-        option.or(
-          option.map(e.mime, evidence_row.mime_to_string),
-          option.map(blob, fn(b) { b.0 }),
-        )
+      let mime = option.map(e.mime, evidence_row.mime_to_string)
       Some(
         json.object([
           #(
@@ -689,27 +674,11 @@ fn document_file(
               #("label", json.nullable(doc.label, json.string)),
               #("filename", json.nullable(e.filename, json.string)),
               #("mime", json.nullable(mime, json.string)),
-              #(
-                "bytes",
-                json.nullable(
-                  option.or(
-                    e.bytes,
-                    option.map(blob, fn(b) { bit_array.byte_size(b.1) }),
-                  ),
-                  json.int,
-                ),
-              ),
+              #("bytes", json.nullable(e.bytes, json.int)),
               #("sha256", json.nullable(e.sha256, json.string)),
             ]),
           ),
-          #("file", case blob {
-            Some(#(content_type, bits)) ->
-              json.object([
-                #("mime", json.string(option.unwrap(mime, content_type))),
-                #("base64", json.string(bit_array.base64_encode(bits, True))),
-              ])
-            None -> json.null()
-          }),
+          #("file", core.file_link(ctx, e)),
         ]),
       )
     }
@@ -757,7 +726,7 @@ type Stored {
 
 type DocumentBody {
   DocumentBody(
-    data_url: String,
+    upload_id: id.UploadIntentId,
     filename: Option(String),
     label: Option(String),
   )
@@ -765,22 +734,23 @@ type DocumentBody {
 
 fn document_shape() -> input.Shape(DocumentBody) {
   use <- rev.fields
-  use data_url <- input.field(
-    "dataUrl",
-    input.required(input.id_of(100_000_000)),
+  use upload_id <- input.field(
+    "uploadId",
+    input.required(uploads.upload_id_field()),
   )
   use filename <- input.field(
     "filename",
     input.nullish(input.text(signing_rules.limit_filename)),
   )
   use label <- input.field("label", input.nullish(input.text(100_000_000)))
-  input.done(DocumentBody(data_url:, filename:, label:))
+  input.done(DocumentBody(upload_id:, filename:, label:))
 }
 
-/// Through the evidence upload path: digest, sniffed type, size limit. The file is stored before the unit; its
-/// vault row is written by the unit, with the package change that names it.
+/// Through the evidence upload path: the upload is the user's, arrived, and its leading bytes are its type. Its vault
+/// row is written by the unit, with the package change that names it.
 fn store_document(
   ctx: Ctx,
+  a: OrgAccess,
   b: DocumentBody,
   next: fn(Stored) -> Response,
 ) -> Response {
@@ -790,12 +760,21 @@ fn store_document(
     signing_rules.limit_label,
     False,
   )
-  case core.evidence_file(ctx, b.data_url, b.filename) {
-    Error(code) ->
+  case
+    core.evidence_upload(
+      ctx,
+      b.upload_id,
+      upload_row.SigningDocument,
+      uploads.OrgUser(a.user.id),
+      b.filename,
+    )
+  {
+    Error(core.FileRefused(code)) ->
       err("SIGNING_DOCUMENT_INVALID", "The file was refused: " <> code <> ".", [
-        #("field", json.string("dataUrl")),
+        #("field", json.string("uploadId")),
         #("reasons", json.array([code], json.string)),
       ])
+    Error(refusal) -> core.file_refused(refusal)
     Ok(file) -> next(Stored(file, label))
   }
 }
@@ -839,6 +818,7 @@ fn record_document(
     core.staff_actor(a, req),
     at,
   ))
+  use _ <- result.try(core.file_used(tx, Some(stored.file), ev, at))
   use doc_id <- result.try(
     ids.next(tx, case kind {
       doc_row.Signing -> "sgd"
@@ -1742,7 +1722,7 @@ pub fn attach(
         limits.SigningDocumentWrite,
         id.org_to_string(a.org.id),
       )
-      use stored <- store_document(ctx, b)
+      use stored <- store_document(ctx, a, b)
       write_document(ctx, req, a, l, doc_row.Signing, stored, now)
     }
   }
@@ -1822,7 +1802,7 @@ pub fn attach_executed(
         limits.SigningDocumentWrite,
         id.org_to_string(a.org.id),
       )
-      use stored <- store_document(ctx, b)
+      use stored <- store_document(ctx, a, b)
       write_document(ctx, req, a, l, doc_row.Executed, stored, now)
     }
   }

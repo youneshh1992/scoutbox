@@ -7,7 +7,6 @@
 //// An Offer may cite the case's transaction workspace (agents/transactions); its readiness is re-read at issue,
 //// never taken from the draft.
 
-import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
@@ -35,7 +34,6 @@ import scoutbox/platform/idempotency
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/live_event
-import scoutbox/platform/media
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/case_lifecycle
@@ -57,6 +55,7 @@ import scoutbox/rows/orgs
 import scoutbox/rows/ver_evidence as evidence_row
 import scoutbox/safety/audit
 import scoutbox/safety/moderate
+import scoutbox/verification/core
 import scoutbox/vocab/audience
 import scoutbox/vocab/offer_status.{Accepted, Draft, Issued}
 import scoutbox/vocab/party
@@ -3529,10 +3528,6 @@ pub fn document(
       case read(ctx, vault_record(_, d.evidence_id)) {
         Error(response) -> response
         Ok(Some(ev)) if ev.org_id == owner -> {
-          let blob = case ev.media_id {
-            Some(m) -> media.read(ctx.config.data_dir, m) |> option.from_result
-            None -> None
-          }
           let mime = option.map(ev.mime, evidence_row.mime_to_string)
           http.json(
             200,
@@ -3542,34 +3537,12 @@ pub fn document(
                 json.object([
                   #("id", id.offer_document_json(d.id)),
                   #("label", json.nullable(d.label, json.string)),
-                  #(
-                    "mime",
-                    json.nullable(
-                      option.or(mime, option.map(blob, fn(b) { b.0 })),
-                      json.string,
-                    ),
-                  ),
-                  #(
-                    "bytes",
-                    json.nullable(
-                      option.or(
-                        ev.bytes,
-                        option.map(blob, fn(b) { bit_size(b.1) }),
-                      ),
-                      json.int,
-                    ),
-                  ),
+                  #("mime", json.nullable(mime, json.string)),
+                  #("bytes", json.nullable(ev.bytes, json.int)),
                   #("filename", json.nullable(ev.filename, json.string)),
                 ]),
               ),
-              #("file", case blob {
-                Some(#(content_type, bits)) ->
-                  json.object([
-                    #("mime", json.string(option.unwrap(mime, content_type))),
-                    #("base64", json.string(base64(bits))),
-                  ])
-                None -> json.null()
-              }),
+              #("file", core.file_link(ctx, ev)),
             ]),
           )
         }
@@ -3577,14 +3550,6 @@ pub fn document(
       }
     }
   }
-}
-
-fn bit_size(b: BitArray) -> Int {
-  bit_array.byte_size(b)
-}
-
-fn base64(b: BitArray) -> String {
-  bit_array.base64_encode(b, True)
 }
 
 // ---------------------------------------------------------------------------------------------- live events

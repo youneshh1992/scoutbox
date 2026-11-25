@@ -11,6 +11,7 @@ import path from 'node:path';
 import { totp } from '../support/totp.mjs';
 import { freePort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { declare, opener, upload } from '../support/uploads.mjs';
 
 const PORT = await freePort();
 const DOWN_PORT = await freePort();
@@ -87,8 +88,15 @@ async function jAt(base, method, url, body, token, extraHeaders = {}) {
 }
 const j = (method, url, body, token, extra) => jAt(BASE, method, url, body, token, extra);
 const A = { 'x-admin-key': 'scoutbox-admin' };
-const PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+/** A PNG uploaded as evidence by an organisation user, or by the applicant holding an application's secret. */
+const evidence = (token) =>
+  upload(BASE, opener.org(token), { purpose: 'verification_evidence', bytes: PNG, mime: 'image/png' });
+const applicantEvidence = (requestId, secret) =>
+  upload(BASE, opener.applicant(requestId, secret), { purpose: 'verification_evidence', bytes: PNG, mime: 'image/png' });
 async function outboxCode(to) {
   const r = await j('GET', '/admin/outbox', undefined, null, A);
   const mail = (r.body?.items ?? []).find((m) => m.to === to);
@@ -266,7 +274,7 @@ let tomIdentityClaim;
   r = await j(
     'POST',
     `/org/verification/claims/${tomIdentityClaim}/evidence`,
-    { dataUrl: PNG, filename: 'passport.png' },
+    { uploadId: await evidence(tom.token), filename: 'passport.png' },
     tom.token,
   );
   ok(
@@ -274,13 +282,12 @@ let tomIdentityClaim;
     'evidence stored; malware scan honestly not_configured',
   );
   tomEvidenceId = r.body.claim.evidence[0].id;
-  r = await j(
-    'POST',
-    `/org/verification/claims/${tomIdentityClaim}/evidence`,
-    { dataUrl: 'data:text/html;base64,PGI+', filename: 'x.html' },
-    tom.token,
-  );
-  ok(r.status === 422, 'active-content evidence file refused');
+  r = await declare(BASE, opener.org(tom.token), {
+    purpose: 'verification_evidence',
+    bytes: Buffer.from('<b>'),
+    mime: 'text/html',
+  });
+  ok(r.status === 400 && r.body.error === 'TYPE_NOT_ALLOWED', 'active-content evidence file refused');
   r = await j('POST', `/org/verification/claims/${tomIdentityClaim}/submit`, { status: 'verified' }, tom.token);
   ok(
     r.status === 200 && r.body.claim.status === 'requires_human_review',
@@ -421,7 +428,7 @@ let riverton = null,
   ok(r.status === 200 && r.body.emailProved, 'applicant proves the organisation mailbox');
   await j('POST', `/auth/org/verification/apply/${rootReqId}/evidence`, {
     applicantSecret,
-    dataUrl: PNG,
+    uploadId: await applicantEvidence(rootReqId, applicantSecret),
     filename: 'registration.png',
     note: 'FA registration certificate',
   });
@@ -598,7 +605,7 @@ let samLicId;
       issuer: 'UEFA',
       identifier: 'UEFA-B-77777',
       holderName: 'Sam Cole',
-      dataUrl: PNG,
+      uploadId: await evidence(sam.token),
       filename: 'licence.png',
     },
     sam.token,
@@ -971,9 +978,13 @@ section('V12 — cross-tenant isolation (concealing 404s)');
   const raw = await fetch(`${BASE}/media/${fileId}`, { headers: { Authorization: `Bearer ${adeyemi.token}` } });
   ok(raw.status === 401, 'direct private-file URL access refused (security case 8)');
   const admEv = await j('GET', `/admin/verification/evidence/${kase.body.evidence[0].id}`, undefined, null, A);
+  const served = admEv.body?.file?.url ? await fetch(new URL(admEv.body.file.url, BASE)) : null;
   ok(
-    admEv.status === 200 && admEv.body.file?.base64?.length > 0,
-    'T&S retrieves the document through the logged, authorised route',
+    admEv.status === 200 &&
+      admEv.body.file.mime === 'image/png' &&
+      served?.ok &&
+      Buffer.from(await served.arrayBuffer()).equals(PNG),
+    'T&S retrieves the document through the logged, authorised route, on a short-lived storage link',
   );
   const kase2 = await j('GET', `/admin/verification/cases/${tomIdentityClaim}`, undefined, null, A);
   ok(
@@ -1025,7 +1036,7 @@ section('V17 — grassroots evidence path: prepared, never auto-approved');
   await j('POST', `/auth/org/verification/apply/${id}/confirm-email`, { applicantSecret: sec, code });
   await j('POST', `/auth/org/verification/apply/${id}/evidence`, {
     applicantSecret: sec,
-    dataUrl: PNG,
+    uploadId: await applicantEvidence(id, sec),
     filename: 'league-listing.png',
     note: 'London FA league handbook entry',
   });
@@ -1063,7 +1074,7 @@ section('V17 — grassroots evidence path: prepared, never auto-approved');
   });
   await j('POST', `/auth/org/verification/apply/${id2}/evidence`, {
     applicantSecret: sec2,
-    dataUrl: PNG,
+    uploadId: await applicantEvidence(id2, sec2),
     filename: 'league-listing.png',
     note: 'London FA league handbook entry',
   });
@@ -1392,7 +1403,12 @@ section('one open identity claim per user, reinstatement included');
 {
   let r = await j('POST', '/org/verification/identity', {}, eve.token);
   const first = r.body.claim.id;
-  await j('POST', `/org/verification/claims/${first}/evidence`, { dataUrl: PNG, filename: 'passport.png' }, eve.token);
+  await j(
+    'POST',
+    `/org/verification/claims/${first}/evidence`,
+    { uploadId: await evidence(eve.token), filename: 'passport.png' },
+    eve.token,
+  );
   r = await j('POST', `/org/verification/claims/${first}/submit`, {}, eve.token);
   r = await j('POST', `/admin/verification/claims/${first}/approve`, { reason: 'document checked' }, null, A);
   ok(r.status === 200 && r.body.claim.status === 'verified', 'identity verified by T&S');

@@ -20,6 +20,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { openFixture, plantCase, legacyMoves } from '../support/sqlFixture.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
+import { signingDocument } from '../support/uploads.mjs';
 
 const PORT = await freePort();
 const BASE = `http://localhost:${PORT}`;
@@ -64,7 +65,6 @@ const pdf = (text) =>
     `%PDF-1.4\n%âãÏÓ\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n% ${text}\ntrailer << /Root 1 0 R >>\n%%EOF\n`,
     'latin1',
   );
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 const DOC = pdf('Contract of employment — journey');
 const SHA = sha256(DOC);
 const DOC2 = pdf('Contract of employment — journey, amended');
@@ -403,11 +403,11 @@ const sv = (r) => r.body?.signing ?? {};
 const revOf = (r) => sv(r).currentRevision ?? {};
 const start = (OID, body = {}, token = maria.token, h = at(T0)) =>
   j('POST', `/org/offers/${OID}/signing`, body, token, h);
-const attach = (SID, buf, expectedRev, token = maria.token, h = at(T0)) =>
+const attach = async (SID, buf, expectedRev, token = maria.token, h = at(T0)) =>
   j(
     'POST',
     `/org/signings/${SID}/document`,
-    { dataUrl: dataUrl(buf), filename: 'contract.pdf', label: 'Contract', expectedRev },
+    { uploadId: await signingDocument(BASE, token, buf), filename: 'contract.pdf', label: 'Contract', expectedRev },
     token,
     h,
   );

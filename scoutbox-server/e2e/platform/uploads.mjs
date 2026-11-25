@@ -6,6 +6,7 @@
 //   C limits: an owner holds at most ten open uploads
 //   D clips: an upload named to /player/media becomes a clip with its file, once; the Verified Clip needs one; the
 //     media link redirects to storage for whoever may see the clip; erasure removes the file
+//   E evidence: an upload named as evidence once; again, the evidence it became is named
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -14,7 +15,7 @@ import path from 'node:path';
 import { serverCommand, serverDir } from '../support/server.mjs';
 import { freePort } from '../support/testPort.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { declare, opener, put, sha256Hex, upload } from '../support/uploads.mjs';
+import { declare, fileOf, opener, put, sha256Hex, upload } from '../support/uploads.mjs';
 
 const PORT = await freePort();
 const API = `http://localhost:${PORT}`;
@@ -270,6 +271,28 @@ ok(!stored(leaverClip), "the clip's file is removed");
     db.close();
   }
 }
+
+section('E evidence');
+const TOM = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Reid', role: 'Scout' })).body
+  .token;
+const claim = (await j('POST', '/org/verification/identity', {}, TOM)).body.claim.id;
+const passport = fileOf('image/png', 2048);
+const evidenceUpload = await upload(API, opener.org(TOM), {
+  purpose: 'verification_evidence',
+  bytes: passport,
+  mime: 'image/png',
+});
+r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: evidenceUpload, filename: 'id.png' }, TOM);
+ok(r.status === 201 && r.body.claim.evidence.length === 1, "Tom's upload becomes evidence on his claim");
+const evidenceId = r.body.claim.evidence[0].id;
+r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: evidenceUpload, filename: 'id.png' }, TOM);
+neg(
+  r.status === 409 && r.body.error === 'UPLOAD_ALREADY_USED' && r.body.evidenceId === evidenceId,
+  'naming it again adds nothing, and names the evidence it became',
+);
+const clipAsEvidence = await upload(API, asKola, { purpose: 'player_clip', bytes: clip.subarray(0, 64), mime: 'video/mp4' });
+r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: clipAsEvidence, filename: 'x.mp4' }, TOM);
+neg(r.status === 404, "a player's clip upload is not evidence");
 
 r = await fetch(`${API}/media/whatever?e=soon&s=x&v=y`, { headers: { authorization: `Bearer ${MARIA}` } });
 neg(r.status === 400, 'a media link with an expiry that is not a number is refused');
