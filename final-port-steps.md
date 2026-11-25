@@ -140,8 +140,9 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    - **Still to do with the real bucket:** an R2 lifecycle rule as the backstop. A PUT that began just before its
      URL expired and was still sending after the 15-minute grace can land after the sweep removed its key.
    - Not covered: an evidence file is never removed, because nothing deletes evidence records yet.
-6. **Drop the old routes** (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
-   `upload_sessions` table.
+6. **Drop the old routes** [**done**] (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
+   `upload_sessions` table: the routes and `platform/media` went with 5.2, and migration 0044 drops
+   `upload_sessions` and `upload_session_chunks`.
 7. **Batteries.** Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a
    `dataUrl`, and rewrite `platform/uploads` around the new flow. It is the last TypeScript battery not yet answered
    here (step 3) and was never copied: start from `../scoutbox/scoutbox-server/e2e/platform/uploads.mjs`, and list

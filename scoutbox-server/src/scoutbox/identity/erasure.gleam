@@ -368,9 +368,6 @@ pub fn erase(
           )
           use _ <- result.try(run(tx, erase_sql(), [sqlight.int(at), p]))
           use _ <- result.try(store.seam(tx, "player.delete.after_erase"))
-          use _ <- result.try(
-            run(tx, "DELETE FROM upload_sessions WHERE player_id = ?", [p]),
-          )
           // An upload never made into a clip expires now, so the sweep removes whatever was sent to it.
           use _ <- result.try(
             run(

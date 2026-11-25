@@ -5438,30 +5438,6 @@ CREATE TABLE friendly_responses (
   FOREIGN KEY (responded_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
   PRIMARY KEY (friendly_id, org_id)
 ) STRICT;
-CREATE TABLE upload_sessions (
-  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
-  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
-  size_bytes                               INTEGER NOT NULL,
-  mime                                     TEXT NOT NULL CHECK (mime IN ('video/webm','video/mp4','video/quicktime','image/jpeg','image/png','image/webp')),
-  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
-  declared_sha256                          TEXT CHECK (declared_sha256 IS NULL OR length(declared_sha256) <= 64),
-  chunk_size                               INTEGER NOT NULL,
-  total_chunks                             INTEGER NOT NULL,
-  status                                   TEXT NOT NULL CHECK (status IN ('open','finalised','aborted','abandoned')),
-  created_at                               INTEGER NOT NULL,
-  finalised_media_id                       TEXT CHECK (finalised_media_id IS NULL OR length(finalised_media_id) <= 80 AND length(finalised_media_id) > 0),
-  CHECK (size_bytes > 0 AND size_bytes <= 41943040),
-  CHECK (chunk_size > 0),
-  CHECK (total_chunks >= 1 AND total_chunks <= 1024),
-  CHECK (declared_sha256 IS NULL OR length(declared_sha256) = 64),
-  CHECK ((status = 'finalised') = (finalised_media_id IS NOT NULL))
-) STRICT;
-CREATE TABLE upload_session_chunks (
-  upload_session_id TEXT NOT NULL CHECK (length(upload_session_id) > 0 AND length(upload_session_id) <= 80),
-  chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
-  FOREIGN KEY (upload_session_id) REFERENCES upload_sessions(id) ON DELETE CASCADE,
-  PRIMARY KEY (upload_session_id, chunk_index)
-) STRICT;
 CREATE TABLE saved_searches (
   id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
   org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
@@ -5612,6 +5588,7 @@ INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0040_match_facts', _
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0041_upload_intents', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0042_clip_blobs', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0043_upload_removals', __NOW__);
+INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0044_drop_upload_sessions', __NOW__);
 INSERT INTO "meta" ("key", "value") VALUES ('sessionTtlMs', '2592000000');
 INSERT INTO "meta" ("key", "value") VALUES ('orgsInit', 'pending');
 INSERT INTO "meta" ("key", "value") VALUES ('coreIdentityInit', 'pending');
@@ -6218,8 +6195,6 @@ CREATE INDEX matchdays_org ON matchdays (org_id);
 CREATE INDEX friendlies_date ON friendlies (match_date, id);
 CREATE INDEX friendlies_org ON friendlies (org_id);
 CREATE INDEX friendly_responses_org ON friendly_responses (org_id);
-CREATE INDEX upload_sessions_player ON upload_sessions (player_id);
-CREATE INDEX upload_sessions_open ON upload_sessions (created_at) WHERE status = 'open';
 CREATE INDEX saved_searches_org ON saved_searches (org_id);
 CREATE UNIQUE INDEX invoices_signing ON invoices (signing_id);
 CREATE INDEX invoices_org ON invoices (org_id);

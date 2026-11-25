@@ -17,7 +17,7 @@
     "fieldCodes": {
       "contract.*": "SIGNING_CONTRACT_DATES_INVALID",
       "expiresAt": "SIGNING_EXPIRY_INVALID",
-      "dataUrl": "SIGNING_DOCUMENT_INVALID",
+      "uploadId": "SIGNING_DOCUMENT_INVALID",
       "method": "SIGNING_METHOD_UNKNOWN",
       "expectedRev": "SIGNING_REV_REQUIRED",
       "expectedVersion": "SIGNING_REV_REQUIRED"
