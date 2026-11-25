@@ -7,6 +7,8 @@
 //   D clips: an upload named to /player/media becomes a clip with its file, once; the Verified Clip needs one; the
 //     media link redirects to storage for whoever may see the clip; erasure removes the file
 //   E evidence: an upload named as evidence once; again, the evidence it became is named
+//   F clean-up: the sweep expires uploads past their time and removes their files, once; a file a record uses stays;
+//     a clip file erasure couldn't remove stays queued, unserved, until a sweep removes it
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -293,6 +295,87 @@ neg(
 const clipAsEvidence = await upload(API, asKola, { purpose: 'player_clip', bytes: clip.subarray(0, 64), mime: 'video/mp4' });
 r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: clipAsEvidence, filename: 'x.mp4' }, TOM);
 neg(r.status === 404, "a player's clip upload is not evidence");
+
+section('F clean-up');
+const ADMIN = { 'x-admin-key': 'scoutbox-admin' };
+const sweep = async () => {
+  const res = await fetch(`${API}/admin/sweep`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...ADMIN },
+    body: '{}',
+  });
+  return res.status;
+};
+const intent = (id) => {
+  const db = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true });
+  try {
+    return db.prepare('SELECT status, removed_at AS removedAt FROM upload_intents WHERE id = ?').get(id);
+  } finally {
+    db.close();
+  }
+};
+const backdate = (id) => {
+  const db = new DatabaseSync(path.join(DATA, 'scoutbox.db'));
+  try {
+    db.prepare('UPDATE upload_intents SET expires_at = ? WHERE id = ?').run(Date.now() - 1000, id);
+  } finally {
+    db.close();
+  }
+};
+const forgotten = await upload(API, asKola, { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+ok(stored(forgotten), 'fixture: an upload sent but never named');
+backdate(forgotten);
+ok((await sweep()) === 200, 'the sweep runs after its time has passed');
+ok(!stored(forgotten) && !fs.existsSync(path.join(DATA, 'media', `${forgotten}.json`)), 'its file is removed');
+r = intent(forgotten);
+ok(r.status === 'expired' && typeof r.removedAt === 'number', 'and the upload is expired, its removal recorded');
+const removedAt = r.removedAt;
+r = await j('POST', '/player/media', { title: 'Too late', uploadId: forgotten }, KOLA);
+neg(r.status === 410 && r.body.error === 'UPLOAD_EXPIRED', 'naming it now answers that it expired');
+ok((await sweep()) === 200 && intent(forgotten).removedAt === removedAt, 'a second sweep changes nothing');
+ok(!stored(halfSent) && typeof intent(halfSent).removedAt === 'number', "the leaver's unnamed upload is removed too");
+ok(stored(clipId) && intent(clipId).status === 'used', 'a file a clip uses stays');
+ok(stored(evidenceUpload) && intent(evidenceUpload).status === 'used', 'and so does one evidence uses');
+
+// Erasure that can't reach storage keeps the clip's removal queued; the clip is never served meanwhile.
+if (process.getuid?.() === 0) {
+  console.log('(skipped: as root, a read-only directory refuses nothing)');
+} else {
+  r = await j('POST', '/auth/player/signup', {
+    name: 'Stranded Uploader',
+    dob: '2000-03-03',
+    country: 'GB',
+    position: 'CB',
+    password: 'longenough1',
+  });
+  const stranded = r.body.token;
+  const strandedKey = await upload(API, opener.player(stranded), { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+  r = await j('POST', '/player/media', { title: 'Stranded clip', uploadId: strandedKey }, stranded);
+  ok(r.status === 201, 'fixture: a player with a clip');
+  const strandedLink = r.body.media.url;
+  const queued = () => {
+    const db = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true });
+    try {
+      return db.prepare('SELECT COUNT(*) AS n FROM media_deletions WHERE blob_key = ?').get(strandedKey).n;
+    } finally {
+      db.close();
+    }
+  };
+  const media = path.join(DATA, 'media');
+  fs.chmodSync(media, 0o555);
+  try {
+    r = await j('DELETE', '/player/account', undefined, stranded);
+    ok(r.status === 200, 'the player deletes their account while storage refuses removals');
+    ok(stored(strandedKey) && queued() === 1, "the clip's file is still there, its removal queued");
+    r = await fetch(`${API}${strandedLink}`, { redirect: 'manual' });
+    neg(r.status !== 302 && r.status !== 200, 'and the clip is not served');
+    ok((await sweep()) === 200 && queued() === 1, 'a sweep that still cannot remove it keeps it queued');
+  } finally {
+    fs.chmodSync(media, 0o755);
+  }
+  ok((await sweep()) === 200, 'once storage answers, the sweep runs');
+  ok(!stored(strandedKey) && queued() === 0, 'and removes the file and its queue entry');
+}
 
 r = await fetch(`${API}/media/whatever?e=soon&s=x&v=y`, { headers: { authorization: `Bearer ${MARIA}` } });
 neg(r.status === 400, 'a media link with an expiry that is not a number is refused');

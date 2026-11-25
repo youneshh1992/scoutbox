@@ -5565,7 +5565,7 @@ CREATE TABLE upload_intents (
   created_at  INTEGER NOT NULL,
   expires_at  INTEGER NOT NULL,
   record_id   TEXT CHECK (record_id IS NULL OR length(record_id) > 0 AND length(record_id) <= 80),
-  used_at     INTEGER,
+  used_at     INTEGER, removed_at INTEGER CHECK (removed_at IS NULL OR status = 'expired'),
   CHECK ((status = 'used') = (record_id IS NOT NULL)),
   CHECK ((status = 'used') = (used_at IS NOT NULL))
 ) STRICT;
@@ -5611,6 +5611,7 @@ INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0039_retire_blob', _
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0040_match_facts', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0041_upload_intents', __NOW__);
 INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0042_clip_blobs', __NOW__);
+INSERT INTO "data_migrations" ("id", "applied_at") VALUES ('0043_upload_removals', __NOW__);
 INSERT INTO "meta" ("key", "value") VALUES ('sessionTtlMs', '2592000000');
 INSERT INTO "meta" ("key", "value") VALUES ('orgsInit', 'pending');
 INSERT INTO "meta" ("key", "value") VALUES ('coreIdentityInit', 'pending');

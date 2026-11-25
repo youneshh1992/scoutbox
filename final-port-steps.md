@@ -130,9 +130,16 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    to, so a minute was too short). **Decided:** the responses that carry a file as base64 (signing documents, offer
    documents, the admin and organisation evidence views) carry `file: {mime, url}` instead, the URL a signed GET
    of the same lifetime.
-5. **Clean-up.** The sweep deletes the objects of expired intents. The `media_deletions` queue calls
-   `blobs.delete` and retries on failure, which covers erasure. An R2 lifecycle rule on unfinished uploads is the
-   backstop.
+5. **Clean-up** [**done**, except the lifecycle rule]. The sweep (periodic and `POST /admin/sweep`) expires each
+   open upload past its time, then removes the files of up to 100 expired uploads a sweep, outside any unit, and
+   records each in `upload_intents.removed_at`; a failed removal is tried again next sweep. A route that verified
+   an upload the sweep then expired finds it stale in `mark_used` and answers `410 UPLOAD_EXPIRED`, so no record
+   is left without its file. Erasure still removes clip files straight after its COMMIT; the sweep retries what's
+   left in `media_deletions` (`erasure.retry_removals`), skipping a clip a player still carries (the operator
+   page's conflicts). The rows stay: `410` depends on them, and only open ones count towards the cap.
+   - **Still to do with the real bucket:** an R2 lifecycle rule as the backstop. A PUT that began just before its
+     URL expired and was still sending after the 15-minute grace can land after the sweep removed its key.
+   - Not covered: an evidence file is never removed, because nothing deletes evidence records yet.
 6. **Drop the old routes** (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
    `upload_sessions` table.
 7. **Batteries.** Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a

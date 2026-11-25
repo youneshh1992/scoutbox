@@ -360,3 +360,66 @@ pub fn refused(refusal: Refusal) -> Response {
 pub fn upload_id_field() -> input.Check(id.UploadIntentId) {
   fn(v) { input.id_of(80)(v) |> result.map(id.upload_intent) }
 }
+
+// -------------------------------------------------------------------------------------------------- the sweep
+
+/// The most expired uploads one sweep removes the files of; the next sweep carries on.
+const removals_per_sweep = 100
+
+/// The uploads' part of the sweep: every open upload past its time is expired, then the files of expired uploads
+/// are removed from storage, between units, never inside one. A domain route that verified an upload the sweep then
+/// expires finds it stale inside its unit (`mark_used`), so a file is never removed under a record. A removal that
+/// fails is logged and tried again by the next sweep; one already done is never tried again.
+///
+/// An upload whose PUT began just before its URL expired and was still sending after the grace may land after its
+/// removal: the bucket's lifecycle rule is the backstop for that file.
+pub fn sweep(ctx: Ctx, now: Int) -> Result(Nil, Nil) {
+  use _ <- result.try(
+    store.unit(ctx.store, fn(tx) {
+      store.run(
+        tx,
+        "UPDATE upload_intents SET status = 'expired' WHERE status = 'open' AND expires_at <= ?",
+        [sqlight.int(now)],
+      )
+    })
+    |> result.replace_error(Nil),
+  )
+  use due <- result.try(
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT id FROM upload_intents WHERE status = 'expired' AND removed_at IS NULL ORDER BY expires_at, id LIMIT ?",
+        [sqlight.int(removals_per_sweep)],
+        decode.at([0], id.upload_intent_decoder()),
+      )
+    })
+    |> result.replace_error(Nil),
+  )
+  let removed =
+    list.filter(due, fn(upload_id) {
+      let key = id.upload_intent_to_string(upload_id)
+      case blobs.delete(ctx.config.blobs, key, clock.now_ms()) {
+        Ok(Nil) -> True
+        Error(problem) -> {
+          wisp.log_error(
+            "upload sweep: " <> key <> ": " <> string.inspect(problem),
+          )
+          False
+        }
+      }
+    })
+  case removed {
+    [] -> Ok(Nil)
+    _ ->
+      store.unit(ctx.store, fn(tx) {
+        list.try_each(removed, fn(upload_id) {
+          store.run(
+            tx,
+            "UPDATE upload_intents SET removed_at = ? WHERE id = ? AND status = 'expired' AND removed_at IS NULL",
+            [sqlight.int(now), id.upload_intent_sql(upload_id)],
+          )
+        })
+      })
+      |> result.replace_error(Nil)
+  }
+}

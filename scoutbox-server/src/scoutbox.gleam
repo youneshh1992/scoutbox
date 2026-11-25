@@ -10,8 +10,10 @@ import scoutbox/agents/agent_sweep
 import scoutbox/agents/dev_reviewers
 import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
+import scoutbox/identity/erasure
 import scoutbox/insight/exposure
 import scoutbox/integrations/webhooks
+import scoutbox/media/uploads
 import scoutbox/messaging/delivery
 import scoutbox/messaging/dev_mail
 import scoutbox/messaging/live_routes
@@ -175,7 +177,7 @@ fn boot() -> Result(Nil, String) {
 /// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
 /// warnings, the signing follow-ups and application reminders, the trial reminders, the match facts whose time-only
 /// change is due, the agent core's expiry and stale-verification notices, the review-later reminders and the exposure
-/// window, and the transition cases' expiries and check-ins.
+/// window, the transition cases' expiries and check-ins, and the files of expired uploads and erased clips.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
@@ -187,6 +189,8 @@ fn sweeping(ctx: Ctx) -> Nil {
   let _ = agent_sweep.sweep(ctx.store, clock.now_ms())
   let _ = exposure.sweep(ctx, clock.now_ms())
   transitions.sweep(ctx.store, clock.now_ms())
+  let _ = uploads.sweep(ctx, clock.now_ms())
+  let _ = erasure.retry_removals(ctx)
   sweeping(ctx)
 }
 

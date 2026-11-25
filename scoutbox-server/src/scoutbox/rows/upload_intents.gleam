@@ -13,10 +13,10 @@ pub const table = "upload_intents"
 
 /// Every column, in `Row` order.
 pub const columns =
-  "id, purpose, owner_kind, owner_id, size_bytes, mime, sha256, status, created_at, expires_at, record_id, used_at"
+  "id, purpose, owner_kind, owner_id, size_bytes, mime, sha256, status, created_at, expires_at, record_id, used_at, removed_at"
 
 /// How many columns `columns` names: an extra column selected after them is read at this index.
-pub const width = 12
+pub const width = 13
 
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
@@ -172,6 +172,7 @@ pub type Row {
     expires_at: Int,
     record_id: Option(String),
     used_at: Option(Int),
+    removed_at: Option(Int),
   )
 }
 
@@ -201,6 +202,7 @@ pub fn new(
     expires_at:,
     record_id: None,
     used_at: None,
+    removed_at: None,
   )
 }
 
@@ -218,6 +220,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use expires_at <- decode.field(9, decode.int)
   use record_id <- decode.field(10, decode.optional(decode.string))
   use used_at <- decode.field(11, decode.optional(decode.int))
+  use removed_at <- decode.field(12, decode.optional(decode.int))
   decode.success(Row(
     id:,
     purpose:,
@@ -231,11 +234,12 @@ pub fn decoder() -> decode.Decoder(Row) {
     expires_at:,
     record_id:,
     used_at:,
+    removed_at:,
   ))
 }
 
 pub const insert_sql =
-  "INSERT INTO upload_intents (id, purpose, owner_kind, owner_id, size_bytes, mime, sha256, status, created_at, expires_at, record_id, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  "INSERT INTO upload_intents (id, purpose, owner_kind, owner_id, size_bytes, mime, sha256, status, created_at, expires_at, record_id, used_at, removed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: Row) -> List(sqlight.Value) {
@@ -252,6 +256,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.int(row.expires_at),
     sqlight.nullable(sqlight.text, row.record_id),
     sqlight.nullable(sqlight.int, row.used_at),
+    sqlight.nullable(sqlight.int, row.removed_at),
   ]
 }
 

@@ -395,6 +395,33 @@ pub fn erase(
   }
 }
 
+/// The removals erasure couldn't finish after its COMMIT, retried by the sweep: at most this many a sweep.
+const retries_per_sweep = 100
+
+/// The sweep's part: each queued removal whose clip no player carries any more (the operator page counts those
+/// that one still does as conflicts, kept and never removed) has its file removed from storage, then leaves the
+/// queue. One that fails again stays for the next sweep.
+pub fn retry_removals(ctx: Ctx) -> Result(Nil, Nil) {
+  use queued <- result.map(
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT d.media_id, d.blob_key FROM media_deletions d
+         WHERE NOT EXISTS (SELECT 1 FROM player_media m WHERE m.id = d.media_id)
+         ORDER BY d.queued_at, d.media_id LIMIT ?",
+        [sqlight.int(retries_per_sweep)],
+        {
+          use media_id <- decode.field(0, decode.string)
+          use blob_key <- decode.field(1, decode.optional(decode.string))
+          decode.success(#(media_id, blob_key))
+        },
+      )
+    })
+    |> result.replace_error(Nil),
+  )
+  list.each(queued, fn(m) { remove_file(ctx, m.0, m.1) })
+}
+
 fn remove_file(ctx: Ctx, media_id: String, blob_key: Option(String)) -> Nil {
   let gone = case blob_key {
     None -> True

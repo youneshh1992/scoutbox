@@ -14,10 +14,12 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
+import scoutbox/identity/erasure
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
 import scoutbox/identity/staff
+import scoutbox/media/uploads
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -850,13 +852,13 @@ pub fn admin_due_at(ctx: Ctx, req: Request, fid: id.FollowUpId) -> Response {
 }
 
 /// `POST /admin/sweep`: runs the scheduled work now. It changes when things happen, never what.
-///
-/// The objects of expired uploads aren't removed by the sweep yet (final-port-steps.md step 5.5).
 pub fn admin_sweep(ctx: Ctx, req: Request) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()
   let _ = sweep(ctx, now)
   let _ = trial_routes.remind(ctx, now)
+  let _ = uploads.sweep(ctx, now)
+  let _ = erasure.retry_removals(ctx)
   http.json(200, json.object([#("ok", json.bool(True))]))
 }
 
