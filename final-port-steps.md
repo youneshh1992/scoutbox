@@ -147,9 +147,8 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    `dataUrl`, and rewrite `platform/uploads` around the new flow. It is the last TypeScript battery not yet answered
    here (step 3) and was never copied: start from `../scoutbox/scoutbox-server/e2e/platform/uploads.mjs`, and list
    it in `e2e/batteries.mjs`.
-8. **Apps** (`../scoutbox`). The player upload screen, the club and Grassroots signing panels, claim evidence and
-   the evidence and document viewers change to "ask for a URL, PUT, send the `uploadId`" and to reading
-   `file.url`. The bucket needs a CORS rule for the web portals.
+8. **Apps** [**moved to step 11.2**]: they talk to the TypeScript server until the switch, and it takes no uploads,
+   so they change with the swap.
 
 Multipart (resumable) uploads are left for later. When they come, they are R2 multipart on the same intent.
 
@@ -195,7 +194,8 @@ server's boundaries check, `tsc`, unit tests and batteries. Replace it with:
 - `npm run e2e`
 
 The app jobs (club build, player typecheck, tests and web export) stay. The UI e2e suites in `../scoutbox/e2e/`
-were out of scope for the battery port: run them against this server once before the switch.
+were out of scope for the battery port: run them against this server once before the switch, after the apps'
+upload change (step 11.2), since their upload flows send what the TypeScript server takes.
 
 ## 9. Move the code the apps share with the server
 
@@ -218,7 +218,11 @@ through PRs).
 
 1. Review `scoutbox-server/README.md`'s "Known differences from the TypeScript server" once, and confirm that none
    matters to a user.
-2. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
-3. Update `../scoutbox/docs/architecture.md`, `scoutbox-server/OPERATIONS.md`, `README.md` and
+2. **Move the apps to uploads** (from step 5.8), in the same release as the swap: the apps can't talk to both
+   servers. The player upload screen, the club and Grassroots signing panels, claim evidence and the evidence and
+   document viewers change to "ask for a URL, PUT, send the `uploadId`" and to reading `file.url`. The bucket
+   needs a CORS rule for the web portals.
+3. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
+4. Update `../scoutbox/docs/architecture.md`, `scoutbox-server/OPERATIONS.md`, `README.md` and
    `../scoutbox/CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in
    step 4. Here it needs only its git rules from step 10, and any remaining mention of the Node server.
