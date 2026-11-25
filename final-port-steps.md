@@ -96,18 +96,27 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
      (`POST /player/media {title, uploadId, attendanceId}`, evidence `{uploadId, filename, note}`, a signing
      document `{uploadId, label}`), so each keeps its own checks, moderation and response.
    - The shared part is `uploads.verify`, before the unit because it calls storage: the intent is the caller's,
-     open and of this purpose, and the object's size, type and SHA-256 match it (for evidence, also its magic
-     bytes). Inside the unit `uploads.use` moves the intent from `open` to `used` with the record it made; a
+     open and of this purpose, and `head` finds the object with its size and type (for evidence, `read_range` also
+     checks its magic bytes). It never reads the whole object: storage has already checked the SHA-256 (3). Inside the unit `uploads.use` moves the intent from `open` to `used` with the record it made; a
      retry finds it used for that record and answers the same, and a race answers `store.stale`. The record's
      `media_id` is the blob key.
-3. **Integrity.** R2 doesn't document `x-amz-checksum-sha256` on PutObject, nor `x-amz-checksum-mode` on
-   HeadObject, and its SHA-256 is composite (multipart) only
-   ([S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/)). Its `Content-MD5` is enforced, but
-   browsers can't compute MD5 and it wouldn't prove the SHA-256 we record. **Decided:** `uploads.verify` hashes
-   the object itself, read in ranges, for every purpose (all are capped at 40 MiB or less, and R2 doesn't charge
-   for reads). The signed PUT fixes the length and type and carries `If-None-Match: *`, which R2 applies
-   atomically, so a key is never overwritten. Signing's `bytes_mismatch` compares the digest recorded at upload
-   instead of re-reading the file.
+3. **Integrity.** **Decided:** this server never hashes an upload. The presigned PUT signs `content-length`,
+   `content-type`, `x-amz-checksum-sha256` (the declared digest) and `If-None-Match: *` into its URL, so the
+   client can't drop or change them. Storage refuses bytes whose digest differs, and a successful PUT means the
+   stored bytes are the declared ones; nothing needs to read the checksum back (R2 doesn't list
+   `x-amz-checksum-mode` on HeadObject). `If-None-Match: *` is applied atomically, so a key is never overwritten.
+   Signing's `bytes_mismatch` compares the digest recorded at upload instead of re-reading the file. `LocalDisk`
+   enforces the same on `PUT /blobs/<token>`, hashing as it writes. The client computes the digest (WebCrypto in
+   the portals, `expo-crypto`'s `digest` in the player app).
+
+   **Still to check against a real R2 bucket** (there isn't one yet): R2's
+   [release notes](https://developers.cloudflare.com/r2/platform/release-notes/) say S3 PutObject supports SHA-256
+   checksums, but its [S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/) page doesn't list the
+   header. Once `platform/blobs` exists, a `gleam dev r2-check` command uses this server's own signer to PUT the
+   wrong bytes under a declared digest (expecting a refusal), the right bytes (expecting success), the same key
+   again (expecting `412`), and a wrong length or type. If R2 doesn't refuse the wrong digest, fall back to a
+   small Cloudflare Worker as the upload endpoint: it checks a token this server issues and stores through the R2
+   binding's `put(key, body, {sha256})`, whose check is documented. Clients keep the same protocol.
 4. **Reads.** `/media/<id>` keeps its session-bound link and live standing check, and answers `302` to a signed GET
    that lives about 60 seconds. **Decided:** the responses that carry a file as base64 (signing documents, offer
    documents, the admin and organisation evidence views) carry `file: {mime, url}` instead, the URL a signed GET
