@@ -58,14 +58,7 @@ fn matrix() -> Matrix {
       "roles",
       decode.list(decode.optional(decode.string)),
     )
-    decode.success(Matrix(
-      now:,
-      statuses:,
-      dims:,
-      values:,
-      codes:,
-      roles:,
-    ))
+    decode.success(Matrix(now:, statuses:, dims:, values:, codes:, roles:))
   }
   let assert Ok(m) = json.parse(text, decoder)
   m

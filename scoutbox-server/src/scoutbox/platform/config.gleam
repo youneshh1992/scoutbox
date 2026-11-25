@@ -11,10 +11,12 @@ import gleam/result
 import gleam/string
 import scoutbox/messaging/transport
 import scoutbox/passport/trust_rules
+import scoutbox/platform/blobs
 import scoutbox/platform/cors
 import scoutbox/platform/input
 import scoutbox/platform/proxy_trust
 import scoutbox/platform/secrets
+import scoutbox/platform/sigv4
 
 pub type Config {
   Config(
@@ -72,6 +74,9 @@ pub type Config {
     mail: transport.Mail,
     /// EXPO_ACCESS_TOKEN: push through Expo. Unset, the push log is the delivery.
     push: transport.Push,
+    /// R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY: uploaded files in Cloudflare R2. None
+    /// set, they are kept on this instance's disk under DATA_DIR/media.
+    blobs: blobs.Blobs,
   )
 }
 
@@ -149,9 +154,11 @@ pub fn load() -> Result(Config, String) {
     Some(secret) -> secret
     None -> secrets.random_hex(32)
   }
+  let data_dir = envoy.get("DATA_DIR") |> result.unwrap("data")
+  use blobs <- result.try(blobs_from(envoy.get, data_dir, media_key))
   Ok(Config(
     port:,
-    data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
+    data_dir:,
     admin_key:,
     dev_logins: !production,
     fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
@@ -197,7 +204,57 @@ pub fn load() -> Result(Config, String) {
     trust_proxy: proxy_trust.parse(envoy.get("SCOUTBOX_TRUST_PROXY")),
     mail: transport.mail_from_env(envoy.get),
     push: transport.push_from_env(envoy.get),
+    blobs:,
   ))
+}
+
+const r2_settings = [
+  "R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+]
+
+/// R2 when all four of its settings are set, the local disk when none is; some of them is a mistake in any mode.
+/// The local store signs its links with the media key.
+pub fn blobs_from(
+  get: fn(String) -> Result(String, Nil),
+  data_dir: String,
+  media_key: String,
+) -> Result(blobs.Blobs, String) {
+  let set =
+    list.map(r2_settings, fn(name) {
+      case get(name) {
+        Ok(value) if value != "" -> Ok(value)
+        _ -> Error(name)
+      }
+    })
+  case result.all(set), result.values(set) {
+    Ok([account_id, bucket, access_key_id, secret_access_key]), _ ->
+      Ok(blobs.R2(
+        credentials: sigv4.Credentials(
+          access_key_id:,
+          secret_access_key:,
+          region: "auto",
+        ),
+        account_id:,
+        bucket:,
+      ))
+    _, [] -> Ok(blobs.LocalDisk(dir: data_dir <> "/media", secret: media_key))
+    _, _ ->
+      Error(
+        "R2 storage needs all of "
+        <> string.join(r2_settings, ", ")
+        <> "; missing "
+        <> string.join(
+          list.filter_map(set, fn(r) {
+            case r {
+              Error(name) -> Ok(name)
+              Ok(_) -> Error(Nil)
+            }
+          }),
+          ", ",
+        )
+        <> ".",
+      )
+  }
 }
 
 /// Any positive number of days, fractions included; anything else is the default, as in the TypeScript server.

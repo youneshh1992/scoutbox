@@ -27,8 +27,9 @@ fn peer(connection: ewe.Connection) -> String {
   }
 }
 
-/// The most a request body can carry at the transport. Wisp enforces its own, smaller limit per request.
-const transport_limit = 32_000_000
+/// The most a request body can carry at the transport: room for the largest upload the local blob store takes
+/// (`blobs.max_bytes`, checked by a test). Wisp enforces its own, smaller limit per request.
+pub const transport_limit = 44_000_000
 
 /// The most a request body may carry: the Express server's `express.json({ limit: '20mb' })`.
 pub const body_limit = 20_971_520

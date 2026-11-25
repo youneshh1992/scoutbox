@@ -11,6 +11,7 @@ import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/messaging/notifications
 import scoutbox/messaging/transport
+import scoutbox/platform/blobs
 import scoutbox/platform/clock
 import scoutbox/platform/config.{type Config}
 import scoutbox/platform/http
@@ -237,8 +238,11 @@ pub fn capability_states(config: Config) -> Json {
     #(
       "object_storage",
       state(
-        "not_configured",
-        "Media is stored on the local disk of this instance.",
+        case config.blobs {
+          blobs.R2(..) -> "configured"
+          blobs.LocalDisk(..) -> "not_configured"
+        },
+        "Without R2, uploaded files are stored on the local disk of this instance.",
       ),
     ),
     #(

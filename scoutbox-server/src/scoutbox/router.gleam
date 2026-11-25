@@ -85,6 +85,7 @@ import scoutbox/operations/follow_ups
 import scoutbox/passport/football_passport
 import scoutbox/passport/sharing
 import scoutbox/passport/trust
+import scoutbox/platform/blob_routes
 import scoutbox/platform/clock
 import scoutbox/platform/cors
 import scoutbox/platform/fault_routes
@@ -172,6 +173,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
     ["orgs", "directory"] ->
       only(req, Get, fn() { club_directory.directory(ctx, req) })
+    ["blobs", token] ->
+      blob_routes.handle(ctx.config.blobs, req, token, clock.now_ms())
     ["media", id] -> only(req, Get, fn() { links.serve(ctx, req, id) })
     ["media", id, "captions"] ->
       only(req, Get, fn() { links.captions(ctx, req, id) })

@@ -70,7 +70,7 @@ application server. This replaces every way the TypeScript server takes bytes:
 
 It is not ported to the TypeScript server, so it comes after step 4: the batteries it changes are owned here now.
 
-1. **Storage interface** (`platform/blobs`): `presign_put`, `presign_get`, `head`, `read_range` and `delete`. It has
+1. **Storage interface** (`platform/blobs`) [**done**]: `presign_put`, `presign_get`, `head`, `read_range` and `delete`. It has
    two backends:
    - `R2`: SigV4 presigning in pure Gleam with `gleam_crypto`, tested against AWS's SigV4 vectors, and `httpc` for
      HEAD, ranged GET and DELETE. Set by `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and
