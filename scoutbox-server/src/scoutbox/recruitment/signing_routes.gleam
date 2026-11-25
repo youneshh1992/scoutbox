@@ -619,38 +619,53 @@ fn vault_record(
 }
 
 /// Before presenting, before a party confirms, at completion and before serving: the vault row must be this
-/// package's and its bytes must hash to the revision's digest. Anything else is refused, never repaired.
-fn document_bytes_problem(
-  ctx: Ctx,
+/// package's and its digest the revision's, then its object must still be in storage. Anything else is refused,
+/// never repaired. The first part reads the database (`document_record`); the second asks storage
+/// (`document_problem`), after the read has given its connection back, so a slow storage never holds a reader.
+type DocumentCheck {
+  /// The records already refuse the document, for this reason.
+  Refused(String)
+  /// The records agree; the object at this key must still be there.
+  InStorage(String)
+}
+
+fn document_record(
   read: Read,
   p: Package,
   doc: Option(doc_row.Row),
-) -> Result(Option(String), Fail(e)) {
+) -> Result(DocumentCheck, Fail(e)) {
   case doc {
-    None -> Ok(Some("missing"))
-    Some(d) if d.sha256 == "" -> Ok(Some("missing"))
+    None -> Ok(Refused("missing"))
+    Some(d) if d.sha256 == "" -> Ok(Refused("missing"))
     Some(d) -> {
       use ev <- result.map(vault_record(read, d.evidence_id, p.row.org_id))
       let mine = Some(p.row.id)
       let digest = Some(d.sha256)
       case ev {
-        None -> Some("evidence_missing")
-        Some(e) if e.signing_package_id != mine -> Some("foreign")
-        Some(e) if e.sha256 != digest -> Some("digest_mismatch")
-        // Storage refused any bytes but the declared ones and never overwrites an object, so the recorded digest
-        // stands for the bytes: what is left to check is that the object is still there.
+        None -> Refused("evidence_missing")
+        Some(e) if e.signing_package_id != mine -> Refused("foreign")
+        Some(e) if e.sha256 != digest -> Refused("digest_mismatch")
         Some(e) ->
           case e.media_id {
-            None -> Some("bytes_missing")
-            Some(key) ->
-              case blobs.head(ctx.config.blobs, key, clock.now_ms()) {
-                Ok(Some(_)) -> None
-                Ok(None) -> Some("bytes_missing")
-                Error(_) -> Some("bytes_unavailable")
-              }
+            None -> Refused("bytes_missing")
+            Some(key) -> InStorage(key)
           }
       }
     }
+  }
+}
+
+/// Storage refused any bytes but the declared ones and never overwrites an object, so the recorded digest stands
+/// for the bytes: what is left to check is that the object is still there. Never call it inside a read or a unit.
+fn document_problem(ctx: Ctx, check: DocumentCheck) -> Option(String) {
+  case check {
+    Refused(why) -> Some(why)
+    InStorage(key) ->
+      case blobs.head(ctx.config.blobs, key, clock.now_ms()) {
+        Ok(Some(_)) -> None
+        Ok(None) -> Some("bytes_missing")
+        Error(_) -> Some("bytes_unavailable")
+      }
   }
 }
 
@@ -705,17 +720,18 @@ fn serve_document(
     Some(d) ->
       case
         read(ctx, fn(rd) {
-          use problem <- result.try(document_bytes_problem(ctx, rd, p, Some(d)))
-          case problem {
-            Some(_) -> Ok(Error(Nil))
-            None -> document_file(ctx, rd, d, p.row.org_id) |> result.map(Ok)
-          }
+          use check <- result.try(document_record(rd, p, Some(d)))
+          use file <- result.map(document_file(ctx, rd, d, p.row.org_id))
+          #(check, file)
         })
       {
         Error(response) -> response
-        Ok(Error(Nil)) -> state_unknown("This document cannot be read.")
-        Ok(Ok(None)) -> gone
-        Ok(Ok(Some(out))) -> http.json(200, out)
+        Ok(#(check, file)) ->
+          case document_problem(ctx, check), file {
+            Some(_), _ -> state_unknown("This document cannot be read.")
+            None, None -> gone
+            None, Some(out) -> http.json(200, out)
+          }
       }
   }
 }
@@ -1874,13 +1890,8 @@ pub fn ready(
         read(ctx, fn(r) {
           use is_blocked <- result.try(blocked(r, l.pkg))
           use removed <- result.try(subject_removed(r, l.room))
-          use problem <- result.map(document_bytes_problem(
-            ctx,
-            r,
-            l.pkg,
-            rev.document,
-          ))
-          #(is_blocked, removed, problem)
+          use check <- result.map(document_record(r, l.pkg, rev.document))
+          #(is_blocked, removed, check)
         })
       case checked {
         Error(response) -> response
@@ -1896,7 +1907,8 @@ pub fn ready(
             "This player removed their ScoutBox account.",
             [],
           )
-        Ok(#(False, False, problem)) -> {
+        Ok(#(False, False, check)) -> {
+          let problem = document_problem(ctx, check)
           let expiry = case b.expires_at {
             None -> Ok(l.pkg.row.expires_at)
             Some(_) ->
@@ -2216,7 +2228,10 @@ pub fn complete_party(
                 ],
               )
             Ok(#(rev, party)) ->
-              case read(ctx, document_bytes_problem(ctx, _, p, rev.document)) {
+              case
+                read(ctx, document_record(_, p, rev.document))
+                |> result.map(document_problem(ctx, _))
+              {
                 Error(response) -> response
                 Ok(Some(_)) ->
                   state_unknown(
@@ -2516,13 +2531,13 @@ pub fn complete(
       let rev = signing_rules.current_revision(p)
       let checked =
         read(ctx, fn(r) {
-          use problem <- result.try(case rev {
+          use check <- result.try(case rev {
             Some(x) ->
               case x.document {
-                Some(_) -> document_bytes_problem(ctx, r, p, x.document)
-                None -> Ok(Some("missing"))
+                Some(_) -> document_record(r, p, x.document)
+                None -> Ok(Refused("missing"))
               }
-            None -> Ok(Some("missing"))
+            None -> Ok(Refused("missing"))
           })
           use siblings <- result.try(packages_of_offer(
             r,
@@ -2541,21 +2556,31 @@ pub fn complete(
             })
             || by_offer != None
           #(
+            check,
+            signing_rules.GateFacts(
+              now:,
+              offer: Some(signing_rules.gate_offer(l.offer, now)),
+              offer_revision: signing_rules.gate_revision(
+                l.offer,
+                p.row.offer_revision_id,
+                now,
+              ),
+              kase: Some(l.room),
+              other_completed: other,
+              blocked: is_blocked,
+              document_problem: None,
+            ),
+            removed,
+            org,
+          )
+        })
+        |> result.map(fn(read) {
+          let #(check, facts, removed, org) = read
+          let document_problem = document_problem(ctx, check)
+          #(
             signing_rules.completion_gate(
               p,
-              signing_rules.GateFacts(
-                now:,
-                offer: Some(signing_rules.gate_offer(l.offer, now)),
-                offer_revision: signing_rules.gate_revision(
-                  l.offer,
-                  p.row.offer_revision_id,
-                  now,
-                ),
-                kase: Some(l.room),
-                other_completed: other,
-                blocked: is_blocked,
-                document_problem: problem,
-              ),
+              signing_rules.GateFacts(..facts, document_problem:),
             ),
             removed,
             org,

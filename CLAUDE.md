@@ -116,6 +116,9 @@ for the product rules; they apply here too.
 - An act whose checks ran before its unit re-checks inside it (a rev, say) and answers `store.stale(what)` when
   another request moved the state first, never a panic. Its route is wrapped in `http.rerun_on_stale`, which runs
   it again from the top so it answers from the new state.
+- Never call object storage (`platform/blobs`) inside a read or a unit: a slow storage would hold a connection
+  and, through the readers' pool, every other request. Read what's needed, give the connection back, then call it
+  (`signing_routes.document_record` then `document_problem`; `uploads.verify` before the unit).
 - Expected failures are values: `store.refuse(e)` rolls the unit back. Map one act's refusals into another's
   with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
 - Crashes are not control flow. `exception.rescue` appears once, in the router's `rescue`: a crash becomes a 500,
