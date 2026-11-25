@@ -61,48 +61,69 @@ Nothing in this repository reads `../scoutbox` any more:
 ## 5. Uploads through object storage
 
 Files go from the client straight to Cloudflare R2 with a signed URL the server issues, and never pass through an
-application server. This replaces all three ways the TypeScript server takes bytes:
+application server. This replaces every way the TypeScript server takes bytes:
 
 - the `dataUrl` on `POST /player/media`
 - the chunked `/player/uploads`
-- the evidence and signing-document `dataUrl`
+- the evidence `dataUrl` on personal claims, licences and root-organisation applications
+- the signing-document `dataUrl`
 
 It is not ported to the TypeScript server, so it comes after step 4: the batteries it changes are owned here now.
 
 1. **Storage interface** (`platform/blobs`): `presign_put`, `presign_get`, `head`, `read_range` and `delete`. It has
    two backends:
-   - `R2`: SigV4 signing in pure Gleam with `gleam_crypto`, and `httpc` for HEAD, ranged GET and DELETE.
+   - `R2`: SigV4 presigning in pure Gleam with `gleam_crypto`, tested against AWS's SigV4 vectors, and `httpc` for
+     HEAD, ranged GET and DELETE. Set by `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and
+     `R2_SECRET_ACCESS_KEY`. Without them the server uses `LocalDisk`.
    - `LocalDisk`: for development and batteries. Its signed URLs point back at this server (`PUT /blobs/<token>`,
-     `GET /blobs/<token>`) and it stores under `DATA_DIR/media`.
+     `GET /blobs/<token>`), the token an HMAC over the key, method, expiry, size and type. It enforces what R2
+     does (the exact length and type, no overwrite), writes to a temporary file and renames it into
+     `DATA_DIR/media/<key>`, and keeps what `head` answers in a small file beside it. Only that route takes a body
+     larger than the usual cap.
 
-   Clients use the same protocol against both, so the demo takes the production path.
-2. **One upload flow for every purpose** (`player_clip`, `verification_evidence`, `signing_document`, later
-   `box_cam`). Each purpose has its own policy: who may upload, the size cap, the allowed types and whether the
-   title is moderated.
-   - `POST …/uploads` with `{purpose, size, mime, sha256, …}` checks the policy, writes an `upload_intents` row,
-     and answers `{uploadId, put: {url, headers}, expiresAt}`.
+   Clients use the same protocol against both, so the demo takes the production path. The seed writes its clips
+   through `blobs` too.
+2. **Upload intents, then the domain route.** One `upload_intents` table: the id (also the blob key, random and
+   never reused), purpose, owner, size, type, declared SHA-256, status (`open`, `used`, `expired`), expiry, and the
+   record it produced. Each purpose (`player_clip`, `verification_evidence`, `signing_document`, later `box_cam`)
+   has its own policy: who may upload, the size cap and the allowed types.
+   - Each audience asks where it already authenticates: `POST /player/uploads` (clips), `POST /org/uploads`
+     (evidence and signing documents), and `POST /auth/org/verification/apply/:id/uploads` (an applicant, by
+     `applicantSecret`). The body is `{purpose, size, mime, sha256}`; the answer `{uploadId, put: {url, headers},
+     expiresAt}`.
    - The client PUTs the file to that URL.
-   - `POST …/uploads/:id/complete`, with the purpose's own fields (`attendanceId` for the Verified Clip, the claim
-     or the signing package), checks the object's size, type and checksum with `head`. For evidence it also checks
-     the magic bytes with `read_range`. Then one unit creates the domain record and closes the intent. A retry
-     answers the same.
-3. **Integrity.** The signed PUT includes `x-amz-checksum-sha256`, so storage refuses bytes that don't match the
-   declared digest. Keys are never reused. Signing's `bytes_mismatch` check compares the stored checksum instead
-   of re-reading the file. **Check first** that R2 enforces a signed SHA-256 checksum. If it doesn't, `complete`
-   hashes the object for the purposes that need a digest.
+   - **Decided:** there is no generic `complete` route. Each domain route takes `uploadId` where it took `dataUrl`
+     (`POST /player/media {title, uploadId, attendanceId}`, evidence `{uploadId, filename, note}`, a signing
+     document `{uploadId, label}`), so each keeps its own checks, moderation and response.
+   - The shared part is `uploads.verify`, before the unit because it calls storage: the intent is the caller's,
+     open and of this purpose, and the object's size, type and SHA-256 match it (for evidence, also its magic
+     bytes). Inside the unit `uploads.use` moves the intent from `open` to `used` with the record it made; a
+     retry finds it used for that record and answers the same, and a race answers `store.stale`. The record's
+     `media_id` is the blob key.
+3. **Integrity.** R2 doesn't document `x-amz-checksum-sha256` on PutObject, nor `x-amz-checksum-mode` on
+   HeadObject, and its SHA-256 is composite (multipart) only
+   ([S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/)). Its `Content-MD5` is enforced, but
+   browsers can't compute MD5 and it wouldn't prove the SHA-256 we record. **Decided:** `uploads.verify` hashes
+   the object itself, read in ranges, for every purpose (all are capped at 40 MiB or less, and R2 doesn't charge
+   for reads). The signed PUT fixes the length and type and carries `If-None-Match: *`, which R2 applies
+   atomically, so a key is never overwritten. Signing's `bytes_mismatch` compares the digest recorded at upload
+   instead of re-reading the file.
 4. **Reads.** `/media/<id>` keeps its session-bound link and live standing check, and answers `302` to a signed GET
-   that lives about 60 seconds.
+   that lives about 60 seconds. **Decided:** the responses that carry a file as base64 (signing documents, offer
+   documents, the admin and organisation evidence views) carry `file: {mime, url}` instead, the URL a signed GET
+   of the same lifetime.
 5. **Clean-up.** The sweep deletes the objects of expired intents. The `media_deletions` queue calls
    `blobs.delete` and retries on failure, which covers erasure. An R2 lifecycle rule on unfinished uploads is the
    backstop.
-6. **Drop the old routes** (the `dataUrl` fields and `/player/uploads` with its chunks) and the `upload_sessions`
-   table.
+6. **Drop the old routes** (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
+   `upload_sessions` table.
 7. **Batteries.** Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a
    `dataUrl`, and rewrite `platform/uploads` around the new flow. It is the last TypeScript battery not yet answered
    here (step 3) and was never copied: start from `../scoutbox/scoutbox-server/e2e/platform/uploads.mjs`, and list
    it in `e2e/batteries.mjs`.
-8. **Apps** (`../scoutbox`). The player upload screen, the club and Grassroots signing panels and claim evidence
-   change to "ask for a URL, PUT, complete". The bucket needs a CORS rule for the web portals.
+8. **Apps** (`../scoutbox`). The player upload screen, the club and Grassroots signing panels, claim evidence and
+   the evidence and document viewers change to "ask for a URL, PUT, send the `uploadId`" and to reading
+   `file.url`. The bucket needs a CORS rule for the web portals.
 
 Multipart (resumable) uploads are left for later. When they come, they are R2 multipart on the same intent.
 
