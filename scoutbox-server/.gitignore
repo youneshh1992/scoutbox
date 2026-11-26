@@ -6,3 +6,4 @@ erl_crash.dump
 node_modules
 /vendor/esqlite/
 /vendor/esqlite-*.tar
+/public

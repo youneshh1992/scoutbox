@@ -6,6 +6,7 @@ import scoutbox/platform/config.{type Config}
 import scoutbox/platform/faults.{type Faults}
 import scoutbox/platform/limits.{type Limits}
 import scoutbox/platform/live.{type Hub}
+import scoutbox/platform/portals.{type Portal}
 import scoutbox/platform/request_metrics.{type RequestMetrics}
 import scoutbox/platform/store.{type Store}
 
@@ -29,5 +30,7 @@ pub type Ctx {
     request_metrics: RequestMetrics,
     /// The dev transport's full texts of mails whose stored record withholds a code.
     dev_mail: Deliveries,
+    /// The web portals whose build was found at boot.
+    portals: List(Portal),
   )
 }

@@ -95,6 +95,7 @@ import scoutbox/platform/http as contract
 import scoutbox/platform/instrument
 import scoutbox/platform/limits
 import scoutbox/platform/operator
+import scoutbox/platform/portals
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/analytics
@@ -2569,7 +2570,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         _ -> not_found()
       }
     }
-    _ -> not_found()
+    // Last, after every API route: the built web portals.
+    segments -> portals.serve(ctx.portals, req, segments, not_found)
   }
 }
 

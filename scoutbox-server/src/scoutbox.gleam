@@ -30,6 +30,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/live.{type Hub}
 import scoutbox/platform/migrations
 import scoutbox/platform/operator
+import scoutbox/platform/portals
 import scoutbox/platform/request_metrics
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
@@ -130,6 +131,8 @@ fn boot() -> Result(Nil, String) {
   use integrity <- result.try(
     store.read(store, operator.integrity) |> result.map_error(string.inspect),
   )
+  let hosted = portals.mounted(config.public_dir)
+  log(config, portals.describe(hosted))
   let ctx =
     Ctx(
       store:,
@@ -143,6 +146,7 @@ fn boot() -> Result(Nil, String) {
       live: hub,
       request_metrics:,
       dev_mail:,
+      portals: hosted,
     )
   // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped. A trial's
   // reminder markers are rows too, so the boot pass re-sends nothing.

@@ -43,7 +43,8 @@ node dev/perf.mjs      # latency of the hot paths (after `gleam export erlang-sh
 node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 and 1000 streams (after the same)
 ```
 
-Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default
+Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `PUBLIC_DIR` (the built web portals, default
+`./public`), `ADMIN_KEY` (development default
 `scoutbox-admin`, refused in production), `NODE_ENV=production` (turns off demo sign-ins and the seed),
 `SCOUTBOX_QUIET_LOGS=1`, `SCOUTBOX_FAST_SWEEPS=1` (the sweeps every half second, and the delivery and webhook
 retry ladders in milliseconds), `MEDIA_SECRET` (signs media links; in development a random key per boot,
@@ -92,6 +93,7 @@ Every route below is exercised by a battery, except where marked.
 | Area | Routes |
 |---|---|
 | Health | `GET /health`, `/readyz` |
+| Web portals | `GET /app/…` (club), `/console/…` (Trust & Safety), `/grassroots/…`, `/agent/…`: each portal's build from `PUBLIC_DIR/club`, `admin`, `grassroots` and `agent`, if it has an `index.html` at boot (`platform/portals`). A file is served from the build; any other path is its `index.html`, except one naming a missing file (`404`). Checked after every API route |
 | Uploads | `POST /player/uploads`, `/org/uploads`, `/auth/org/verification/apply/:id/uploads` (declare a file, answered with the URL to PUT it to); `PUT`/`GET /blobs/:token` (the local store standing in for R2, `platform/blobs`); `GET /media/:id` redirects to a storage link. A route that took a `dataUrl` takes the `uploadId` |
 | Backups | `POST /admin/backup` (a copy of the database from a read-only connection, `store.copy_to`, so writes carry on; the media files, less those queued for removal; a checksummed manifest written last), `POST /admin/backup/verify`, `GET /admin/backups` (no battery). The battery restores a backup into a new, empty `DATA_DIR` and boots it |
 | Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/player/login` (a password-protected player, checked before the unit), `/auth/player/pair` (a guardian's pairing code, used once, charged per address only when wrong), `/auth/guardian/signup`, `/auth/guardian/login` (a password-protected guardian by id or e-mail, checked before the unit), `/auth/guardian/verify-email`; `/auth/sso/start` and `/callback` against the local test identity provider (`GET /testidp/authorize`, development only; both refuse in production) |

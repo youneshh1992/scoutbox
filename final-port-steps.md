@@ -152,20 +152,23 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
 
 Multipart (resumable) uploads are left for later. When they come, they are R2 multipart on the same intent.
 
-## 6. Host the web portals
+## 6. Host the web portals [**done**]
 
-The TypeScript server serves the built portals, and this one doesn't
-(`../scoutbox/scoutbox-server/domains/platform/http.mjs:50`):
+This server serves the built portals as the TypeScript server does (`registerAppHosting`), from `PUBLIC_DIR`
+(default `public/` beside the server), and `platform/appHosting` checks it:
 
-| Route | Portal |
-| --- | --- |
-| `/app` | the club portal |
-| `/console` | the Trust & Safety admin |
-| `/grassroots` | Grassroots |
-| `/agent` | the Agent portal |
+| Route | Portal | Folder |
+| --- | --- | --- |
+| `/app` | the club portal | `club` |
+| `/console` | the Trust & Safety admin | `admin` |
+| `/grassroots` | Grassroots | `grassroots` |
+| `/agent` | the Agent portal | `agent` |
 
-Each route serves `index.html` for its client-side routes. Either add static serving (wisp's `serve_static` with
-a single-page fallback), or host the portals separately and say so in the deploy docs.
+A portal is mounted only if its folder has an `index.html` at boot. A built file is served; any other GET under the
+route is `index.html`, for the portal's own routes. Unlike the TypeScript server, a path naming a missing file (its
+last segment has a `.`) answers `404` rather than `index.html`, so a stale tab's old asset fails visibly. Hashed
+files under `assets/` may be cached for good; everything else is `no-cache`. The portals are checked after every API
+route. The server never builds them: step 7's image puts each build in its folder.
 
 ## 7. Deployment
 

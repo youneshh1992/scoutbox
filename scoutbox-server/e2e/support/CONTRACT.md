@@ -12,6 +12,7 @@ production with the setting present (`config.problems` in `src/scoutbox/platform
 |---|---|
 | `PORT` | The port to listen on. Batteries pick free ones (`support/testPort.mjs`). |
 | `DATA_DIR` | The directory holding `scoutbox.db`. A fresh directory gets the migrated schema and, unless `SCOUTBOX_SEED_DEMO` says otherwise, the demo world on first boot. A directory a fixture wrote (`sqlFixture.mjs`) is marked installed, so it isn't seeded. |
+| `PUBLIC_DIR` | The folder of built web portals, one subfolder each (`club`, `admin`, `grassroots`, `agent`), read at boot. Default `public` beside the server. |
 | `NODE_ENV` | `production` turns off every development-only behaviour on this page and enables the production boot checks. Anything else is development. |
 | `SCOUTBOX_QUIET_LOGS` | `1`: no per-request log lines. |
 | `SCOUTBOX_SEED_DEMO` | `1` loads the demo world on first boot and `0` starts empty. Unset, it seeds except in production. Any other value is refused at boot. |

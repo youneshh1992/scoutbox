@@ -22,6 +22,9 @@ pub type Config {
   Config(
     port: Int,
     data_dir: String,
+    /// PUBLIC_DIR: where the built web portals are, one folder each (`platform/portals`). Default `public`, beside
+    /// the server, where the deploy image puts them.
+    public_dir: String,
     admin_key: String,
     /// Passwordless demo sign-ins and the demo seed: development only.
     dev_logins: Bool,
@@ -159,6 +162,10 @@ pub fn load() -> Result(Config, String) {
   Ok(Config(
     port:,
     data_dir:,
+    public_dir: case envoy.get("PUBLIC_DIR") {
+      Ok("") | Error(Nil) -> "public"
+      Ok(dir) -> dir
+    },
     admin_key:,
     dev_logins: !production,
     fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
