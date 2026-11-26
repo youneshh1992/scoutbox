@@ -26,11 +26,11 @@ transport-security and no-frame-persisted checks are requirements in `box-cam/do
 Expo push, SendGrid email and the three `box_cam_*` live events are ported. Only video analysis and uploads (until
 step 5) are still marked `Out of scope:`.
 
-## 3. Close the ledger [**done**, except `platform/uploads`]
+## 3. Close the ledger [**done**]
 
 Every domain was ported except platform, whose one remaining battery, `uploads`, waits for step 5. Every rules
 suite's recorded call got a generated case, a row in a matrix, a hand port or a reason it has no counterpart. The
-ledger itself was retired in step 4; the `uploads` battery is carried by step 5.7.
+ledger itself was retired in step 4; the `uploads` battery was rewritten in step 5.7.
 
 **Still open:** the contact, signing, case and transaction routes parse with `parse_coded`, which doesn't keep
 the body's key order. If a body has several unknown fields, the refusal can name a different one than the
@@ -130,20 +130,20 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    to, so a minute was too short). **Decided:** the responses that carry a file as base64 (signing documents, offer
    documents, the admin and organisation evidence views) carry `file: {mime, url}` instead, the URL a signed GET
    of the same lifetime.
-5. **Clean-up** [**done**, except the lifecycle rule]. The sweep (periodic and `POST /admin/sweep`) expires each
+5. **Clean-up** [**done**]. The sweep (periodic and `POST /admin/sweep`) expires each
    open upload past its time, then removes the files of up to 100 expired uploads a sweep, outside any unit, and
    records each in `upload_intents.removed_at`; a failed removal is tried again next sweep. A route that verified
    an upload the sweep then expired finds it stale in `mark_used` and answers `410 UPLOAD_EXPIRED`, so no record
    is left without its file. Erasure still removes clip files straight after its COMMIT; the sweep retries what's
    left in `media_deletions` (`erasure.retry_removals`), skipping a clip a player still carries (the operator
    page's conflicts). The rows stay: `410` depends on them, and only open ones count towards the cap.
-   - **Still to do with the real bucket:** an R2 lifecycle rule as the backstop. A PUT that began just before its
-     URL expired and was still sending after the 15-minute grace can land after the sweep removed its key.
+   - The R2 lifecycle rule that catches a PUT landing after the sweep removed its key waits for the bucket: see
+     `docs/known-issues.md`.
    - Not covered: an evidence file is never removed, because nothing deletes evidence records yet.
 6. **Drop the old routes** [**done**] (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
    `upload_sessions` table: the routes and `platform/media` went with 5.2, and migration 0044 drops
    `upload_sessions` and `upload_session_chunks`.
-7. **Batteries.** Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a
+7. **Batteries** [**done**]. Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a
    `dataUrl`, and rewrite `platform/uploads` around the new flow. It is the last TypeScript battery not yet answered
    here (step 3) and was never copied: start from `../scoutbox/scoutbox-server/e2e/platform/uploads.mjs`, and list
    it in `e2e/batteries.mjs`.

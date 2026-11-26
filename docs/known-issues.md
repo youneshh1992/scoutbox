@@ -321,3 +321,20 @@ writes "sended", and `test/fixtures/contact_matrix.json` records it.
 
 **Fix.** Spell out "sent" in `can_act` (and in `canContactAction` while the TypeScript server lives), then re-bless
 the fixture (`npm run fixtures:bless`) and check that only those messages changed. The `contacts` battery (D4b) checks only the code, so no battery changes.
+
+## A late upload can land after the sweep removed its key
+
+Found 2026-11-26 while finishing uploads (`final-port-steps.md` step 5.5). Waits for a Cloudflare account and an R2
+bucket, which need sign-off.
+
+**What it is.** The sweep expires an open upload once its time has passed, then removes its file and records that in
+`upload_intents.removed_at`. A PUT that began just before its signed URL expired, and was still sending after the
+15-minute grace, can finish after that removal. Its object then sits in the bucket with no intent that can use it and
+no sweep that will remove it again.
+
+**Where it is in the port.** The sweep (`POST /admin/sweep` and the periodic one) handles every upload that finishes
+in time. `LocalDisk` has the same gap, but it only serves development and the batteries.
+
+**Fix.** Add an R2 lifecycle rule on the bucket as the backstop, deleting objects older than a set age that nothing
+claimed. Pick the age so it can't remove a used upload's file: either keep used files under a prefix the rule skips,
+or have the rule only apply to keys the sweep has already released.
