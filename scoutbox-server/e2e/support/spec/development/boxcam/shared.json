@@ -1,0 +1,40 @@
+{
+  "$source": "domains/development/boxcam/shared.mjs",
+  "SESSION_STATES": [
+    "not_started",
+    "setup_required",
+    "ready",
+    "recording",
+    "processing",
+    "verified",
+    "partially_verified",
+    "unable_to_verify",
+    "completed_unverified",
+    "cancelled",
+    "invalidated"
+  ],
+  "QUALITY": [
+    "good",
+    "degraded",
+    "insufficient"
+  ],
+  "OBSERVATION_KINDS": [
+    "active",
+    "presence",
+    "ball",
+    "rep",
+    "set",
+    "pause",
+    "interruption",
+    "multi_person"
+  ],
+  "STATE_COPY": {
+    "verified": "Box Cam observed activity consistent with this drill for the recorded duration.",
+    "partially_verified": "Box Cam verified part of this session. Some activity could not be reliably observed because the player or ball left the camera view.",
+    "unable_to_verify": "ScoutBox could not reliably verify this session. Your training is not being marked as Box Cam Verified.",
+    "completed_unverified": "This session was recorded without Box Cam verification requirements being met, so it is not Box Cam Verified.",
+    "cancelled": "This Box Session was cancelled before completion.",
+    "invalidated": "This Box Cam result was invalidated after review and no longer counts as Box Cam Verified evidence."
+  },
+  "DEV_ACTIVITY_NOTE": "This is evidence of recorded training activity. It is not proof of player ability."
+}

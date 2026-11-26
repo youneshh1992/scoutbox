@@ -1,0 +1,662 @@
+//// Checks of the rules from the rules suites of development/boxCam, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/development/box_cam_rules
+import scoutbox/rows/box_challenges
+import scoutbox/rows/box_sessions
+import scoutbox/vocab/box_provider
+import scoutbox/vocab/box_quality
+import scoutbox/vocab/box_target_type
+
+// boxCam: verifiedActiveMs — plain active interval sums
+pub fn plain_active_interval_sums_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 300_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 300_000.0
+}
+
+// boxCam: verifiedActiveMs — overlapping intervals union (no double count)
+pub fn overlapping_intervals_union_no_double_count_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 300_000.0,
+          quality: box_quality.Good,
+        ),
+        box_cam_rules.Interval(
+          from_ms: 120_000.0,
+          to_ms: 360_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 360_000.0
+}
+
+// boxCam: verifiedActiveMs — duplicate interval counts once
+pub fn duplicate_interval_counts_once_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 300_000.0,
+          quality: box_quality.Good,
+        ),
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 300_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 300_000.0
+}
+
+// boxCam: verifiedActiveMs — nested interval absorbed
+pub fn nested_interval_absorbed_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 60_000.0,
+          to_ms: 120_000.0,
+          quality: box_quality.Good,
+        ),
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 300_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 300_000.0
+}
+
+// boxCam: verifiedActiveMs — [neg] interval clamped to session window — time outside the session never counts
+pub fn neg_interval_clamped_to_session_window_time_outside_the_session_never_co_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 480_000.0,
+          to_ms: 1_200_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 120_000.0
+}
+
+// boxCam: verifiedActiveMs — paused period removed
+pub fn paused_period_removed_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 600_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [box_cam_rules.Span(from_ms: 180_000.0, to_ms: 300_000.0)],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 480_000.0
+}
+
+// boxCam: verifiedActiveMs — interruption removed
+pub fn interruption_removed_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 600_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [box_cam_rules.Span(from_ms: 180_000.0, to_ms: 300_000.0)],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 480_000.0
+}
+
+// boxCam: verifiedActiveMs — [neg] insufficient-quality observation never counts as active
+pub fn neg_insufficient_quality_observation_never_counts_as_active_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 600_000.0,
+          quality: box_quality.Insufficient,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: None,
+    )
+    == 0.0
+}
+
+// boxCam: verifiedActiveMs — ball-required drill: only active∩ball counts
+pub fn ball_required_drill_only_active_ball_counts_test() {
+  assert box_cam_rules.verified_active_ms(
+      active: [
+        box_cam_rules.Interval(
+          from_ms: 0.0,
+          to_ms: 600_000.0,
+          quality: box_quality.Good,
+        ),
+      ],
+      pauses: [],
+      interruptions: [],
+      session_duration_ms: 600_000.0,
+      required: Some([box_cam_rules.Span(from_ms: 0.0, to_ms: 360_000.0)]),
+    )
+    == 360_000.0
+}
+
+// boxCam: targetCompleted — exactly target = completed
+pub fn exactly_target_completed_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Duration, value: 1_200_000.0),
+      active_ms: 1_200_000.0,
+      reps: None,
+      sets_completed: 0,
+      capabilities: [],
+    )
+    == Some(True)
+}
+
+// boxCam: targetCompleted — [neg] 1 ms below target is NOT completed
+pub fn neg_1_ms_below_target_is_not_completed_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Duration, value: 1_200_000.0),
+      active_ms: 1_199_999.0,
+      reps: None,
+      sets_completed: 0,
+      capabilities: [],
+    )
+    == Some(False)
+}
+
+// boxCam: targetCompleted — 1 ms above target = completed
+pub fn t_1_ms_above_target_completed_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Duration, value: 1_200_000.0),
+      active_ms: 1_200_001.0,
+      reps: None,
+      sets_completed: 0,
+      capabilities: [],
+    )
+    == Some(True)
+}
+
+// boxCam: mergeIntervals — adjacent intervals merge
+pub fn adjacent_intervals_merge_test() {
+  assert box_cam_rules.merge_intervals([
+      box_cam_rules.Span(from_ms: 0.0, to_ms: 1.0),
+      box_cam_rules.Span(from_ms: 1.0, to_ms: 2.0),
+    ])
+    == [box_cam_rules.Span(from_ms: 0.0, to_ms: 2.0)]
+}
+
+// boxCam: intersectIntervals — intersection clips
+pub fn intersection_clips_test() {
+  assert box_cam_rules.intersect_intervals(
+      [box_cam_rules.Span(from_ms: 0.0, to_ms: 10.0)],
+      [box_cam_rules.Span(from_ms: 5.0, to_ms: 20.0)],
+    )
+    == [box_cam_rules.Span(from_ms: 5.0, to_ms: 10.0)]
+}
+
+// boxCam: subtractIntervals — subtract splits an interval
+pub fn subtract_splits_an_interval_test() {
+  assert box_cam_rules.subtract_intervals(
+      [box_cam_rules.Span(from_ms: 0.0, to_ms: 10.0)],
+      [box_cam_rules.Span(from_ms: 4.0, to_ms: 6.0)],
+    )
+    == [
+      box_cam_rules.Span(from_ms: 0.0, to_ms: 4.0),
+      box_cam_rules.Span(from_ms: 6.0, to_ms: 10.0),
+    ]
+}
+
+// boxCam: detectionQuality — quality bands
+pub fn quality_bands_test() {
+  assert box_cam_rules.detection_quality(
+      observed_ms: 540_000.0,
+      session_duration_ms: 600_000.0,
+    )
+    == box_quality.Good
+}
+
+// boxCam: detectionQuality — quality bands
+pub fn quality_bands_2_test() {
+  assert box_cam_rules.detection_quality(
+      observed_ms: 180_000.0,
+      session_duration_ms: 600_000.0,
+    )
+    == box_quality.Degraded
+}
+
+// boxCam: detectionQuality — quality bands
+pub fn quality_bands_3_test() {
+  assert box_cam_rules.detection_quality(
+      observed_ms: 60_000.0,
+      session_duration_ms: 600_000.0,
+    )
+    == box_quality.Insufficient
+}
+
+// boxCam: dedupeReps — well-spaced reps counted
+pub fn well_spaced_reps_counted_test() {
+  assert box_cam_rules.dedupe_reps(
+      [
+        box_cam_rules.Rep(at_ms: 0.0, confidence: None),
+        box_cam_rules.Rep(at_ms: 300.0, confidence: None),
+        box_cam_rules.Rep(at_ms: 600.0, confidence: None),
+      ],
+      session_duration_ms: None,
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == [
+      box_cam_rules.CountedRep(at_ms: 0.0, confidence: 1.0),
+      box_cam_rules.CountedRep(at_ms: 300.0, confidence: 1.0),
+      box_cam_rules.CountedRep(at_ms: 600.0, confidence: 1.0),
+    ]
+}
+
+// boxCam: dedupeReps — [neg] physically-impossible rapid duplicate collapsed
+pub fn neg_physically_impossible_rapid_duplicate_collapsed_test() {
+  assert box_cam_rules.dedupe_reps(
+      [
+        box_cam_rules.Rep(at_ms: 0.0, confidence: None),
+        box_cam_rules.Rep(at_ms: 100.0, confidence: None),
+      ],
+      session_duration_ms: None,
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == [box_cam_rules.CountedRep(at_ms: 0.0, confidence: 1.0)]
+}
+
+// boxCam: dedupeReps — [neg] two detectors on the same instant count once
+pub fn neg_two_detectors_on_the_same_instant_count_once_test() {
+  assert box_cam_rules.dedupe_reps(
+      [
+        box_cam_rules.Rep(at_ms: 1000.0, confidence: Some(0.9)),
+        box_cam_rules.Rep(at_ms: 1000.0, confidence: Some(0.8)),
+      ],
+      session_duration_ms: None,
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == [box_cam_rules.CountedRep(at_ms: 1000.0, confidence: 0.9)]
+}
+
+// boxCam: dedupeReps — [neg] low-confidence rep dropped
+pub fn neg_low_confidence_rep_dropped_test() {
+  assert box_cam_rules.dedupe_reps(
+      [box_cam_rules.Rep(at_ms: 500.0, confidence: Some(0.3))],
+      session_duration_ms: None,
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == []
+}
+
+// boxCam: dedupeReps — [neg] rep outside the session window dropped
+pub fn neg_rep_outside_the_session_window_dropped_test() {
+  assert box_cam_rules.dedupe_reps(
+      [box_cam_rules.Rep(at_ms: 99_999.0, confidence: None)],
+      session_duration_ms: Some(5000.0),
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == []
+}
+
+// boxCam: dedupeReps — out-of-order reps sorted then counted
+pub fn out_of_order_reps_sorted_then_counted_test() {
+  assert box_cam_rules.dedupe_reps(
+      [
+        box_cam_rules.Rep(at_ms: 600.0, confidence: None),
+        box_cam_rules.Rep(at_ms: 0.0, confidence: None),
+        box_cam_rules.Rep(at_ms: 300.0, confidence: None),
+      ],
+      session_duration_ms: None,
+      min_gap_ms: 250.0,
+      min_confidence: 0.5,
+    )
+    == [
+      box_cam_rules.CountedRep(at_ms: 0.0, confidence: 1.0),
+      box_cam_rules.CountedRep(at_ms: 300.0, confidence: 1.0),
+      box_cam_rules.CountedRep(at_ms: 600.0, confidence: 1.0),
+    ]
+}
+
+// boxCam: targetCompleted — 100/100 reps completed
+pub fn t_100_100_reps_completed_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Repetitions, value: 100.0),
+      active_ms: 0.0,
+      reps: Some(100),
+      sets_completed: 0,
+      capabilities: [box_cam_rules.RepCount],
+    )
+    == Some(True)
+}
+
+// boxCam: targetCompleted — [neg] 149/150 is NOT completed (never rounded up)
+pub fn neg_149_150_is_not_completed_never_rounded_up_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Repetitions, value: 150.0),
+      active_ms: 0.0,
+      reps: Some(149),
+      sets_completed: 0,
+      capabilities: [box_cam_rules.RepCount],
+    )
+    == Some(False)
+}
+
+// boxCam: targetCompleted — [neg] rep target on a drill without rep_count capability → null (not fabricated)
+pub fn neg_rep_target_on_a_drill_without_rep_count_capability_null_not_fabricat_test() {
+  assert box_cam_rules.target_completed(
+      box_cam_rules.Target(type_: box_target_type.Repetitions, value: 100.0),
+      active_ms: 0.0,
+      reps: Some(100),
+      sets_completed: 0,
+      capabilities: [],
+    )
+    == None
+}
+
+// boxCam: deriveVerification — good + completed → verified
+pub fn good_completed_verified_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: False,
+      liveness_passed: True,
+      provider_available: True,
+      active_ms: 1_200_000.0,
+      completed: Some(True),
+      quality: Some(box_quality.Good),
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStateVerified, [])
+}
+
+// boxCam: deriveVerification — observed work but target missed → partially_verified (never erased)
+pub fn observed_work_but_target_missed_partially_verified_never_erased_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: False,
+      liveness_passed: True,
+      provider_available: True,
+      active_ms: 780_000.0,
+      completed: Some(False),
+      quality: Some(box_quality.Good),
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStatePartiallyVerified, [
+      box_cam_rules.TargetNotYetCompleted,
+    ])
+}
+
+// boxCam: deriveVerification — no reliable observation → unable_to_verify
+pub fn no_reliable_observation_unable_to_verify_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: False,
+      liveness_passed: True,
+      provider_available: True,
+      active_ms: 0.0,
+      completed: Some(False),
+      quality: Some(box_quality.Insufficient),
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStateUnableToVerify, [
+      box_cam_rules.NoActivityObserved,
+    ])
+}
+
+// boxCam: deriveVerification — [neg] no liveness → never Box Cam Verified
+pub fn neg_no_liveness_never_box_cam_verified_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: False,
+      liveness_passed: False,
+      provider_available: True,
+      active_ms: 1_200_000.0,
+      completed: Some(True),
+      quality: Some(box_quality.Good),
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStateCompletedUnverified, [
+      box_cam_rules.LivenessNotEstablished,
+    ])
+}
+
+// boxCam: deriveVerification — [neg] provider unavailable → not verified
+pub fn neg_provider_unavailable_not_verified_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: False,
+      liveness_passed: True,
+      provider_available: False,
+      active_ms: 1_200_000.0,
+      completed: Some(True),
+      quality: Some(box_quality.Good),
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStateCompletedUnverified, [
+      box_cam_rules.ProviderUnavailable,
+    ])
+}
+
+// boxCam: deriveVerification — cancelled state
+pub fn cancelled_state_test() {
+  assert box_cam_rules.derive_verification(box_cam_rules.Observed(
+      cancelled: True,
+      liveness_passed: False,
+      provider_available: True,
+      active_ms: 0.0,
+      completed: None,
+      quality: None,
+      interruptions_count: 0,
+      unsupported_target_metric: False,
+    ))
+    == #(box_sessions.VerificationStateCancelled, [
+      box_cam_rules.SessionCancelled,
+    ])
+}
+
+// boxCam: boxStreakWeeks — consecutive training weeks build a streak
+pub fn consecutive_training_weeks_build_a_streak_test() {
+  assert box_cam_rules.box_streak_weeks(
+      [
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 60_480_000_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 59_875_200_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 59_270_400_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+      ],
+      60_480_000_000,
+    )
+    == 3
+}
+
+// boxCam: boxStreakWeeks — current week still in progress does not break the streak
+pub fn current_week_still_in_progress_does_not_break_the_streak_test() {
+  assert box_cam_rules.box_streak_weeks(
+      [
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 59_875_200_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 59_270_400_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+      ],
+      60_480_000_000,
+    )
+    == 2
+}
+
+// boxCam: boxStreakWeeks — [neg] an empty week ends the streak (only at week granularity — rest days never matter)
+pub fn neg_an_empty_week_ends_the_streak_only_at_week_granularity_rest_days_nev_test() {
+  assert box_cam_rules.box_streak_weeks(
+      [
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 60_480_000_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+        box_cam_rules.Finished(
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_active_ms: 600_000.0,
+          at: 59_270_400_000,
+          id: "",
+          drill_id: "",
+          drill_version: 1,
+          verified_reps: None,
+        ),
+      ],
+      60_480_000_000,
+    )
+    == 1
+}
+
+// boxCam: challengeProgress — [neg] duplicate session id counts once in challenge progress (replay-safe)
+pub fn neg_duplicate_session_id_counts_once_in_challenge_progress_replay_safe_test() {
+  assert box_cam_rules.challenge_progress(
+      box_cam_rules.ChallengeWindow(
+        drill_id: "box-touches",
+        metric: box_challenges.Reps,
+        target_total: 1000,
+        starts_at: 0,
+        ends_at: 60_480_000_000,
+      ),
+      [
+        box_cam_rules.Finished(
+          id: "s1",
+          drill_id: "box-touches",
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_reps: Some(600),
+          at: 604_800_000,
+          drill_version: 1,
+          verified_active_ms: 0.0,
+        ),
+        box_cam_rules.Finished(
+          id: "s1",
+          drill_id: "box-touches",
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_reps: Some(600),
+          at: 604_800_000,
+          drill_version: 1,
+          verified_active_ms: 0.0,
+        ),
+        box_cam_rules.Finished(
+          id: "s2",
+          drill_id: "box-touches",
+          state: Some(box_sessions.VerificationStateVerified),
+          verified_reps: Some(500),
+          at: 1_209_600_000,
+          drill_version: 1,
+          verified_active_ms: 0.0,
+        ),
+      ],
+    )
+    == box_cam_rules.Progress(total: 1100, completed: True, session_ids: [
+      "s1",
+      "s2",
+    ])
+}
+
+// boxCam: providerFor — test provider hidden unless explicitly enabled
+pub fn test_provider_hidden_unless_explicitly_enabled_test() {
+  assert box_cam_rules.provider_for("local_test", False) == None
+}
+
+// boxCam: providerFor — test provider hidden unless explicitly enabled
+pub fn test_provider_hidden_unless_explicitly_enabled_2_test() {
+  assert box_cam_rules.provider_for("local_test", True)
+    == Some(box_cam_rules.provider(box_provider.LocalTest))
+}
+
+// boxCam: drillByIdVersion — Box Wall honestly declares rep counting not configured
+pub fn box_wall_honestly_declares_rep_counting_not_configured_test() {
+  assert option.map(box_cam_rules.drill_by_id_version("box-wall", 1), fn(d) {
+      #(d.id, d.version)
+    })
+    == Some(#("box-wall", 1))
+}

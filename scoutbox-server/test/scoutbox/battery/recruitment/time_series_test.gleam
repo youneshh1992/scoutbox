@@ -1,0 +1,96 @@
+//// Checks of the rules from the rules suites of recruitment/analytics, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/recruitment/analytics/context
+import scoutbox/recruitment/analytics/time_series
+import scoutbox/rows/id
+
+// analytics: stageVisits — two completed visits, and the current one is absent
+pub fn two_completed_visits_and_the_current_one_is_absent_test() {
+  assert time_series.stage_visits(
+      context.room(
+        id: id.recruitment_case("r4"),
+        player_id: id.player("pl-r4"),
+        created_at: 1_778_932_800_000,
+        status: "shortlisted",
+        priority: "normal",
+        source_context: "search",
+        history: [
+          context.Entry(
+            at: 1_778_932_800_000,
+            action: "room_created",
+            from: None,
+            to: None,
+            status: Some("watching"),
+          ),
+          context.Entry(
+            at: 1_779_796_800_000,
+            action: "room_status_changed",
+            from: Some("watching"),
+            to: Some("under_review"),
+            status: None,
+          ),
+          context.Entry(
+            at: 1_780_660_800_000,
+            action: "room_status_changed",
+            from: Some("under_review"),
+            to: Some("shortlisted"),
+            status: None,
+          ),
+        ],
+      ),
+    )
+    == [
+      time_series.Visit(
+        status: "watching",
+        from: 1_778_932_800_000,
+        to: 1_779_796_800_000,
+        ms: 864_000_000,
+      ),
+      time_series.Visit(
+        status: "under_review",
+        from: 1_779_796_800_000,
+        to: 1_780_660_800_000,
+        ms: 864_000_000,
+      ),
+    ]
+}
+
+// analytics: lastActivityAt — last activity is the newest history entry, whatever wrote it
+pub fn last_activity_is_the_newest_history_entry_whatever_wrote_it_test() {
+  assert time_series.last_activity_at(
+      context.room(
+        id: id.recruitment_case("r4"),
+        player_id: id.player("pl-r4"),
+        created_at: 1_778_932_800_000,
+        status: "shortlisted",
+        priority: "normal",
+        source_context: "search",
+        history: [
+          context.Entry(
+            at: 1_778_932_800_000,
+            action: "room_created",
+            from: None,
+            to: None,
+            status: Some("watching"),
+          ),
+          context.Entry(
+            at: 1_779_796_800_000,
+            action: "room_status_changed",
+            from: Some("watching"),
+            to: Some("under_review"),
+            status: None,
+          ),
+          context.Entry(
+            at: 1_780_660_800_000,
+            action: "room_status_changed",
+            from: Some("under_review"),
+            to: Some("shortlisted"),
+            status: None,
+          ),
+        ],
+      ),
+    )
+    == 1_780_660_800_000
+}

@@ -1,0 +1,100 @@
+//// Checks of the rules from the rules suites of platform/dates, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/battery/base
+import scoutbox/recruitment/analytics/metrics
+
+// dates: resolveWindow — N1 a custom window
+pub fn n1_a_custom_window_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-03-01"),
+        Some("2026-03-31"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"preset\":\"custom\",\"from\":\"2026-03-01\",\"to\":\"2026-03-31\",\"days\":31}"
+}
+
+// dates: resolveWindow — [neg] N2 a window bounded by a day that does not exist is refused (it used to become 2 March)
+pub fn neg_n2_a_window_bounded_by_a_day_that_does_not_exist_is_refused_it_used_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-02-30"),
+        Some("2026-03-31"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"error\":\"WINDOW_INVALID\",\"detail\":\"from and to must both be calendar days as YYYY-MM-DD.\"}"
+}
+
+// dates: resolveWindow — [neg] N2 a window bounded by a day that does not exist is refused (it used to become 2 March)
+pub fn neg_n2_a_window_bounded_by_a_day_that_does_not_exist_is_refused_it_used_2_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-03-01"),
+        Some("2026-13-01"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"error\":\"WINDOW_INVALID\",\"detail\":\"from and to must both be calendar days as YYYY-MM-DD.\"}"
+}
+
+// dates: resolveWindow — [neg] N3 backwards and future windows are refused
+pub fn neg_n3_backwards_and_future_windows_are_refused_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-03-05"),
+        Some("2026-03-01"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"error\":\"WINDOW_INVALID\",\"detail\":\"from must not be after to.\"}"
+}
+
+// dates: resolveWindow — [neg] N3 backwards and future windows are refused
+pub fn neg_n3_backwards_and_future_windows_are_refused_2_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-12-01"),
+        Some("2026-12-31"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"error\":\"WINDOW_INVALID\",\"detail\":\"from must not be in the future.\"}"
+}
+
+// dates: previousWindow — N4 the previous window is the same length
+pub fn n4_the_previous_window_is_the_same_length_test() {
+  assert json.to_string(
+      metrics.window_json(
+        metrics.previous_window(metrics.Window(
+          from: base.day("2026-03-01"),
+          to: base.day("2026-03-31"),
+          preset: "custom",
+          days: 0,
+        )),
+      ),
+    )
+    == "{\"preset\":\"previous\",\"from\":\"2026-01-29\",\"to\":\"2026-02-28\",\"days\":31}"
+}
+
+// dates: resolveWindow — [neg] O #22 an analytics window starting on 30 February resolves — EXPECT NO
+pub fn neg_o_22_an_analytics_window_starting_on_30_february_resolves_expect_no_test() {
+  assert json.to_string(
+      metrics.resolution_json(metrics.resolve_window(
+        None,
+        Some("2026-02-30"),
+        Some("2026-03-01"),
+        1_790_164_800_000,
+      )),
+    )
+    == "{\"error\":\"WINDOW_INVALID\",\"detail\":\"from and to must both be calendar days as YYYY-MM-DD.\"}"
+}

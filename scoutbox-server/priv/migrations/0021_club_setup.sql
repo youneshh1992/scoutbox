@@ -1,0 +1,97 @@
+-- 0021_club_setup: tactical setups (roles, criteria, windows), squads, shadow lists, looking-for, federation checks and vacancies become typed tables
+
+CREATE TABLE org_tactical_setups (
+  org_id           TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  formation        TEXT NOT NULL CHECK (length(formation) BETWEEN 1 AND 20),
+  planning_horizon TEXT CHECK (planning_horizon IS NULL OR length(planning_horizon) <= 40),
+  updated_at       INTEGER NOT NULL,
+  updated_by_name  TEXT NOT NULL CHECK (length(updated_by_name) <= 200)
+) STRICT;
+CREATE TABLE org_tactical_roles (
+  id             TEXT PRIMARY KEY,
+  org_id         TEXT NOT NULL REFERENCES org_tactical_setups(org_id) ON DELETE CASCADE,
+  ordinal        INTEGER NOT NULL CHECK (ordinal >= 0),
+  name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+  position_group TEXT NOT NULL CHECK (position_group IN ('GK','DEF','MID','ATT')),
+  description    TEXT NOT NULL CHECK (length(description) <= 300),
+  category       TEXT NOT NULL CHECK (category IN ('mens','womens','boys','girls','mixed')),
+  UNIQUE (org_id, id)
+) STRICT;
+CREATE TABLE org_tactical_role_criteria (
+  role_id      TEXT NOT NULL REFERENCES org_tactical_roles(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('required','preferred')),
+  ordinal      INTEGER NOT NULL CHECK (ordinal >= 0),
+  key          TEXT NOT NULL CHECK (key IN ('positionGroup','minAge','maxAge','foot','availability','maxLevel','minAppearances','category')),
+  value_number INTEGER,
+  value_text   TEXT CHECK (value_text IS NULL OR length(value_text) <= 40),
+  PRIMARY KEY (role_id, kind, ordinal),
+  UNIQUE (role_id, kind, key),
+  CHECK ((value_number IS NULL) <> (value_text IS NULL)),
+  CHECK ((key IN ('minAge','maxAge','minAppearances')) = (value_number IS NOT NULL))
+) STRICT;
+CREATE TABLE org_tactical_windows (
+  org_id  TEXT NOT NULL REFERENCES org_tactical_setups(org_id) ON DELETE CASCADE,
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  name    TEXT NOT NULL CHECK (length(name) <= 40),
+  opens   TEXT CHECK (opens IS NULL OR length(opens) = 10),
+  closes  TEXT CHECK (closes IS NULL OR length(closes) = 10),
+  PRIMARY KEY (org_id, ordinal),
+  CHECK (opens IS NULL OR closes IS NULL OR opens <= closes)
+) STRICT;
+CREATE TABLE org_squad_members (
+  id                TEXT PRIMARY KEY,
+  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id         TEXT,
+  name              TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  position          TEXT CHECK (position IS NULL OR length(position) <= 40),
+  source            TEXT NOT NULL CHECK (source IN ('manual','invite_approved','signing')),
+  approved_by_label TEXT CHECK (approved_by_label IS NULL OR length(approved_by_label) <= 200),
+  added_at          INTEGER NOT NULL,
+  CHECK ((source = 'invite_approved') = (approved_by_label IS NOT NULL)),
+  CHECK (source = 'manual' OR player_id IS NOT NULL)
+) STRICT;
+CREATE UNIQUE INDEX org_squad_members_org_player ON org_squad_members (org_id, player_id) WHERE player_id IS NOT NULL;
+CREATE INDEX org_squad_members_org ON org_squad_members (org_id);
+CREATE INDEX org_squad_members_player ON org_squad_members (player_id);
+CREATE TABLE org_shadow_players (
+  id            TEXT PRIMARY KEY,
+  org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id     TEXT NOT NULL,
+  name          TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  role_id       TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,
+  added_by_name TEXT NOT NULL CHECK (length(added_by_name) <= 200),
+  added_at      INTEGER NOT NULL,
+  UNIQUE (org_id, player_id)
+) STRICT;
+CREATE INDEX org_shadow_players_player ON org_shadow_players (player_id);
+CREATE TABLE org_looking_for (
+  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  ordinal  INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 4),
+  position TEXT NOT NULL CHECK (position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  PRIMARY KEY (org_id, ordinal),
+  UNIQUE (org_id, position)
+) STRICT;
+CREATE TABLE org_federation_checks (
+  org_id          TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  federation      TEXT NOT NULL CHECK (length(federation) BETWEEN 1 AND 120),
+  registration_id TEXT NOT NULL CHECK (length(registration_id) BETWEEN 1 AND 60),
+  contact_email   TEXT CHECK (contact_email IS NULL OR length(contact_email) <= 120),
+  status          TEXT NOT NULL CHECK (status IN ('pending')),
+  submitted_at    INTEGER NOT NULL
+) STRICT;
+CREATE TABLE vacancies (
+  id              TEXT PRIMARY KEY,
+  org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  role_id         TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,
+  role_name       TEXT NOT NULL CHECK (length(role_name) BETWEEN 1 AND 60),
+  window_name     TEXT CHECK (window_name IS NULL OR length(window_name) <= 40),
+  notes           TEXT CHECK (notes IS NULL OR length(notes) <= 300),
+  status          TEXT NOT NULL CHECK (status IN ('open','closed')),
+  created_by_name TEXT NOT NULL CHECK (length(created_by_name) <= 200),
+  created_at      INTEGER NOT NULL,
+  closed_at       INTEGER,
+  CHECK ((status = 'closed') = (closed_at IS NOT NULL))
+) STRICT;
+CREATE INDEX vacancies_org_status ON vacancies (org_id, status);
+CREATE INDEX vacancies_role ON vacancies (role_id);
+CREATE INDEX org_shadow_players_role ON org_shadow_players (role_id);

@@ -1,0 +1,243 @@
+//// Checks of the rules from the rules suites of discovery/matchingAndWatchlists, first generated from the TypeScript
+//// server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/discovery/matching/watchlist_rules
+import scoutbox/rows/dynamic_watchlists
+import scoutbox/rows/watchlist_membership_events
+import scoutbox/vocab/brief_status
+
+// matchingAndWatchlists: reconcileMembership — entered / left / unchanged are computed correctly
+pub fn entered_left_unchanged_are_computed_correctly_test() {
+  assert json.to_string(
+      watchlist_rules.diff_json(
+        watchlist_rules.reconcile(["a", "b", "c"], ["b", "c", "d"]),
+      ),
+    )
+    == "{\"entered\":[\"d\"],\"left\":[\"a\"],\"unchanged\":[\"b\",\"c\"],\"changed\":true}"
+}
+
+// matchingAndWatchlists: reconcileMembership — no change is reported as no change
+pub fn no_change_is_reported_as_no_change_test() {
+  assert json.to_string(
+      watchlist_rules.diff_json(watchlist_rules.reconcile(["a"], ["a"])),
+    )
+    == "{\"entered\":[],\"left\":[],\"unchanged\":[\"a\"],\"changed\":false}"
+}
+
+// matchingAndWatchlists: reconcileMembership — reconciliation is order-independent and deterministic
+pub fn reconciliation_is_order_independent_and_deterministic_test() {
+  assert json.to_string(
+      watchlist_rules.diff_json(
+        watchlist_rules.reconcile(["c", "a"], ["b", "a"]),
+      ),
+    )
+    == "{\"entered\":[\"b\"],\"left\":[\"c\"],\"unchanged\":[\"a\"],\"changed\":true}"
+}
+
+// matchingAndWatchlists: reconcileMembership — reconciliation is order-independent and deterministic
+pub fn reconciliation_is_order_independent_and_deterministic_2_test() {
+  assert json.to_string(
+      watchlist_rules.diff_json(
+        watchlist_rules.reconcile(["a", "c"], ["a", "b"]),
+      ),
+    )
+    == "{\"entered\":[\"b\"],\"left\":[\"c\"],\"unchanged\":[\"a\"],\"changed\":true}"
+}
+
+// matchingAndWatchlists: transitionFingerprint — the same transition fingerprints the same
+pub fn the_same_transition_fingerprints_the_same_test() {
+  assert watchlist_rules.fingerprint(
+      "wl1",
+      "p1",
+      "cv1:abc",
+      watchlist_membership_events.Entered,
+      watchlist_membership_events.CriterionNowMet,
+    )
+    == "wl:wl1:p1:cv1:abc:entered:criterion_now_met"
+}
+
+// matchingAndWatchlists: transitionFingerprint — [neg] the same player entering under DIFFERENT criteria is a different transition
+pub fn neg_the_same_player_entering_under_different_criteria_is_a_different_tra_test() {
+  assert watchlist_rules.fingerprint(
+      "wl1",
+      "p1",
+      "cv1:def",
+      watchlist_membership_events.Entered,
+      watchlist_membership_events.CriterionNowMet,
+    )
+    == "wl:wl1:p1:cv1:def:entered:criterion_now_met"
+}
+
+// matchingAndWatchlists: explainTransition — entering names the criterion that actually flipped
+pub fn entering_names_the_criterion_that_actually_flipped_test() {
+  assert json.to_string(
+      watchlist_rules.explanation_json(watchlist_rules.explain(
+        Some([
+          watchlist_rules.Met(
+            criterion_id: "age:gte:value=16",
+            met: False,
+            text: "",
+          ),
+        ]),
+        Some([
+          watchlist_rules.Met(
+            criterion_id: "age:gte:value=16",
+            met: True,
+            text: "Matches age criteria (16)",
+          ),
+        ]),
+        False,
+        False,
+        watchlist_membership_events.Entered,
+      )),
+    )
+    == "{\"reason\":\"criterion_now_met\",\"criterionId\":\"age:gte:value=16\",\"text\":\"Matches age criteria (16)\"}"
+}
+
+// matchingAndWatchlists: explainTransition — leaving names the criterion that stopped being met
+pub fn leaving_names_the_criterion_that_stopped_being_met_test() {
+  assert json.to_string(
+      watchlist_rules.explanation_json(watchlist_rules.explain(
+        Some([
+          watchlist_rules.Met(
+            criterion_id: "age:gte:value=16",
+            met: True,
+            text: "Matches age criteria (16)",
+          ),
+        ]),
+        Some([
+          watchlist_rules.Met(
+            criterion_id: "age:gte:value=16",
+            met: False,
+            text: "Age 15 is below the criteria",
+          ),
+        ]),
+        False,
+        False,
+        watchlist_membership_events.Left,
+      )),
+    )
+    == "{\"reason\":\"criterion_no_longer_met\",\"criterionId\":\"age:gte:value=16\",\"text\":\"Age 15 is below the criteria\"}"
+}
+
+// matchingAndWatchlists: explainTransition — [neg] A45 — a player who left because they are no longer VISIBLE gets the privacy-safe reason — never "they blocked you"
+pub fn neg_a45_a_player_who_left_because_they_are_no_longer_visible_gets_the_pr_test() {
+  assert json.to_string(
+      watchlist_rules.explanation_json(watchlist_rules.explain(
+        Some([
+          watchlist_rules.Met(
+            criterion_id: "age:gte:value=16",
+            met: True,
+            text: "Matches age criteria (16)",
+          ),
+        ]),
+        None,
+        False,
+        False,
+        watchlist_membership_events.Left,
+      )),
+    )
+    == "{\"reason\":\"unavailable\",\"criterionId\":null,\"text\":\"This player is no longer available in this watchlist\"}"
+}
+
+// matchingAndWatchlists: explainTransition — a criteria edit is reported as a criteria edit, not as a player change
+pub fn a_criteria_edit_is_reported_as_a_criteria_edit_not_as_a_player_change_test() {
+  assert json.to_string(
+      watchlist_rules.explanation_json(watchlist_rules.explain(
+        None,
+        None,
+        True,
+        False,
+        watchlist_membership_events.Entered,
+      )),
+    )
+    == "{\"reason\":\"criteria_changed\",\"criterionId\":null,\"text\":\"The saved criteria changed\"}"
+}
+
+// matchingAndWatchlists: explainTransition — a brief edit is reported as a brief edit
+pub fn a_brief_edit_is_reported_as_a_brief_edit_test() {
+  assert json.to_string(
+      watchlist_rules.explanation_json(watchlist_rules.explain(
+        None,
+        None,
+        False,
+        True,
+        watchlist_membership_events.Left,
+      )),
+    )
+    == "{\"reason\":\"brief_changed\",\"criterionId\":null,\"text\":\"The linked Recruitment Brief changed\"}"
+}
+
+// matchingAndWatchlists: membershipSummary — the summary counts entered, left and the current set
+pub fn the_summary_counts_entered_left_and_the_current_set_test() {
+  assert json.to_string(watchlist_rules.summary(2, 1, 1))
+    == "{\"newlyMatched\":2,\"noLongerMatches\":1,\"unchanged\":1,\"current\":3,\"note\":\"Counts of players against criteria your organisation wrote. Entering a watchlist is not an improvement in a player, and leaving one is not a decline.\"}"
+}
+
+// matchingAndWatchlists: membershipNotification — [neg] A48 — twenty-five players entering after a criteria edit is ONE grouped sentence, not twenty-five notifications
+pub fn neg_a48_twenty_five_players_entering_after_a_criteria_edit_is_one_groupe_test() {
+  assert json.to_string(watchlist_rules.notification_json(
+      watchlist_rules.notification("W", 25, 0, watchlist_rules.CriteriaEdited),
+      25,
+      0,
+    ))
+    == "{\"text\":\"25 players now match “W” after the criteria changed.\",\"grouped\":true,\"entered\":25,\"left\":0}"
+}
+
+// matchingAndWatchlists: membershipNotification — no change produces no notification at all
+pub fn no_change_produces_no_notification_at_all_test() {
+  assert json.to_string(watchlist_rules.notification_json(
+      watchlist_rules.notification("W", 0, 0, watchlist_rules.FactsChanged),
+      0,
+      0,
+    ))
+    == "null"
+}
+
+// matchingAndWatchlists: watchlistBlockedState — an active saved-criteria watchlist is not blocked
+pub fn an_active_saved_criteria_watchlist_is_not_blocked_test() {
+  assert json.to_string(watchlist_rules.blocked_state(
+      dynamic_watchlists.Active,
+      watchlist_rules.NotLinked,
+    ))
+    == "{\"blocked\":false}"
+}
+
+// matchingAndWatchlists: watchlistBlockedState — [neg] an archived watchlist stops maintaining membership
+pub fn neg_an_archived_watchlist_stops_maintaining_membership_test() {
+  assert json.to_string(watchlist_rules.blocked_state(
+      dynamic_watchlists.Archived,
+      watchlist_rules.NotLinked,
+    ))
+    == "{\"blocked\":true,\"code\":\"WATCHLIST_ARCHIVED\",\"message\":\"This watchlist is archived. Its history is kept; membership is no longer maintained.\"}"
+}
+
+// matchingAndWatchlists: watchlistBlockedState — [neg] a paused watchlist still SHOWS membership; only the notifications stop
+pub fn neg_a_paused_watchlist_still_shows_membership_only_the_notifications_sto_test() {
+  assert json.to_string(watchlist_rules.blocked_state(
+      dynamic_watchlists.Paused,
+      watchlist_rules.NotLinked,
+    ))
+    == "{\"blocked\":false,\"paused\":true,\"code\":\"WATCHLIST_PAUSED\",\"message\":\"This watchlist is paused. Membership is still shown, and no change notifications are sent.\"}"
+}
+
+// matchingAndWatchlists: watchlistBlockedState — [neg] a live-linked watchlist whose brief is gone says so instead of showing an empty list as a fact
+pub fn neg_a_live_linked_watchlist_whose_brief_is_gone_says_so_instead_of_showi_test() {
+  assert json.to_string(watchlist_rules.blocked_state(
+      dynamic_watchlists.Active,
+      watchlist_rules.LinkedTo(None),
+    ))
+    == "{\"blocked\":true,\"code\":\"WATCHLIST_BRIEF_UNAVAILABLE\",\"message\":\"The linked Recruitment Brief is no longer available. Membership cannot be maintained until the link is changed.\"}"
+}
+
+// matchingAndWatchlists: watchlistBlockedState — [neg] a live-linked watchlist whose brief is archived says so
+pub fn neg_a_live_linked_watchlist_whose_brief_is_archived_says_so_test() {
+  assert json.to_string(watchlist_rules.blocked_state(
+      dynamic_watchlists.Active,
+      watchlist_rules.LinkedTo(Some(brief_status.Archived)),
+    ))
+    == "{\"blocked\":true,\"code\":\"WATCHLIST_BRIEF_INACTIVE\",\"message\":\"The linked Recruitment Brief is archived. Activate it, or switch this watchlist to its own saved criteria.\"}"
+}

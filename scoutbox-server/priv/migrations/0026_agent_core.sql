@@ -1,0 +1,284 @@
+-- 0026_agent_core: agent profiles, agency affiliations, representation agreements and agency settings become typed tables
+
+CREATE TABLE agent_profiles (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  display_name                             TEXT NOT NULL CHECK (length(display_name) <= 80 AND length(display_name) > 0),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  declared_fifa_licence_number             TEXT CHECK (declared_fifa_licence_number IS NULL OR length(declared_fifa_licence_number) <= 40 AND length(declared_fifa_licence_number) > 0),
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  UNIQUE (user_id),
+  CHECK (rev >= 1)
+) STRICT;
+CREATE INDEX agent_profiles_agency ON agent_profiles (agency_org_id);
+CREATE TABLE agent_profile_jurisdictions (
+  profile_id    TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
+  jurisdiction  TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  PRIMARY KEY (profile_id, jurisdiction),
+  UNIQUE (profile_id, ord)
+) STRICT;
+CREATE TABLE agent_profile_facets (
+  profile_id                               TEXT NOT NULL CHECK (length(profile_id) <= 80 AND length(profile_id) > 0),
+  facet                                    TEXT NOT NULL CHECK (facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
+  member_association                       TEXT NOT NULL CHECK (member_association IN ('INT','ENG','USA')),
+  state                                    TEXT NOT NULL CHECK (state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  reference                                TEXT CHECK (reference IS NULL OR length(reference) <= 60 AND length(reference) > 0),
+  provenance_provider                      TEXT CHECK (provenance_provider IS NULL OR provenance_provider IN ('none','local-synthetic-test-provider','attributed_review')),
+  provenance_kind                          TEXT CHECK (provenance_kind IS NULL OR provenance_kind IN ('none','synthetic','human_review')),
+  provenance_at                            INTEGER,
+  provenance_reviewer_id                   TEXT CHECK (provenance_reviewer_id IS NULL OR length(provenance_reviewer_id) <= 80 AND length(provenance_reviewer_id) > 0),
+  provenance_review_id                     TEXT CHECK (provenance_review_id IS NULL OR length(provenance_review_id) <= 80 AND length(provenance_review_id) > 0),
+  submitted_at                             INTEGER,
+  verified_at                              INTEGER,
+  recheck_at                               INTEGER,
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 1000),
+  stale_notified_at                        INTEGER,
+  FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE,
+  PRIMARY KEY (profile_id, facet, member_association),
+  CHECK ((facet = 'fifa_licence') = (member_association = 'INT')),
+  CHECK (provenance_reviewer_id IS NULL OR provenance_provider = 'attributed_review')
+) STRICT;
+CREATE INDEX agent_profile_facets_stale ON agent_profile_facets (recheck_at) WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL;
+CREATE TABLE agent_profile_history (
+  id                    TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  profile_id            TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
+  ord                   INTEGER NOT NULL CHECK (ord >= 0),
+  at                    INTEGER NOT NULL,
+  by_kind               TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                 TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name               TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role               TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                TEXT NOT NULL CHECK (action IN ('agent_profile_created','agent_profile_updated','agent_verification_submitted','agent_verification_state_changed','agent_facet_rechecked')),
+  detail_display_name   INTEGER CHECK (detail_display_name IN (0,1)),
+  detail_jurisdictions  INTEGER CHECK (detail_jurisdictions IN (0,1)),
+  detail_licence_number INTEGER CHECK (detail_licence_number IN (0,1)),
+  detail_facet          TEXT CHECK (detail_facet IS NULL OR detail_facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
+  detail_ma             TEXT CHECK (detail_ma IS NULL OR detail_ma IN ('INT','ENG','USA')),
+  detail_from TEXT CHECK (detail_from IS NULL OR detail_from IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_to TEXT CHECK (detail_to IS NULL OR detail_to IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_state TEXT CHECK (detail_state IS NULL OR detail_state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_review_id      TEXT CHECK (detail_review_id IS NULL OR (length(detail_review_id) > 0 AND length(detail_review_id) <= 80)),
+  UNIQUE (profile_id, ord),
+  CHECK ((action = 'agent_profile_updated') = (detail_display_name IS NOT NULL)),
+  CHECK ((detail_display_name IS NULL) = (detail_jurisdictions IS NULL) AND (detail_display_name IS NULL) = (detail_licence_number IS NULL)),
+  CHECK ((action IN ('agent_verification_submitted','agent_verification_state_changed','agent_facet_rechecked')) = (detail_facet IS NOT NULL)),
+  CHECK ((action IN ('agent_verification_state_changed','agent_facet_rechecked')) = (detail_to IS NOT NULL)),
+  CHECK ((detail_from IS NULL) = (detail_to IS NULL)),
+  CHECK ((action = 'agent_verification_state_changed') = (detail_state IS NOT NULL)),
+  CHECK (detail_review_id IS NULL OR action = 'agent_verification_state_changed')
+) STRICT;
+CREATE TABLE agency_affiliations (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  started_at                               INTEGER NOT NULL,
+  ended_at                                 INTEGER,
+  ended_reason                             TEXT CHECK (ended_reason IS NULL OR length(ended_reason) <= 40),
+  created_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  create_key                               TEXT CHECK (create_key IS NULL OR length(create_key) <= 64 AND length(create_key) > 0),
+  create_fp                                TEXT CHECK (create_fp IS NULL OR length(create_fp) <= 4000),
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (rev >= 1),
+  CHECK (ended_at IS NULL OR ended_reason IS NOT NULL),
+  CHECK ((create_key IS NULL) = (create_fp IS NULL))
+) STRICT;
+CREATE INDEX agency_affiliations_member ON agency_affiliations (user_id, agency_org_id);
+CREATE INDEX agency_affiliations_agency ON agency_affiliations (agency_org_id, ended_at);
+CREATE UNIQUE INDEX agency_affiliations_create_key ON agency_affiliations (agency_org_id, create_key) WHERE create_key IS NOT NULL;
+CREATE TABLE agency_affiliation_tiers (
+  affiliation_id  TEXT NOT NULL REFERENCES agency_affiliations(id) ON DELETE CASCADE,
+  ord             INTEGER NOT NULL CHECK (ord >= 0),
+  tier            TEXT NOT NULL CHECK (tier IN ('licensed_agent','agency_admin','analyst','assistant','finance')),
+  PRIMARY KEY (affiliation_id, tier),
+  UNIQUE (affiliation_id, ord)
+) STRICT;
+CREATE TABLE agency_affiliation_history (
+  id                    TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  affiliation_id        TEXT NOT NULL REFERENCES agency_affiliations(id) ON DELETE CASCADE,
+  ord                   INTEGER NOT NULL CHECK (ord >= 0),
+  at                    INTEGER NOT NULL,
+  by_kind               TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                 TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name               TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role               TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                TEXT NOT NULL CHECK (action IN ('agency_affiliation_created','agency_affiliation_updated','agency_affiliation_ended')),
+  detail_bootstrap      INTEGER CHECK (detail_bootstrap IN (1)),
+  detail_reason_code    TEXT CHECK (detail_reason_code IS NULL OR length(detail_reason_code) <= 40),
+  UNIQUE (affiliation_id, ord),
+  CHECK (detail_bootstrap IS NULL OR action = 'agency_affiliation_created'),
+  CHECK ((action = 'agency_affiliation_ended') = (detail_reason_code IS NOT NULL))
+) STRICT;
+CREATE TABLE agency_affiliation_history_tiers (
+  history_id  TEXT NOT NULL REFERENCES agency_affiliation_history(id) ON DELETE CASCADE,
+  list        TEXT NOT NULL CHECK (list IN ('from','to')),
+  ord         INTEGER NOT NULL CHECK (ord >= 0),
+  tier        TEXT NOT NULL CHECK (tier IN ('licensed_agent','agency_admin','analyst','assistant','finance')),
+  PRIMARY KEY (history_id, list, ord)
+) STRICT;
+CREATE TABLE representation_agreements (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agent_user_id                            TEXT NOT NULL CHECK (length(agent_user_id) <= 80 AND length(agent_user_id) > 0),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  client_kind                              TEXT NOT NULL CHECK (client_kind IN ('player')),
+  client_id                                TEXT NOT NULL CHECK (length(client_id) <= 80 AND length(client_id) > 0),
+  jurisdiction                             TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  exclusive                                INTEGER NOT NULL CHECK (exclusive IN (0,1)),
+  term_months                              INTEGER NOT NULL,
+  start_at                                 INTEGER,
+  end_at                                   INTEGER,
+  status                                   TEXT NOT NULL CHECK (status IN ('proposed','active','declined','terminated_by_client','terminated_by_agent','disputed')),
+  proposed_at                              INTEGER NOT NULL,
+  confirmed_at                             INTEGER,
+  declined_at                              INTEGER,
+  terminated_at                            INTEGER,
+  terminated_by                            TEXT CHECK (terminated_by IS NULL OR terminated_by IN ('agent','client','trust_safety')),
+  termination_reason_code                  TEXT CHECK (termination_reason_code IS NULL OR length(termination_reason_code) <= 40),
+  disputed_at                              INTEGER,
+  dispute_reason                           TEXT CHECK (dispute_reason IS NULL OR length(dispute_reason) <= 300),
+  dispute_resolved_at                      INTEGER,
+  dispute_review_id                        TEXT CHECK (dispute_review_id IS NULL OR length(dispute_review_id) <= 80 AND length(dispute_review_id) > 0),
+  dispute_outcome                          TEXT CHECK (dispute_outcome IS NULL OR dispute_outcome IN ('reinstated','ended')),
+  share_with_agency_staff                  INTEGER NOT NULL CHECK (share_with_agency_staff IN (0,1)),
+  disclosure_club_presence                 INTEGER NOT NULL CHECK (disclosure_club_presence IN (0,1)),
+  disclosure_contact_routing               INTEGER NOT NULL CHECK (disclosure_contact_routing IN (0,1)),
+  disclosure_trial_visibility              INTEGER NOT NULL CHECK (disclosure_trial_visibility IN (0,1)),
+  subject_removed_at                       INTEGER,
+  expiry_notified_at                       INTEGER,
+  created_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  confirmed_by_player_id                   TEXT CHECK (confirmed_by_player_id IS NULL OR length(confirmed_by_player_id) <= 80 AND length(confirmed_by_player_id) > 0),
+  request_key                              TEXT CHECK (request_key IS NULL OR length(request_key) <= 64 AND length(request_key) > 0),
+  request_fp                               TEXT CHECK (request_fp IS NULL OR length(request_fp) <= 4000),
+  confirm_key                              TEXT CHECK (confirm_key IS NULL OR length(confirm_key) <= 64 AND length(confirm_key) > 0),
+  confirm_fp                               TEXT CHECK (confirm_fp IS NULL OR length(confirm_fp) <= 4000),
+  decline_key                              TEXT CHECK (decline_key IS NULL OR length(decline_key) <= 64 AND length(decline_key) > 0),
+  decline_fp                               TEXT CHECK (decline_fp IS NULL OR length(decline_fp) <= 4000),
+  client_terminate_key                     TEXT CHECK (client_terminate_key IS NULL OR length(client_terminate_key) <= 64 AND length(client_terminate_key) > 0),
+  client_terminate_fp                      TEXT CHECK (client_terminate_fp IS NULL OR length(client_terminate_fp) <= 4000),
+  dispute_key                              TEXT CHECK (dispute_key IS NULL OR length(dispute_key) <= 64 AND length(dispute_key) > 0),
+  dispute_fp                               TEXT CHECK (dispute_fp IS NULL OR length(dispute_fp) <= 4000),
+  agent_terminate_key                      TEXT CHECK (agent_terminate_key IS NULL OR length(agent_terminate_key) <= 64 AND length(agent_terminate_key) > 0),
+  agent_terminate_fp                       TEXT CHECK (agent_terminate_fp IS NULL OR length(agent_terminate_fp) <= 4000),
+  FOREIGN KEY (agent_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (term_months BETWEEN 1 AND 24),
+  CHECK (rev >= 1),
+  CHECK ((confirmed_at IS NULL) = (confirmed_by_player_id IS NULL)),
+  CHECK ((status = 'declined') = (declined_at IS NOT NULL)),
+  CHECK ((terminated_at IS NULL) = (terminated_by IS NULL)),
+  CHECK (status NOT IN ('terminated_by_client','terminated_by_agent') OR terminated_at IS NOT NULL),
+  CHECK (status <> 'disputed' OR disputed_at IS NOT NULL),
+  CHECK ((dispute_resolved_at IS NULL) = (dispute_review_id IS NULL)),
+  CHECK ((request_key IS NULL) = (request_fp IS NULL)),
+  CHECK ((confirm_key IS NULL) = (confirm_fp IS NULL)),
+  CHECK ((decline_key IS NULL) = (decline_fp IS NULL)),
+  CHECK ((client_terminate_key IS NULL) = (client_terminate_fp IS NULL)),
+  CHECK ((dispute_key IS NULL) = (dispute_fp IS NULL)),
+  CHECK ((agent_terminate_key IS NULL) = (agent_terminate_fp IS NULL))
+) STRICT;
+CREATE INDEX representation_agreements_agency_agent ON representation_agreements (agency_org_id, agent_user_id);
+CREATE INDEX representation_agreements_client ON representation_agreements (client_id);
+CREATE INDEX representation_agreements_expiry ON representation_agreements (end_at) WHERE status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL;
+CREATE UNIQUE INDEX representation_agreements_request_key ON representation_agreements (agency_org_id, agent_user_id, request_key) WHERE request_key IS NOT NULL;
+CREATE TABLE agreement_scopes (
+  agreement_id  TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
+  scope         TEXT NOT NULL CHECK (scope IN ('employment','transfer','commercial','other_services')),
+  PRIMARY KEY (agreement_id, scope),
+  UNIQUE (agreement_id, ord)
+) STRICT;
+CREATE TABLE agreement_policy_versions (
+  agreement_id       TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  ord                INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL CHECK (length(policy_version_id) > 0 AND length(policy_version_id) <= 80),
+  PRIMARY KEY (agreement_id, policy_version_id),
+  UNIQUE (agreement_id, ord)
+) STRICT;
+CREATE TABLE agreement_opportunity_shares (
+  agreement_id                             TEXT NOT NULL CHECK (length(agreement_id) <= 80 AND length(agreement_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  opportunity_id                           TEXT NOT NULL CHECK (length(opportunity_id) <= 80 AND length(opportunity_id) > 0),
+  via                                      TEXT CHECK (via IS NULL OR via IN ('opportunity','open_trial')),
+  title                                    TEXT CHECK (title IS NULL OR length(title) <= 200),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  deadline                                 TEXT CHECK (deadline IS NULL OR length(deadline) <= 40),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 300 AND length(note) > 0),
+  shared_at                                INTEGER NOT NULL,
+  shared_by_kind                           TEXT NOT NULL CHECK (shared_by_kind IN ('org')),
+  shared_by_user_id                        TEXT NOT NULL CHECK (length(shared_by_user_id) <= 80 AND length(shared_by_user_id) > 0),
+  shared_by_name                           TEXT CHECK (shared_by_name IS NULL OR length(shared_by_name) <= 200),
+  withdrawn_at                             INTEGER,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER NOT NULL,
+  share_key                                TEXT CHECK (share_key IS NULL OR length(share_key) <= 64 AND length(share_key) > 0),
+  share_fp                                 TEXT CHECK (share_fp IS NULL OR length(share_fp) <= 4000),
+  FOREIGN KEY (agreement_id) REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  FOREIGN KEY (shared_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  UNIQUE (agreement_id, ord),
+  CHECK (ord >= 0 AND ord < 200),
+  CHECK (rev >= 1),
+  CHECK ((share_key IS NULL) = (share_fp IS NULL))
+) STRICT;
+CREATE UNIQUE INDEX agreement_opportunity_shares_live ON agreement_opportunity_shares (agreement_id, opportunity_id) WHERE withdrawn_at IS NULL;
+CREATE UNIQUE INDEX agreement_opportunity_shares_key ON agreement_opportunity_shares (agreement_id, share_key) WHERE share_key IS NOT NULL;
+CREATE TABLE agreement_history (
+  id                              TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agreement_id                    TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  ord                             INTEGER NOT NULL CHECK (ord >= 0),
+  at                              INTEGER NOT NULL,
+  by_kind                         TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                           TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name                         TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role                         TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                          TEXT NOT NULL CHECK (action IN ('representation_requested','representation_confirmed','representation_rejected','representation_terminated','representation_disputed','representation_sharing_changed','opportunity_shared','opportunity_share_withdrawn')),
+  detail_by                       TEXT CHECK (detail_by IS NULL OR detail_by IN ('agent','client','trust_safety')),
+  detail_from TEXT CHECK (detail_from IS NULL OR detail_from IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_to TEXT CHECK (detail_to IS NULL OR detail_to IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_had_reason               INTEGER CHECK (detail_had_reason IN (0,1)),
+  detail_phase TEXT CHECK (detail_phase IS NULL OR detail_phase IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_reason_code              TEXT CHECK (detail_reason_code IS NULL OR length(detail_reason_code) <= 40),
+  detail_review_id                TEXT CHECK (detail_review_id IS NULL OR (length(detail_review_id) > 0 AND length(detail_review_id) <= 80)),
+  detail_share_with_agency_staff  INTEGER CHECK (detail_share_with_agency_staff IN (0,1)),
+  detail_club_presence            INTEGER CHECK (detail_club_presence IN (0,1)),
+  detail_contact_routing          INTEGER CHECK (detail_contact_routing IN (0,1)),
+  detail_trial_visibility         INTEGER CHECK (detail_trial_visibility IN (0,1)),
+  detail_share_id                 TEXT CHECK (detail_share_id IS NULL OR (length(detail_share_id) > 0 AND length(detail_share_id) <= 80)),
+  detail_via                      TEXT CHECK (detail_via IS NULL OR detail_via IN ('opportunity','open_trial')),
+  UNIQUE (agreement_id, ord),
+  CHECK ((action IN ('representation_confirmed','representation_rejected','representation_terminated','representation_disputed')) = (detail_by IS NOT NULL)),
+  CHECK ((detail_by = 'client') = (detail_from IS NOT NULL AND detail_to IS NOT NULL AND detail_had_reason IS NOT NULL)),
+  CHECK (detail_by IS NULL OR detail_by = 'client' OR (detail_phase IS NOT NULL AND detail_reason_code IS NOT NULL)),
+  CHECK ((detail_by = 'trust_safety') = (detail_review_id IS NOT NULL)),
+  CHECK ((action IN ('opportunity_shared','opportunity_share_withdrawn')) = (detail_share_id IS NOT NULL)),
+  CHECK (detail_via IS NULL OR action = 'opportunity_shared'),
+  CHECK ((action = 'representation_sharing_changed') = (coalesce(detail_share_with_agency_staff, detail_club_presence, detail_contact_routing, detail_trial_visibility) IS NOT NULL))
+) STRICT;
+CREATE TABLE org_agency_settings (
+  org_id       TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  description  TEXT NOT NULL CHECK (length(description) <= 300),
+  updated_at   INTEGER NOT NULL
+) STRICT;
+CREATE TABLE org_agency_jurisdictions (
+  org_id        TEXT NOT NULL REFERENCES org_agency_settings(org_id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
+  jurisdiction  TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  PRIMARY KEY (org_id, jurisdiction),
+  UNIQUE (org_id, ord)
+) STRICT;

@@ -1,0 +1,11 @@
+-- 0006_media_deletions: crash-safe queue of media files to remove after a player deletion commits
+
+CREATE TABLE media_deletions (
+      media_id        TEXT PRIMARY KEY,
+      player_id       TEXT,
+      queued_at       INTEGER NOT NULL,
+      attempts        INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at INTEGER,
+      last_error      TEXT
+    ) STRICT;
+    CREATE INDEX media_deletions_queued ON media_deletions (queued_at);

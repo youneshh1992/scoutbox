@@ -1,0 +1,57 @@
+-- 0012_channels: message threads become their own tables (channels, messages, message_attachments; typed columns; the request, organisation and staff sender are keys, the player and guardian tolerant; the activity time orders the inboxes; the retry id is unique per thread and sender)
+
+CREATE TABLE channels (
+  seq                     INTEGER PRIMARY KEY,
+  id                      TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  request_id              TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
+  player_id               TEXT NOT NULL CHECK (player_id IS NULL OR length(player_id) BETWEEN 1 AND 80),
+  player_name             TEXT CHECK (player_name IS NULL OR length(player_name) BETWEEN 0 AND 200),
+  org_id                  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name                TEXT NOT NULL CHECK (org_name IS NULL OR length(org_name) BETWEEN 0 AND 200),
+  org_verified            INTEGER CHECK (org_verified IS NULL OR org_verified IN (0, 1)),
+  scout_name              TEXT CHECK (scout_name IS NULL OR length(scout_name) BETWEEN 0 AND 200),
+  scout_role              TEXT CHECK (scout_role IS NULL OR length(scout_role) BETWEEN 0 AND 200),
+  counterparty            TEXT NOT NULL CHECK (counterparty IN ('player', 'guardian')),
+  guardian_id             TEXT CHECK (guardian_id IS NULL OR length(guardian_id) BETWEEN 1 AND 80),
+  created_at              INTEGER NOT NULL,
+  last_activity_at        INTEGER NOT NULL,
+  read_by_org_at          INTEGER,
+  read_by_counterparty_at INTEGER,
+  CHECK (last_activity_at >= created_at)
+) STRICT;
+CREATE UNIQUE INDEX channels_request_id ON channels (request_id);
+CREATE INDEX channels_org_activity ON channels (org_id, last_activity_at, seq);
+CREATE INDEX channels_activity ON channels (last_activity_at, seq);
+CREATE INDEX channels_guardian_id ON channels (guardian_id);
+CREATE INDEX channels_player_id_counterparty ON channels (player_id, counterparty);
+CREATE TABLE messages (
+  seq              INTEGER PRIMARY KEY,
+  id               TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  channel_id       TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL CHECK (position >= 0),
+  created_at       INTEGER NOT NULL,
+  sender_kind      TEXT NOT NULL CHECK (sender_kind IN ('player', 'guardian', 'org_user')),
+  sender_user_id   TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  sender_person_id TEXT CHECK (sender_person_id IS NULL OR length(sender_person_id) BETWEEN 1 AND 80),
+  sender_name      TEXT CHECK (sender_name IS NULL OR length(sender_name) BETWEEN 0 AND 200),
+  text             TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 4000),
+  client_msg_id    TEXT CHECK (client_msg_id IS NULL OR length(client_msg_id) BETWEEN 1 AND 64),
+  CHECK ((sender_kind = 'org_user' AND sender_user_id IS NOT NULL AND sender_person_id IS NULL)
+      OR (sender_kind <> 'org_user' AND sender_person_id IS NOT NULL AND sender_user_id IS NULL))
+) STRICT;
+CREATE UNIQUE INDEX messages_channel_position ON messages (channel_id, position);
+CREATE UNIQUE INDEX messages_client_msg_id ON messages (channel_id, sender_kind, COALESCE(sender_user_id, sender_person_id), client_msg_id) WHERE client_msg_id IS NOT NULL;
+CREATE INDEX messages_sender_user_id ON messages (sender_user_id);
+CREATE TABLE message_attachments (
+  message_id    TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL CHECK (kind IN ('clip', 'trial_report')),
+  media_id      TEXT CHECK (media_id IS NULL OR length(media_id) BETWEEN 1 AND 80),
+  title         TEXT CHECK (title IS NULL OR length(title) BETWEEN 0 AND 300),
+  url           TEXT CHECK (url IS NULL OR length(url) BETWEEN 0 AND 2000),
+  verified_clip INTEGER CHECK (verified_clip IS NULL OR verified_clip IN (0, 1)),
+  report_id     TEXT CHECK (report_id IS NULL OR length(report_id) BETWEEN 1 AND 80),
+  org_name      TEXT CHECK (org_name IS NULL OR length(org_name) BETWEEN 0 AND 200),
+  summary       TEXT CHECK (summary IS NULL OR length(summary) BETWEEN 0 AND 500),
+  CHECK ((kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL AND org_name IS NULL AND summary IS NULL)
+      OR (kind = 'trial_report' AND report_id IS NOT NULL AND media_id IS NULL AND title IS NULL AND url IS NULL AND verified_clip IS NULL))
+) STRICT;

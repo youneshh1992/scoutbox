@@ -1,0 +1,33 @@
+-- 0001_org_users: organisation staff accounts: org_users and org_user_recovery_codes
+
+CREATE TABLE org_users (
+  id             TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 80),
+  org_id         TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  name_key       TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (length(role) BETWEEN 1 AND 60),
+  email          TEXT CHECK (email IS NULL OR length(email) BETWEEN 3 AND 254),
+  sso_subject    TEXT CHECK (sso_subject IS NULL OR length(sso_subject) BETWEEN 1 AND 255),
+  created_at     INTEGER NOT NULL,
+  removed_at     INTEGER,
+  removed_by_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  provenance     TEXT CHECK (provenance IS NULL OR provenance IN ('org_password_bootstrap')),
+  mfa_secret     TEXT CHECK (mfa_secret IS NULL OR length(mfa_secret) BETWEEN 16 AND 128),
+  mfa_enabled_at INTEGER,
+  quiet_start    TEXT CHECK (quiet_start IS NULL OR quiet_start GLOB '[01][0-9]:[0-5][0-9]' OR quiet_start GLOB '2[0-3]:[0-5][0-9]'),
+  quiet_end      TEXT CHECK (quiet_end IS NULL OR quiet_end GLOB '[01][0-9]:[0-5][0-9]' OR quiet_end GLOB '2[0-3]:[0-5][0-9]'),
+  email_enabled  INTEGER NOT NULL DEFAULT 1 CHECK (email_enabled IN (0, 1)),
+  UNIQUE (id, org_id),
+  CHECK (removed_by_id IS NULL OR removed_at IS NOT NULL),
+  CHECK (mfa_enabled_at IS NULL OR mfa_secret IS NOT NULL)
+) STRICT;
+CREATE INDEX org_users_org ON org_users (org_id);
+CREATE UNIQUE INDEX org_users_org_name ON org_users (org_id, name_key);
+CREATE UNIQUE INDEX org_users_org_email ON org_users (org_id, lower(email)) WHERE email IS NOT NULL AND removed_at IS NULL;
+CREATE UNIQUE INDEX org_users_sso ON org_users (org_id, sso_subject) WHERE sso_subject IS NOT NULL;
+CREATE INDEX org_users_removed_by ON org_users (removed_by_id) WHERE removed_by_id IS NOT NULL;
+CREATE TABLE org_user_recovery_codes (
+  org_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL CHECK (length(code_hash) = 64),
+  PRIMARY KEY (org_user_id, code_hash)
+) STRICT;

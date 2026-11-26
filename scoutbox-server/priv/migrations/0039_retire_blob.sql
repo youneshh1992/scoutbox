@@ -1,0 +1,12 @@
+-- 0039_retire_blob: The blob store is retired: the collections table is dropped and the id counter becomes a row of counters
+
+DROP TABLE IF EXISTS collections;
+
+CREATE TABLE counters (
+  name  TEXT PRIMARY KEY CHECK (length(name) BETWEEN 1 AND 40),
+  value INTEGER NOT NULL CHECK (value >= 0)
+) STRICT;
+
+INSERT INTO counters (name, value) VALUES ('id', 1000);
+
+DELETE FROM meta WHERE key IN ('idCounter', 'savedAt', 'saveSeq');

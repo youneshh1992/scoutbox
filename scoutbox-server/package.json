@@ -1,0 +1,18 @@
+{
+  "name": "scoutbox-gleam-server-e2e",
+  "private": true,
+  "type": "module",
+  "description": "The Gleam server's end-to-end batteries and development scripts. No dependencies.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "esqlite": "node dev/esqlite.mjs",
+    "e2e": "node e2e/run.mjs",
+    "e2e:check": "node e2e/check.mjs && npm run --silent codegen:check && gleam dev sql-check && node --disable-warning=ExperimentalWarning dev/fixture_schema.mjs --check",
+    "codegen": "gleam dev && gleam format src/scoutbox/rows src/scoutbox/vocab && node --disable-warning=ExperimentalWarning dev/fixture_schema.mjs",
+    "codegen:check": "rm -rf build/codegen-check && gleam dev build/codegen-check && gleam format build/codegen-check && diff -r build/codegen-check/scoutbox/rows src/scoutbox/rows && diff -r build/codegen-check/scoutbox/vocab src/scoutbox/vocab",
+    "sql:check": "gleam dev sql-check",
+    "fixtures:bless": "node dev/bless.mjs"
+  }
+}

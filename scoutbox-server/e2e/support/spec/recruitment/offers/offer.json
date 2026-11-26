@@ -1,0 +1,38 @@
+{
+  "$source": "domains/recruitment/offers/offer.mjs",
+  "OFFER_LIMITS": {
+    "role": 80,
+    "squad": 80,
+    "conditions": 1000,
+    "recipientMessage": 2000,
+    "internalNote": 2000,
+    "withdrawReason": 400,
+    "declineReason": 400,
+    "documentLabel": 120,
+    "documents": 10,
+    "revisions": 20,
+    "clientKey": 64,
+    "minExpiryMs": 3600000,
+    "maxExpiryMs": 15552000000,
+    "historyPage": 200
+  },
+  "OFFER_INPUT_CODES": {
+    "codes": {
+      "FIELD_INVALID": "OFFER_INPUT_INVALID"
+    },
+    "fieldCodes": {
+      "terms.*": "OFFER_TERMS_INVALID",
+      "documents.*": "OFFER_DOCUMENT_INVALID",
+      "expectedRev": "OFFER_REV_REQUIRED",
+      "expectedVersion": "OFFER_REV_REQUIRED"
+    }
+  },
+  "MINOR_OFFER_PATHWAY_ENABLED": {
+    "GB": false,
+    "ENG": false,
+    "INT": false,
+    "USA": false,
+    "DEFAULT": false
+  },
+  "OFFER_POLICY_VERSION": 1
+}

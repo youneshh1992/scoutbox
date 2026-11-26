@@ -1,0 +1,155 @@
+//// The mail outbox (`outbox`). Every mail is recorded before its provider call (`mailer`): on the dev transport the
+//// outbox is the delivery; on SendGrid the record is written undelivered and the provider's answer is written to it
+//// when it comes. It also holds what the delivery centre's local fake provider accepted (`source = 'delivery'`).
+
+import gleam/json.{type Json}
+import gleam/list
+import gleam/option.{Some}
+import gleam/result
+import gleam/string
+import scoutbox/platform/paging.{type Page, IntKey}
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/id
+import scoutbox/rows/outbox as row
+import sqlight
+
+pub type Mail =
+  row.Row
+
+/// What a withheld secret reads as in the stored record.
+pub const withheld_placeholder =
+  "[code withheld — delivered to the recipient only]"
+
+/// Records a mail on `transport`, with each of `secrets` withheld. A subject or text longer than the columns hold is
+/// shortened, never refused: the mail still goes. On the dev transport the record is the delivery; on SendGrid it is
+/// undelivered until `mark_delivered`.
+pub fn append(
+  tx: Tx,
+  transport transport: row.Transport,
+  to to: String,
+  subject subject: String,
+  text text: String,
+  secrets secrets: List(String),
+  at at: Int,
+) -> Result(id.MailId, Fail(e)) {
+  let text =
+    list.fold(secrets, text, fn(t, secret) {
+      case secret {
+        "" -> t
+        _ -> string.replace(t, secret, withheld_placeholder)
+      }
+    })
+  use id <- result.try(id.next_mail(tx))
+  row.insert(
+    tx,
+    row.New(
+      ..row.new(
+        id:,
+        source: row.Mailer,
+        created_at: at,
+        to_address: to,
+        text: string.slice(text, 0, 10_000),
+        transport:,
+      ),
+      subject: Some(string.slice(subject, 0, 300)),
+      delivered: Some(transport == row.DevOutbox),
+    ),
+  )
+  |> result.replace(id)
+}
+
+/// The provider's answer to a mail it was handed.
+pub fn mark_delivered(
+  tx: Tx,
+  mail: id.MailId,
+  delivered: Bool,
+) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE outbox SET delivered = ? WHERE id = ?", [
+    sqlight.bool(delivered),
+    id.mail_sql(mail),
+  ])
+}
+
+/// What the delivery centre's local fake provider accepted: the record is the send.
+pub fn append_delivery(
+  tx: Tx,
+  to to: String,
+  text text: String,
+  provider_message_id provider_message_id: String,
+  at at: Int,
+) -> Result(Nil, Fail(e)) {
+  use id <- result.try(id.next_mail(tx))
+  row.insert(
+    tx,
+    row.New(
+      ..row.new(
+        id:,
+        source: row.Delivery,
+        created_at: at,
+        to_address: to,
+        text: string.slice(text, 0, 300),
+        transport: row.LocalFake,
+      ),
+      channel: Some("email"),
+      provider_message_id: Some(provider_message_id),
+    ),
+  )
+}
+
+/// Newest first, keyed by `seq`.
+pub fn page(
+  read: Read,
+  page: Page,
+) -> Result(#(List(Mail), option.Option(String)), Fail(e)) {
+  let #(where, args) = case page.after {
+    Some([IntKey(seq)]) -> #("AND seq < ?", [sqlight.int(seq)])
+    _ -> #("", [])
+  }
+  use rows <- result.map(store.query(
+    read,
+    "SELECT "
+      <> row.columns
+      <> " FROM outbox WHERE 1 = 1 "
+      <> where
+      <> " ORDER BY seq DESC LIMIT ?",
+    list.append(args, [sqlight.int(page.limit + 1)]),
+    row.decoder(),
+  ))
+  paging.page_of(rows, page.limit, fn(m) { [IntKey(m.seq)] })
+}
+
+pub fn view(m: Mail) -> Json {
+  case m.source {
+    row.Mailer -> mail_view(m)
+    row.Delivery ->
+      json.object([
+        #("id", id.mail_json(m.id)),
+        #("at", json.int(m.created_at)),
+        #("channel", json.string("email")),
+        #("to", json.string(m.to_address)),
+        #("text", json.string(m.text)),
+        #(
+          "providerMessageId",
+          json.string(option.unwrap(m.provider_message_id, "")),
+        ),
+        #("provider", row.transport_to_json(m.transport)),
+      ])
+  }
+}
+
+fn mail_view(m: Mail) -> Json {
+  json.object([
+    #("id", id.mail_json(m.id)),
+    #("ts", json.int(m.created_at)),
+    #("to", json.string(m.to_address)),
+    #("subject", json.string(option.unwrap(m.subject, ""))),
+    #("text", json.string(m.text)),
+    #("transport", row.transport_to_json(m.transport)),
+    #("delivered", json.bool(option.unwrap(m.delivered, False))),
+  ])
+}
+
+/// The mail with `text` in place of its stored text.
+pub fn with_text(m: Mail, text: String) -> Mail {
+  row.Row(..m, text:)
+}

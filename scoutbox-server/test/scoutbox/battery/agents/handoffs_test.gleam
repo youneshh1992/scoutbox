@@ -1,0 +1,194 @@
+//// Checks of the rules from the rules suites of agents/crossApp, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/agents/handoffs
+import scoutbox/battery/base
+import scoutbox/rows/case_transaction_handoffs
+import scoutbox/vocab/room_status
+
+// crossApp: handoffBlockers — P-p4 every precondition met → no blockers
+pub fn p_p4_every_precondition_met_no_blockers_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == []
+}
+
+// crossApp: handoffBlockers — [neg] P-p5 a missing decision is reported as HANDOFF_DECISION_REQUIRED, not as a permission problem
+pub fn neg_p_p5_a_missing_decision_is_reported_as_handoff_decision_required_not_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: False,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_DECISION_REQUIRED"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p6 permission is reported first, so a viewer is told it is not theirs to do rather than handed a checklist
+pub fn neg_p_p6_permission_is_reported_first_so_a_viewer_is_told_it_is_not_thei_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: False,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_NOT_PERMITTED"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p7 a case at watching cannot hand off
+pub fn neg_p_p7_a_case_at_watching_cannot_hand_off_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.Watching,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_CASE_STATE"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p8 nor a minor (Z)
+pub fn neg_p_p8_nor_a_minor_z_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: False,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_MINOR_PATHWAY_DISABLED"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p9 nor through a block (Y)
+pub fn neg_p_p9_nor_through_a_block_y_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: True,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_BLOCKED"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p10 nor twice (Q)
+pub fn neg_p_p10_nor_twice_q_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: Some("invited"),
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_EXISTS"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p11 nor where a live transaction already covers it (Q)
+pub fn neg_p_p11_nor_where_a_live_transaction_already_covers_it_q_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: True,
+      compliance_evaluable: True,
+    ))
+    == ["HANDOFF_TRANSACTION_EXISTS"]
+}
+
+// crossApp: handoffBlockers — [neg] P-p12 nor where compliance cannot be evaluated (R)
+pub fn neg_p_p12_nor_where_compliance_cannot_be_evaluated_r_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: None,
+      live_transaction: False,
+      compliance_evaluable: False,
+    ))
+    == ["HANDOFF_COMPLIANCE_UNAVAILABLE"]
+}
+
+// crossApp: handoffBlockers — P-p13 a withdrawn invitation does not block a fresh one
+pub fn p_p13_a_withdrawn_invitation_does_not_block_a_fresh_one_test() {
+  assert handoffs.blockers(handoffs.Facts(
+      can_write: True,
+      has_final_progress_decision: True,
+      case_status: room_status.OfferConsideration,
+      subject_present: True,
+      is_adult: True,
+      blocked: False,
+      existing_status: Some("withdrawn"),
+      live_transaction: False,
+      compliance_evaluable: True,
+    ))
+    == []
+}
+
+// crossApp: effectiveHandoffStatus — P-p16 an invitation nobody took up reads as expired, derived from the clock
+pub fn p_p16_an_invitation_nobody_took_up_reads_as_expired_derived_from_the_clo_test() {
+  assert handoffs.effective_status(
+      case_transaction_handoffs.Row(
+        ..base.handoff(),
+        status: case_transaction_handoffs.Invited,
+        invited_at: 1_787_183_999_999,
+      ),
+      1_789_776_000_000,
+    )
+    == "expired"
+}
+
+// crossApp: effectiveHandoffStatus — P-p17 and a fresh one does not
+pub fn p_p17_and_a_fresh_one_does_not_test() {
+  assert handoffs.effective_status(
+      case_transaction_handoffs.Row(
+        ..base.handoff(),
+        status: case_transaction_handoffs.Invited,
+        invited_at: 1_789_689_600_000,
+      ),
+      1_789_776_000_000,
+    )
+    == "invited"
+}

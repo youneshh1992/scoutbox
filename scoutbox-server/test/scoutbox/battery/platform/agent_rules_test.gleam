@@ -1,0 +1,94 @@
+//// Checks of the rules from the rules suites of platform/dates, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/agents/agent_rules
+import scoutbox/battery/base
+import scoutbox/rows/agent_profile_facets
+import scoutbox/rows/id
+import scoutbox/rows/representation_agreements
+import scoutbox/vocab/facet_state
+
+// dates: effectiveFacetState — K1 control: VERIFIED before recheck
+pub fn k1_control_verified_before_recheck_test() {
+  assert agent_rules.effective_facet_state(
+      Some(
+        agent_profile_facets.Row(
+          ..base.facet(),
+          state: facet_state.Verified,
+          recheck_at: Some(1_790_251_200_000),
+        ),
+      ),
+      1_790_164_800_000,
+    )
+    == facet_state.Verified
+}
+
+// dates: effectiveFacetState — [neg] K2 STALE at the recheck instant
+pub fn neg_k2_stale_at_the_recheck_instant_test() {
+  assert agent_rules.effective_facet_state(
+      Some(
+        agent_profile_facets.Row(
+          ..base.facet(),
+          state: facet_state.Verified,
+          recheck_at: Some(1_790_164_800_000),
+        ),
+      ),
+      1_790_164_800_000,
+    )
+    == facet_state.Stale
+}
+
+// dates: effectiveFacetState — K3 an ABSENT recheck clock keeps the frozen reading (legacy row, no decay)
+pub fn k3_an_absent_recheck_clock_keeps_the_frozen_reading_legacy_row_no_decay_test() {
+  assert agent_rules.effective_facet_state(
+      Some(
+        agent_profile_facets.Row(..base.facet(), state: facet_state.Verified),
+      ),
+      1_790_164_800_000,
+    )
+    == facet_state.Verified
+}
+
+// dates: effectiveFacetState — K3 an ABSENT recheck clock keeps the frozen reading (legacy row, no decay)
+pub fn k3_an_absent_recheck_clock_keeps_the_frozen_reading_legacy_row_no_decay_2_test() {
+  assert agent_rules.effective_facet_state(
+      Some(
+        agent_profile_facets.Row(
+          ..base.facet(),
+          state: facet_state.Verified,
+          recheck_at: None,
+        ),
+      ),
+      1_790_164_800_000,
+    )
+    == facet_state.Verified
+}
+
+// dates: affiliationActive — K5 control: affiliation
+pub fn k5_control_affiliation_test() {
+  assert agent_rules.affiliation_active(
+      1_790_164_799_999,
+      None,
+      1_790_164_800_000,
+    )
+    == True
+}
+
+// dates: agreementGrantsAccess — K7 control: mandate
+pub fn k7_control_mandate_test() {
+  assert agent_rules.grants_access(
+      representation_agreements.Row(
+        ..base.agreement(),
+        status: representation_agreements.Active,
+        confirmed_at: Some(1_790_078_400_000),
+        agent_user_id: id.org_user("u"),
+        client_id: "p",
+        start_at: Some(1_790_078_400_000),
+        end_at: Some(1_790_251_200_000),
+      ),
+      id.org_user("u"),
+      1_790_164_800_000,
+    )
+    == True
+}

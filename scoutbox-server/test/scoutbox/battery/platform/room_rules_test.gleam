@@ -1,0 +1,160 @@
+//// Checks of the rules from the rules suites of platform/storeGuarantees, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import scoutbox/recruitment/room_rules
+import scoutbox/rows/orgs
+import scoutbox/rows/recruitment_cases
+import scoutbox/vocab/room_status
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Watching,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Identified
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_2_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.UnderReview,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Review
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_3_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.ContactPlanned,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Review
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_4_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Contacted,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Review
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_5_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Shortlisted,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Observation
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_6_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Priority,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Observation
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_7_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.TrialRequested,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Trial
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_8_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.TrialScheduled,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Trial
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_9_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.TrialCompleted,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Trial
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_10_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.OfferConsideration,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Decision
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_11_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.OfferMade,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Decision
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_12_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.OfferAccepted,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Decision
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_13_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.OfferDeclined,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Decision
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_14_test() {
+  assert room_rules.stage_for_room_status(room_status.Signed, orgs.LevelAcademy)
+    == recruitment_cases.Closed
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_15_test() {
+  assert room_rules.stage_for_room_status(room_status.OnHold, orgs.LevelAcademy)
+    == recruitment_cases.Review
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_16_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Withdrawn,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Closed
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_17_test() {
+  assert room_rules.stage_for_room_status(
+      room_status.Archived,
+      orgs.LevelAcademy,
+    )
+    == recruitment_cases.Closed
+}
+
+// storeGuarantees: stageForRoomStatus — all 18 lifecycle states project with their own status, label and terminality
+pub fn all_18_lifecycle_states_project_with_their_own_status_label_and_terminal_18_test() {
+  assert room_rules.stage_for_room_status(room_status.Closed, orgs.LevelAcademy)
+    == recruitment_cases.Closed
+}

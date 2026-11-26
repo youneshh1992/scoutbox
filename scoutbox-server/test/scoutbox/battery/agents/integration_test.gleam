@@ -1,0 +1,1206 @@
+//// Checks of the rules from the rules suites of agents/crossApp, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/agents/agent_rules
+import scoutbox/agents/integration
+import scoutbox/battery/base
+import scoutbox/rows/agreement_scopes
+import scoutbox/rows/id
+import scoutbox/rows/representation_agreements
+import scoutbox/vocab/agreement_status
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_test() {
+  assert integration.is_regulated(integration.ClientPrivate) == False
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_2_test() {
+  assert integration.is_regulated(integration.PassportBasic) == False
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_3_test() {
+  assert integration.is_regulated(integration.PassportShared) == False
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_4_test() {
+  assert integration.is_regulated(integration.EvidenceShared) == False
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_5_test() {
+  assert integration.is_regulated(integration.ContactParticipation) == True
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_6_test() {
+  assert integration.is_regulated(integration.TrialProjection) == False
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_7_test() {
+  assert integration.is_regulated(integration.TrialCoordination) == True
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_8_test() {
+  assert integration.is_regulated(integration.OpportunityShare) == True
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_9_test() {
+  assert integration.is_regulated(integration.TransactionInitiation) == True
+}
+
+// crossApp: surfaceIsRegulated — A-p9 and every regulated surface HAS a mapping — a regulated surface with nothing to ask would be unenforceable
+pub fn a_p9_and_every_regulated_surface_has_a_mapping_a_regulated_surface_with_10_test() {
+  assert integration.is_regulated(integration.ClubAgentPresence) == False
+}
+
+// crossApp: agentClientBasis — B-p1 an active, client-confirmed, unexpired agreement naming this agent IS a basis
+pub fn b_p1_an_active_client_confirmed_unexpired_agreement_naming_this_agent_is_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Active,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_815_696_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-ana"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(
+      agreement: Some(
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Active,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_815_696_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ),
+      status: Some(agreement_status.Active),
+    )
+}
+
+// crossApp: agentClientBasis — [neg] B-p3 a proposal is not a basis: nothing is active until the client confirms it
+pub fn neg_b_p3_a_proposal_is_not_a_basis_nothing_is_active_until_the_client_co_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Proposed,
+            confirmed_at: None,
+            end_at: Some(1_815_696_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-ana"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(
+      agreement: None,
+      status: Some(agreement_status.Proposed),
+    )
+}
+
+// crossApp: agentClientBasis — [neg] B-p4 a dispute is not a basis (#13)
+pub fn neg_b_p4_a_dispute_is_not_a_basis_13_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Disputed,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_815_696_000_000),
+            disputed_at: Some(1_789_776_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-ana"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(
+      agreement: None,
+      status: Some(agreement_status.Disputed),
+    )
+}
+
+// crossApp: agentClientBasis — [neg] B-p5 an active agreement past its end is not a basis — expiry is derived, never waited for (#13, T)
+pub fn neg_b_p5_an_active_agreement_past_its_end_is_not_a_basis_expiry_is_deriv_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Active,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_789_689_600_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-ana"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(
+      agreement: None,
+      status: Some(agreement_status.Expired),
+    )
+}
+
+// crossApp: agentClientBasis — [neg] B-p6 a colleague at the same agency is not a basis (#3, #4)
+pub fn neg_b_p6_a_colleague_at_the_same_agency_is_not_a_basis_3_4_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Active,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_815_696_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-someone-else"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(agreement: None, status: None)
+}
+
+// crossApp: agentClientBasis — [neg] B-p7 and the basis is per CLIENT: an agreement about one player says nothing about another (#25)
+pub fn neg_b_p7_and_the_basis_is_per_client_an_agreement_about_one_player_says_test() {
+  assert integration.basis(
+      [
+        agent_rules.Agreement(
+          row: representation_agreements.Row(
+            ..base.agreement(),
+            id: id.agreement("rep-1"),
+            agent_user_id: id.org_user("usr-ana"),
+            agency_org_id: id.org("org-northstar"),
+            client_id: "pl-kola",
+            status: representation_agreements.Active,
+            confirmed_at: Some(1_788_912_000_000),
+            end_at: Some(1_815_696_000_000),
+          ),
+          scope: [agreement_scopes.Employment],
+          policy_versions: [],
+          history: [],
+        ),
+      ],
+      id.org_user("usr-ana"),
+      "pl-other",
+      1_789_776_000_000,
+    )
+    == integration.Basis(agreement: None, status: None)
+}
+
+// crossApp: agentClientBasis — [neg] B-p10 and "none at all" is a different answer from "not active" — a third party gets neither
+pub fn neg_b_p10_and_none_at_all_is_a_different_answer_from_not_active_a_third_test() {
+  assert integration.basis(
+      [],
+      id.org_user("usr-ana"),
+      "pl-kola",
+      1_789_776_000_000,
+    )
+    == integration.Basis(agreement: None, status: None)
+}
+
+// crossApp: agentSurfaceDecision — S-p1 client_private allows when every fact is satisfied
+pub fn s_p1_client_private_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 passport_basic allows when every fact is satisfied
+pub fn s_p1_passport_basic_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.PassportBasic,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 passport_shared allows when every fact is satisfied
+pub fn s_p1_passport_shared_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.PassportShared,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 evidence_shared allows when every fact is satisfied
+pub fn s_p1_evidence_shared_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.EvidenceShared,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 contact_participation allows when every fact is satisfied
+pub fn s_p1_contact_participation_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 trial_projection allows when every fact is satisfied
+pub fn s_p1_trial_projection_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.TrialProjection,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 trial_coordination allows when every fact is satisfied
+pub fn s_p1_trial_coordination_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.TrialCoordination,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 opportunity_share allows when every fact is satisfied
+pub fn s_p1_opportunity_share_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.OpportunityShare,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 transaction_initiation allows when every fact is satisfied
+pub fn s_p1_transaction_initiation_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.TransactionInitiation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p1 club_agent_presence allows when every fact is satisfied
+pub fn s_p1_club_agent_presence_allows_when_every_fact_is_satisfied_test() {
+  assert integration.judge(
+      integration.ClubAgentPresence,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p4 no basis → NO_REPRESENTATION
+pub fn neg_s_p4_no_basis_no_representation_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(agreement: None, status: None),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("NO_REPRESENTATION", "BASIS")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p5 a basis that once existed → REPRESENTATION_NOT_ACTIVE
+pub fn neg_s_p5_a_basis_that_once_existed_representation_not_active_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(agreement: None, status: Some(agreement_status.Expired)),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("REPRESENTATION_NOT_ACTIVE", "BASIS")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p6 a removed subject → SUBJECT_UNAVAILABLE (#34)
+pub fn neg_s_p6_a_removed_subject_subject_unavailable_34_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: False,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("SUBJECT_UNAVAILABLE", "SUBJECT_PRESENT")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p7 a minor → MINOR_PATHWAY_DISABLED on every adultOnly surface (Z, #7, #8, #9)
+pub fn neg_s_p7_a_minor_minor_pathway_disabled_on_every_adultonly_surface_z_7_8_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: False,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("MINOR_PATHWAY_DISABLED", "MINOR_PATHWAY")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p9 a block → BLOCKED (Y, #26, #27)
+pub fn neg_s_p9_a_block_blocked_y_26_27_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: True,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("BLOCKED", "BLOCK")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p11 a commercial-only mandate cannot be a party to an employment contact → SCOPE_INSUFFICIENT
+pub fn neg_s_p11_a_commercial_only_mandate_cannot_be_a_party_to_an_employment_c_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Commercial],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("SCOPE_INSUFFICIENT", "SCOPE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p12 silence is not consent: a null disclosure → DISCLOSURE_WITHHELD
+pub fn neg_s_p12_silence_is_not_consent_a_null_disclosure_disclosure_withheld_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: False,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("DISCLOSURE_WITHHELD", "DISCLOSURE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p13 and an explicit no is a no
+pub fn neg_s_p13_and_an_explicit_no_is_a_no_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: False,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("DISCLOSURE_WITHHELD", "DISCLOSURE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p14 a surface needing an explicit share → SHARE_REQUIRED
+pub fn neg_s_p14_a_surface_needing_an_explicit_share_share_required_test() {
+  assert integration.judge(
+      integration.PassportShared,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: False,
+        licence_current: True,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("SHARE_REQUIRED", "SHARE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p15 a regulated surface with a stale licence → LICENCE_NOT_CURRENT (W, #11, #12)
+pub fn neg_s_p15_a_regulated_surface_with_a_stale_licence_licence_not_current_w_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: False,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("LICENCE_NOT_CURRENT", "LICENCE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p16 "not evaluated" is not clear → COMPLIANCE_NOT_CLEAR (R)
+pub fn neg_s_p16_not_evaluated_is_not_clear_compliance_not_clear_r_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: None,
+      ),
+    )
+    == integration.Denied("COMPLIANCE_NOT_CLEAR", "COMPLIANCE")
+}
+
+// crossApp: agentSurfaceDecision — [neg] S-p17 and neither is a no
+pub fn neg_s_p17_and_neither_is_a_no_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: Some(False),
+      ),
+    )
+    == integration.Denied("COMPLIANCE_NOT_CLEAR", "COMPLIANCE")
+}
+
+// crossApp: agentSurfaceDecision — S-p18 an UNregulated surface asks the compliance layer nothing — it is a read of the agent's own client
+pub fn s_p18_an_unregulated_surface_asks_the_compliance_layer_nothing_it_is_a_r_test() {
+  assert integration.judge(
+      integration.ClientPrivate,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: False,
+        disclosed: True,
+        shared: True,
+        licence_current: True,
+        compliance_clear: None,
+      ),
+    )
+    == integration.Allowed(
+      agent_rules.Agreement(
+        row: representation_agreements.Row(
+          ..base.agreement(),
+          id: id.agreement("rep-1"),
+          agent_user_id: id.org_user("usr-ana"),
+          agency_org_id: id.org("org-northstar"),
+        ),
+        scope: [agreement_scopes.Employment],
+        policy_versions: [],
+        history: [],
+      ),
+    )
+}
+
+// crossApp: agentSurfaceDecision — S-p19 the first refusal in RULE_ORDER wins, so a refusal never leaks the later facts
+pub fn s_p19_the_first_refusal_in_rule_order_wins_so_a_refusal_never_leaks_the_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: False,
+        blocked: True,
+        disclosed: True,
+        shared: True,
+        licence_current: False,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("MINOR_PATHWAY_DISABLED", "MINOR_PATHWAY")
+}
+
+// crossApp: agentSurfaceDecision — S-p19b and a blocked player is refused before the licence is even consulted
+pub fn s_p19b_and_a_blocked_player_is_refused_before_the_licence_is_even_consul_test() {
+  assert integration.judge(
+      integration.ContactParticipation,
+      integration.Basis(
+        agreement: Some(
+          agent_rules.Agreement(
+            row: representation_agreements.Row(
+              ..base.agreement(),
+              id: id.agreement("rep-1"),
+              agent_user_id: id.org_user("usr-ana"),
+              agency_org_id: id.org("org-northstar"),
+            ),
+            scope: [agreement_scopes.Employment],
+            policy_versions: [],
+            history: [],
+          ),
+        ),
+        status: Some(agreement_status.Active),
+      ),
+      integration.Facts(
+        subject_present: True,
+        is_adult: True,
+        blocked: True,
+        disclosed: True,
+        shared: True,
+        licence_current: False,
+        compliance_clear: Some(True),
+      ),
+    )
+    == integration.Denied("BLOCKED", "BLOCK")
+}
+
+// crossApp: surfaceScopes — K-p2 a trial projection needs an employment or transfer mandate
+pub fn k_p2_a_trial_projection_needs_an_employment_or_transfer_mandate_test() {
+  assert integration.scopes(integration.TrialProjection)
+    == Some([agreement_scopes.Employment, agreement_scopes.Transfer])
+}
+
+// crossApp: surfaceIsRegulated — [neg] K-p3 reading a schedule is not itself a regulated act — it needs a mandate and a disclosure, not a licence check
+pub fn neg_k_p3_reading_a_schedule_is_not_itself_a_regulated_act_it_needs_a_man_test() {
+  assert integration.is_regulated(integration.TrialProjection) == False
+}
+
+// crossApp: surfaceIsRegulated — K-p4 but coordinating one would be, which is why it is declared separately
+pub fn k_p4_but_coordinating_one_would_be_which_is_why_it_is_declared_separatel_test() {
+  assert integration.is_regulated(integration.TrialCoordination) == True
+}

@@ -1,0 +1,113 @@
+-- 0019_scouting_evidence: evidence passport records (media links, disputes, history), coach affiliations (history) and squad invitations become typed tables
+
+CREATE TABLE evidence (
+  id                  TEXT PRIMARY KEY,
+  player_id           TEXT NOT NULL,
+  claim_type          TEXT NOT NULL CHECK (claim_type IN ('statistic','attendance','assessment_result','reference','footage','availability')),
+  label               TEXT NOT NULL CHECK (length(label) <= 120),
+  value_number        REAL,
+  value_text          TEXT CHECK (value_text IS NULL OR length(value_text) <= 120),
+  units               TEXT CHECK (units IS NULL OR length(units) <= 20),
+  season              TEXT CHECK (season IS NULL OR length(season) <= 20),
+  source_kind         TEXT NOT NULL CHECK (source_kind IN ('player','guardian','org')),
+  source_id           TEXT NOT NULL,
+  source_name         TEXT NOT NULL CHECK (length(source_name) <= 200),
+  observed_at         INTEGER,
+  recorded_at         INTEGER NOT NULL,
+  verification_status TEXT NOT NULL CHECK (verification_status IN ('self_reported','coach_confirmed','club_assessed')),
+  verification_method TEXT CHECK (verification_method IS NULL OR length(verification_method) <= 80),
+  reviewer_id         TEXT,
+  reviewer_name       TEXT CHECK (reviewer_name IS NULL OR length(reviewer_name) <= 200),
+  reviewed_at         INTEGER,
+  expires_at          INTEGER,
+  correction_of_id    TEXT REFERENCES evidence(id) ON DELETE RESTRICT,
+  superseded_by_id    TEXT REFERENCES evidence(id) ON DELETE RESTRICT,
+  note                TEXT CHECK (note IS NULL OR length(note) <= 300),
+  CHECK (value_number IS NULL OR value_text IS NULL)
+) STRICT;
+CREATE INDEX evidence_player ON evidence (player_id, claim_type);
+CREATE INDEX evidence_superseded_by ON evidence (superseded_by_id);
+CREATE TABLE evidence_media (
+  evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  media_id    TEXT NOT NULL,
+  PRIMARY KEY (evidence_id, position),
+  UNIQUE (evidence_id, media_id)
+) STRICT;
+CREATE TABLE evidence_disputes (
+  id                 TEXT PRIMARY KEY,
+  evidence_id        TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+  position           INTEGER NOT NULL,
+  filed_at           INTEGER NOT NULL,
+  by_kind            TEXT NOT NULL CHECK (by_kind IN ('player','org')),
+  by_id              TEXT NOT NULL,
+  by_name            TEXT NOT NULL CHECK (length(by_name) <= 200),
+  reason             TEXT NOT NULL CHECK (length(reason) <= 300),
+  status             TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolution_outcome TEXT CHECK (resolution_outcome IS NULL OR resolution_outcome IN ('upheld','rejected')),
+  resolution_note    TEXT CHECK (resolution_note IS NULL OR length(resolution_note) <= 300),
+  resolved_at        INTEGER,
+  UNIQUE (evidence_id, position),
+  CHECK ((status = 'resolved') = (resolution_outcome IS NOT NULL AND resolved_at IS NOT NULL))
+) STRICT;
+CREATE INDEX evidence_disputes_status_filed ON evidence_disputes (status, filed_at);
+
+CREATE TABLE evidence_history (
+  id          TEXT PRIMARY KEY,
+  evidence_id    TEXT NOT NULL REFERENCES evidence(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
+  at          INTEGER NOT NULL,
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
+  by_id       TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action      TEXT NOT NULL,
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (evidence_id, position)
+) STRICT;
+CREATE TABLE coach_affiliations (
+  id                   TEXT PRIMARY KEY,
+  org_id               TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name             TEXT NOT NULL CHECK (length(org_name) <= 200),
+  coach_name           TEXT NOT NULL CHECK (length(coach_name) <= 80),
+  coach_email          TEXT CHECK (coach_email IS NULL OR length(coach_email) <= 120),
+  role                 TEXT NOT NULL CHECK (length(role) <= 60),
+  from_date            TEXT NOT NULL CHECK (length(from_date) = 10),
+  to_date              TEXT CHECK (to_date IS NULL OR length(to_date) = 10),
+  status               TEXT NOT NULL CHECK (status IN ('confirmed','ended','revoked')),
+  confirmed_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  confirmed_by_name    TEXT NOT NULL CHECK (length(confirmed_by_name) <= 200),
+  conflict_of_interest TEXT CHECK (conflict_of_interest IS NULL OR length(conflict_of_interest) <= 200),
+  created_at           INTEGER NOT NULL,
+  CHECK ((status = 'confirmed') = (to_date IS NULL))
+) STRICT;
+CREATE INDEX coach_affiliations_org_status ON coach_affiliations (org_id, status);
+CREATE INDEX coach_affiliations_created ON coach_affiliations (created_at);
+
+CREATE TABLE coach_affiliation_history (
+  id          TEXT PRIMARY KEY,
+  affiliation_id    TEXT NOT NULL REFERENCES coach_affiliations(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
+  at          INTEGER NOT NULL,
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
+  by_id       TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action      TEXT NOT NULL,
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (affiliation_id, position)
+) STRICT;
+CREATE TABLE squad_invites (
+  id           TEXT PRIMARY KEY,
+  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name     TEXT NOT NULL CHECK (length(org_name) <= 200),
+  player_id    TEXT NOT NULL,
+  player_name  TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  by_user_id   TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  by_name      TEXT NOT NULL CHECK (length(by_name) <= 200),
+  note         TEXT CHECK (note IS NULL OR length(note) <= 200),
+  status       TEXT NOT NULL CHECK (status IN ('pending_guardian','pending_player','approved','declined')),
+  created_at   INTEGER NOT NULL,
+  responded_at INTEGER,
+  CHECK ((status IN ('approved','declined')) = (responded_at IS NOT NULL))
+) STRICT;
+CREATE UNIQUE INDEX squad_invites_one_pending ON squad_invites (org_id, player_id) WHERE status IN ('pending_guardian','pending_player');
+CREATE INDEX squad_invites_player_status ON squad_invites (player_id, status);

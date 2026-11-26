@@ -1,0 +1,123 @@
+{
+  "$source": "domains/agents/core/shared.mjs",
+  "PERMISSIONS": {
+    "me.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "profile.write.own": [
+      "licensed_agent"
+    ],
+    "verification.submit": [
+      "licensed_agent"
+    ],
+    "clients.read.own": [
+      "licensed_agent"
+    ],
+    "clients.read.shared_summary": [
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "clients.request": [
+      "licensed_agent"
+    ],
+    "clients.terminate": [
+      "licensed_agent"
+    ],
+    "clients.opportunities.read": [
+      "licensed_agent"
+    ],
+    "clients.opportunities.share": [
+      "licensed_agent"
+    ],
+    "players.lookup": [
+      "licensed_agent"
+    ],
+    "inbox.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "agency.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "agency.team.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "agency.team.write": [
+      "agency_admin"
+    ],
+    "agency.settings.write": [
+      "agency_admin"
+    ],
+    "agency.audit.read": [
+      "agency_admin"
+    ],
+    "agency.compliance.read": [
+      "agency_admin",
+      "licensed_agent"
+    ],
+    "compliance.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "compliance.contexts.write": [
+      "licensed_agent"
+    ],
+    "transactions.read": [
+      "licensed_agent",
+      "agency_admin",
+      "analyst",
+      "assistant",
+      "finance"
+    ],
+    "transactions.write": [
+      "licensed_agent"
+    ]
+  },
+  "FACETS": [
+    "fifa_licence",
+    "national_registration",
+    "domestic_authorisation",
+    "minors_authorisation"
+  ],
+  "SCOPES": [
+    "employment",
+    "transfer",
+    "commercial",
+    "other_services"
+  ],
+  "AGREEMENT_STATUSES": [
+    "proposed",
+    "active",
+    "declined",
+    "expired",
+    "terminated_by_client",
+    "terminated_by_agent",
+    "disputed"
+  ],
+  "MAX_TERM_MONTHS": 24,
+  "DISCLOSURE_KEYS": [
+    "clubPresence",
+    "contactRouting",
+    "trialVisibility"
+  ]
+}

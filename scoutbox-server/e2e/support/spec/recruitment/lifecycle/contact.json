@@ -1,0 +1,22 @@
+{
+  "$source": "domains/recruitment/lifecycle/contact.mjs",
+  "CONTACT_STATUSES": [
+    "draft",
+    "delivered",
+    "failed",
+    "responded",
+    "recorded",
+    "cancelled"
+  ],
+  "CONTACT_LIMITS": {
+    "subject": 120,
+    "body": 2000,
+    "summary": 500,
+    "replyMessage": 500,
+    "clientKey": 64,
+    "occurredAtSkewMs": 900000,
+    "occurredAtMaxAgeMs": 15552000000,
+    "cooldownMs": 259200000,
+    "historyPage": 100
+  }
+}

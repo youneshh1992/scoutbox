@@ -1,0 +1,1 @@
+-- 0014_player_erasure: an account deletion keeps the player row as the retained record (id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed) instead of deleting it; no table, no column, no foreign key, no retention period

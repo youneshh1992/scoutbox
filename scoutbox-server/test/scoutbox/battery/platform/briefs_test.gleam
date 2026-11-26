@@ -1,0 +1,378 @@
+//// Checks of the rules from the rules suites of platform/contracts, platform/dates, first generated from the
+//// TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/battery/base
+import scoutbox/discovery/briefs
+import scoutbox/rows/recruitment_briefs
+import scoutbox/vocab/brief_status
+
+// contracts: briefIsLiveOn — live on its first day
+pub fn live_on_its_first_day_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-09-12"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-09-12"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — [neg] not live the day before it starts
+pub fn neg_not_live_the_day_before_it_starts_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-09-12"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-09-11"),
+    )
+    == False
+}
+
+// contracts: briefIsLiveOn — live on its last day, all day
+pub fn live_on_its_last_day_all_day_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-09-12"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-09-30"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — [neg] not live the day after
+pub fn neg_not_live_the_day_after_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-09-12"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-10-01"),
+    )
+    == False
+}
+
+// contracts: briefIsLiveOn — a window across the European DST change is unaffected — there is no clock in a calendar day
+pub fn a_window_across_the_european_dst_change_is_unaffected_there_is_no_clock_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-03-28"),
+        active_until_date: Some("2026-03-29"),
+      ),
+      base.day("2026-03-29"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — no window means always live while active
+pub fn no_window_means_always_live_while_active_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: None,
+        active_until_date: None,
+      ),
+      base.day("1999-01-01"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — [neg] a paused brief is not live inside its window
+pub fn neg_a_paused_brief_is_not_live_inside_its_window_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Paused,
+        active_from_date: Some("2026-09-12"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-09-15"),
+    )
+    == False
+}
+
+// contracts: validateRecruitmentBrief — [neg] a window that ends before it starts cannot be saved
+pub fn neg_a_window_that_ends_before_it_starts_cannot_be_saved_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "activeFrom", "activeUntil"],
+      briefs.Fields(
+        title: Some("Backwards"),
+        positions: Some(["CM"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: Some("2026-09-30"),
+        active_until: Some("2026-09-12"),
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"activeWindow\",\"error\":\"BRIEF_WINDOW_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-14"),
+        active_until_date: Some("2026-11-14"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == False
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_2_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-15"),
+        active_until_date: Some("2026-11-15"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_3_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-16"),
+        active_until_date: Some("2026-11-16"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == False
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_4_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-14"),
+        active_until_date: Some("2026-11-14"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == False
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_5_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-15"),
+        active_until_date: Some("2026-11-15"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == True
+}
+
+// contracts: briefIsLiveOn — today is the UTC calendar day
+pub fn today_is_the_utc_calendar_day_6_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-11-16"),
+        active_until_date: Some("2026-11-16"),
+      ),
+      base.day("2026-11-15"),
+    )
+    == False
+}
+
+// dates: validateRecruitmentBrief — N5 control brief window
+pub fn n5_control_brief_window_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "activeFrom", "activeUntil"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: Some(["CM"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: Some("2026-09-01"),
+        active_until: Some("2026-09-30"),
+      ),
+      False,
+    ))
+    == "{\"ok\":true,\"title\":\"x\",\"criteria\":{\"positions\":[\"CM\"],\"positionGroups\":[\"MID\"],\"minAge\":null,\"maxAge\":null,\"radiusKm\":null,\"maxLevel\":null,\"foot\":null,\"availability\":null,\"evidenceRequirements\":[],\"minTrustBand\":null,\"combineProtocols\":[]},\"activeFrom\":\"2026-09-01\",\"activeUntil\":\"2026-09-30\"}"
+}
+
+// dates: validateRecruitmentBrief — [neg] N6 a brief whose end cannot be read is refused (it used to be live for ever)
+pub fn neg_n6_a_brief_whose_end_cannot_be_read_is_refused_it_used_to_be_live_fo_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "activeUntil"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: Some(["CM"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: Some("garbage"),
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"activeUntil\",\"error\":\"DATE_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// dates: validateRecruitmentBrief — [neg] N6b a rolled-over start, and a backwards window
+pub fn neg_n6b_a_rolled_over_start_and_a_backwards_window_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "activeFrom"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: Some(["CM"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: Some("2026-02-30"),
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"activeFrom\",\"error\":\"DATE_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// dates: validateRecruitmentBrief — [neg] N6b a rolled-over start, and a backwards window
+pub fn neg_n6b_a_rolled_over_start_and_a_backwards_window_2_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "activeFrom", "activeUntil"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: Some(["CM"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: Some("2026-09-30"),
+        active_until: Some("2026-09-01"),
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"activeWindow\",\"error\":\"BRIEF_WINDOW_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// dates: briefIsLiveOn — N7 live through the whole last day
+pub fn n7_live_through_the_whole_last_day_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-09-01"),
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-09-30"),
+    )
+    == True
+}
+
+// dates: briefIsLiveOn — N7 live through the whole last day
+pub fn n7_live_through_the_whole_last_day_2_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_until_date: Some("2026-09-30"),
+      ),
+      base.day("2026-10-01"),
+    )
+    == False
+}
+
+// dates: briefIsLiveOn — [neg] N8 a brief with garbage in a bound is not live
+pub fn neg_n8_a_brief_with_garbage_in_a_bound_is_not_live_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_until_date: Some("garbage"),
+      ),
+      base.day("2026-09-23"),
+    )
+    == False
+}
+
+// dates: briefIsLiveOn — [neg] N8 a brief with garbage in a bound is not live
+pub fn neg_n8_a_brief_with_garbage_in_a_bound_is_not_live_2_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_from_date: Some("2026-02-30"),
+      ),
+      base.day("2026-09-23"),
+    )
+    == False
+}
+
+// dates: briefIsLiveOn — [neg] O #21 a recruitment brief ending "whenever" is live — EXPECT NO
+pub fn neg_o_21_a_recruitment_brief_ending_whenever_is_live_expect_no_test() {
+  assert briefs.is_live_on(
+      recruitment_briefs.Row(
+        ..base.brief(),
+        status: brief_status.Active,
+        active_until_date: Some("whenever"),
+      ),
+      base.day("2026-09-23"),
+    )
+    == False
+}

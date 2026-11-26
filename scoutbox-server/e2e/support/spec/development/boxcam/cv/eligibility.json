@@ -1,0 +1,8 @@
+{
+  "$source": "domains/development/boxcam/cv/eligibility.mjs",
+  "COMBINE_DISABLED_REASON": {
+    "code": "REAL_WORLD_VALIDATION_NOT_COMPLETED",
+    "short": "Combine verification is not available yet for this protocol.",
+    "detail": "Real-world validation has not been completed, so ScoutBox will not publish a standardised Combine measurement from computer vision."
+  }
+}

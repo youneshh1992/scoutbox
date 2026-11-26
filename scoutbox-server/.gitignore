@@ -1,0 +1,9 @@
+*.beam
+*.ez
+/build
+erl_crash.dump
+/data
+node_modules
+/vendor/esqlite/
+/vendor/esqlite-*.tar
+/public

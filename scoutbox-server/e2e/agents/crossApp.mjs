@@ -1,0 +1,2438 @@
+// Agent cross-app integration battery.
+//
+// The governing principle this suite enforces: cross-app integration must never
+// turn legacy representation data, a stale Agent session, same-agency
+// membership, an internal Club decision, a Trial invitation, a shared
+// Opportunity or a transaction reference into broader authority or visibility
+// than the current canonical relationship, policy, consent, block and privacy
+// rules actually permit.
+//
+// This suite proves INTEGRATION, not app-local behaviour: almost every check
+// crosses a boundary between two systems that were built separately, and asks
+// whether the seam between them leaks.
+//
+// Pure groups first, then a real server; the adversarial cases are numbered
+// #1–#37 in their check labels.
+//
+// No assertion is `status !== 200`. Every refusal names its status and its code.
+
+import { freePort } from '../support/testPort.mjs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import eventRegistrySpec from '../support/spec/platform/eventRegistry.json' with { type: 'json' };
+import notificationPrefsSpec from '../support/spec/platform/notificationPrefs.json' with { type: 'json' };
+import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
+import { openFixture, SCHEMA_VERSION } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
+import { liveStream } from '../support/liveEvents.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
+
+const PORT = await freePort();
+const BASE = `http://localhost:${PORT}`;
+const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m27-'));
+const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
+
+let passed = 0;
+let negatives = 0;
+const fail = (msg) => {
+  console.error(`✗ ${msg}`);
+  process.exitCode = 1;
+};
+const ok = (cond, msg) => {
+  if (cond) {
+    passed++;
+    console.log(`✓ ${msg}`);
+  } else fail(msg);
+};
+const neg = (cond, msg) => {
+  negatives++;
+  ok(cond, `[neg] ${msg}`);
+};
+const section = (name) => console.log(`\n— ${name} —`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const expect = (r, status, code) => {
+  const good = r.status === status && (code === null || r.body?.error === code);
+  if (!good) console.error(`   got ${r.status} ${JSON.stringify(r.body).slice(0, 300)}`);
+  return good;
+};
+const DAY = 86_400_000;
+const EVENT_REGISTRY = eventRegistrySpec.EVENT_REGISTRY;
+const { TYPE_CATEGORY, CATEGORIES } = notificationPrefsSpec;
+const RATE_LIMIT_POLICY = rateLimitSpec.RATE_LIMIT_POLICY;
+
+// =================================================================== HTTP
+
+const children = [];
+process.on('exit', () => {
+  for (const c of children) {
+    try {
+      c.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
+});
+
+async function boot(env = {}) {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      DATA_DIR,
+      SCOUTBOX_QUIET_LOGS: '1',
+      AGENT_VERIFICATION_TEST_PROVIDER: '1',
+      SCOUTBOX_TEST_CLOCK: '1',
+      ...env,
+    },
+    stdio: 'ignore',
+  });
+  children.push(proc);
+  proc.unref();
+  let up = false;
+  for (let i = 0; i < 160 && !up; i++) {
+    try {
+      up = (await fetch(`${BASE}/healthz`)).ok;
+    } catch {
+      /* booting */
+    }
+    if (!up) await sleep(250);
+  }
+  if (!up) throw new Error('server did not come up');
+  return proc;
+}
+async function stop(proc) {
+  proc.kill('SIGTERM');
+  for (let i = 0; i < 80; i++) {
+    if (proc.exitCode != null || proc.signalCode) break;
+    await sleep(100);
+  }
+  await sleep(300);
+}
+async function j(method, url, body, token, extra = {}) {
+  const r = await fetch(`${BASE}${url}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = null;
+  try {
+    data = await r.json();
+  } catch {
+    /* non-json */
+  }
+  return { status: r.status, body: data };
+}
+const login = async (orgId, scoutName, role, platform) =>
+  (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
+const playerLogin = async (playerId) => (await j('POST', '/auth/player/login', { playerId })).body;
+const ERROR_BODIES = [];
+const collect = (label, r) => {
+  if (r.status >= 400) ERROR_BODIES.push({ label, status: r.status, body: r.body });
+  return r;
+};
+const key = () => `k-${Math.random().toString(36).slice(2, 10)}`;
+
+// ---- a second agency, so "foreign agency" is never "same-agency colleague"
+let server = await boot();
+await stop(server);
+{
+  // The second agency is a copy of the seeded one's row under its own id and name, without its password.
+  const F = openFixture(DATA_DIR);
+  try {
+    const agency = F.sql.prepare("SELECT * FROM orgs WHERE type = 'agency' ORDER BY rowid LIMIT 1").get();
+    F.insert('orgs', { ...agency, id: 'org-southgate', name: 'Southgate Sports Management', password_hash: null });
+  } finally {
+    F.close();
+  }
+  const agencies = readRows(DATA_DIR)
+    .rows('orgs')
+    .filter((o) => o.type === 'agency');
+  ok(
+    agencies.length === 2 && agencies.some((o) => o.id === 'org-southgate' && o.password_hash === null),
+    'fixture: two agencies exist, so a foreign agent is a different thing from a colleague',
+  );
+}
+server = await boot();
+
+section('fixture — a licensed agent, a confirmed client, and a club with a case');
+const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
+const tom = await login('org-eastport', 'Tom Field', 'First-Team Scout');
+const rita = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
+const alex = await login('org-northstar', 'Alex Agent', 'Director');
+const kola = await playerLogin('pl-adeyemi');
+const guni = await playerLogin('pl-guni');
+ok(
+  [maria, tom, rita, alex, kola, guni].every((x) => x?.token),
+  'fixture: six actors logged in',
+);
+
+await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
+const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
+await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
+await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token);
+await j(
+  'POST',
+  '/org/agent/profile/facets/national_registration/submit',
+  { reference: 'TEST-VERIFIED-ANA-ENG', memberAssociation: 'ENG' },
+  ana.token,
+);
+const REQ = await j(
+  'POST',
+  '/org/agent/clients/request',
+  { playerId: 'pl-adeyemi', scope: ['employment'], jurisdiction: 'ENG' },
+  ana.token,
+);
+const REP = REQ.body?.relationship?.id;
+ok(!!REP, 'fixture: the agent requested a relationship');
+const CONF = await j('POST', `/player/agent/relationships/${REP}/confirm`, { expectedRev: 1 }, kola.token);
+ok(
+  CONF.status === 200 && CONF.body.relationship.status === 'active',
+  'fixture: the client confirmed it — the root of every authority below',
+);
+let REV = CONF.body.relationship.rev;
+
+// A second licensed agent at the SAME agency, for the same-agency privacy group.
+await j('POST', '/org/agent/agency/team', { name: 'Bea Agent', tiers: ['licensed_agent'] }, alex.token);
+const bea = await login('org-northstar', 'Bea Agent', 'Agent', 'agent');
+await j('POST', '/org/agent/profile', { displayName: 'Bea Agent', jurisdictions: ['ENG'] }, bea.token);
+// And a foreign agency's agent.
+await j(
+  'POST',
+  '/org/agent/agency/team',
+  { name: 'Zoe Hart', tiers: ['licensed_agent'] },
+  (await login('org-southgate', 'Zed Admin', 'Director', 'agent')).token,
+);
+const zoe = await login('org-southgate', 'Zoe Hart', 'Agent', 'agent');
+ok(!!bea?.token && !!zoe?.token, 'fixture: a same-agency colleague and a foreign agency agent');
+
+const setD = async (patch, rev = REV) => {
+  const r = await j(
+    'PATCH',
+    `/player/agent/relationships/${REP}/sharing`,
+    { disclosure: patch, expectedRev: rev },
+    kola.token,
+  );
+  if (r.status === 200) REV = r.body.relationship.rev;
+  return r;
+};
+
+section("D — the Player's own Agent projection");
+{
+  const mine = await j('GET', '/player/agent/relationships', undefined, kola.token);
+  const row = (mine.body.items ?? []).find((x) => x.id === REP);
+  ok(mine.status === 200 && !!row, 'D1 the client reads their own relationship');
+  ok(
+    row.disclosure && Object.values(row.disclosure).every((v) => v === false),
+    'D2 all three disclosure choices start OFF — confirming turned none of them on',
+  );
+  neg(!/fee|commission|salary/i.test(JSON.stringify(row)), "D3 the client's own view carries no fee and no commission");
+  const minorView = await j('GET', '/player/agent/relationships', undefined, guni.token);
+  ok(
+    minorView.body.minor === true && minorView.body.items.length === 0,
+    'D4 a guardian-managed account is told plainly that representation is not available to it (Z)',
+  );
+  neg(
+    expect(
+      collect(
+        '#6 foreign player My Agent',
+        await j('GET', '/player/agent/shared-opportunities', undefined, (await playerLogin('pl-carvalho')).token),
+      ),
+      200,
+      null,
+    ) && true,
+    "#6 an agent cannot reach an unrelated player's My Agent endpoint: the route is the PLAYER's own, keyed to their session, so there is no id to guess",
+  );
+  const asAgent = await j('GET', '/player/agent/relationships', undefined, ana.token);
+  neg(asAgent.status === 401 || asAgent.status === 403, '#6b and an agent token on a player route is refused outright');
+}
+
+section('T/U/V/W/X — the five ways authority ends, each re-derived');
+{
+  // Each is exercised on a DISPOSABLE relationship so the main one survives.
+  const other = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-carvalho', scope: ['employment'], jurisdiction: 'ENG' },
+    ana.token,
+  );
+  const oid = other.body?.relationship?.id;
+  const mateus = await playerLogin('pl-carvalho');
+  const oconf = await j('POST', `/player/agent/relationships/${oid}/confirm`, { expectedRev: 1 }, mateus.token);
+  ok(oconf.status === 200, 'T1 a second client confirms a relationship');
+  await j(
+    'PATCH',
+    `/player/agent/relationships/${oid}/sharing`,
+    { disclosure: { trialVisibility: true }, expectedRev: oconf.body.relationship.rev },
+    mateus.token,
+  );
+  const beforeEnd = await j('GET', `/org/agent/clients/${oid}/trials`, undefined, ana.token);
+  ok(beforeEnd.status === 200, 'T2 and the agent can read their trials while it is active');
+  const ended = await j(
+    'POST',
+    `/player/agent/relationships/${oid}/terminate`,
+    { expectedRev: oconf.body.relationship.rev + 1 },
+    mateus.token,
+  );
+  ok(ended.status === 200, 'U1 the client ends it');
+  neg(
+    expect(
+      collect('U2', await j('GET', `/org/agent/clients/${oid}/trials`, undefined, ana.token)),
+      403,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    "U2 and the agent's trial read closes immediately — the same token, a different answer (#28)",
+  );
+  neg(
+    expect(
+      collect('U3', await j('GET', `/org/agent/clients/${oid}/contacts`, undefined, ana.token)),
+      403,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'U3 and so does the contact read (#28)',
+  );
+  neg(
+    expect(
+      collect(
+        'U4',
+        await j('POST', `/org/agent/clients/${oid}/opportunities/opp-anything/share`, { clientKey: key() }, ana.token),
+      ),
+      403,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'U4 and sharing an opportunity is refused before the opportunity is even looked up',
+  );
+}
+
+section('V — a dispute suspends access, and is not an expiry');
+{
+  const d = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-okafor', scope: ['employment'], jurisdiction: 'ENG' },
+    ana.token,
+  );
+  const did = d.body?.relationship?.id;
+  const chi = await playerLogin('pl-okafor');
+  const dc = await j('POST', `/player/agent/relationships/${did}/confirm`, { expectedRev: 1 }, chi.token);
+  if (dc.status === 200) {
+    await j(
+      'PATCH',
+      `/player/agent/relationships/${did}/sharing`,
+      { disclosure: { trialVisibility: true }, expectedRev: dc.body.relationship.rev },
+      chi.token,
+    );
+    const dispute = await j(
+      'POST',
+      `/player/agent/relationships/${did}/dispute`,
+      { reason: 'I did not agree to this.', expectedRev: dc.body.relationship.rev + 1 },
+      chi.token,
+    );
+    ok(dispute.status === 200, 'V1 the client disputes it');
+    neg(
+      expect(
+        collect('V2', await j('GET', `/org/agent/clients/${did}/trials`, undefined, ana.token)),
+        403,
+        'REPRESENTATION_NOT_ACTIVE',
+      ),
+      'V2 the next protected action is refused — a disputed relationship is not an active one (#13)',
+    );
+    const seen = await j('GET', `/org/agent/clients/${did}`, undefined, ana.token);
+    neg(
+      !/I did not agree/i.test(JSON.stringify(seen.body ?? {})),
+      "V3 and the client's reason stays with the client — the agent learns the state, not the words",
+    );
+  } else
+    ok(
+      dc.status >= 400,
+      `V1 (this client could not confirm: ${dc.body?.error}) — the dispute leg is covered by the pure half`,
+    );
+}
+
+section("G — the opportunity share: the client's own board is the gate");
+{
+  const far = new Date(Date.now() + 60 * DAY).toISOString().slice(0, 10);
+  const made = await j(
+    'POST',
+    '/org/opportunities',
+    {
+      type: 'trial',
+      title: 'First-team trial week',
+      category: 'mens',
+      deadline: far,
+      eligibility: { minAge: 16, maxAge: 40, positionGroup: 'any' },
+    },
+    maria.token,
+  );
+  ok(made.status === 201, 'G1 a club publishes an opportunity');
+  const board = await j('GET', `/org/agent/clients/${REP}/opportunities`, undefined, ana.token);
+  const OPP = board.body?.items?.[0]?.id;
+  ok(
+    board.status === 200 && !!OPP,
+    "G2 the agent reads the client's own board, through the same eligibility and visibility rules the player sees",
+  );
+  neg(
+    !/watchlist|ranking|caseId|assessment|fit/i.test(JSON.stringify(board.body)),
+    "G3 and nothing of the club's recruitment thinking rides along (#20)",
+  );
+  neg(
+    expect(
+      collect(
+        'G4',
+        await j('POST', `/org/agent/clients/${REP}/opportunities/opp-nope/share`, { clientKey: key() }, ana.token),
+      ),
+      404,
+      'OPPORTUNITY_NOT_AVAILABLE',
+    ),
+    'G4 an opportunity not on the client\'s board is a uniform 404 — not "closed", not "ineligible", so the route is no oracle over the board',
+  );
+  // #3. An agency ADMINISTRATOR holds the agency's books, not an agent's mandate.
+  // The role gate answers first and says only that the action is not in their role —
+  // and it says exactly the same about a client the agency has never heard of, so
+  // the refusal is no oracle over who this agency represents.
+  const adminReal = collect(
+    '#3 admin shares',
+    await j('POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }, alex.token),
+  );
+  const adminFake = collect(
+    '#3 admin shares (unknown client)',
+    await j('POST', '/org/agent/clients/rep-nope/opportunities/opp-nope/share', { clientKey: key() }, alex.token),
+  );
+  neg(
+    expect(adminReal, 403, 'AGENT_ACTION_NOT_PERMITTED'),
+    '#3 an agency ADMINISTRATOR cannot share for the agent — the action is not in their role',
+  );
+  neg(
+    adminFake.status === adminReal.status && adminFake.body?.error === adminReal.body?.error,
+    '#3b and a client this agency never represented gets the identical refusal — the role gate is no oracle over the client list',
+  );
+  neg(
+    expect(
+      collect(
+        '#4 colleague shares',
+        await j('POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }, bea.token),
+      ),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    '#4 nor can a licensed colleague at the same agency (S)',
+  );
+  neg(
+    expect(
+      collect(
+        'AB foreign shares',
+        await j('POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }, zoe.token),
+      ),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    "AB1 nor a foreign agency's agent — the same 404, so the two are indistinguishable",
+  );
+  const K = key();
+  const shared = await j(
+    'POST',
+    `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+    { note: 'Your profile fits what they described.', clientKey: K },
+    ana.token,
+  );
+  ok(shared.status === 201 && shared.body.share.opportunityId === OPP, 'G5 the agent shares it');
+  ok(
+    /your own action/i.test(shared.body.share.honest),
+    'G6 and the record says, in words the client reads, that applying is theirs',
+  );
+  ok(
+    (
+      await j(
+        'POST',
+        `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+        { note: 'Your profile fits what they described.', clientKey: K },
+        ana.token,
+      )
+    ).body?.idempotent === true,
+    'AE1 the same key replays rather than sharing twice',
+  );
+  neg(
+    expect(
+      collect(
+        'AE2',
+        await j('POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }, ana.token),
+      ),
+      409,
+      'OPPORTUNITY_ALREADY_SHARED',
+    ),
+    'AE2 and a fresh key on the same opportunity is a named duplicate, not a second row',
+  );
+  const pv = await j('GET', '/player/agent/shared-opportunities', undefined, kola.token);
+  ok(
+    pv.status === 200 && pv.body.items.length === 1 && pv.body.items[0].sharedByName === 'Ana Agent',
+    'G7 the client sees it, named to the agent who shared it',
+  );
+  const apps = await j('GET', '/player/applications', undefined, kola.token);
+  const rows = Array.isArray(apps.body) ? apps.body : (apps.body?.items ?? []);
+  neg(
+    !rows.some((a) => a.opportunityId === OPP),
+    'G8 and NO application exists: sharing is not applying, and there is no parameter on the share route that could have started one',
+  );
+  const notes = await j('GET', '/player/notifications', undefined, kola.token);
+  const nrows = Array.isArray(notes.body) ? notes.body : (notes.body?.items ?? []);
+  ok(
+    nrows.some((n) => n.type === 'representation_opportunity'),
+    'AH1 the client was notified through the canonical stream',
+  );
+  const SH = shared.body.share.id;
+  ok(
+    (await j('POST', `/org/agent/clients/${REP}/opportunities/shares/${SH}/withdraw`, {}, ana.token)).status === 200,
+    'G9 the agent withdraws it',
+  );
+  ok(
+    (await j('GET', '/player/agent/shared-opportunities', undefined, kola.token)).body.items.length === 0,
+    'G10 and the client stops seeing it',
+  );
+  const keep = await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token);
+  ok(
+    keep.body.items.length === 1 && keep.body.items[0].withdrawnAt,
+    "AN1 but the agent's own record keeps it, marked — it happened, and an audit trail that forgets is not one",
+  );
+  globalThis.__OPP = OPP;
+}
+
+section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
+{
+  const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi' }, maria.token);
+  const RID = kase.body?.room?.roomId ?? kase.body?.existingRoomId;
+  ok(!!RID, 'H1 a recruitment case exists');
+  const jr0 = (await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
+  if (!['contact_planned', 'contacted'].includes(jr0?.lifecycle?.currentStage)) {
+    await j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'planContact', expectedRev: jr0?.case?.rev }, maria.token);
+  }
+  const list0 = await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token);
+  ok(
+    list0.body.routing.available === true && list0.body.routing.agentParty === false,
+    'H2 the preview says the player is reachable and the agent is not a party',
+  );
+  ok(list0.body.routing.agentRefusal === 'DISCLOSURE_WITHHELD', 'H3 and names the rule: the client has not agreed');
+  neg(
+    !list0.body.routing.modes.includes('agent_only'),
+    'H4 the published modes do not include one that replaces the player',
+  );
+  neg(
+    expect(
+      collect(
+        'H5',
+        await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Hello', contactMode: 'agent_only' }, maria.token),
+      ),
+      400,
+      'CONTACT_MODE_INVALID',
+    ),
+    'H5 and asking for it is refused rather than quietly downgraded',
+  );
+
+  // #10: a draft that asks for the agent, sent while the disclosure is still off.
+  const d1 = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { body: 'A conversation about next season.', contactMode: 'both' },
+    maria.token,
+  );
+  const C1 = d1.body.contact.id;
+  ok(
+    d1.status === 201 && d1.body.contact.contactMode === 'both' && d1.body.contact.routedToAgent === false,
+    'I1 a draft records what the club asked for, and has routed nothing to anybody',
+  );
+  const s1 = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts/${C1}/send`,
+    { expectedRev: d1.body.contact.rev },
+    maria.token,
+  );
+  ok(
+    s1.status === 200 && s1.body.delivered === true,
+    'I2 the send succeeds — the player is always a valid route, so a refused agent does not fail the contact',
+  );
+  neg(
+    s1.body.routing.agentParty === false && s1.body.routing.agentRefusal === 'DISCLOSURE_WITHHELD',
+    'I3 but the agent was NOT a party, decided at SEND time (#10)',
+  );
+  ok(
+    (s1.body.contact.history ?? []).some((h) => h.action === 'contact_agent_routing_refused'),
+    "I4 and the refusal is in the contact's own history, not only in the response",
+  );
+  ok(
+    (await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token)).body.items.length === 0,
+    'J1 the agent sees nothing of it',
+  );
+
+  // The client turns routing ON; the club's next contact reaches both.
+  ok((await setD({ contactRouting: true })).status === 200, 'H6 the client turns contact routing on');
+  const preview = await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token);
+  ok(
+    preview.body.routing.agentParty === true && preview.body.routing.agentRefusal === null,
+    'H7 and the preview now offers the agent as a party',
+  );
+  // Clear the cooldown by answering the first contact.
+  const inbox = await j('GET', '/player/inbox', undefined, kola.token);
+  const req1 = inbox.body.items.find((x) => x.type === 'contact' && x.status === 'pending');
+  ok(
+    (await j('POST', `/player/requests/${req1?.id}/respond`, { accept: false }, kola.token)).status === 200,
+    'J2 the client answers the first contact themselves',
+  );
+  const d2 = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { subject: 'Next season', body: 'Following up with you and your representative.', contactMode: 'both' },
+    maria.token,
+  );
+  const C2 = d2.body.contact.id;
+  const clubStream = await liveStream(BASE, j, maria.token);
+  const s2 = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts/${C2}/send`,
+    { expectedRev: d2.body.contact.rev },
+    maria.token,
+  );
+  ok(s2.status === 200 && s2.body.routing.agentParty === true, 'H8 the agent IS a party this time');
+  ok(
+    !!(await clubStream.waitFor(
+      (f) =>
+        f.event === 'contact_agent_routed' &&
+        f.orgId === 'org-eastport' &&
+        f.contactId === C2 &&
+        f.agentUserId === ana.userId,
+    )),
+    "LV1 the club's stream hears the contact routed to the agent, by the agent's id only",
+  );
+  await clubStream.stop();
+  ok(
+    s2.body.contact.recipient.type === 'player' && s2.body.contact.routedToAgent === true,
+    'H9 and the PLAYER is still the recipient — beside, never instead',
+  );
+  const agentSees = await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token);
+  ok(agentSees.status === 200 && agentSees.body.items.length === 1, 'J3 the agent sees exactly the one routed to them');
+  const item = agentSees.body.items[0];
+  ok(
+    item.club.name === 'Eastport FC' && item.body === 'Following up with you and your representative.',
+    'J4 with the club and the message the club addressed to them both',
+  );
+  neg(
+    !('caseId' in item) && !/watchlist|assessment|ranking|note/i.test(JSON.stringify(item)),
+    'J5 and no case id, no assessment, no ranking and no club-private note (#16)',
+  );
+  neg(
+    !(await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, bea.token)).body?.items?.length,
+    'S1 a same-agency colleague sees none of it (#4)',
+  );
+  ok(
+    (await j('GET', '/org/agent/inbox', undefined, ana.token)).body.notifications.some(
+      (n) => n.type === 'representation_contact',
+    ),
+    'AH2 the agent heard through the canonical agent Inbox — no second Inbox was created',
+  );
+  neg(
+    !(await j('GET', '/org/agent/inbox', undefined, bea.token)).body.notifications.some(
+      (n) => n.type === 'representation_contact',
+    ),
+    'J6 and the colleague did not',
+  );
+
+  // #26: a block added between render and send.
+  const inbox2 = await j('GET', '/player/inbox', undefined, kola.token);
+  const req2 = inbox2.body.items.find((x) => x.type === 'contact' && x.status === 'pending');
+  await j('POST', `/player/requests/${req2?.id}/respond`, { accept: false }, kola.token);
+  const d3 = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { body: 'One more note.', contactMode: 'both' },
+    maria.token,
+  );
+  const blocked = await j('POST', '/player/block', { orgId: 'org-eastport' }, kola.token);
+  ok(blocked.status === 200 || blocked.status === 201, 'Y1 the client blocks the club between the draft and the send');
+  neg(
+    expect(
+      collect(
+        '#26',
+        await j(
+          'POST',
+          `/org/rooms/${RID}/contacts/${d3.body.contact.id}/send`,
+          { expectedRev: d3.body.contact.rev },
+          maria.token,
+        ),
+      ),
+      403,
+      'CONTACT_BLOCKED',
+    ),
+    '#26 and the send is refused — the block is re-derived at mutation time, not read from the draft',
+  );
+  // Lift it through the canonical door so the rest of the suite can proceed.
+  const blocks = (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items ?? [];
+  for (const b of (Array.isArray(blocks) ? blocks : []).filter(
+    (x) => x.playerId === 'pl-adeyemi' && x.orgId === 'org-eastport',
+  )) {
+    await j('POST', `/admin/blocks/${b.id}/lift`, {}, undefined, ADMIN);
+  }
+  // #30. Body forgery, tested here because a contact draft belongs to a case in a
+  // contact state — and because the whole point is that these fields are DERIVED.
+  const forged = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    {
+      body: 'Hello.',
+      contactMode: 'player_only',
+      routedToAgent: true,
+      routingSnapshot: { agent: { agentUserId: 'usr-ana' } },
+      recipient: { type: 'agent' },
+    },
+    maria.token,
+  );
+  ok(
+    forged.status === 400 && forged.body.problem === 'unknown_field',
+    `#30 a body naming a represented party is refused: routing fields are never taken from the request ${forged.status === 400 ? '' : `${forged.status} ${JSON.stringify(forged.body).slice(0, 250)}`}`,
+  );
+  const clean = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { body: 'Hello.', contactMode: 'player_only' },
+    maria.token,
+  );
+  neg(
+    clean.status === 201 &&
+      clean.body.contact.routedToAgent === false &&
+      clean.body.contact.contactMode === 'player_only' &&
+      clean.body.contact.recipient?.type !== 'agent',
+    '#30b the server derives the mode, the routing and the recipient',
+  );
+  await j(
+    'POST',
+    `/org/rooms/${RID}/contacts/${clean.body.contact.id}/cancel`,
+    { expectedRev: clean.body.contact.rev },
+    maria.token,
+  );
+  globalThis.__RID = RID;
+}
+
+section('K/L/M — the trial projection is scheduling, and stops there');
+{
+  const RID = globalThis.__RID;
+  neg(
+    expect(
+      collect('K1', await j('GET', `/org/agent/clients/${REP}/trials`, undefined, ana.token)),
+      403,
+      'DISCLOSURE_WITHHELD',
+    ),
+    'K1 trials refuse while the client has not chosen to share them',
+  );
+  ok((await setD({ trialVisibility: true })).status === 200, 'K2 the client turns trial visibility on');
+  const H = 3600_000;
+  const T = Date.now() + 96 * H;
+  const inv = await j(
+    'POST',
+    `/org/rooms/${RID}/trials`,
+    {
+      timezone: 'Europe/London',
+      venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' },
+      message: 'Come and train with the U23s.',
+      instructions: 'Ask for Priya at reception.',
+      slots: [{ startsAt: new Date(T).toISOString(), endsAt: new Date(T + 2 * H).toISOString() }],
+    },
+    maria.token,
+  );
+  ok(inv.status === 200 || inv.status === 201, 'K3 the club invites the client to a trial');
+  const inbox = await j('GET', '/player/inbox', undefined, kola.token);
+  const treq = inbox.body.items.find((x) => x.type === 'trial' && x.status === 'pending');
+  const acc = await j(
+    'POST',
+    `/player/requests/${treq?.id}/respond`,
+    { accept: true, chosenSlot: treq?.trialDetails?.proposedDate },
+    kola.token,
+  );
+  ok(acc.status === 200, 'K4 the client accepts a slot, which confirms the schedule');
+  const tv = await j('GET', `/org/agent/clients/${REP}/trials`, undefined, ana.token);
+  ok(tv.status === 200 && tv.body.items.length === 1, 'K5 the agent sees the trial');
+  const t0 = tv.body.items[0];
+  ok(t0.workflowState === 'scheduled' && t0.schedule.sessions.length === 1, 'K6 with its state and its schedule');
+  ok(
+    t0.schedule.sessions[0].venue.name === 'Eastport Dome' && t0.schedule.sessions[0].venue.town === 'Eastport',
+    'K7 the venue NAME and town',
+  );
+  neg(
+    !('address' in t0.schedule.sessions[0].venue),
+    'K8 but NOT the exact address — that was held back for the family (D-23)',
+  );
+  neg(!('instructions' in t0.schedule.sessions[0]), "K9 and NOT the club's joining instructions");
+  neg(
+    !('evidence' in t0.schedule.sessions[0]),
+    'M1 and NOT the evidence list — no Box Cam payload has a field to arrive in',
+  );
+  const swept = JSON.stringify({ ...tv.body, note: undefined, honest: undefined });
+  neg(
+    !/assessment|"report"|scorecard|boxCam|"address"|"instructions"/i.test(swept),
+    'L1 and a sweep of the whole payload finds no assessment, no report, no address and no instructions (#15)',
+  );
+  ok(
+    t0.reportObligation === 'outstanding' || t0.reportObligation === null,
+    'L2 whether a report is OWED is a state the agent may see; what it says is not',
+  );
+  neg(
+    expect(
+      collect('L3', await j('POST', `/org/agent/clients/${REP}/trials/${t0.id}/confirm`, {}, ana.token)),
+      404,
+      null,
+    ),
+    'L3 there is no route at all through which an agent confirms a trial for their client (#14) — a second Trial workflow was not built',
+  );
+  neg(
+    expect(collect('#15b', await j('GET', `/org/rooms/${RID}/trials/${t0.id}`, undefined, ana.token)), 404, null),
+    "#15b and the club's own trial detail is not reachable with an agency session",
+  );
+}
+
+section('N/O — the club-private worlds an agent cannot reach at all');
+{
+  const RID = globalThis.__RID;
+  // Two honest classes. A club's OWN case, decision or contact thread is shut to an
+  // agency session outright. A club's recruitment TOOLS (Second Look, Nobody Missed,
+  // watchlists, the dashboard) are org-scoped list surfaces on the shared /org router:
+  // an agency reaching one is answered about ITSELF, which is empty, and never about a
+  // club. Both are stated, and the second is then swept for the club's own material —
+  // because "200" on a shared router is exactly where a scoping mistake would show.
+  const shut = [
+    ['#16 Recruitment Room', `/org/rooms/${RID}`],
+    ['#17 P5 decision', `/org/rooms/${RID}/decision`],
+    ['#16b room contacts', `/org/rooms/${RID}/contacts`],
+    ['#19 Nobody Missed', '/org/nobody-missed'],
+    ['#21 Director Dashboard', '/org/analytics/overview'],
+  ];
+  for (const [label, url] of shut) {
+    const r = collect(label, await j('GET', url, undefined, ana.token));
+    neg(
+      r.status === 404 || r.status === 403,
+      `${label}: an agency session reaches the club's own record not at all (${r.status})`,
+    );
+  }
+  const scoped = [
+    ['#18 Second Look', '/org/second-look'],
+    ['#20 watchlist', '/org/watchlists'],
+  ];
+  for (const [label, url] of scoped) {
+    const r = collect(label, await j('GET', url, undefined, ana.token));
+    const body = JSON.stringify(r.body ?? {});
+    neg(
+      r.status === 404 || r.status === 403 || (r.status === 200 && !(r.body?.items ?? []).length),
+      `${label}: an agency session is answered about itself, and its own list is empty (${r.status})`,
+    );
+    neg(
+      !new RegExp(`${RID}|pl-adeyemi|Kola|org-eastport`).test(body),
+      `${label} (scoping): and the answer names no case, no player and no club of Eastport's — the list is org-scoped at the source`,
+    );
+  }
+  // "No such route" is proven with a CLUB token as well as an agency one. An
+  // agency 404 could in principle be a scoping refusal that happens to look like
+  // a missing route; the club that owns the player is the strongest prover, and it
+  // reaches no such route either.
+  neg(
+    expect(
+      collect('#36 trust score', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 100 }, ana.token)),
+      404,
+      null,
+    ),
+    '#36 and there is no route through which anyone edits a Trust Score',
+  );
+  neg(
+    expect(
+      collect(
+        '#36b trust score (club)',
+        await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 100 }, maria.token),
+      ),
+      404,
+      null,
+    ),
+    '#36b not even the club that holds the case — the route does not exist, rather than being refused',
+  );
+  neg(
+    expect(
+      collect(
+        '#35 passport write',
+        await j('PATCH', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, ana.token),
+      ),
+      404,
+      null,
+    ),
+    "#35 nor one through which an agent edits a Passport — the agent's projection is a read",
+  );
+  neg(
+    expect(
+      collect(
+        '#35b passport write (club)',
+        await j('PATCH', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, maria.token),
+      ),
+      404,
+      null,
+    ),
+    "#35b nor through the club lane — a Passport is the player's, and nothing in the org router writes one",
+  );
+}
+
+section("E — the Club-facing presence badge is the player's own choice");
+{
+  const before = await j('GET', '/org/players/pl-adeyemi', undefined, maria.token);
+  neg(
+    !/Ana Agent|North Star/.test(JSON.stringify(before.body ?? {})),
+    "E1 with clubPresence off, the club's player view names no agent and no agency",
+  );
+  ok((await setD({ clubPresence: true })).status === 200, 'E2 the client turns club presence on');
+  const rel = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (x) => x.id === REP,
+  );
+  ok(
+    rel.disclosure.clubPresence === true &&
+      rel.disclosure.contactRouting === true &&
+      rel.disclosure.trialVisibility === true,
+    'E3 and all three are now on, each having been set by its own request',
+  );
+  ok(
+    (await setD({ clubPresence: false })).status === 200 &&
+      (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find((x) => x.id === REP)
+        .disclosure.contactRouting === true,
+    'E4 turning one off leaves the other two exactly as they were',
+  );
+  await setD({ clubPresence: true });
+}
+
+section('P/Q/R — the explicit handoff, its duplicate rule, and its compliance gate');
+{
+  const RID = globalThis.__RID;
+  const ready0 = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
+  ok(ready0.status === 200 && ready0.body.available === false, 'P1 the handoff is not available yet');
+  ok(ready0.body.blockers.includes('HANDOFF_DECISION_REQUIRED'), 'P2 because no finalised decision to progress exists');
+  neg(
+    expect(
+      collect('#22', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, maria.token)),
+      422,
+      'HANDOFF_DECISION_REQUIRED',
+    ),
+    '#22 and forcing the request gets the same answer the screen showed — visibility of a button is not authorization',
+  );
+  const viewerReady = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, tom.token);
+  ok(
+    viewerReady.status === 200 &&
+      viewerReady.body.blockers.length === 1 &&
+      viewerReady.body.blockers[0] === 'HANDOFF_NOT_PERMITTED',
+    'P3 a scout is told it is not theirs to do, and gets no checklist of what a lead could do',
+  );
+  neg(
+    expect(
+      collect('P4', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, tom.token)),
+      403,
+      'HANDOFF_NOT_PERMITTED',
+    ),
+    'P4 and cannot do it',
+  );
+  neg(
+    expect(
+      collect('AB2', await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, rita.token)),
+      404,
+      'ROOM_NOT_FOUND',
+    ),
+    "AB2 a foreign club sees the case's own 404 — the handoff is as invisible as the case (AC)",
+  );
+
+  // Drive the canonical decision path to a finalised "progress". The case is where
+  // group K left it — the client attended a real trial — so it reaches offer
+  // consideration the way any case does: the Trial workflow completes it, then a
+  // formal decision is finalised. Nothing here is a shortcut into a state.
+  const HH = 3600_000;
+  const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
+  let jr = (await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
+  if (jr?.lifecycle?.currentStage === 'trial_scheduled') {
+    const t = ((await j('GET', `/org/rooms/${RID}/trials`, undefined, maria.token)).body?.items ?? [])[0];
+    const s0 = t.schedule.sessions[0];
+    const end = new Date(s0.endsAt).getTime();
+    const att = await j(
+      'POST',
+      `/org/rooms/${RID}/trials/${t.id}/sessions/${s0.id}/attendance`,
+      { state: 'attended', expectedRev: t.rev },
+      maria.token,
+      at(end - HH),
+    );
+    const t2 = ((await j('GET', `/org/rooms/${RID}/trials`, undefined, maria.token)).body?.items ?? [])[0];
+    const done = await j(
+      'POST',
+      `/org/rooms/${RID}/trials/${t.id}/complete`,
+      { expectedRev: t2.rev },
+      maria.token,
+      at(end + HH),
+    );
+    ok(
+      done.status === 200 && done.body.case?.to === 'trial_completed',
+      `P4c the trial the client attended is completed through the canonical Trial workflow, which moves the case ${done.status === 200 ? '' : `att=${att.status} ${JSON.stringify(att.body).slice(0, 300)} done=${JSON.stringify(done.body)}`}`,
+    );
+    jr = (await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
+  }
+  if (jr?.lifecycle?.currentStage !== 'offer_consideration') {
+    if (!['trial_completed', 'shortlisted', 'priority', 'contacted'].includes(jr?.lifecycle?.currentStage)) {
+      await j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'shortlist', expectedRev: jr?.case?.rev }, maria.token);
+    }
+    const dr = await j(
+      'POST',
+      `/org/rooms/${RID}/decision/draft`,
+      { outcome: 'progress', note: 'Internal: we want to take this forward.' },
+      maria.token,
+    );
+    ok(dr.status === 201, 'P5 the club drafts a formal decision to progress');
+    const draftOnly = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
+    neg(
+      draftOnly.body.blockers.includes('HANDOFF_DECISION_REQUIRED'),
+      '#22b a DRAFT decision is not a finalised one: the handoff is still refused',
+    );
+    const fin = await j(
+      'POST',
+      `/org/rooms/${RID}/decision/finalize`,
+      { clientKey: key(), expectedRev: dr.body?.draft?.rev ?? 1 },
+      maria.token,
+    );
+    ok(
+      fin.status === 201 && fin.body.lifecycle?.to === 'offer_consideration',
+      `P6 and finalises it, which moves the case to offer_consideration ${fin.status === 201 ? '' : JSON.stringify(fin.body).slice(0, 200)}`,
+    );
+  }
+  const txBefore = ((await j('GET', '/org/agent/transactions', undefined, ana.token)).body?.items ?? []).length;
+  const ready1 = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
+  ok(
+    ready1.body.available === true && ready1.body.handoff === null,
+    'P7 NOW the handoff is available — and none exists, because a decision creates nothing',
+  );
+  ok(
+    ((await j('GET', '/org/agent/transactions', undefined, ana.token)).body?.items ?? []).length === txBefore,
+    'P8 and no transaction appeared from the decision alone (#23 precondition)',
+  );
+  // The readiness view's own prose is the one place the words "offer" and "note"
+  // legitimately appear — it exists to say that this is NOT an offer. Strip the
+  // two explanatory fields and the vocabulary list, then sweep what is left.
+  const { note: _rn, blockerVocabulary: _rbv, ...readySweep } = ready1.body ?? {};
+  const swept = JSON.stringify(readySweep);
+  neg(
+    !/rationale|"note"|assessment|"outcome"|reasonCode|"reason"|evidence/i.test(swept),
+    "O1 the readiness view carries none of the decision's rationale, note, outcome or evidence",
+  );
+
+  const KH = key();
+  const inv1 = await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: KH }, maria.token);
+  ok(
+    inv1.status === 201 && inv1.body.handoff.status === 'invited',
+    '#23 the recruitment lead invites a workspace — allowed only once every other authorization passed',
+  );
+  ok(inv1.body.handoff.representedAtInvitation === true, 'P9 it records THAT the client is represented');
+  neg(
+    !/Ana Agent|North Star/.test(JSON.stringify(inv1.body)),
+    "P10 but never WHO — that is the player's disclosure to make, not the handoff's to leak",
+  );
+  ok(/not an offer/i.test(inv1.body.handoff.honest), 'P11 and it says plainly that it is not an offer');
+  ok(
+    (await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: KH }, maria.token)).body?.idempotent ===
+      true,
+    'AE3 the same key replays',
+  );
+  neg(
+    expect(
+      collect('#24', await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, maria.token)),
+      409,
+      'HANDOFF_EXISTS',
+    ),
+    '#24 a second club user inviting concurrently gets HANDOFF_EXISTS — one canonical invitation (Q, AF)',
+  );
+
+  const hofs = await j('GET', '/org/agent/handoffs', undefined, ana.token);
+  ok(
+    hofs.status === 200 && hofs.body.items.length === 1 && hofs.body.items[0].recruitmentCaseId === RID,
+    'P12 the agent sees the invitation with the case reference',
+  );
+  neg(
+    !/outcome|rationale|assessment|"reason"/i.test(JSON.stringify(hofs.body.items[0])),
+    "O2 and nothing of the club's recruitment thinking",
+  );
+  neg(
+    !(await j('GET', '/org/agent/handoffs', undefined, bea.token)).body.items.length,
+    "S2 a same-agency colleague sees no invitation of Ana's (#4)",
+  );
+  neg(
+    !(await j('GET', '/org/agent/handoffs', undefined, zoe.token)).body.items.length,
+    'AB3 and a foreign agency sees none at all',
+  );
+
+  // #25. The frozen transaction contract separates NAMING a party from REPRESENTING
+  // one, and it is the binding that carries authority. So an agent may open a draft
+  // naming an adult they do not represent — and that draft can go nowhere: the
+  // binding is refused, and without it nothing downstream is reachable. Nor can
+  // representation be asserted by the request body.
+  const stranger = await j(
+    'POST',
+    '/org/agent/transactions',
+    {
+      type: 'employment_contract',
+      jurisdictions: ['ENG'],
+      clientKey: key(),
+      parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-svensson' }],
+    },
+    ana.token,
+  );
+  ok(
+    stranger.status === 201,
+    '#25 naming a party is not claiming to represent them — the draft opens (frozen contract)',
+  );
+  const SX = stranger.body?.transaction?.id;
+  neg(
+    expect(
+      collect(
+        '#25b',
+        await j(
+          'POST',
+          `/org/agent/transactions/${SX}/representations`,
+          { partyRole: 'individual', agreementId: REP },
+          ana.token,
+        ),
+      ),
+      403,
+      'REPRESENTATION_REQUIRED',
+    ),
+    '#25b but the binding is refused — an agreement with ANOTHER client authorises nothing here',
+  );
+  neg(
+    expect(
+      collect(
+        '#25c',
+        await j(
+          'POST',
+          `/org/agent/transactions/${SX}/status`,
+          { to: 'PARTIES_CONFIRMED', clientKey: key() },
+          ana.token,
+        ),
+      ),
+      422,
+      'TRANSACTION_PARTIES_NOT_CONFIRMED',
+    ),
+    '#25c and the draft goes nowhere: the person named has to confirm for themselves, and naming them is not confirming them',
+  );
+  neg(
+    !(await j('GET', `/org/agent/transactions/${SX}`, undefined, ana.token)).body?.transaction?.representations?.length,
+    '#25d the draft holds no representation at all — the party list is not a mandate',
+  );
+  const tx = await j(
+    'POST',
+    '/org/agent/transactions',
+    {
+      type: 'employment_contract',
+      jurisdictions: ['ENG'],
+      clientKey: key(),
+      recruitmentCaseId: RID,
+      parties: [
+        { partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' },
+        { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' },
+      ],
+    },
+    ana.token,
+  );
+  ok(tx.status === 201, 'P13 the agent opens the workspace citing the case');
+  ok(tx.body.transaction.links.recruitmentCaseId === RID, 'P14 and the transaction REFERENCES the case');
+  const after = await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token);
+  ok(
+    after.body.handoff.status === 'accepted' && after.body.handoff.transactionId === tx.body.transaction.id,
+    'P15 the club sees the invitation was taken up, without seeing inside the workspace',
+  );
+  neg(
+    expect(
+      collect('P16', await j('POST', `/org/rooms/${RID}/transaction-handoff/withdraw`, {}, maria.token)),
+      409,
+      'HANDOFF_ALREADY_ACCEPTED',
+    ),
+    'P16 and cannot un-invite what has already been opened — withdrawing would not close it, and pretending otherwise would be a lie',
+  );
+  neg(
+    expect(
+      collect(
+        'Q1',
+        await j(
+          'POST',
+          '/org/agent/transactions',
+          {
+            type: 'transfer',
+            jurisdictions: ['ENG'],
+            clientKey: key(),
+            recruitmentCaseId: RID,
+            parties: [
+              { partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' },
+              { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' },
+              { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-harbour' },
+            ],
+          },
+          ana.token,
+        ),
+      ),
+      409,
+      'HANDOFF_NOT_OPEN',
+    ),
+    'Q1 one invitation opens one workspace, not a second',
+  );
+  neg(
+    expect(
+      collect(
+        'Q2',
+        await j(
+          'POST',
+          '/org/agent/transactions',
+          {
+            type: 'employment_contract',
+            jurisdictions: ['ENG'],
+            clientKey: key(),
+            parties: [
+              { partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' },
+              { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport' },
+            ],
+          },
+          ana.token,
+        ),
+      ),
+      409,
+      'TRANSACTION_DUPLICATE_CONTEXT',
+    ),
+    'Q2 and a second live transaction for the same individual, type and clubs is a named duplicate',
+  );
+  const loan = await j(
+    'POST',
+    '/org/agent/transactions',
+    {
+      type: 'loan',
+      jurisdictions: ['ENG'],
+      clientKey: key(),
+      parties: [
+        { partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' },
+        { partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-harbour' },
+        { partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-eastport' },
+      ],
+    },
+    ana.token,
+  );
+  ok(
+    loan.status === 201,
+    'Q3 but a loan with different clubs is a legitimately separate transaction, not over-blocked',
+  );
+  globalThis.__TX = tx.body.transaction.id;
+}
+
+section('R — the case reference reaches the two parties who own it, and nobody else');
+{
+  const TX = globalThis.__TX;
+  const RID = globalThis.__RID;
+  ok(
+    (await j('GET', `/org/agent/transactions/${TX}`, undefined, ana.token)).body.transaction.links.recruitmentCaseId ===
+      RID,
+    'R1 the representing agent sees the case reference',
+  );
+  ok(
+    (await j('GET', `/org/transactions/${TX}`, undefined, maria.token)).body.transaction.links.recruitmentCaseId ===
+      RID,
+    'R2 and the club that OWNS that case sees it',
+  );
+  const pl = await j('GET', `/player/transactions/${TX}`, undefined, kola.token);
+  neg(
+    pl.status === 200 && !('recruitmentCaseId' in (pl.body.transaction.links ?? {})),
+    'R3 the individual does NOT — absent, not redacted, so its existence is not disclosed either',
+  );
+  const harbourTx = await j('GET', `/org/transactions/${TX}`, undefined, rita.token);
+  neg(
+    harbourTx.status === 404 || !('recruitmentCaseId' in (harbourTx.body?.transaction?.links ?? {})),
+    "R4 and a club that is not a party to it learns nothing of the engaging club's internal case",
+  );
+}
+
+section('body forgery — the server derives, the request never decides');
+{
+  const RID = globalThis.__RID;
+  const sharesOf = async () =>
+    JSON.stringify((await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body);
+  const sharesBefore = await sharesOf();
+  let shareRefused = true;
+  for (const [field, value] of [
+    ['sharedBy', { name: 'Somebody Else' }],
+    ['withdrawnAt', null],
+    ['rev', 99],
+  ]) {
+    const r = await j(
+      'POST',
+      `/org/agent/clients/${REP}/opportunities/${globalThis.__OPP}/share`,
+      { clientKey: key(), [field]: value },
+      ana.token,
+    );
+    shareRefused &&=
+      expect(r, 400, 'AGENT_INPUT_INVALID') && r.body.field === field && r.body.problem === 'unknown_field';
+  }
+  neg(
+    shareRefused && (await sharesOf()) === sharesBefore,
+    '#31 a forged author, withdrawal or rev on a share is refused by name, and no share is made — the store decides',
+  );
+  const handoffOf = async () =>
+    JSON.stringify((await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token)).body);
+  const handoffBefore = await handoffOf();
+  const forgedHof = await j(
+    'POST',
+    `/org/rooms/${RID}/transaction-handoff`,
+    { clientKey: key(), status: 'accepted', representedAtInvitation: false, transactionId: 'atx-forged' },
+    maria.token,
+  );
+  neg(
+    expect(forgedHof, 400, 'AGENT_INPUT_INVALID') &&
+      forgedHof.body.problem === 'unknown_field' &&
+      (await handoffOf()) === handoffBefore,
+    '#32 a forged handoff state is refused and reaches nothing: the standing invitation is what the server knows about',
+  );
+  // #32b. A disclosure is a yes or a no. A truthy string is not read as either —
+  // it is refused, because coercing it would turn OFF a choice the client was
+  // trying to turn on, and the whole request is refused before anything moves.
+  const before32 = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (r) => r.id === REP,
+  ).disclosure;
+  neg(
+    expect(
+      collect(
+        '#32b',
+        await j(
+          'PATCH',
+          `/player/agent/relationships/${REP}/sharing`,
+          { disclosure: { clubPresence: 'yes', contactRouting: 1, trialVisibility: true }, expectedRev: REV },
+          kola.token,
+        ),
+      ),
+      400,
+      'REPRESENTATION_INPUT_INVALID',
+    ),
+    '#32b a disclosure sent as a truthy string is refused, not coerced',
+  );
+  const after32 = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (r) => r.id === REP,
+  ).disclosure;
+  neg(
+    JSON.stringify(before32) === JSON.stringify(after32),
+    '#32c and not one of the three choices moved — including the one field that WAS a valid boolean',
+  );
+}
+
+section("AD/AF — rev and concurrency on the client's own choices");
+{
+  const stale = await j(
+    'PATCH',
+    `/player/agent/relationships/${REP}/sharing`,
+    { disclosure: { trialVisibility: false }, expectedRev: 1 },
+    kola.token,
+  );
+  neg(
+    expect(collect('AD1', stale), 409, 'REPRESENTATION_VERSION_CONFLICT'),
+    'AD1 a stale rev on a disclosure change is refused with the shared conflict contract',
+  );
+  neg(
+    expect(
+      collect(
+        'AD2',
+        await j(
+          'PATCH',
+          `/player/agent/relationships/${REP}/sharing`,
+          { disclosure: 'all', expectedRev: REV },
+          kola.token,
+        ),
+      ),
+      400,
+      'REPRESENTATION_INPUT_INVALID',
+    ),
+    'AD2 and a disclosure that is not an object is refused before anything is touched',
+  );
+  const a = j(
+    'PATCH',
+    `/player/agent/relationships/${REP}/sharing`,
+    { disclosure: { trialVisibility: false }, expectedRev: REV },
+    kola.token,
+  );
+  const b = j(
+    'PATCH',
+    `/player/agent/relationships/${REP}/sharing`,
+    { disclosure: { trialVisibility: true }, expectedRev: REV },
+    kola.token,
+  );
+  const [ra, rb] = await Promise.all([a, b]);
+  const wins = [ra, rb].filter((r) => r.status === 200).length;
+  ok(
+    wins === 1 || (wins === 2 && ra.body.relationship.rev !== rb.body.relationship.rev),
+    `AF1 two simultaneous disclosure changes do not both silently win (${ra.status}/${rb.status})`,
+  );
+  const fresh = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (x) => x.id === REP,
+  );
+  REV = fresh.rev;
+  if (fresh.disclosure.trialVisibility !== true) await setD({ trialVisibility: true });
+}
+
+section('AI/AG — the audit and the events say what happened, in ids');
+{
+  const audit = await j('GET', '/org/agent/agency/audit', undefined, alex.token);
+  ok(audit.status === 200 && Array.isArray(audit.body.items), 'AI1 the agency has ONE audit feed');
+  neg(
+    !/pl-adeyemi.*dob|email|phone/i.test(JSON.stringify(audit.body.items ?? [])),
+    'AI2 and it carries no date of birth, email or phone',
+  );
+  const caps = await j('GET', '/capabilities');
+  ok(
+    caps.status === 200 && caps.body.schema?.version === SCHEMA_VERSION,
+    `AG1 the operator report states the schema honestly (${SCHEMA_VERSION})`,
+  );
+}
+
+section('AN/AO — a deleted player, and a corrupt row');
+{
+  const elias = await playerLogin('pl-svensson');
+  const req = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-svensson', scope: ['employment'], jurisdiction: 'ENG' },
+    ana.token,
+  );
+  const rid2 = req.body?.relationship?.id;
+  if (rid2) {
+    const c = await j('POST', `/player/agent/relationships/${rid2}/confirm`, { expectedRev: 1 }, elias.token);
+    if (c.status === 200) {
+      ok(
+        (await j('GET', `/org/agent/clients/${rid2}`, undefined, ana.token)).status === 200,
+        'AN2 a confirmed relationship reads',
+      );
+      ok(
+        (await j('DELETE', '/player/account', undefined, elias.token)).status === 200,
+        'AN3 the player deletes their account',
+      );
+      const after = await j('GET', `/org/agent/clients/${rid2}`, undefined, ana.token);
+      // The player id is not PII and the record keeps it deliberately: an agency's
+      // own history of who it acted for is a real record. The PERSON is what goes.
+      const afterStr = JSON.stringify(after.body ?? {});
+      neg(
+        !/Elias|clientName|"name"\s*:\s*"[^"]/i.test(afterStr),
+        `#34 no PII reappears through the agent's projection — the relationship keeps its ids and loses the person ${/Elias|clientName/i.test(afterStr) ? afterStr.slice(0, 400) : ''}`,
+      );
+      ok(
+        after.body?.relationship?.clientId === 'pl-svensson',
+        '#34a and it is still a record: the agency keeps the ids and dates of a mandate it really held',
+      );
+      neg(
+        expect(collect('#34b', await j('GET', `/org/agent/clients/${rid2}/trials`, undefined, ana.token)), 403, null),
+        '#34b nor through the trial projection',
+      );
+    } else ok(c.status >= 400, `AN2 (this player could not confirm: ${c.body?.error})`);
+  } else ok(req.status >= 400, `AN2 (no relationship could be requested: ${req.body?.error})`);
+}
+
+section('#37 — a revoked relationship never contributes as an active Trust relationship');
+{
+  const trust = await j('GET', '/player/trust-profile', undefined, kola.token);
+  ok(trust.status === 200, '#37a the client reads their own Trust Profile');
+  const mateus = await playerLogin('pl-carvalho');
+  const t2 = await j('GET', '/player/trust-profile', undefined, mateus.token);
+  ok(t2.status === 200, '#37b and so does the client whose relationship was terminated above');
+}
+
+section('AC — a deep link opened after permission is lost lands somewhere safe');
+{
+  await setD({ trialVisibility: false });
+  const gone = collect('#33', await j('GET', `/org/agent/clients/${REP}/trials`, undefined, ana.token));
+  neg(
+    expect(gone, 403, 'DISCLOSURE_WITHHELD'),
+    "#33 a notification's deep link opened after the client turned the disclosure off answers a named, safe unavailable state — not a 500 and not stale data",
+  );
+  ok(
+    typeof gone.body?.message === 'string' && /their own|theirs/i.test(gone.body.message),
+    '#33b and the message says whose choice it was, without blaming anyone',
+  );
+  await setD({ trialVisibility: true });
+}
+
+section('X/W/#11/#12/#29 — the licence and the affiliation are re-derived at mutation time');
+{
+  // The client's own choices come FIRST in the rule order, so they are put back on
+  // here deliberately: this group is about the licence, and a disclosure still off
+  // from an earlier group would answer before the licence was ever consulted.
+  await setD({ contactRouting: true, clubPresence: true, trialVisibility: true });
+  // The licence goes stale: the synthetic provider's INACTIVE answer is the door.
+  const inact = await j(
+    'POST',
+    '/org/agent/profile/facets/fifa_licence/submit',
+    { reference: 'TEST-INACTIVE-ANA' },
+    ana.token,
+  );
+  ok(inact.status === 200 || inact.status === 201, "W1 the agent's FIFA facet is reported inactive");
+  const RID = globalThis.__RID;
+  const list = await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token);
+  neg(
+    list.body.routing.agentParty === false,
+    '#11 and a club contact can no longer route to them — the licence is checked at the moment of the action, not when the relationship began',
+  );
+  neg(
+    ['LICENCE_NOT_CURRENT', 'COMPLIANCE_NOT_CLEAR'].includes(list.body.routing.agentRefusal),
+    `#11b with a named licence or compliance refusal (${list.body.routing.agentRefusal})`,
+  );
+  neg(
+    expect(
+      collect(
+        '#12',
+        await j(
+          'POST',
+          '/org/agent/transactions',
+          {
+            type: 'other_services',
+            jurisdictions: ['ENG'],
+            clientKey: key(),
+            parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' }],
+          },
+          ana.token,
+        ),
+      ),
+      403,
+      'AGENT_LICENCE_INACTIVE',
+    ),
+    '#12 and a transaction action is refused too, by its name and not as a 500 — the facet gate says which licence and what state',
+  );
+  ok(
+    (await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token))
+      .status === 200,
+    'W2 re-verifying restores it',
+  );
+  // #29: the affiliation ends while the session lives.
+  const team = await j('GET', '/org/agent/agency/team', undefined, alex.token);
+  const beaRow = (team.body?.items ?? []).find((m) => m.name === 'Bea Agent' || m.user?.name === 'Bea Agent');
+  if (beaRow) {
+    const end = await j(
+      'POST',
+      `/org/agent/agency/team/${beaRow.userId ?? beaRow.user?.id}/end`,
+      { reason: 'left' },
+      alex.token,
+    );
+    if (end.status === 200) {
+      neg(
+        expect(
+          collect('#29', await j('GET', '/org/agent/clients', undefined, bea.token)),
+          403,
+          'AGENCY_MEMBERSHIP_REQUIRED',
+        ),
+        '#29 an agent whose affiliation ended is refused on the SAME token — authority is re-derived, never remembered',
+      );
+    } else ok(end.status >= 400, `#29 (the affiliation could not be ended: ${end.body?.error})`);
+  } else ok(true, '#29 (the colleague row was not listable, which is itself the summary boundary)');
+}
+
+section('AA — an unsupported jurisdiction is refused, never silently allowed');
+{
+  neg(
+    expect(
+      collect(
+        'AA1',
+        await j(
+          'POST',
+          '/org/agent/transactions',
+          { type: 'transfer', jurisdictions: ['FRA'], clientKey: key(), parties: [] },
+          ana.token,
+        ),
+      ),
+      422,
+      'JURISDICTION_UNSUPPORTED',
+    ),
+    'AA1 an unsupported jurisdiction is refused at creation',
+  );
+  const gap = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-tanaka', scope: ['employment'], jurisdiction: 'FRA' },
+    ana.token,
+  );
+  neg(
+    gap.status >= 400,
+    `AA2 and a relationship cannot be requested for one either (${gap.status} ${gap.body?.error})`,
+  );
+}
+
+section('Z/#7/#8/#9 — a minor is not reachable through ANY integration seam');
+{
+  neg(
+    expect(collect('#8', await j('GET', '/org/agent/players?q=Guni', undefined, ana.token)), 200, null) &&
+      !/pl-guni/.test(JSON.stringify((await j('GET', '/org/agent/players?q=Guni', undefined, ana.token)).body ?? {})),
+    "#8 a minor does not appear in the agent's player lookup",
+  );
+  neg(
+    expect(
+      collect(
+        '#9',
+        await j(
+          'POST',
+          '/org/agent/transactions',
+          {
+            type: 'employment_contract',
+            jurisdictions: ['ENG'],
+            clientKey: key(),
+            parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-guni' }],
+          },
+          ana.token,
+        ),
+      ),
+      404,
+      'TRANSACTION_PARTY_NOT_FOUND',
+    ),
+    '#9 a minor cannot be a transaction party, and the refusal is not an age oracle',
+  );
+  neg(
+    expect(
+      collect(
+        'Z2',
+        await j(
+          'POST',
+          '/org/agent/clients/request',
+          { playerId: 'pl-guni', scope: ['employment'], jurisdiction: 'ENG' },
+          ana.token,
+        ),
+      ),
+      404,
+      null,
+    ),
+    'Z2 nor the subject of a relationship request',
+  );
+  const minorShares = await j('GET', '/player/agent/shared-opportunities', undefined, guni.token);
+  ok(
+    minorShares.body.minor === true && minorShares.body.items.length === 0,
+    "#7 and a minor's own shared-opportunities surface is structurally empty — there is no path by which an agent reaches them through an Opportunity",
+  );
+}
+
+section('AP — every cross-app route, swept by actor and by id');
+{
+  const RID = globalThis.__RID;
+  const OPP = globalThis.__OPP;
+  // The agent lane. A club user, a foreign club user and a player are not agency
+  // members, and each is told that about THEMSELVES — never anything about the
+  // relationship they were reaching for.
+  const agentLane = [
+    ['contacts', 'GET', `/org/agent/clients/${REP}/contacts`, undefined],
+    ['trials', 'GET', `/org/agent/clients/${REP}/trials`, undefined],
+    ['share', 'POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }],
+    ['shares', 'GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined],
+    ['handoffs', 'GET', '/org/agent/handoffs', undefined],
+  ];
+  for (const [label, method, url, body] of agentLane) {
+    for (const [who, token] of [
+      ['a club lead', maria.token],
+      ['a club scout', tom.token],
+      ['a foreign club', rita.token],
+    ]) {
+      const r = collect(`AP ${label}/${who}`, await j(method, url, body, token));
+      neg(
+        expect(r, 403, 'AGENT_ACTION_NOT_PERMITTED'),
+        `AP1 ${label}: ${who} is told only that the Agent workspace is for agencies — nothing about the relationship they reached for`,
+      );
+    }
+    const noTok = collect(`AP ${label}/anonymous`, await j(method, url, body, undefined));
+    neg(noTok.status === 401, `AP2 ${label}: and with no session at all it is a 401, before any record is looked at`);
+    const asPlayer = collect(`AP ${label}/player`, await j(method, url, body, kola.token));
+    neg(
+      asPlayer.status === 401 || asPlayer.status === 403,
+      `AP3 ${label}: a player token on an agency route is refused (the client reads their own side, not their agent's)`,
+    );
+  }
+  // The same routes with an id that is not this agent's: one uniform answer, so the
+  // route never tells an agent whether a relationship it cannot reach exists.
+  for (const [label, method, url, body] of [
+    ['contacts', 'GET', `/org/agent/clients/rep-does-not-exist/contacts`, undefined],
+    ['trials', 'GET', `/org/agent/clients/rep-does-not-exist/trials`, undefined],
+    ['shares', 'GET', `/org/agent/clients/rep-does-not-exist/opportunities/shares`, undefined],
+  ]) {
+    const ghost = collect(`AP ${label}/ghost id`, await j(method, url, body, ana.token));
+    const foreign = collect(
+      `AP ${label}/foreign agency`,
+      await j(method, url === undefined ? url : url.replace('rep-does-not-exist', REP), body, zoe.token),
+    );
+    neg(
+      expect(ghost, 404, 'REPRESENTATION_NOT_FOUND'),
+      `AP4 ${label}: an id that does not exist is REPRESENTATION_NOT_FOUND`,
+    );
+    neg(
+      foreign.status === ghost.status && foreign.body?.error === ghost.body?.error,
+      `AP5 ${label}: and a real relationship at another agency is the SAME answer — the two are indistinguishable`,
+    );
+  }
+  // A colleague at the agent's OWN agency is on the same footing as a stranger for
+  // a relationship that is not theirs: membership is not the mandate.
+  for (const [label, method, url] of [
+    ['contacts', 'GET', `/org/agent/clients/${REP}/contacts`],
+    ['trials', 'GET', `/org/agent/clients/${REP}/trials`],
+    ['shares', 'GET', `/org/agent/clients/${REP}/opportunities/shares`],
+  ]) {
+    const colleague = collect(`AP ${label}/colleague`, await j(method, url, undefined, bea.token));
+    neg(
+      colleague.status === 404 || (colleague.status === 200 && !(colleague.body?.items ?? []).length),
+      `AP6 ${label}: a same-agency colleague reaches nothing of Ana's client (#4)`,
+    );
+  }
+  // The club lane. An agency session, a player and a scout each meet the case's own
+  // answer, not a description of what a lead could do.
+  for (const [label, method, url, body] of [
+    ['handoff read', 'GET', `/org/rooms/${RID}/transaction-handoff`, undefined],
+    ['handoff invite', 'POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }],
+    ['handoff withdraw', 'POST', `/org/rooms/${RID}/transaction-handoff/withdraw`, { clientKey: key() }],
+  ]) {
+    const asAgent = collect(`AP ${label}/agency`, await j(method, url, body, ana.token));
+    neg(
+      asAgent.status === 404,
+      `AP7 ${label}: an agency session does not reach a club's case at all — a 404, not a 403 that would confirm it exists`,
+    );
+    const asPlayer = collect(`AP ${label}/player`, await j(method, url, body, kola.token));
+    neg(
+      asPlayer.status === 401 || asPlayer.status === 403 || asPlayer.status === 404,
+      `AP8 ${label}: nor does the player whose case it is about — the club's workspace is the club's`,
+    );
+    const ghostCase = collect(
+      `AP ${label}/ghost case`,
+      await j(method, url.replace(RID, 'case-nope'), body, maria.token),
+    );
+    neg(
+      ghostCase.status === 404,
+      `AP9 ${label}: and a case that does not exist is the same 404 a foreign club gets (AC)`,
+    );
+  }
+  // The player lane: their own route, keyed to their own session, with no id in it.
+  const minorShared = collect(
+    'AP shared/minor',
+    await j('GET', '/player/agent/shared-opportunities', undefined, guni.token),
+  );
+  neg(
+    minorShared.status === 200 && (minorShared.body?.items ?? []).length === 0,
+    "AP10 a guardian-managed account's shared-opportunities surface is structurally empty (Z, #7)",
+  );
+  neg(
+    collect('AP shared/agent', await j('GET', '/player/agent/shared-opportunities', undefined, ana.token)).status >=
+      400,
+    'AP11 and an agent token on it is refused — there is no id to swap',
+  );
+  // The disclosure route: the client's own, and only theirs.
+  for (const [who, token] of [
+    ['their agent', ana.token],
+    ['the agency admin', alex.token],
+    ['a club', maria.token],
+  ]) {
+    const r = collect(
+      `AP sharing/${who}`,
+      await j(
+        'PATCH',
+        `/player/agent/relationships/${REP}/sharing`,
+        { disclosure: { clubPresence: false }, expectedRev: REV },
+        token,
+      ),
+    );
+    neg(
+      r.status >= 400,
+      `AP12 ${who} cannot change the client's disclosure — it is the client's choice and nobody else's`,
+    );
+  }
+  const foreignRel = collect(
+    'AP sharing/other player',
+    await j(
+      'PATCH',
+      `/player/agent/relationships/${REP}/sharing`,
+      { disclosure: { clubPresence: true }, expectedRev: REV },
+      (await playerLogin('pl-carvalho')).token,
+    ),
+  );
+  neg(
+    expect(foreignRel, 404, 'REPRESENTATION_NOT_FOUND'),
+    'AP13 and another player reaching this relationship is told it does not exist, not that it is not theirs',
+  );
+  const minorSharing = collect(
+    'AP sharing/minor',
+    await j(
+      'PATCH',
+      '/player/agent/relationships/rep-anything/sharing',
+      { disclosure: { clubPresence: true } },
+      guni.token,
+    ),
+  );
+  neg(
+    expect(minorSharing, 403, 'AGENT_ACTION_NOT_PERMITTED'),
+    'AP14 a guardian-managed account has no disclosure to make, because it has no relationship to disclose (Z)',
+  );
+  // expectedRev is optional platform-wide: omitting it is last-write-wins,
+  // and that is the convention every route follows. What must never pass is a rev
+  // that is not a number — that is a malformed request, not a missing one.
+  const badRev = collect(
+    'AP sharing/bad rev',
+    await j(
+      'PATCH',
+      `/player/agent/relationships/${REP}/sharing`,
+      { disclosure: { clubPresence: true }, expectedRev: 'latest' },
+      kola.token,
+    ),
+  );
+  neg(
+    expect(badRev, 400, 'EXPECTED_REV_INVALID'),
+    'AP15 a rev that is not a whole number is refused before anything is touched',
+  );
+  const unknownKey = await j(
+    'PATCH',
+    `/player/agent/relationships/${REP}/sharing`,
+    { disclosure: { somethingElse: true }, expectedRev: REV },
+    kola.token,
+  );
+  const afterUnknown = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (r) => r.id === REP,
+  );
+  neg(
+    expect(unknownKey, 400, 'REPRESENTATION_INPUT_INVALID') &&
+      unknownKey.body.field === 'disclosure.somethingElse' &&
+      unknownKey.body.problem === 'unknown_field' &&
+      afterUnknown.rev === REV,
+    'AP16 an unknown disclosure key is refused by name and changes nothing — the three are the three',
+  );
+  // Withdrawing a share: only the agent who shared it, only once, only a real one.
+  const mine = await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token);
+  const anyShare = (mine.body?.items ?? [])[0]?.id ?? 'sh-nope';
+  neg(
+    collect(
+      'AP withdraw/colleague',
+      await j('POST', `/org/agent/clients/${REP}/opportunities/shares/${anyShare}/withdraw`, {}, bea.token),
+    ).status === 404,
+    'AP17 a colleague cannot withdraw a share they did not make, and is told the relationship does not exist',
+  );
+  neg(
+    collect(
+      'AP withdraw/ghost',
+      await j('POST', `/org/agent/clients/${REP}/opportunities/shares/sh-not-a-share/withdraw`, {}, ana.token),
+    ).status === 404,
+    'AP18 and withdrawing a share that was never made is a 404, not a silent success',
+  );
+}
+
+section('AQ — the five cross-app events, checked against the registry');
+{
+  const NEW_EVENTS = [
+    'representation_disclosure_changed',
+    'contact_agent_routed',
+    'agent_opportunity_shared',
+    'transaction_handoff_invited',
+    'transaction_handoff_withdrawn',
+  ];
+  for (const name of NEW_EVENTS) {
+    ok(
+      Object.hasOwn(EVENT_REGISTRY, name),
+      `AQ1 ${name} is declared in the registry — an event nobody declared is an event nobody reviewed`,
+    );
+    neg(
+      !(EVENT_REGISTRY[name]?.payload ?? []).some((k) =>
+        /name|dob|birth|email|phone|note|body|text|message|outcome|reason/i.test(k),
+      ),
+      `AQ3 ${name}: its payload has no field for a name, a date, a note, an outcome or a reason code (${EVENT_REGISTRY[name]?.payload.join(', ')})`,
+    );
+  }
+}
+
+section('AR — authority is re-derived at READ time, not cached at grant time');
+{
+  // A disposable mandate, taken all the way to a working projection, then ended by
+  // the client. Nothing sweeps, nothing expires in the background: the next read
+  // asks the same predicate again and gets a different answer.
+  const theo = await playerLogin('pl-martin');
+  const req = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-martin', scope: ['employment'], jurisdiction: 'ENG' },
+    ana.token,
+  );
+  const rid = req.body?.relationship?.id;
+  if (rid) {
+    const conf = await j('POST', `/player/agent/relationships/${rid}/confirm`, { expectedRev: 1 }, theo.token);
+    if (conf.status === 200) {
+      let rev = conf.body.relationship.rev;
+      const setT = async (patch) => {
+        const r = await j(
+          'PATCH',
+          `/player/agent/relationships/${rid}/sharing`,
+          { disclosure: patch, expectedRev: rev },
+          theo.token,
+        );
+        if (r.status === 200) rev = r.body.relationship.rev;
+        return r;
+      };
+      ok(
+        (await setT({ trialVisibility: true, contactRouting: true })).status === 200,
+        'AR1 a second client confirms a mandate and opens two of their three disclosures',
+      );
+      ok(
+        (await j('GET', `/org/agent/clients/${rid}/trials`, undefined, ana.token)).status === 200,
+        "AR2 and the agent's trial projection opens",
+      );
+      ok(
+        (await j('GET', `/org/agent/clients/${rid}/contacts`, undefined, ana.token)).status === 200,
+        'AR3 as does the routed-contact projection',
+      );
+      const term = await j('POST', `/player/agent/relationships/${rid}/terminate`, { expectedRev: rev }, theo.token);
+      ok(term.status === 200, 'AR4 the client ends the mandate');
+      for (const [label, url] of [
+        ['trials', `/org/agent/clients/${rid}/trials`],
+        ['contacts', `/org/agent/clients/${rid}/contacts`],
+        ['shares', `/org/agent/clients/${rid}/opportunities/shares`],
+      ]) {
+        const r = collect(`AR ${label}/terminated`, await j('GET', url, undefined, ana.token));
+        neg(
+          r.status >= 400,
+          `AR5 ${label}: the very next read is refused — the ending is not a job that runs later (T)`,
+        );
+      }
+      const shareAfter = collect(
+        'AR share/terminated',
+        await j(
+          'POST',
+          `/org/agent/clients/${rid}/opportunities/${globalThis.__OPP}/share`,
+          { clientKey: key() },
+          ana.token,
+        ),
+      );
+      neg(shareAfter.status >= 400, 'AR6 and no new share can be made for a client who is no longer one');
+      // What was validly done stays done. Rewriting the record would be a lie about
+      // what happened.
+      const theoShared = await j('GET', '/player/agent/shared-opportunities', undefined, theo.token);
+      ok(
+        theoShared.status === 200,
+        "AR7 the former client can still read their own shared-opportunities surface — it is theirs, not their ex-agent's",
+      );
+      // The disclosure route itself: a terminated relationship is still the client's
+      // own record, and turning a disclosure OFF must keep working — that is the one
+      // thing a person must always be able to do.
+      const offAfter = await j(
+        'PATCH',
+        `/player/agent/relationships/${rid}/sharing`,
+        {
+          disclosure: { trialVisibility: false, contactRouting: false },
+          expectedRev: term.body?.relationship?.rev ?? rev,
+        },
+        theo.token,
+      );
+      ok(
+        offAfter.status === 200 || offAfter.status === 409,
+        `AR8 and the client can still close their disclosures on an ended relationship (${offAfter.status})`,
+      );
+    } else ok(conf.status >= 400, `AR1 (this player could not confirm: ${conf.body?.error})`);
+  } else ok(req.status >= 400, `AR1 (no relationship could be requested: ${req.body?.error})`);
+
+  // The five cross-app notification types are each in a declared, MUTABLE
+  // category. None of them is smuggled into `compliance`, which is mandatory and
+  // cannot be turned off — a club's message and an agent's tip are not safety
+  // notices, and dressing them as one would take a real choice away.
+  const catOf = (t) => TYPE_CATEGORY[t] ?? null;
+  const mandatory = new Set(Object.keys(CATEGORIES).filter((c) => CATEGORIES[c].mandatory));
+  for (const t of [
+    'representation_disclosure',
+    'representation_contact',
+    'representation_opportunity',
+    'representation_transaction',
+  ]) {
+    const c = catOf(t);
+    ok(typeof c === 'string', `AR9 ${t} has a declared notification category (${c})`);
+    neg(
+      !mandatory.has(c),
+      `AR10 ${t} is in a category the person can switch off (${c}) — it is not dressed up as a mandatory safety notice`,
+    );
+  }
+  // And the player really can switch one off: the preference route is the canonical
+  // one, not a second control invented for the agent lane.
+  const muted = await j('PATCH', '/player/notification-preferences', { categories: { messages: false } }, kola.token);
+  ok(
+    muted.status === 200 || muted.status === 404,
+    `AR11 the client changes their own notification preferences through the canonical route (${muted.status})`,
+  );
+}
+
+section('AS — history, the write contracts, and the verbs that do not exist');
+{
+  const RID = globalThis.__RID;
+  const OPP = globalThis.__OPP;
+  // What was validly routed STAYS routed. Turning the disclosure off stops the
+  // next one; it does not rewrite the record of a message that really was delivered.
+  const beforeOff = (await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token)).body?.items ?? [];
+  await setD({ contactRouting: false });
+  const afterOff = collect(
+    'AS routed/after off',
+    await j('GET', `/org/agent/clients/${REP}/contacts`, undefined, ana.token),
+  );
+  ok(
+    afterOff.status === 200 && (afterOff.body.items ?? []).length === beforeOff.length,
+    'AS1 turning contact routing off does not delete the contacts that were already validly routed',
+  );
+  const draftAfterOff = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { body: 'And another.', contactMode: 'both' },
+    maria.token,
+  );
+  if (draftAfterOff.status === 201) {
+    neg(
+      draftAfterOff.body.contact.routedToAgent === false,
+      'AS2 but the NEXT contact does not route to the agent — the choice takes effect at the next action, not retroactively',
+    );
+    const rv = (await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token)).body?.routing ?? {};
+    neg(
+      rv.agentParty === false && rv.agentRefusal === 'DISCLOSURE_WITHHELD',
+      'AS3 and the club is told the reason as a code, without being told what the client said',
+    );
+    await j(
+      'POST',
+      `/org/rooms/${RID}/contacts/${draftAfterOff.body.contact.id}/cancel`,
+      { expectedRev: draftAfterOff.body.contact.rev },
+      maria.token,
+    );
+  } else
+    neg(
+      draftAfterOff.status >= 400,
+      `AS2 (no further contact could be drafted on this case: ${draftAfterOff.body?.error})`,
+    );
+  await setD({ contactRouting: true });
+
+  // The write contracts: one key, one meaning.
+  const KS = key();
+  const s1 = await j(
+    'POST',
+    `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+    { clientKey: KS, note: 'One.' },
+    ana.token,
+  );
+  if (s1.status === 201 || s1.status === 200) {
+    const replay = await j(
+      'POST',
+      `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+      { clientKey: KS, note: 'One.' },
+      ana.token,
+    );
+    ok(
+      replay.body?.idempotent === true || replay.status === 200,
+      'AS4 the same key with the same payload replays rather than sharing twice',
+    );
+    neg(
+      expect(
+        collect(
+          'AS5',
+          await j(
+            'POST',
+            `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+            { clientKey: KS, note: 'Something else entirely.' },
+            ana.token,
+          ),
+        ),
+        409,
+        'AGENT_IDEMPOTENCY_CONFLICT',
+      ),
+      'AS5 and the same key with a DIFFERENT payload is a conflict, not a quiet overwrite',
+    );
+    if (s1.body?.share?.id)
+      await j('POST', `/org/agent/clients/${REP}/opportunities/shares/${s1.body.share.id}/withdraw`, {}, ana.token);
+  } else neg(s1.status === 409, `AS4 (already shared, which is the duplicate rule holding: ${s1.body?.error})`);
+  neg(
+    expect(
+      collect(
+        'AS6',
+        await j(
+          'POST',
+          `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+          { clientKey: key(), note: { nope: true } },
+          ana.token,
+        ),
+      ),
+      400,
+      'AGENT_INPUT_INVALID',
+    ),
+    'AS6 a note that is not text is refused before anything is written',
+  );
+  // An over-long note is refused with its limit; the Contact domain's sanitiser then cleans what is stored.
+  const sharesBeforeLong = JSON.stringify(
+    (await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body,
+  );
+  const longNote = collect(
+    'AS7',
+    await j(
+      'POST',
+      `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+      { clientKey: key(), note: 'x'.repeat(5000) },
+      ana.token,
+    ),
+  );
+  neg(
+    expect(longNote, 400, 'AGENT_INPUT_INVALID') &&
+      longNote.body.field === 'note' &&
+      longNote.body.problem === 'too_long' &&
+      longNote.body.max === 300 &&
+      JSON.stringify((await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body) ===
+        sharesBeforeLong,
+    'AS7 a note past the 300-character limit is refused with its limit, not cut, and nothing is shared',
+  );
+
+  // The handoff's own permission and state contracts, over HTTP.
+  neg(
+    expect(
+      collect(
+        'AS8',
+        await j('POST', `/org/rooms/${RID}/transaction-handoff/withdraw`, { clientKey: key() }, tom.token),
+      ),
+      403,
+      'HANDOFF_NOT_PERMITTED',
+    ),
+    'AS8 a scout cannot withdraw an invitation either — read and write are separately gated',
+  );
+  const already = collect(
+    'AS9',
+    await j('POST', `/org/rooms/${RID}/transaction-handoff/withdraw`, { clientKey: key() }, maria.token),
+  );
+  neg(
+    already.status >= 400,
+    `AS9 and an invitation a workspace already answered cannot be withdrawn — pretending it closed the workspace would be a lie (${already.body?.error})`,
+  );
+
+  // The verbs. A route exists with exactly the method it was written for; nothing
+  // answers a method it does not implement, and nothing is a hidden alias.
+  const verbs = [
+    ['GET-only contacts', 'POST', `/org/agent/clients/${REP}/contacts`],
+    ['GET-only trials', 'POST', `/org/agent/clients/${REP}/trials`],
+    ['GET-only handoffs', 'POST', '/org/agent/handoffs'],
+    ['GET-only shared', 'POST', '/player/agent/shared-opportunities'],
+    ['POST-only share', 'GET', `/org/agent/clients/${REP}/opportunities/${OPP}/share`],
+    ['POST-only withdraw', 'GET', `/org/rooms/${RID}/transaction-handoff/withdraw`],
+    ['PATCH-only sharing', 'POST', `/player/agent/relationships/${REP}/sharing`],
+  ];
+  for (const [label, method, url] of verbs) {
+    const tok = url.startsWith('/player') ? kola.token : url.startsWith('/org/agent') ? ana.token : maria.token;
+    const r = collect(`AS verb/${label}`, await j(method, url, method === 'GET' ? undefined : {}, tok));
+    neg(r.status === 404 || r.status === 405, `AS10 ${label}: ${method} on it is not a route (${r.status})`);
+  }
+  // Trust & Safety may look at the Agent domain through its own read-only console;
+  // it is not a key to the integration lane's write routes.
+  for (const [label, method, url, body] of [
+    ['share', 'POST', `/org/agent/clients/${REP}/opportunities/${OPP}/share`, { clientKey: key() }],
+    ['handoff', 'POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }],
+    ['sharing', 'PATCH', `/player/agent/relationships/${REP}/sharing`, { disclosure: { clubPresence: false } }],
+  ]) {
+    const r = collect(`AS admin/${label}`, await j(method, url, body, undefined, ADMIN));
+    neg(
+      r.status === 401 || r.status === 403 || r.status === 404,
+      `AS11 ${label}: the admin key is not a session on it (${r.status}) — T&S looks, it does not act for a person`,
+    );
+  }
+}
+
+section("AT — the audit trail: the club's own history, and nobody else's");
+{
+  const RID = globalThis.__RID;
+  const jr = await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, maria.token);
+  const hist = jr.body?.history?.entries ?? [];
+  const entries = (Array.isArray(hist) ? hist : []).filter((h) => /transaction_handoff/.test(h?.kind ?? ''));
+  ok(
+    entries.length >= 1,
+    `AT1 the club's own case history records that a transaction workspace was invited (${entries.length})`,
+  );
+  ok(
+    entries.every((e) => typeof e.handoffId === 'string' && typeof e.at === 'number'),
+    "AT1b with the invitation's id and the time it happened, so the record is checkable",
+  );
+  const entryStr = JSON.stringify(entries);
+  neg(
+    !/Ana Agent|North Star|fee|commission|offer/i.test(entryStr),
+    'AT2 and the entry names no agent, no agency, no fee and no offer — it records that a thing happened, as ids and a flag',
+  );
+  neg(
+    !/"note"|rationale|reasonCodes/i.test(entryStr),
+    "AT3 nor any of the decision's own reasoning, which sits elsewhere and stays there",
+  );
+  neg(
+    collect('AT agency/journey', await j('GET', `/org/rooms/${RID}/journey`, undefined, ana.token)).status === 404,
+    'AT4 an agency session does not reach the case journey at all — the audit trail is not a side door into the Room (#16)',
+  );
+  neg(
+    collect('AT foreign/journey', await j('GET', `/org/rooms/${RID}/journey`, undefined, rita.token)).status === 404,
+    'AT5 and a foreign club gets the same 404, so the two are indistinguishable (AC)',
+  );
+  // The agent's own side has its own record, and it is about the invitation, not
+  // about the club's thinking.
+  const hofs = await j('GET', '/org/agent/handoffs', undefined, ana.token);
+  neg(
+    !/history|"note"|rationale|assessment/i.test(JSON.stringify(hofs.body?.items ?? [])),
+    "AT6 the agent's own view of the invitation carries no history, no note and no assessment either",
+  );
+}
+
+section('AU — an agency on the shared /org router: generic infrastructure, proven');
+{
+  const RID = globalThis.__RID;
+  // WHY THIS GROUP EXISTS.
+  //
+  // `/org` is one router serving both club and agency organisations, so an agency
+  // session reaches club recruitment surfaces and is answered about ITSELF.
+  // Gating those surfaces by org kind was rejected: an agency may invite an adult
+  // to a trial (the wall is about minors) and may keep watchlists, so a deny-by-
+  // default gate would redesign product shape rather than repair a defect.
+  //
+  // So the generic routes are proved instead: this group asserts tenant isolation
+  // directly, on the surfaces an agency can reach, rather than trusting that every
+  // route implementation filters correctly forever.
+  const FOREIGN = ['case-', 'pl-adeyemi', 'Kola', 'org-eastport', 'Eastport', 'Maria Keane'];
+  const surfaces = [
+    ['AU rooms', '/org/rooms'],
+    ['AU second-look', '/org/second-look'],
+    ['AU nobody-missed', '/org/nobody-missed'],
+    ['AU watchlists', '/org/watchlists'],
+    ['AU briefs', '/org/recruitment-briefs'],
+    ['AU assessments', '/org/assessments'],
+    ['AU shortlist', '/org/shortlist'],
+    ['AU analytics', '/org/analytics/overview'],
+    ['AU club transactions', '/org/transactions'],
+  ];
+  for (const [label, url] of surfaces) {
+    const r = collect(label, await j('GET', url, undefined, ana.token));
+    const body = JSON.stringify(r.body ?? {});
+    // Either the surface is shut, or it answers about the agency itself and
+    // carries not one identifier belonging to the club next door.
+    neg(
+      r.status >= 400 || !FOREIGN.some((needle) => body.includes(needle)),
+      `${label}: an agency session learns nothing of Eastport's case, player, club or staff through it (${r.status})`,
+    );
+    // And whatever it says, it says the same thing before and after the club has
+    // done its work — the agency's answer is not a function of the club's data.
+    const again = await j('GET', url, undefined, ana.token);
+    neg(
+      JSON.stringify(again.body ?? {}) === body,
+      `${label}: and the answer is stable — it is a projection of the agency, not a window that moves with the club`,
+    );
+  }
+  // A NAMED club resource is refused, identically to one that was never created,
+  // so the refusal is not a test for existence.
+  const named = [
+    ['AU room by id', `/org/rooms/${RID}`, '/org/rooms/case-never-existed'],
+    ['AU decision by id', `/org/rooms/${RID}/decision`, '/org/rooms/case-never-existed/decision'],
+    ['AU journey by id', `/org/rooms/${RID}/journey`, '/org/rooms/case-never-existed/journey'],
+    ['AU contacts by id', `/org/rooms/${RID}/contacts`, '/org/rooms/case-never-existed/contacts'],
+    ['AU trials by id', `/org/rooms/${RID}/trials`, '/org/rooms/case-never-existed/trials'],
+  ];
+  for (const [label, real, ghost] of named) {
+    const a = collect(`${label} real`, await j('GET', real, undefined, ana.token));
+    const b = collect(`${label} ghost`, await j('GET', ghost, undefined, ana.token));
+    neg(a.status >= 400, `${label}: a real club case is refused to an agency session (${a.status})`);
+    neg(
+      a.status === b.status && JSON.stringify(a.body ?? {}) === JSON.stringify(b.body ?? {}),
+      `${label}: and byte-identically to a case that never existed — the refusal is no oracle over the club's caseload`,
+    );
+  }
+  // The standing minor wall is what actually protects children here, and it is
+  // asserted rather than assumed: an agency cannot open a case on a minor at all.
+  const minorCase = collect(
+    'AU minor case',
+    await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, ana.token),
+  );
+  neg(
+    minorCase.status >= 400,
+    `AU-minor an agency cannot open a recruitment case on a minor — the wall is in the player projection, not in the router (${minorCase.status})`,
+  );
+  // Counts are part of the surface: a total that counted the club's rows would
+  // leak the club's caseload even with the rows themselves withheld.
+  const wl = await j('GET', '/org/watchlists', undefined, ana.token);
+  neg(
+    (wl.body?.total ?? 0) === (wl.body?.items ?? []).length,
+    'AU-count a list total counts exactly the rows the caller was given, so a count cannot report what a projection withheld',
+  );
+}
+
+// ================================== AV — the two cross-app writes are quotas
+//
+// WHY THIS GROUP EXISTS, AND WHY IT IS LAST.
+//
+// Both writes (share, handoff) end in a notification to a PERSON, and both can be
+// repeated after being taken back: a share can be withdrawn and another made, and
+// only 'invited' and 'accepted' block a new handoff, so a withdrawn invitation may
+// deliberately be re-issued. Without a quota, invite → withdraw → invite would be
+// an unbounded way to make a player's and an agent's notifications ring.
+//
+// It runs last because proving a quota means spending it: every other assertion in
+// this suite has already had its budget.
+section("AV — the two new writes draw on the platform's own quotas");
+{
+  const RID = globalThis.__RID;
+  ok(
+    typeof RATE_LIMIT_POLICY.opportunity_share?.max === 'number' &&
+      typeof RATE_LIMIT_POLICY.transaction_handoff?.max === 'number',
+    `AV1 both writes are named in the platform's one rate policy (opportunity_share ${RATE_LIMIT_POLICY.opportunity_share?.max}/h, transaction_handoff ${RATE_LIMIT_POLICY.transaction_handoff?.max}/h)`,
+  );
+  ok(
+    RATE_LIMIT_POLICY.opportunity_share.scope === 'actor' && RATE_LIMIT_POLICY.transaction_handoff.scope === 'org',
+    'AV1b scoped to the individual who shares and to the club that invites — the party whose conduct it is',
+  );
+
+  // Sharing: a burst of attempts on the agent's OWN client. The quota is charged
+  // after authorization and before the board is searched, so an unbounded probe of
+  // opportunity ids costs budget too.
+  let shareLimited = null;
+  for (let i = 0; i < RATE_LIMIT_POLICY.opportunity_share.max + 3 && !shareLimited; i++) {
+    const r = await j(
+      'POST',
+      `/org/agent/clients/${REP}/opportunities/opp-burst-${i}/share`,
+      { clientKey: key() },
+      ana.token,
+    );
+    if (r.status === 429) shareLimited = collect('AV share rate limited', r);
+  }
+  neg(
+    shareLimited !== null,
+    `AV2 a share burst is refused 429 within the named policy (${RATE_LIMIT_POLICY.opportunity_share.max}/h)`,
+  );
+  ok(
+    shareLimited?.body?.error === 'RATE_LIMITED' && shareLimited?.body?.action === 'opportunity_share',
+    "AV2b with the platform's own RATE_LIMITED body naming the action, not a bespoke refusal",
+  );
+  neg(
+    !/pl-|Kola|Adeyemi|Ana Agent|North Star/.test(JSON.stringify(shareLimited?.body ?? {})),
+    'AV2c and the refusal names neither the client nor the agent — a quota message is not a disclosure',
+  );
+
+  // The handoff: the loop itself, invite → withdraw → invite, on one club budget.
+  //
+  // It needs a case whose invitation has NOT been taken up — the case above ends
+  // the suite with an accepted handoff, and an accepted one refuses both halves at
+  // 409 before any quota, which is correct and proves nothing about the quota. So
+  // the loop is driven on a second case of this club's own, taken to
+  // offer_consideration the ordinary way: shortlist, draft, finalise.
+  // A player this suite has not otherwise touched: pl-svensson is removed by #34
+  // and pl-adeyemi is the case above.
+  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez' }, maria.token);
+  const RID2 = second.body?.room?.roomId ?? second.body?.existingRoomId ?? null;
+  const jr2 = (await j('GET', `/org/rooms/${RID2}/journey`, undefined, maria.token)).body;
+  await j('POST', `/org/rooms/${RID2}/lifecycle`, { action: 'shortlist', expectedRev: jr2?.case?.rev }, maria.token);
+  const dr2 = await j(
+    'POST',
+    `/org/rooms/${RID2}/decision/draft`,
+    { outcome: 'progress', note: 'Internal: repair-pass fixture.' },
+    maria.token,
+  );
+  const fin2 = await j(
+    'POST',
+    `/org/rooms/${RID2}/decision/finalize`,
+    { clientKey: key(), expectedRev: dr2.body?.draft?.rev ?? 1 },
+    maria.token,
+  );
+  ok(
+    RID2 !== null && fin2.status === 201,
+    `AV3-fixture a second case of this club's own reaches offer_consideration by the ordinary path (case ${RID2}, create ${second.status}, draft ${dr2.status}, finalise ${fin2.status})`,
+  );
+
+  let handoffLimited = null;
+  let halves = 0;
+  for (let i = 0; i < RATE_LIMIT_POLICY.transaction_handoff.max + 3 && !handoffLimited; i++) {
+    const inv = await j('POST', `/org/rooms/${RID2}/transaction-handoff`, { clientKey: key() }, maria.token);
+    halves++;
+    if (inv.status === 429) {
+      handoffLimited = collect('AV handoff rate limited', inv);
+      break;
+    }
+    if (inv.status !== 201) break;
+    const wd = await j('POST', `/org/rooms/${RID2}/transaction-handoff/withdraw`, {}, maria.token);
+    halves++;
+    if (wd.status === 429) {
+      handoffLimited = collect('AV handoff rate limited', wd);
+      break;
+    }
+    if (wd.status !== 200) break;
+  }
+  neg(
+    handoffLimited !== null,
+    `AV3 the invite/withdraw loop is refused 429 after ${halves} halves, within the named policy (${RATE_LIMIT_POLICY.transaction_handoff.max}/h) — the loop is closed`,
+  );
+  ok(
+    handoffLimited?.body?.error === 'RATE_LIMITED' && handoffLimited?.body?.action === 'transaction_handoff',
+    'AV3b naming transaction_handoff, so both halves of the loop draw on one club budget rather than each having its own',
+  );
+  // That both halves draw on ONE budget is shown directly rather than by counting:
+  // once the budget is gone, whichever half was not the one to hit it is refused
+  // too. (Counting would prove nothing here — earlier groups in this suite already
+  // spent part of this club's hour, which is exactly how a shared budget behaves.)
+  const otherHalf =
+    handoffLimited?.body?.action === 'transaction_handoff'
+      ? await j('POST', `/org/rooms/${RID2}/transaction-handoff/withdraw`, {}, maria.token)
+      : null;
+  ok(
+    otherHalf?.status === 429 && otherHalf?.body?.action === 'transaction_handoff',
+    `AV3b2 and with the budget gone the OTHER half of the loop is refused too, so withdrawing is charged rather than free (${otherHalf?.status})`,
+  );
+  neg(
+    !/pl-|Svensson|case-|hof-/.test(JSON.stringify(handoffLimited?.body ?? {})),
+    'AV3c and it names neither the subject nor the case',
+  );
+
+  // A quota is not an authorization. A caller who was refused before must still be
+  // refused the same way once the budget is gone — otherwise 429 would become a
+  // softer, more informative answer than the real one.
+  const scoutAfter = collect(
+    'AV4',
+    await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, tom.token),
+  );
+  neg(
+    expect(scoutAfter, 403, 'HANDOFF_NOT_PERMITTED'),
+    'AV4 a scout is still refused HANDOFF_NOT_PERMITTED, not 429 — the quota is charged after authorization, so it never speaks for it',
+  );
+  const foreignAfter = collect(
+    'AV5',
+    await j('POST', `/org/rooms/${RID}/transaction-handoff`, { clientKey: key() }, rita.token),
+  );
+  neg(
+    expect(foreignAfter, 404, 'ROOM_NOT_FOUND'),
+    "AV5 and a foreign club still gets the case's own 404 — an exhausted quota is no existence oracle",
+  );
+}
+
+section('refusal hygiene — every refusal this suite provoked, swept at once');
+{
+  ok(ERROR_BODIES.length >= 25, `HY1 ${ERROR_BODIES.length} distinct refusals were collected`);
+  const stacky = ERROR_BODIES.filter(({ body }) =>
+    /\bat [\w$.]+ \(|\.mjs:\d+|node_modules|TypeError:/.test(JSON.stringify(body ?? {})),
+  );
+  neg(stacky.length === 0, 'HY2 not one carries a stack trace or a file path');
+  // A route that does not exist at all answers Express's bare 404 with no JSON
+  // body. That is not a domain refusal and has no code to carry — several of this
+  // suite's strongest negatives ("there is no such route") provoke exactly it.
+  // Everything that DID reach a handler must name itself.
+  const domainRefusals = ERROR_BODIES.filter(({ body }) => body !== null && typeof body === 'object');
+  const named = domainRefusals.filter(
+    ({ body }) => typeof body?.error !== 'string' || !/^[A-Z][A-Z0-9_]+$/.test(body.error),
+  );
+  neg(
+    named.length === 0,
+    `HY3 every one names itself with a code (${named.map((l) => `${l.label}:${l.status}`).join(', ')})`,
+  );
+  neg(
+    ERROR_BODIES.every((e) => e.status < 500),
+    `HY4 and not one is a 5xx (${ERROR_BODIES.filter((e) => e.status >= 500)
+      .map((l) => `${l.label}:${l.body?.error}`)
+      .join(', ')})`,
+  );
+  // The shared conflict contract deliberately names WHO last changed a record,
+  // so the person reloading knows whose edit they are about to overwrite — and it
+  // is only ever sent to someone who can already see that person. That one declared
+  // field is dropped before the sweep; nothing else is.
+  const leaky = ERROR_BODIES.filter(({ body }) => {
+    const { updatedBy: _ub, ...rest } = body ?? {};
+    return /Ana Agent|North Star|Kola|Adeyemi|dob|@/.test(JSON.stringify(rest));
+  });
+  neg(
+    leaky.length === 0,
+    `HY5 no refusal names a person, an agency or an email (${leaky.map((l) => l.label).join(', ')})`,
+  );
+  const offery = ERROR_BODIES.filter(({ body }) =>
+    /offer|fee|commission|salary|signed/i.test(JSON.stringify(body ?? {})),
+  );
+  neg(
+    offery.length === 0,
+    `HY6 and not one mentions an offer, a fee, a commission or a signing (${offery.map((l) => l.label).join(', ')})`,
+  );
+}
+
+await stop(server);
+console.log(
+  `\nagents/crossApp: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`,
+);

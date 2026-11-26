@@ -1,0 +1,582 @@
+//// Checks of the rules from the rules suites of discovery/secondLookAndNobodyMissed, first generated from the
+//// TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/discovery/briefs
+import scoutbox/vocab/brief_status
+import scoutbox/vocab/position
+import scoutbox/vocab/trust_band
+
+// secondLookAndNobodyMissed: canBriefTransition — five brief states with a transition table
+pub fn five_brief_states_with_a_transition_table_test() {
+  assert briefs.can_transition(brief_status.Draft, brief_status.Active) == True
+}
+
+// secondLookAndNobodyMissed: canBriefTransition — [neg] an archived brief cannot be reactivated
+pub fn neg_an_archived_brief_cannot_be_reactivated_test() {
+  assert briefs.can_transition(brief_status.Archived, brief_status.Active)
+    == False
+}
+
+// secondLookAndNobodyMissed: canBriefTransition — [neg] a draft cannot be paused
+pub fn neg_a_draft_cannot_be_paused_test() {
+  assert briefs.can_transition(brief_status.Draft, brief_status.Paused) == False
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "race"
+pub fn neg_a_brief_can_never_filter_by_race_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "race"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"race\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "ethnicity"
+pub fn neg_a_brief_can_never_filter_by_ethnicity_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "ethnicity"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"ethnicity\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "religion"
+pub fn neg_a_brief_can_never_filter_by_religion_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "religion"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"religion\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "sexual_orientation"
+pub fn neg_a_brief_can_never_filter_by_sexual_orientation_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "sexual_orientation"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"sexual_orientation\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "disability"
+pub fn neg_a_brief_can_never_filter_by_disability_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "disability"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"disability\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "family_income"
+pub fn neg_a_brief_can_never_filter_by_family_income_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "family_income"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"family_income\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "school_type"
+pub fn neg_a_brief_can_never_filter_by_school_type_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "school_type"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"school_type\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "postcode_deprivation"
+pub fn neg_a_brief_can_never_filter_by_postcode_deprivation_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "postcode_deprivation"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"postcode_deprivation\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "physical_maturity"
+pub fn neg_a_brief_can_never_filter_by_physical_maturity_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "physical_maturity"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"physical_maturity\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief can never filter by "national_origin"
+pub fn neg_a_brief_can_never_filter_by_national_origin_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "national_origin"],
+      briefs.Fields(
+        title: Some("x"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_CRITERION_PROHIBITED\",\"prohibited\":[\"national_origin\"],\"message\":\"A recruitment brief can never filter players by a protected characteristic.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_AGE_RANGE_INVALID
+pub fn neg_refused_brief_age_range_invalid_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "minAge", "maxAge"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: Some(20.0),
+        max_age: Some(16.0),
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"ageRange\",\"error\":\"BRIEF_AGE_RANGE_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_AGE_INVALID
+pub fn neg_refused_brief_age_invalid_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "minAge"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: Some(2.0),
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"minAge\",\"error\":\"BRIEF_AGE_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_RADIUS_INVALID
+pub fn neg_refused_brief_radius_invalid_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "radiusKm"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: Some(-5.0),
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"radiusKm\",\"error\":\"BRIEF_RADIUS_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_POSITION_UNKNOWN
+pub fn neg_refused_brief_position_unknown_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: Some(["SWEEPER"]),
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"positions\",\"error\":\"BRIEF_POSITION_UNKNOWN\",\"unknown\":[\"SWEEPER\"]}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_EVIDENCE_REQUIREMENT_UNKNOWN
+pub fn neg_refused_brief_evidence_requirement_unknown_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "evidenceRequirements"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: Some(["is_good"]),
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"evidenceRequirements\",\"error\":\"BRIEF_EVIDENCE_REQUIREMENT_UNKNOWN\",\"unknown\":[\"is_good\"]}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_TRUST_BAND_UNKNOWN
+pub fn neg_refused_brief_trust_band_unknown_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "minTrustBand"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: Some("excellent"),
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"minTrustBand\",\"error\":\"BRIEF_TRUST_BAND_UNKNOWN\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_LEVEL_UNKNOWN
+pub fn neg_refused_brief_level_unknown_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "maxLevel"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: Some("galactico"),
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"maxLevel\",\"error\":\"BRIEF_LEVEL_UNKNOWN\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] refused: BRIEF_WINDOW_INVALID
+pub fn neg_refused_brief_window_invalid_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "activeFrom", "activeUntil"],
+      briefs.Fields(
+        title: Some("Brief"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: Some("2027-06-01"),
+        active_until: Some("2027-01-01"),
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"activeWindow\",\"error\":\"BRIEF_WINDOW_INVALID\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a brief with no title is refused
+pub fn neg_a_brief_with_no_title_is_refused_test() {
+  assert json.to_string(briefs.validate_body(
+      [],
+      briefs.Fields(
+        title: None,
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":false,\"error\":\"BRIEF_INVALID\",\"details\":[{\"field\":\"title\",\"error\":\"BRIEF_TITLE_REQUIRED\"}],\"message\":\"This recruitment brief cannot be saved as written.\"}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — a valid brief derives its position groups from the canonical taxonomy
+pub fn a_valid_brief_derives_its_position_groups_from_the_canonical_taxonomy_test() {
+  assert json.to_string(briefs.validate_body(
+      [
+        "title",
+        "positions",
+        "minAge",
+        "maxAge",
+        "evidenceRequirements",
+        "minTrustBand",
+      ],
+      briefs.Fields(
+        title: Some("2027 DM"),
+        positions: Some(["CDM", "CM"]),
+        min_age: Some(16.0),
+        max_age: Some(18.0),
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: Some(["recent_full_match"]),
+        min_trust_band: Some("established_evidence"),
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":true,\"title\":\"2027 DM\",\"criteria\":{\"positions\":[\"CDM\",\"CM\"],\"positionGroups\":[\"MID\"],\"minAge\":16,\"maxAge\":18,\"radiusKm\":null,\"maxLevel\":null,\"foot\":null,\"availability\":null,\"evidenceRequirements\":[\"recent_full_match\"],\"minTrustBand\":\"established_evidence\",\"combineProtocols\":[]},\"activeFrom\":null,\"activeUntil\":null}"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — [neg] a grassroots brief cannot exceed the 50 km radius or reach pro level
+pub fn neg_a_grassroots_brief_cannot_exceed_the_50_km_radius_or_reach_pro_level_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "radiusKm", "maxLevel"],
+      briefs.Fields(
+        title: Some("g"),
+        positions: None,
+        min_age: None,
+        max_age: None,
+        radius_km: Some(500.0),
+        max_level: Some("pro"),
+        foot: None,
+        availability: None,
+        evidence_requirements: None,
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      True,
+    ))
+    == "{\"ok\":true,\"title\":\"g\",\"criteria\":{\"positions\":[],\"positionGroups\":[],\"minAge\":null,\"maxAge\":null,\"radiusKm\":50,\"maxLevel\":\"semi_pro\",\"foot\":null,\"availability\":null,\"evidenceRequirements\":[],\"minTrustBand\":null,\"combineProtocols\":[]},\"activeFrom\":null,\"activeUntil\":null}"
+}
+
+// secondLookAndNobodyMissed: explainBriefCriteria — every criterion is explainable in plain language — there are no hidden criteria
+pub fn every_criterion_is_explainable_in_plain_language_there_are_no_hidden_cri_test() {
+  assert json.to_string(
+      briefs.explain(
+        briefs.Criteria(
+          positions: [position.CDM, position.CM],
+          min_age: Some(16),
+          max_age: Some(18),
+          radius_km: None,
+          max_level: None,
+          foot: None,
+          availability: None,
+          evidence_requirements: ["recent_full_match"],
+          min_trust_band: Some(trust_band.EstablishedEvidence),
+          combine_protocols: [],
+        ),
+      ),
+    )
+    == "[{\"key\":\"positions\",\"label\":\"Position\",\"value\":\"CDM, CM\"},{\"key\":\"age\",\"label\":\"Age\",\"value\":\"16–18\"},{\"key\":\"evidence:recent_full_match\",\"label\":\"Evidence\",\"value\":\"Recent full match available\"},{\"key\":\"minTrustBand\",\"label\":\"Minimum evidence confidence\",\"value\":\"established_evidence\"}]"
+}
+
+// secondLookAndNobodyMissed: validateRecruitmentBrief — a matching player matches
+pub fn a_matching_player_matches_test() {
+  assert json.to_string(briefs.validate_body(
+      ["title", "positions", "minAge", "maxAge", "evidenceRequirements"],
+      briefs.Fields(
+        title: Some("b"),
+        positions: Some(["CDM"]),
+        min_age: Some(16.0),
+        max_age: Some(18.0),
+        radius_km: None,
+        max_level: None,
+        foot: None,
+        availability: None,
+        evidence_requirements: Some(["recent_full_match"]),
+        min_trust_band: None,
+        combine_protocols: None,
+        active_from: None,
+        active_until: None,
+      ),
+      False,
+    ))
+    == "{\"ok\":true,\"title\":\"b\",\"criteria\":{\"positions\":[\"CDM\"],\"positionGroups\":[\"MID\"],\"minAge\":16,\"maxAge\":18,\"radiusKm\":null,\"maxLevel\":null,\"foot\":null,\"availability\":null,\"evidenceRequirements\":[\"recent_full_match\"],\"minTrustBand\":null,\"combineProtocols\":[]},\"activeFrom\":null,\"activeUntil\":null}"
+}

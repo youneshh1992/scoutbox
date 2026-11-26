@@ -1,0 +1,1528 @@
+{
+  "$source": "domains/platform/eventRegistry.mjs",
+  "EVENT_REGISTRY": {
+    "players": {
+      "domain": "players",
+      "sourceSystem": "players",
+      "audience": "public_safe",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "orgs": {
+      "domain": "organisations",
+      "sourceSystem": "orgs",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "opportunities": {
+      "domain": "recruitment",
+      "sourceSystem": "opportunities",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "openTrials": {
+      "domain": "trials",
+      "sourceSystem": "openTrials",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "campaigns": {
+      "domain": "campaigns",
+      "sourceSystem": "campaigns",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "friendlies": {
+      "domain": "grassroots",
+      "sourceSystem": "friendlies",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "ledger": {
+      "domain": "discovery",
+      "sourceSystem": "ledger",
+      "audience": "public_safe",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "type",
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "messages": {
+      "domain": "messaging",
+      "sourceSystem": "channels",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "channelId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "typing": {
+      "domain": "messaging",
+      "sourceSystem": "channels",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "channelId",
+        "side"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "never",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "inbox": {
+      "domain": "messaging",
+      "sourceSystem": "requests",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "notify": {
+      "domain": "notifications",
+      "sourceSystem": "notifications",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "audienceKind",
+        "audienceId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "requests": {
+      "domain": "recruitment",
+      "sourceSystem": "requests",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "applications": {
+      "domain": "recruitment",
+      "sourceSystem": "applications",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "feedback": {
+      "domain": "assessments",
+      "sourceSystem": "assessments",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "evidence": {
+      "domain": "evidence",
+      "sourceSystem": "evidence",
+      "audience": "org_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "recruitment_room_archived": {
+      "domain": "recruitment_rooms",
+      "sourceSystem": "cases",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "assessment_submitted": {
+      "domain": "assessments",
+      "sourceSystem": "assessments",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "assessmentId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "recruitment_case_moved": {
+      "domain": "recruitment_rooms",
+      "sourceSystem": "cases",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "from",
+        "to"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "room_decision_finalized": {
+      "domain": "recruitment",
+      "sourceSystem": "roomDecisions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "decisionId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "room_decision_superseded": {
+      "domain": "recruitment",
+      "sourceSystem": "roomDecisions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "decisionId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "transaction_handoff_invited": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentCases",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "handoffId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "transaction_handoff_withdrawn": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentCases",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "handoffId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "recruitment_room_reopened_from_second_look": {
+      "domain": "second_look",
+      "sourceSystem": "cases",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "itemId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "watchlist_created": {
+      "domain": "recruitment",
+      "sourceSystem": "matching",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "watchlistId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "watchlist_updated": {
+      "domain": "recruitment",
+      "sourceSystem": "matching",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "watchlistId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "watchlist_membership_changed": {
+      "domain": "recruitment",
+      "sourceSystem": "matching",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "watchlistId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "watchlist_archived": {
+      "domain": "recruitment",
+      "sourceSystem": "matching",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "watchlistId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "matching_room_created": {
+      "domain": "recruitment",
+      "sourceSystem": "matching",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "development_plan_created": {
+      "domain": "development",
+      "sourceSystem": "developmentPlans",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "development_plan_updated": {
+      "domain": "development",
+      "sourceSystem": "developmentPlans",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "development_plan_completed": {
+      "domain": "development",
+      "sourceSystem": "developmentPlans",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "development_goal_created": {
+      "domain": "development",
+      "sourceSystem": "developmentGoals",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId",
+        "goalId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "development_goal_updated": {
+      "domain": "development",
+      "sourceSystem": "developmentGoals",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId",
+        "goalId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "development_action_completed": {
+      "domain": "development",
+      "sourceSystem": "developmentActions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId",
+        "actionId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "development_evidence_linked": {
+      "domain": "development",
+      "sourceSystem": "developmentEvidenceLinks",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId",
+        "goalId",
+        "actionId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "development_review_submitted": {
+      "domain": "development",
+      "sourceSystem": "developmentReviews",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "planId",
+        "reviewId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_invited": {
+      "domain": "recruitment",
+      "sourceSystem": "requests",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "requestId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_accepted": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId",
+        "requestId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_declined": {
+      "domain": "recruitment",
+      "sourceSystem": "requests",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "requestId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_scheduled": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_rescheduled": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_cancelled": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_attendance_recorded": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId",
+        "sessionId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "trial_completed": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "trial_evidence_linked": {
+      "domain": "recruitment",
+      "sourceSystem": "trials",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "trialId",
+        "sessionId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "contact_created": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentContacts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "contactId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "contact_sent": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentContacts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "contactId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "contact_failed": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentContacts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "contactId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "contact_external_recorded": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentContacts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "contactId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "contact_responded": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentContacts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "contactId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "offer_draft_created": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "offer_draft_updated": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "offer_issued": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "offer_superseded": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "offer_withdrawn": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "offer_responded": {
+      "domain": "recruitment",
+      "sourceSystem": "recruitmentOffers",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "offerId",
+        "status"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_created": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId",
+        "offerId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": true
+    },
+    "signing_ready": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId",
+        "revisionId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_party_completed": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId",
+        "revisionId",
+        "partyType"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_completed": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId",
+        "signingId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_cancelled": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_voided": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": true
+    },
+    "signing_superseded": {
+      "domain": "recruitment",
+      "sourceSystem": "signingPackages",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "roomId",
+        "signingPackageId",
+        "revisionId",
+        "supersedes"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "player_development_evidence_changed": {
+      "domain": "box_cam",
+      "sourceSystem": "boxSessions",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "box_cam_cv_session_started": {
+      "domain": "box_cam",
+      "sourceSystem": "boxCamCv",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId",
+        "sessionId"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "box_cam_cv_refused": {
+      "domain": "box_cam",
+      "sourceSystem": "boxCamCv",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId",
+        "sessionId",
+        "reason"
+      ],
+      "dedupeStrategy": "fingerprint",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "box_cam_observed": {
+      "domain": "box_cam",
+      "sourceSystem": "boxCamCv",
+      "audience": "player_private",
+      "privacyClass": "subject_reference",
+      "payload": [
+        "playerId",
+        "sessionId"
+      ],
+      "dedupeStrategy": "coalesce_by_subject",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    },
+    "agent_profile_created": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "userId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_verification_state_changed": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "userId",
+        "facet",
+        "state"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agency_affiliation_created": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "userId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agency_affiliation_ended": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "userId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_requested": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_confirmed": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_rejected": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_terminated": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_disputed": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "representation_disclosure_changed": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "contact_agent_routed": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "contactId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_opportunity_shared": {
+      "domain": "agent",
+      "sourceSystem": "representationAgreements",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "agreementId",
+        "agentUserId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_review_requested": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryReviews",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "reviewId",
+        "kind"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_review_started": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryReviews",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "reviewId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_review_resolved": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryReviews",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "reviewId",
+        "outcome"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "conflict_evaluated": {
+      "domain": "compliance",
+      "sourceSystem": "complianceContexts",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "ctxId",
+        "outcome"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_consent_requested": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryConsents",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "consentId",
+        "ctxId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_consent_granted": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryConsents",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "consentId",
+        "ctxId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_consent_declined": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryConsents",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "consentId",
+        "ctxId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "regulatory_consent_revoked": {
+      "domain": "compliance",
+      "sourceSystem": "regulatoryConsents",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "consentId",
+        "ctxId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_authorisation_state_changed": {
+      "domain": "compliance",
+      "sourceSystem": "agentProfiles",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "userId",
+        "state"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_created": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_party_changed": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "partyRole"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_compliance_updated": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "outcome"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_status_changed": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "status"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_document_added": {
+      "domain": "transaction",
+      "sourceSystem": "transactionDocuments",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "docId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_message_linked": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_held": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "status"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_cancelled": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "status"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "agent_transaction_closed": {
+      "domain": "transaction",
+      "sourceSystem": "agentTransactions",
+      "audience": "org_private",
+      "privacyClass": "org_internal",
+      "payload": [
+        "orgId",
+        "txId",
+        "status"
+      ],
+      "dedupeStrategy": "none",
+      "replayPolicy": "never",
+      "notificationEligible": true,
+      "analyticsEligible": false
+    },
+    "policy_version_published": {
+      "domain": "compliance",
+      "sourceSystem": "jurisdictionPolicies",
+      "audience": "public_safe",
+      "privacyClass": "none",
+      "payload": [],
+      "dedupeStrategy": "none",
+      "replayPolicy": "replay",
+      "notificationEligible": false,
+      "analyticsEligible": false
+    }
+  },
+  "EVENT_NAMES": [
+    "players",
+    "orgs",
+    "opportunities",
+    "openTrials",
+    "campaigns",
+    "friendlies",
+    "ledger",
+    "messages",
+    "typing",
+    "inbox",
+    "notify",
+    "requests",
+    "applications",
+    "feedback",
+    "evidence",
+    "recruitment_room_archived",
+    "assessment_submitted",
+    "recruitment_case_moved",
+    "room_decision_finalized",
+    "room_decision_superseded",
+    "transaction_handoff_invited",
+    "transaction_handoff_withdrawn",
+    "recruitment_room_reopened_from_second_look",
+    "watchlist_created",
+    "watchlist_updated",
+    "watchlist_membership_changed",
+    "watchlist_archived",
+    "matching_room_created",
+    "development_plan_created",
+    "development_plan_updated",
+    "development_plan_completed",
+    "development_goal_created",
+    "development_goal_updated",
+    "development_action_completed",
+    "development_evidence_linked",
+    "development_review_submitted",
+    "trial_invited",
+    "trial_accepted",
+    "trial_declined",
+    "trial_scheduled",
+    "trial_rescheduled",
+    "trial_cancelled",
+    "trial_attendance_recorded",
+    "trial_completed",
+    "trial_evidence_linked",
+    "contact_created",
+    "contact_sent",
+    "contact_failed",
+    "contact_external_recorded",
+    "contact_responded",
+    "offer_draft_created",
+    "offer_draft_updated",
+    "offer_issued",
+    "offer_superseded",
+    "offer_withdrawn",
+    "offer_responded",
+    "signing_created",
+    "signing_ready",
+    "signing_party_completed",
+    "signing_completed",
+    "signing_cancelled",
+    "signing_voided",
+    "signing_superseded",
+    "player_development_evidence_changed",
+    "box_cam_cv_session_started",
+    "box_cam_cv_refused",
+    "box_cam_observed",
+    "agent_profile_created",
+    "agent_verification_state_changed",
+    "agency_affiliation_created",
+    "agency_affiliation_ended",
+    "representation_requested",
+    "representation_confirmed",
+    "representation_rejected",
+    "representation_terminated",
+    "representation_disputed",
+    "representation_disclosure_changed",
+    "contact_agent_routed",
+    "agent_opportunity_shared",
+    "regulatory_review_requested",
+    "regulatory_review_started",
+    "regulatory_review_resolved",
+    "conflict_evaluated",
+    "regulatory_consent_requested",
+    "regulatory_consent_granted",
+    "regulatory_consent_declined",
+    "regulatory_consent_revoked",
+    "agent_authorisation_state_changed",
+    "agent_transaction_created",
+    "agent_transaction_party_changed",
+    "agent_transaction_compliance_updated",
+    "agent_transaction_status_changed",
+    "agent_transaction_document_added",
+    "agent_transaction_message_linked",
+    "agent_transaction_held",
+    "agent_transaction_cancelled",
+    "agent_transaction_closed",
+    "policy_version_published"
+  ]
+}

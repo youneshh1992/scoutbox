@@ -1,0 +1,3167 @@
+//// Checks of the rules from the rules suites of passport/passport, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/passport/passport_rules
+import scoutbox/rows/assessments
+import scoutbox/rows/evidence
+import scoutbox/rows/id
+import scoutbox/rows/passport_achievements
+import scoutbox/rows/passport_career_entries
+import scoutbox/rows/ver_references
+import scoutbox/vocab/party
+import scoutbox/vocab/playing_level
+import scoutbox/vocab/position
+
+// passport: buildTimeline — projection is deterministic — same sources, byte-identical timeline
+pub fn projection_is_deterministic_same_sources_byte_identical_timeline_test() {
+  assert passport_rules.build_timeline(
+      passport_rules.Sources(
+        ..passport_rules.no_sources,
+        career_entries: [
+          passport_career_entries.Row(
+            id: id.career_entry("c1"),
+            org_name: "Riverside Youth",
+            role: Some("RW"),
+            from_date: "2019",
+            to_date: Some("2021-06"),
+            submitted_by: party.Player,
+            player_id: id.player("p"),
+            note: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_career_entries.Row(
+            id: id.career_entry("c2"),
+            org_name: "Old Boys",
+            from_date: "2022-03-15",
+            to_date: None,
+            submitted_by: party.Guardian,
+            player_id: id.player("p"),
+            role: None,
+            note: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_career_entries.Row(
+            id: id.career_entry("c3"),
+            org_name: "Gone FC",
+            from_date: "2015",
+            to_date: None,
+            submitted_by: party.Player,
+            withdrawn_at: Some(123),
+            player_id: id.player("p"),
+            role: None,
+            note: None,
+            created_at: 0,
+          ),
+        ],
+        squads: [
+          passport_rules.SquadSource(
+            org_id: id.org("o9"),
+            org_name: "Marsh Lane",
+            row_id: "sq1",
+            added_at: 1_714_608_000_000,
+            org_verified: True,
+          ),
+        ],
+        trials: [
+          passport_rules.TrialSource(
+            id: id.trial("t1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            proposed_date: Some("2023-03-10"),
+            accepted_at: 1_677_628_800_000,
+            attendance: passport_rules.Legacy,
+            report_at: Some(1_678_579_200_000),
+          ),
+        ],
+        assessments: [
+          passport_rules.AssessmentSource(
+            id: id.assessment("a1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            submitted_at: Some(1_679_270_400_000),
+            created_at: 0,
+            state: assessments.Submitted,
+          ),
+        ],
+        references: [
+          passport_rules.ReferenceSource(
+            id: id.reference("r1"),
+            coach_name: Some("Coach K"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            created_at: 1_680_307_200_000,
+            role_at_time: None,
+            relationship: "",
+            from_year: None,
+            to_year: None,
+            strengths: "",
+            development: "",
+            summary: "",
+            status: ver_references.Active,
+            provenance_still_current: False,
+          ),
+        ],
+        evidence: [
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e1"),
+            claim_type: evidence.Footage,
+            label: "Full match",
+            recorded_at: 1_706_745_600_000,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            superseded: False,
+            expired: False,
+          ),
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e2"),
+            claim_type: evidence.Statistic,
+            label: "Goals",
+            recorded_at: 1_706_832_000_000,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            superseded: False,
+            expired: False,
+          ),
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e3"),
+            claim_type: evidence.Footage,
+            label: "Old cut",
+            recorded_at: 1_675_209_600_000,
+            superseded: True,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            expired: False,
+          ),
+        ],
+        signings: [
+          passport_rules.SigningSource(
+            id: id.signing("s1"),
+            org_id: id.org("o9"),
+            org_name: Some("Marsh Lane"),
+            ts: 1_714_608_000_000,
+          ),
+        ],
+        achievements: [
+          passport_achievements.Row(
+            id: id.achievement("ach1"),
+            title: "Top scorer",
+            when_date: Some("2024"),
+            submitted_by: party.Player,
+            player_id: id.player("p"),
+            org_name: None,
+            confirmation_provenance: None,
+            confirmation_org_id: None,
+            confirmation_org_name: None,
+            confirmation_by_name: None,
+            confirmation_at: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_achievements.Row(
+            id: id.achievement("ach2"),
+            title: "Withdrawn one",
+            when_date: Some("2024"),
+            submitted_by: party.Player,
+            withdrawn_at: Some(1),
+            player_id: id.player("p"),
+            org_name: None,
+            confirmation_provenance: None,
+            confirmation_org_id: None,
+            confirmation_org_name: None,
+            confirmation_by_name: None,
+            confirmation_at: None,
+            created_at: 0,
+          ),
+        ],
+        position_history: [
+          passport_rules.PositionSource(
+            id: id.position_entry("p1"),
+            from: "2020",
+            primary: position.RW,
+            secondary: [],
+          ),
+        ],
+      ),
+    )
+    == [
+      passport_rules.Event(
+        id: "pev:signing:s1:signed",
+        type_: "signed",
+        when: passport_rules.When(
+          t: 1_714_608_000_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("Marsh Lane"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o9")),
+          name: Some("Marsh Lane"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.Public,
+        source: passport_rules.Source(type_: "signing", id: "s1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:squad:o9:sq1:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_714_608_000_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("org", passport_rules.Text("Marsh Lane")),
+          #("role", passport_rules.Text("squad")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o9")),
+          name: Some("Marsh Lane"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.Public,
+        current: Some(True),
+        source: passport_rules.Source(type_: "squad_row", id: "o9:sq1"),
+        public_eligible: False,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:evidence:e1:evidence_added",
+        type_: "evidence_added",
+        when: passport_rules.When(
+          t: 1_706_745_600_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("label", passport_rules.Text("Full match"))],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "evidence", id: "e1"),
+        org: None,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:achievement:ach1:achievement",
+        type_: "achievement",
+        when: passport_rules.When(
+          t: 1_704_067_200_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("label", passport_rules.Text("Top scorer")),
+          #("org", passport_rules.Null),
+        ],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "achievement", id: "ach1"),
+        org: None,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:reference:r1:reference_received",
+        type_: "reference_received",
+        when: passport_rules.When(
+          t: 1_680_307_200_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("coach", passport_rules.Text("Coach K")),
+          #("org", passport_rules.Text("City Academy")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedCoachConfirmed,
+        visibility: passport_rules.Recruitment,
+        source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:assessment:a1:assessment_completed",
+        type_: "assessment_completed",
+        when: passport_rules.When(
+          t: 1_679_270_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        source: passport_rules.Source(type_: "assessment", id: "a1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:trial:t1:trial_outcome",
+        type_: "trial_outcome",
+        when: passport_rules.When(
+          t: 1_678_579_200_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.PrivateOwnOrg,
+        source: passport_rules.Source(type_: "trial", id: "t1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:trial:t1:trial_attended",
+        type_: "trial_attended",
+        when: passport_rules.When(
+          t: 1_678_406_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "trial", id: "t1"),
+        trial: Some(passport_rules.TrialMark(
+          legacy: True,
+          attended_sessions: None,
+        )),
+        current: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c2:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_647_302_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("org", passport_rules.Text("Old Boys")),
+          #("role", passport_rules.Null),
+        ],
+        org: Some(passport_rules.EventOrg(id: None, name: Some("Old Boys"))),
+        provenance: passport_rules.GuardianSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        current: Some(True),
+        source: passport_rules.Source(type_: "career_entry", id: "c2"),
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c1:club_left",
+        type_: "club_left",
+        when: passport_rules.When(
+          t: 1_622_505_600_000,
+          precision: passport_rules.Month,
+        ),
+        title: [#("org", passport_rules.Text("Riverside Youth"))],
+        org: Some(passport_rules.EventOrg(
+          id: None,
+          name: Some("Riverside Youth"),
+        )),
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "career_entry", id: "c1"),
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:position:p1:position_change",
+        type_: "position_change",
+        when: passport_rules.When(
+          t: 1_577_836_800_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("primary", passport_rules.Text("RW")),
+          #("secondary", passport_rules.Texts([])),
+        ],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        source: passport_rules.Source(type_: "position_entry", id: "p1"),
+        org: None,
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c1:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_546_300_800_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("org", passport_rules.Text("Riverside Youth")),
+          #("role", passport_rules.Text("RW")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: None,
+          name: Some("Riverside Youth"),
+        )),
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        current: Some(False),
+        source: passport_rules.Source(type_: "career_entry", id: "c1"),
+        trial: None,
+      ),
+    ]
+}
+
+// passport: buildTimeline — [neg] duplicated source row cannot create a duplicate event (canonical ids dedupe)
+pub fn neg_duplicated_source_row_cannot_create_a_duplicate_event_canonical_ids_test() {
+  assert passport_rules.build_timeline(
+      passport_rules.Sources(
+        ..passport_rules.no_sources,
+        career_entries: [
+          passport_career_entries.Row(
+            id: id.career_entry("c1"),
+            org_name: "Riverside Youth",
+            role: Some("RW"),
+            from_date: "2019",
+            to_date: Some("2021-06"),
+            submitted_by: party.Player,
+            player_id: id.player("p"),
+            note: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_career_entries.Row(
+            id: id.career_entry("c2"),
+            org_name: "Old Boys",
+            from_date: "2022-03-15",
+            to_date: None,
+            submitted_by: party.Guardian,
+            player_id: id.player("p"),
+            role: None,
+            note: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_career_entries.Row(
+            id: id.career_entry("c3"),
+            org_name: "Gone FC",
+            from_date: "2015",
+            to_date: None,
+            submitted_by: party.Player,
+            withdrawn_at: Some(123),
+            player_id: id.player("p"),
+            role: None,
+            note: None,
+            created_at: 0,
+          ),
+        ],
+        squads: [
+          passport_rules.SquadSource(
+            org_id: id.org("o9"),
+            org_name: "Marsh Lane",
+            row_id: "sq1",
+            added_at: 1_714_608_000_000,
+            org_verified: True,
+          ),
+        ],
+        trials: [
+          passport_rules.TrialSource(
+            id: id.trial("t1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            proposed_date: Some("2023-03-10"),
+            accepted_at: 1_677_628_800_000,
+            attendance: passport_rules.Legacy,
+            report_at: Some(1_678_579_200_000),
+          ),
+          passport_rules.TrialSource(
+            id: id.trial("t1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            proposed_date: Some("2023-03-10"),
+            accepted_at: 1_677_628_800_000,
+            attendance: passport_rules.Legacy,
+            report_at: Some(1_678_579_200_000),
+          ),
+        ],
+        assessments: [
+          passport_rules.AssessmentSource(
+            id: id.assessment("a1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            submitted_at: Some(1_679_270_400_000),
+            created_at: 0,
+            state: assessments.Submitted,
+          ),
+        ],
+        references: [
+          passport_rules.ReferenceSource(
+            id: id.reference("r1"),
+            coach_name: Some("Coach K"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            created_at: 1_680_307_200_000,
+            role_at_time: None,
+            relationship: "",
+            from_year: None,
+            to_year: None,
+            strengths: "",
+            development: "",
+            summary: "",
+            status: ver_references.Active,
+            provenance_still_current: False,
+          ),
+        ],
+        evidence: [
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e1"),
+            claim_type: evidence.Footage,
+            label: "Full match",
+            recorded_at: 1_706_745_600_000,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            superseded: False,
+            expired: False,
+          ),
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e2"),
+            claim_type: evidence.Statistic,
+            label: "Goals",
+            recorded_at: 1_706_832_000_000,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            superseded: False,
+            expired: False,
+          ),
+          passport_rules.EvidenceSource(
+            id: id.scouting_evidence("e3"),
+            claim_type: evidence.Footage,
+            label: "Old cut",
+            recorded_at: 1_675_209_600_000,
+            superseded: True,
+            tier: evidence.SelfReported,
+            source_kind: evidence.Player,
+            expired: False,
+          ),
+        ],
+        signings: [
+          passport_rules.SigningSource(
+            id: id.signing("s1"),
+            org_id: id.org("o9"),
+            org_name: Some("Marsh Lane"),
+            ts: 1_714_608_000_000,
+          ),
+        ],
+        achievements: [
+          passport_achievements.Row(
+            id: id.achievement("ach1"),
+            title: "Top scorer",
+            when_date: Some("2024"),
+            submitted_by: party.Player,
+            player_id: id.player("p"),
+            org_name: None,
+            confirmation_provenance: None,
+            confirmation_org_id: None,
+            confirmation_org_name: None,
+            confirmation_by_name: None,
+            confirmation_at: None,
+            created_at: 0,
+            withdrawn_at: None,
+          ),
+          passport_achievements.Row(
+            id: id.achievement("ach2"),
+            title: "Withdrawn one",
+            when_date: Some("2024"),
+            submitted_by: party.Player,
+            withdrawn_at: Some(1),
+            player_id: id.player("p"),
+            org_name: None,
+            confirmation_provenance: None,
+            confirmation_org_id: None,
+            confirmation_org_name: None,
+            confirmation_by_name: None,
+            confirmation_at: None,
+            created_at: 0,
+          ),
+        ],
+        position_history: [
+          passport_rules.PositionSource(
+            id: id.position_entry("p1"),
+            from: "2020",
+            primary: position.RW,
+            secondary: [],
+          ),
+        ],
+      ),
+    )
+    == [
+      passport_rules.Event(
+        id: "pev:signing:s1:signed",
+        type_: "signed",
+        when: passport_rules.When(
+          t: 1_714_608_000_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("Marsh Lane"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o9")),
+          name: Some("Marsh Lane"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.Public,
+        source: passport_rules.Source(type_: "signing", id: "s1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:squad:o9:sq1:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_714_608_000_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("org", passport_rules.Text("Marsh Lane")),
+          #("role", passport_rules.Text("squad")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o9")),
+          name: Some("Marsh Lane"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.Public,
+        current: Some(True),
+        source: passport_rules.Source(type_: "squad_row", id: "o9:sq1"),
+        public_eligible: False,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:evidence:e1:evidence_added",
+        type_: "evidence_added",
+        when: passport_rules.When(
+          t: 1_706_745_600_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("label", passport_rules.Text("Full match"))],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "evidence", id: "e1"),
+        org: None,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:achievement:ach1:achievement",
+        type_: "achievement",
+        when: passport_rules.When(
+          t: 1_704_067_200_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("label", passport_rules.Text("Top scorer")),
+          #("org", passport_rules.Null),
+        ],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "achievement", id: "ach1"),
+        org: None,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:reference:r1:reference_received",
+        type_: "reference_received",
+        when: passport_rules.When(
+          t: 1_680_307_200_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("coach", passport_rules.Text("Coach K")),
+          #("org", passport_rules.Text("City Academy")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedCoachConfirmed,
+        visibility: passport_rules.Recruitment,
+        source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:assessment:a1:assessment_completed",
+        type_: "assessment_completed",
+        when: passport_rules.When(
+          t: 1_679_270_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        source: passport_rules.Source(type_: "assessment", id: "a1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:trial:t1:trial_outcome",
+        type_: "trial_outcome",
+        when: passport_rules.When(
+          t: 1_678_579_200_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.PrivateOwnOrg,
+        source: passport_rules.Source(type_: "trial", id: "t1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:trial:t1:trial_attended",
+        type_: "trial_attended",
+        when: passport_rules.When(
+          t: 1_678_406_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "trial", id: "t1"),
+        trial: Some(passport_rules.TrialMark(
+          legacy: True,
+          attended_sessions: None,
+        )),
+        current: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c2:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_647_302_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("org", passport_rules.Text("Old Boys")),
+          #("role", passport_rules.Null),
+        ],
+        org: Some(passport_rules.EventOrg(id: None, name: Some("Old Boys"))),
+        provenance: passport_rules.GuardianSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        current: Some(True),
+        source: passport_rules.Source(type_: "career_entry", id: "c2"),
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c1:club_left",
+        type_: "club_left",
+        when: passport_rules.When(
+          t: 1_622_505_600_000,
+          precision: passport_rules.Month,
+        ),
+        title: [#("org", passport_rules.Text("Riverside Youth"))],
+        org: Some(passport_rules.EventOrg(
+          id: None,
+          name: Some("Riverside Youth"),
+        )),
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "career_entry", id: "c1"),
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:position:p1:position_change",
+        type_: "position_change",
+        when: passport_rules.When(
+          t: 1_577_836_800_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("primary", passport_rules.Text("RW")),
+          #("secondary", passport_rules.Texts([])),
+        ],
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        source: passport_rules.Source(type_: "position_entry", id: "p1"),
+        org: None,
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:career:c1:club_joined",
+        type_: "club_joined",
+        when: passport_rules.When(
+          t: 1_546_300_800_000,
+          precision: passport_rules.Year,
+        ),
+        title: [
+          #("org", passport_rules.Text("Riverside Youth")),
+          #("role", passport_rules.Text("RW")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: None,
+          name: Some("Riverside Youth"),
+        )),
+        provenance: passport_rules.PlayerSubmitted,
+        visibility: passport_rules.Recruitment,
+        public_eligible: True,
+        current: Some(False),
+        source: passport_rules.Source(type_: "career_entry", id: "c1"),
+        trial: None,
+      ),
+    ]
+}
+
+// passport: evId — year-only input STAYS year precision — no invented month/day
+pub fn year_only_input_stays_year_precision_no_invented_month_day_test() {
+  assert passport_rules.ev_id("career", "c1", "club_joined")
+    == "pev:career:c1:club_joined"
+}
+
+// passport: whenDisplay — year-only input STAYS year precision — no invented month/day
+pub fn year_only_input_stays_year_precision_no_invented_month_day_2_test() {
+  assert passport_rules.when_display(passport_rules.When(
+      t: 1_546_300_800_000,
+      precision: passport_rules.Year,
+    ))
+    == "2019"
+}
+
+// passport: evId — month input stays month precision
+pub fn month_input_stays_month_precision_test() {
+  assert passport_rules.ev_id("career", "c1", "club_left")
+    == "pev:career:c1:club_left"
+}
+
+// passport: whenDisplay — month input stays month precision
+pub fn month_input_stays_month_precision_2_test() {
+  assert passport_rules.when_display(passport_rules.When(
+      t: 1_622_505_600_000,
+      precision: passport_rules.Month,
+    ))
+    == "2021-06"
+}
+
+// passport: evId — guardian-submitted entry carries guardian provenance
+pub fn guardian_submitted_entry_carries_guardian_provenance_test() {
+  assert passport_rules.ev_id("career", "c2", "club_joined")
+    == "pev:career:c2:club_joined"
+}
+
+// passport: normWhen — unparseable dates become null, never a guessed timestamp
+pub fn unparseable_dates_become_null_never_a_guessed_timestamp_test() {
+  assert passport_rules.when_of("sometime in 2019") == None
+}
+
+// passport: normWhen — unparseable dates become null, never a guessed timestamp
+pub fn unparseable_dates_become_null_never_a_guessed_timestamp_2_test() {
+  assert passport_rules.when_of("") == None
+}
+
+// passport: normWhen — three precision levels normalise as given
+pub fn three_precision_levels_normalise_as_given_test() {
+  assert passport_rules.when_of_year(2019, None)
+    == Some(passport_rules.When(
+      t: 1_546_300_800_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: normWhen — three precision levels normalise as given
+pub fn three_precision_levels_normalise_as_given_2_test() {
+  assert passport_rules.when_of("2019-03")
+    == Some(passport_rules.When(
+      t: 1_551_398_400_000,
+      precision: passport_rules.Month,
+    ))
+}
+
+// passport: normWhen — three precision levels normalise as given
+pub fn three_precision_levels_normalise_as_given_3_test() {
+  assert passport_rules.when_at(1_551_744_000_000)
+    == passport_rules.When(t: 1_551_744_000_000, precision: passport_rules.Day)
+}
+
+// passport: provRank — provenance vocabulary is rank-ordered for precedence only
+pub fn provenance_vocabulary_is_rank_ordered_for_precedence_only_test() {
+  assert passport_rules.provenance_rank(passport_rules.PlayerSubmitted) == 0
+}
+
+// passport: provRank — provenance vocabulary is rank-ordered for precedence only
+pub fn provenance_vocabulary_is_rank_ordered_for_precedence_only_2_test() {
+  assert passport_rules.provenance_rank(passport_rules.ScoutboxReviewed) == 5
+}
+
+// passport: provRank — provenance vocabulary is rank-ordered for precedence only
+pub fn provenance_vocabulary_is_rank_ordered_for_precedence_only_3_test() {
+  assert passport_rules.provenance_rank(passport_rules.VerifiedClubConfirmed)
+    == 7
+}
+
+// passport: provRank — provenance vocabulary is rank-ordered for precedence only
+pub fn provenance_vocabulary_is_rank_ordered_for_precedence_only_4_test() {
+  assert passport_rules.provenance_rank(passport_rules.AuthoritativeRegistry)
+    == 8
+}
+
+// passport: provRank — box_cam_observed outranks self-submission but NEVER organisation confirmation or review
+pub fn box_cam_observed_outranks_self_submission_but_never_organisation_confirm_test() {
+  assert passport_rules.provenance_rank(passport_rules.BoxCamObserved) == 4
+}
+
+// passport: provRank — box_cam_observed outranks self-submission but NEVER organisation confirmation or review
+pub fn box_cam_observed_outranks_self_submission_but_never_organisation_confirm_2_test() {
+  assert passport_rules.provenance_rank(passport_rules.GuardianSubmitted) == 1
+}
+
+// passport: provenanceFromMethod — verification methods map onto Passport provenance
+pub fn verification_methods_map_onto_passport_provenance_test() {
+  assert passport_rules.provenance_from_method(
+      "organisation_admin_confirmation",
+    )
+    == passport_rules.VerifiedClubConfirmed
+}
+
+// passport: provenanceFromMethod — verification methods map onto Passport provenance
+pub fn verification_methods_map_onto_passport_provenance_2_test() {
+  assert passport_rules.provenance_from_method("scoutbox_manual_review")
+    == passport_rules.ScoutboxReviewed
+}
+
+// passport: provenanceFromMethod — verification methods map onto Passport provenance
+pub fn verification_methods_map_onto_passport_provenance_3_test() {
+  assert passport_rules.provenance_from_method("authoritative_registry")
+    == passport_rules.AuthoritativeRegistry
+}
+
+// passport: provenanceFromMethod — verification methods map onto Passport provenance
+pub fn verification_methods_map_onto_passport_provenance_4_test() {
+  assert passport_rules.provenance_from_method("migration")
+    == passport_rules.HistoricalMigration
+}
+
+// passport: provenanceFromMethod — verification methods map onto Passport provenance
+pub fn verification_methods_map_onto_passport_provenance_5_test() {
+  assert passport_rules.provenance_from_method("unknown_thing")
+    == passport_rules.SystemRecorded
+}
+
+// passport: clubHistory — signing yields ONE current club-confirmed row (squad row folded away)
+pub fn signing_yields_one_current_club_confirmed_row_squad_row_folded_away_test() {
+  assert passport_rules.club_history(
+      [
+        passport_rules.SigningRow(
+          id: id.signing("s1"),
+          org_id: id.org("o9"),
+          org_name: Some("Marsh Lane"),
+          ts: 1_714_608_000_000,
+          ended_at: None,
+          org_suspended: False,
+        ),
+      ],
+      [
+        passport_rules.SquadSource(
+          org_id: id.org("o9"),
+          org_name: "Marsh Lane",
+          row_id: "sq",
+          added_at: 1_714_694_400_000,
+          org_verified: True,
+        ),
+      ],
+      [],
+    )
+    == passport_rules.History(
+      rows: [
+        passport_rules.HistoryRow(
+          key: "signing:s1",
+          org_id: Some(id.org("o9")),
+          org_name: Some("Marsh Lane"),
+          role: None,
+          from: Some(passport_rules.When(
+            t: 1_714_608_000_000,
+            precision: passport_rules.Day,
+          )),
+          to: None,
+          current: True,
+          provenance: passport_rules.VerifiedClubConfirmed,
+          source: passport_rules.Source(type_: "signing", id: "s1"),
+        ),
+      ],
+      folded: [],
+    )
+}
+
+// passport: clubHistory — outcome-report end date closes the period
+pub fn outcome_report_end_date_closes_the_period_test() {
+  assert passport_rules.club_history(
+      [
+        passport_rules.SigningRow(
+          id: id.signing("s1"),
+          org_id: id.org("o9"),
+          org_name: Some("Marsh Lane"),
+          ts: 1_714_608_000_000,
+          ended_at: Some(1_736_467_200_000),
+          org_suspended: False,
+        ),
+      ],
+      [],
+      [],
+    )
+    == passport_rules.History(
+      rows: [
+        passport_rules.HistoryRow(
+          key: "signing:s1",
+          org_id: Some(id.org("o9")),
+          org_name: Some("Marsh Lane"),
+          role: None,
+          from: Some(passport_rules.When(
+            t: 1_714_608_000_000,
+            precision: passport_rules.Day,
+          )),
+          to: Some(passport_rules.When(
+            t: 1_736_467_200_000,
+            precision: passport_rules.Day,
+          )),
+          current: False,
+          provenance: passport_rules.VerifiedClubConfirmed,
+          source: passport_rules.Source(type_: "signing", id: "s1"),
+        ),
+      ],
+      folded: [],
+    )
+}
+
+// passport: whenDisplay — outcome-report end date closes the period
+pub fn outcome_report_end_date_closes_the_period_2_test() {
+  assert passport_rules.when_display(passport_rules.When(
+      t: 1_736_467_200_000,
+      precision: passport_rules.Day,
+    ))
+    == "2025-01-10"
+}
+
+// passport: clubHistory — [neg] a suspended organisation lends no CURRENT relationship — history preserved
+pub fn neg_a_suspended_organisation_lends_no_current_relationship_history_prese_test() {
+  assert passport_rules.club_history(
+      [
+        passport_rules.SigningRow(
+          id: id.signing("s1"),
+          org_id: id.org("o9"),
+          org_name: Some("Marsh Lane"),
+          ts: 1_714_608_000_000,
+          ended_at: None,
+          org_suspended: True,
+        ),
+      ],
+      [],
+      [],
+    )
+    == passport_rules.History(
+      rows: [
+        passport_rules.HistoryRow(
+          key: "signing:s1",
+          org_id: Some(id.org("o9")),
+          org_name: Some("Marsh Lane"),
+          role: None,
+          from: Some(passport_rules.When(
+            t: 1_714_608_000_000,
+            precision: passport_rules.Day,
+          )),
+          to: None,
+          current: False,
+          provenance: passport_rules.VerifiedClubConfirmed,
+          source: passport_rules.Source(type_: "signing", id: "s1"),
+        ),
+      ],
+      folded: [],
+    )
+}
+
+// passport: clubHistory — self entry duplicating an authoritative row folds into it (flagged, not duplicated)
+pub fn self_entry_duplicating_an_authoritative_row_folds_into_it_flagged_not_du_test() {
+  assert passport_rules.club_history(
+      [
+        passport_rules.SigningRow(
+          id: id.signing("s1"),
+          org_id: id.org("o9"),
+          org_name: Some("Marsh Lane"),
+          ts: 1_714_608_000_000,
+          ended_at: None,
+          org_suspended: False,
+        ),
+      ],
+      [],
+      [
+        passport_career_entries.Row(
+          id: id.career_entry("c9"),
+          org_name: "  marsh LANE ",
+          from_date: "2024",
+          to_date: None,
+          submitted_by: party.Player,
+          player_id: id.player("p"),
+          role: None,
+          note: None,
+          created_at: 0,
+          withdrawn_at: None,
+        ),
+      ],
+    )
+    == passport_rules.History(
+      rows: [
+        passport_rules.HistoryRow(
+          key: "signing:s1",
+          org_id: Some(id.org("o9")),
+          org_name: Some("Marsh Lane"),
+          role: None,
+          from: Some(passport_rules.When(
+            t: 1_714_608_000_000,
+            precision: passport_rules.Day,
+          )),
+          to: None,
+          current: True,
+          provenance: passport_rules.VerifiedClubConfirmed,
+          source: passport_rules.Source(type_: "signing", id: "s1"),
+        ),
+      ],
+      folded: [
+        passport_rules.Folded(
+          entry_id: id.career_entry("c9"),
+          into: "signing:s1",
+        ),
+      ],
+    )
+}
+
+// passport: normWhen — authoritative current wins display; player input becomes a FLAGGED conflict, never silently discarded
+pub fn authoritative_current_wins_display_player_input_becomes_a_flagged_confli_test() {
+  assert passport_rules.when_of("2024")
+    == Some(passport_rules.When(
+      t: 1_704_067_200_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: normWhen — authoritative current wins display; player input becomes a FLAGGED conflict, never silently discarded
+pub fn authoritative_current_wins_display_player_input_becomes_a_flagged_confli_2_test() {
+  assert passport_rules.when_of("2018")
+    == Some(passport_rules.When(
+      t: 1_514_764_800_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: currentStatus — authoritative current wins display; player input becomes a FLAGGED conflict, never silently discarded
+pub fn authoritative_current_wins_display_player_input_becomes_a_flagged_confli_3_test() {
+  assert json.to_string(
+      passport_rules.status_json(passport_rules.current_status(
+        passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_name: Some("Marsh Lane"),
+              org_id: Some(id.org("o9")),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_704_067_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s1"),
+            ),
+            passport_rules.HistoryRow(
+              key: "k2",
+              org_name: Some("Sunday Kings"),
+              org_id: None,
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_514_764_800_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.PlayerSubmitted,
+              source: passport_rules.Source(type_: "career_entry", id: "c1"),
+            ),
+          ],
+          folded: [],
+        ),
+        None,
+        None,
+        False,
+      )),
+    )
+    == "{\"currentClub\":{\"orgId\":\"o9\",\"orgName\":\"Marsh Lane\",\"role\":null,\"since\":\"2024\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null,\"conflicts\":[{\"code\":\"CURRENT_CLUB_CONFLICT\",\"authoritative\":{\"orgName\":\"Marsh Lane\",\"provenance\":\"verified_club_confirmed\",\"source\":{\"type\":\"signing\",\"id\":\"s1\"}},\"submitted\":{\"orgName\":\"Sunday Kings\",\"provenance\":\"player_submitted\",\"source\":{\"type\":\"career_entry\",\"id\":\"c1\"}}}]}"
+}
+
+// passport: currentStatus — with no authoritative record, self entry displays under its own honest provenance
+pub fn with_no_authoritative_record_self_entry_displays_under_its_own_honest_pr_test() {
+  assert json.to_string(
+      passport_rules.status_json(passport_rules.current_status(
+        passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k2",
+              org_name: Some("Sunday Kings"),
+              org_id: None,
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_514_764_800_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.PlayerSubmitted,
+              source: passport_rules.Source(type_: "career_entry", id: "c1"),
+            ),
+          ],
+          folded: [],
+        ),
+        None,
+        None,
+        False,
+      )),
+    )
+    == "{\"currentClub\":{\"orgId\":null,\"orgName\":\"Sunday Kings\",\"role\":null,\"since\":\"2018\",\"provenance\":\"player_submitted\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null,\"conflicts\":[]}"
+}
+
+// passport: normWhen — event before date of birth → TEMPORAL_CONFLICT flag
+pub fn event_before_date_of_birth_temporal_conflict_flag_test() {
+  assert passport_rules.when_of("2001")
+    == Some(passport_rules.When(
+      t: 978_307_200_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: normWhen — event before date of birth → TEMPORAL_CONFLICT flag
+pub fn event_before_date_of_birth_temporal_conflict_flag_2_test() {
+  assert passport_rules.when_of("2031")
+    == Some(passport_rules.When(
+      t: 1_924_992_000_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: normWhen — event before date of birth → TEMPORAL_CONFLICT flag
+pub fn event_before_date_of_birth_temporal_conflict_flag_3_test() {
+  assert passport_rules.when_of("2020")
+    == Some(passport_rules.When(
+      t: 1_577_836_800_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: temporalConflicts — event before date of birth → TEMPORAL_CONFLICT flag
+pub fn event_before_date_of_birth_temporal_conflict_flag_4_test() {
+  assert json.to_string(json.array(
+      passport_rules.temporal_conflicts(
+        [
+          passport_rules.Event(
+            id: "ev1",
+            when: passport_rules.When(
+              t: 978_307_200_000,
+              precision: passport_rules.Year,
+            ),
+            type_: "",
+            title: [],
+            org: None,
+            provenance: passport_rules.PlayerSubmitted,
+            visibility: passport_rules.Private,
+            public_eligible: False,
+            current: None,
+            source: passport_rules.Source("", ""),
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "ev2",
+            when: passport_rules.When(
+              t: 1_924_992_000_000,
+              precision: passport_rules.Year,
+            ),
+            type_: "",
+            title: [],
+            org: None,
+            provenance: passport_rules.PlayerSubmitted,
+            visibility: passport_rules.Private,
+            public_eligible: False,
+            current: None,
+            source: passport_rules.Source("", ""),
+            trial: None,
+          ),
+        ],
+        [
+          passport_rules.HistoryRow(
+            key: "h1",
+            from: Some(passport_rules.When(
+              t: 1_577_836_800_000,
+              precision: passport_rules.Year,
+            )),
+            to: Some(passport_rules.When(
+              t: 1_514_764_800_000,
+              precision: passport_rules.Year,
+            )),
+            current: False,
+            role: None,
+            provenance: passport_rules.VerifiedClubConfirmed,
+            org_id: None,
+            org_name: None,
+            source: passport_rules.Source("", ""),
+          ),
+          passport_rules.HistoryRow(
+            key: "h2",
+            org_name: Some("Marsh Lane"),
+            org_id: Some(id.org("o9")),
+            role: None,
+            from: Some(passport_rules.When(
+              t: 1_704_067_200_000,
+              precision: passport_rules.Year,
+            )),
+            to: None,
+            current: True,
+            provenance: passport_rules.VerifiedClubConfirmed,
+            source: passport_rules.Source(type_: "signing", id: "s1"),
+          ),
+          passport_rules.HistoryRow(
+            key: "h3",
+            org_name: Some("Other FC"),
+            org_id: Some(id.org("o9")),
+            role: None,
+            from: Some(passport_rules.When(
+              t: 1_704_067_200_000,
+              precision: passport_rules.Year,
+            )),
+            to: None,
+            current: True,
+            provenance: passport_rules.VerifiedClubConfirmed,
+            source: passport_rules.Source(type_: "signing", id: "s1"),
+          ),
+        ],
+        Some("2010-02-01"),
+        1_794_744_000_000,
+      ),
+      passport_rules.temporal_conflict_json,
+    ))
+    == "[{\"code\":\"TEMPORAL_CONFLICT\",\"kind\":\"before_dob\",\"eventId\":\"ev1\"},{\"code\":\"TEMPORAL_CONFLICT\",\"kind\":\"far_future\",\"eventId\":\"ev2\"},{\"code\":\"TEMPORAL_CONFLICT\",\"kind\":\"left_before_joined\",\"key\":\"h1\"},{\"code\":\"TEMPORAL_CONFLICT\",\"kind\":\"overlapping_current_authoritative\",\"keys\":[\"h2\",\"h3\"]}]"
+}
+
+// passport: viewerSees — [neg] public/other-player viewers see ONLY public items
+pub fn neg_public_other_player_viewers_see_only_public_items_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.PublicViewer,
+      passport_rules.Recruitment,
+    )
+    == False
+}
+
+// passport: viewerSees — [neg] public/other-player viewers see ONLY public items
+pub fn neg_public_other_player_viewers_see_only_public_items_2_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.PublicViewer,
+      passport_rules.Private,
+    )
+    == False
+}
+
+// passport: viewerSees — [neg] public/other-player viewers see ONLY public items
+pub fn neg_public_other_player_viewers_see_only_public_items_3_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.OtherPlayer,
+      passport_rules.Recruitment,
+    )
+    == False
+}
+
+// passport: viewerSees — clubs see public+recruitment, never private/guardian layers
+pub fn clubs_see_public_recruitment_never_private_guardian_layers_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.ProClub,
+      passport_rules.Recruitment,
+    )
+    == True
+}
+
+// passport: viewerSees — clubs see public+recruitment, never private/guardian layers
+pub fn clubs_see_public_recruitment_never_private_guardian_layers_2_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.ProClub,
+      passport_rules.Private,
+    )
+    == False
+}
+
+// passport: viewerSees — clubs see public+recruitment, never private/guardian layers
+pub fn clubs_see_public_recruitment_never_private_guardian_layers_3_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.ProClub,
+      passport_rules.GuardianOnly,
+    )
+    == False
+}
+
+// passport: viewerSees — guardian-only layer reaches the guardian, not the player
+pub fn guardian_only_layer_reaches_the_guardian_not_the_player_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.GuardianViewer,
+      passport_rules.GuardianOnly,
+    )
+    == True
+}
+
+// passport: viewerSees — guardian-only layer reaches the guardian, not the player
+pub fn guardian_only_layer_reaches_the_guardian_not_the_player_2_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.SelfViewer,
+      passport_rules.GuardianOnly,
+    )
+    == False
+}
+
+// passport: viewerSees — [neg] trust_and_safety layer is T&S-only
+pub fn neg_trust_and_safety_layer_is_t_s_only_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.GuardianViewer,
+      passport_rules.TrustAndSafety,
+    )
+    == False
+}
+
+// passport: viewerSees — [neg] trust_and_safety layer is T&S-only
+pub fn neg_trust_and_safety_layer_is_t_s_only_2_test() {
+  assert passport_rules.viewer_sees(
+      passport_rules.TrustSafety,
+      passport_rules.TrustAndSafety,
+    )
+    == True
+}
+
+// passport: completeness — coverage descriptors are words about evidence, never ability
+pub fn coverage_descriptors_are_words_about_evidence_never_ability_test() {
+  assert json.to_string(
+      passport_rules.completeness_json(
+        passport_rules.completeness(passport_rules.Facts(
+          has_recent_full_match: False,
+          full_match_count: 0,
+          clip_count: 0,
+          reference_count: 0,
+          has_confirmed_current_club: False,
+          has_recent_assessment: False,
+          has_position: False,
+          has_availability: False,
+          identity_confirmed: False,
+          history_rows: 0,
+          has_recent_training_evidence: False,
+        )),
+      ),
+    )
+    == "{\"evidenceCoverage\":\"limited\",\"gaps\":[{\"id\":\"gap.full_match_recent\",\"version\":1,\"category\":\"match_evidence\"},{\"id\":\"gap.training_evidence\",\"version\":2,\"category\":\"training\"},{\"id\":\"gap.coach_reference\",\"version\":1,\"category\":\"references\"},{\"id\":\"gap.current_club_confirmed\",\"version\":1,\"category\":\"club_history\"},{\"id\":\"gap.assessment_recent\",\"version\":1,\"category\":\"assessments\"},{\"id\":\"gap.position_declared\",\"version\":1,\"category\":\"position\"},{\"id\":\"gap.availability_set\",\"version\":1,\"category\":\"availability\"},{\"id\":\"gap.identity_confirmed\",\"version\":1,\"category\":\"identity\"},{\"id\":\"gap.career_history\",\"version\":1,\"category\":\"career\"}],\"eligibility\":{\"satisfied\":0,\"total\":9,\"rulesVersion\":2,\"missing\":[\"gap.full_match_recent\",\"gap.training_evidence\",\"gap.coach_reference\",\"gap.current_club_confirmed\",\"gap.assessment_recent\",\"gap.position_declared\",\"gap.availability_set\",\"gap.identity_confirmed\",\"gap.career_history\"]}}"
+}
+
+// passport: completeness — coverage descriptors are words about evidence, never ability
+pub fn coverage_descriptors_are_words_about_evidence_never_ability_2_test() {
+  assert json.to_string(
+      passport_rules.completeness_json(
+        passport_rules.completeness(passport_rules.Facts(
+          has_recent_full_match: True,
+          full_match_count: 2,
+          clip_count: 3,
+          reference_count: 1,
+          has_confirmed_current_club: True,
+          has_recent_assessment: True,
+          has_position: True,
+          has_availability: True,
+          identity_confirmed: True,
+          history_rows: 3,
+          has_recent_training_evidence: True,
+        )),
+      ),
+    )
+    == "{\"evidenceCoverage\":\"strong\",\"gaps\":[],\"eligibility\":{\"satisfied\":9,\"total\":9,\"rulesVersion\":2,\"missing\":[]}}"
+}
+
+// passport: evaluateGaps — gap engine is deterministic over facts
+pub fn gap_engine_is_deterministic_over_facts_test() {
+  assert json.to_string(json.array(
+      passport_rules.evaluate_gaps(passport_rules.Facts(
+        has_recent_full_match: False,
+        full_match_count: 0,
+        clip_count: 0,
+        reference_count: 0,
+        has_confirmed_current_club: False,
+        has_recent_assessment: False,
+        has_position: False,
+        has_availability: False,
+        identity_confirmed: False,
+        history_rows: 0,
+        has_recent_training_evidence: False,
+      )),
+      passport_rules.gap_json,
+    ))
+    == "[{\"id\":\"gap.full_match_recent\",\"version\":1,\"category\":\"match_evidence\"},{\"id\":\"gap.training_evidence\",\"version\":2,\"category\":\"training\"},{\"id\":\"gap.coach_reference\",\"version\":1,\"category\":\"references\"},{\"id\":\"gap.current_club_confirmed\",\"version\":1,\"category\":\"club_history\"},{\"id\":\"gap.assessment_recent\",\"version\":1,\"category\":\"assessments\"},{\"id\":\"gap.position_declared\",\"version\":1,\"category\":\"position\"},{\"id\":\"gap.availability_set\",\"version\":1,\"category\":\"availability\"},{\"id\":\"gap.identity_confirmed\",\"version\":1,\"category\":\"identity\"},{\"id\":\"gap.career_history\",\"version\":1,\"category\":\"career\"}]"
+}
+
+// passport: normWhen — [neg] trial participation is NOT public by default
+pub fn neg_trial_participation_is_not_public_by_default_test() {
+  assert passport_rules.when_of("2023")
+    == Some(passport_rules.When(
+      t: 1_672_531_200_000,
+      precision: passport_rules.Year,
+    ))
+}
+
+// passport: buildTimeline — [neg] trial participation is NOT public by default
+pub fn neg_trial_participation_is_not_public_by_default_2_test() {
+  assert passport_rules.build_timeline(
+      passport_rules.Sources(
+        ..passport_rules.no_sources,
+        trials: [
+          passport_rules.TrialSource(
+            id: id.trial("t1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            proposed_date: Some("2023-03-10"),
+            accepted_at: 1_677_628_800_000,
+            attendance: passport_rules.Legacy,
+            report_at: None,
+          ),
+        ],
+        assessments: [
+          passport_rules.AssessmentSource(
+            id: id.assessment("a1"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            submitted_at: Some(1_679_270_400_000),
+            created_at: 0,
+            state: assessments.Submitted,
+          ),
+        ],
+        references: [
+          passport_rules.ReferenceSource(
+            id: id.reference("r1"),
+            coach_name: Some("Coach K"),
+            org_id: id.org("o2"),
+            org_name: Some("City Academy"),
+            created_at: 1_680_307_200_000,
+            role_at_time: None,
+            relationship: "",
+            from_year: None,
+            to_year: None,
+            strengths: "",
+            development: "",
+            summary: "",
+            status: ver_references.Active,
+            provenance_still_current: False,
+          ),
+        ],
+      ),
+    )
+    == [
+      passport_rules.Event(
+        id: "pev:reference:r1:reference_received",
+        type_: "reference_received",
+        when: passport_rules.When(
+          t: 1_680_307_200_000,
+          precision: passport_rules.Day,
+        ),
+        title: [
+          #("coach", passport_rules.Text("Coach K")),
+          #("org", passport_rules.Text("City Academy")),
+        ],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedCoachConfirmed,
+        visibility: passport_rules.Recruitment,
+        source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:assessment:a1:assessment_completed",
+        type_: "assessment_completed",
+        when: passport_rules.When(
+          t: 1_679_270_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        source: passport_rules.Source(type_: "assessment", id: "a1"),
+        public_eligible: False,
+        current: None,
+        trial: None,
+      ),
+      passport_rules.Event(
+        id: "pev:trial:t1:trial_attended",
+        type_: "trial_attended",
+        when: passport_rules.When(
+          t: 1_678_406_400_000,
+          precision: passport_rules.Day,
+        ),
+        title: [#("org", passport_rules.Text("City Academy"))],
+        org: Some(passport_rules.EventOrg(
+          id: Some(id.org("o2")),
+          name: Some("City Academy"),
+        )),
+        provenance: passport_rules.VerifiedClubConfirmed,
+        visibility: passport_rules.RecruitmentOwnOrg,
+        public_eligible: True,
+        source: passport_rules.Source(type_: "trial", id: "t1"),
+        trial: Some(passport_rules.TrialMark(
+          legacy: True,
+          attended_sessions: None,
+        )),
+        current: None,
+      ),
+    ]
+}
+
+// passport: evId — [neg] trial participation is NOT public by default
+pub fn neg_trial_participation_is_not_public_by_default_3_test() {
+  assert passport_rules.ev_id("trial", "t1", "trial_attended")
+    == "pev:trial:t1:trial_attended"
+}
+
+// passport: projectPassport — [neg] trial participation is NOT public by default
+pub fn neg_trial_participation_is_not_public_by_default_4_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(22),
+          minor: False,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.PublicViewer,
+      passport_rules.Opts(org_id: None, share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":22,\"position\":\"ST\",\"location\":\"Testville\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null}},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"public\",\"timeline\":[],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"achievements\":[],\"evidence\":{\"summaryOnly\":true,\"fullMatches\":1,\"clips\":0,\"lastEvidenceDays\":4}}"
+}
+
+// passport: evId — explicit selection makes a public-ELIGIBLE item public (opt-in)
+pub fn explicit_selection_makes_a_public_eligible_item_public_opt_in_test() {
+  assert passport_rules.ev_id("assessment", "a1", "assessment_completed")
+    == "pev:assessment:a1:assessment_completed"
+}
+
+// passport: evId — explicit selection makes a public-ELIGIBLE item public (opt-in)
+pub fn explicit_selection_makes_a_public_eligible_item_public_opt_in_2_test() {
+  assert passport_rules.ev_id("reference", "r1", "reference_received")
+    == "pev:reference:r1:reference_received"
+}
+
+// passport: projectPassport — explicit selection makes a public-ELIGIBLE item public (opt-in)
+pub fn explicit_selection_makes_a_public_eligible_item_public_opt_in_3_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(22),
+          minor: False,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [
+              "pev:trial:t1:trial_attended",
+              "pev:assessment:a1:assessment_completed",
+              "pev:reference:r1:reference_received",
+            ],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.PublicViewer,
+      passport_rules.Opts(org_id: None, share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":22,\"position\":\"ST\",\"location\":\"Testville\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null}},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"public\",\"timeline\":[{\"id\":\"pev:trial:t1:trial_attended\",\"type\":\"trial_attended\",\"when\":{\"display\":\"2023-03-10\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"trial\"},\"legacy\":true,\"attendedSessions\":null}],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"achievements\":[],\"evidence\":{\"summaryOnly\":true,\"fullMatches\":1,\"clips\":0,\"lastEvidenceDays\":4}}"
+}
+
+// passport: projectPassport — assessing org sees its own assessment/trial events
+pub fn assessing_org_sees_its_own_assessment_trial_events_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(22),
+          minor: False,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.ProClub,
+      passport_rules.Opts(org_id: Some(id.org("o2")), share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":22,\"position\":\"ST\",\"location\":\"Testville\",\"level\":\"amateur\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"pro_club\",\"timeline\":[{\"id\":\"pev:reference:r1:reference_received\",\"type\":\"reference_received\",\"when\":{\"display\":\"2023-04-01\",\"precision\":\"day\"},\"title\":{\"coach\":\"Coach K\",\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_coach_confirmed\",\"provenanceCopy\":\"Confirmed by a coach whose club affiliation was verified when they confirmed it.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"coach_reference\"}},{\"id\":\"pev:assessment:a1:assessment_completed\",\"type\":\"assessment_completed\",\"when\":{\"display\":\"2023-03-20\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"assessment\"}},{\"id\":\"pev:trial:t1:trial_attended\",\"type\":\"trial_attended\",\"when\":{\"display\":\"2023-03-10\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"trial\"},\"legacy\":true,\"attendedSessions\":null}],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"evidence\":{\"fullMatches\":1,\"clips\":0,\"assessments\":1,\"references\":1,\"lastEvidenceDays\":4,\"note\":\"n\"},\"references\":[],\"achievements\":[],\"assessments\":[],\"trials\":[],\"availability\":null,\"representation\":null,\"developmentActivity\":null,\"combine\":null,\"shareMode\":null}"
+}
+
+// passport: projectPassport — assessing org sees its own assessment/trial events
+pub fn assessing_org_sees_its_own_assessment_trial_events_2_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(22),
+          minor: False,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.ProClub,
+      passport_rules.Opts(org_id: Some(id.org("oZ")), share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":22,\"position\":\"ST\",\"location\":\"Testville\",\"level\":\"amateur\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"pro_club\",\"timeline\":[{\"id\":\"pev:reference:r1:reference_received\",\"type\":\"reference_received\",\"when\":{\"display\":\"2023-04-01\",\"precision\":\"day\"},\"title\":{\"coach\":\"Coach K\",\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_coach_confirmed\",\"provenanceCopy\":\"Confirmed by a coach whose club affiliation was verified when they confirmed it.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"coach_reference\"}}],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"evidence\":{\"fullMatches\":1,\"clips\":0,\"assessments\":1,\"references\":1,\"lastEvidenceDays\":4,\"note\":\"n\"},\"references\":[],\"achievements\":[],\"assessments\":[],\"trials\":[],\"availability\":null,\"representation\":null,\"developmentActivity\":null,\"combine\":null,\"shareMode\":null}"
+}
+
+// passport: projectPassport — raw source ids stay with self/guardian/T&S; org viewers get the source TYPE only
+pub fn raw_source_ids_stay_with_self_guardian_t_s_org_viewers_get_the_source_ty_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(22),
+          minor: False,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.SelfViewer,
+      passport_rules.Opts(org_id: None, share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":22,\"position\":\"ST\",\"location\":\"Testville\",\"level\":\"amateur\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null,\"conflicts\":[]},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"self\",\"timeline\":[{\"id\":\"pev:reference:r1:reference_received\",\"type\":\"reference_received\",\"when\":{\"display\":\"2023-04-01\",\"precision\":\"day\"},\"title\":{\"coach\":\"Coach K\",\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_coach_confirmed\",\"provenanceCopy\":\"Confirmed by a coach whose club affiliation was verified when they confirmed it.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"coach_reference\",\"id\":\"r1\"}},{\"id\":\"pev:assessment:a1:assessment_completed\",\"type\":\"assessment_completed\",\"when\":{\"display\":\"2023-03-20\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"assessment\",\"id\":\"a1\"}},{\"id\":\"pev:trial:t1:trial_attended\",\"type\":\"trial_attended\",\"when\":{\"display\":\"2023-03-10\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"trial\",\"id\":\"t1\"},\"legacy\":true,\"attendedSessions\":null}],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"foldedConflicts\":[],\"conflicts\":[],\"temporalConflicts\":[],\"evidence\":{\"fullMatches\":1,\"clips\":0,\"assessments\":1,\"references\":1,\"lastEvidenceDays\":4,\"note\":\"n\"},\"references\":[],\"achievements\":[],\"development\":{\"active\":0,\"completed\":0},\"trials\":{\"total\":1,\"withReport\":0},\"completeness\":{\"evidenceCoverage\":\"limited\",\"gaps\":[{\"id\":\"gap.full_match_recent\",\"version\":1,\"category\":\"match_evidence\"},{\"id\":\"gap.training_evidence\",\"version\":2,\"category\":\"training\"},{\"id\":\"gap.coach_reference\",\"version\":1,\"category\":\"references\"},{\"id\":\"gap.current_club_confirmed\",\"version\":1,\"category\":\"club_history\"},{\"id\":\"gap.assessment_recent\",\"version\":1,\"category\":\"assessments\"},{\"id\":\"gap.position_declared\",\"version\":1,\"category\":\"position\"},{\"id\":\"gap.availability_set\",\"version\":1,\"category\":\"availability\"},{\"id\":\"gap.identity_confirmed\",\"version\":1,\"category\":\"identity\"},{\"id\":\"gap.career_history\",\"version\":1,\"category\":\"career\"}],\"eligibility\":{\"satisfied\":0,\"total\":9,\"rulesVersion\":2,\"missing\":[\"gap.full_match_recent\",\"gap.training_evidence\",\"gap.coach_reference\",\"gap.current_club_confirmed\",\"gap.assessment_recent\",\"gap.position_declared\",\"gap.availability_set\",\"gap.identity_confirmed\",\"gap.career_history\"]}},\"developmentActivity\":null,\"combine\":null,\"sharing\":{\"active\":0},\"prefs\":{\"bio\":null,\"positions\":null,\"availability\":null,\"availableFrom\":null,\"publicSelections\":[]}}"
+}
+
+// passport: projectPassport — [neg] a minor's location is stripped from org and public projections (existing redaction policy)
+pub fn neg_a_minor_s_location_is_stripped_from_org_and_public_projections_exist_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(14),
+          minor: True,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.ProClub,
+      passport_rules.Opts(org_id: Some(id.org("o2")), share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":14,\"position\":\"ST\",\"location\":null,\"level\":\"amateur\"},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null},\"positions\":null,\"availability\":null,\"availableFrom\":null,\"representation\":null,\"identity\":null},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"pro_club\",\"timeline\":[{\"id\":\"pev:reference:r1:reference_received\",\"type\":\"reference_received\",\"when\":{\"display\":\"2023-04-01\",\"precision\":\"day\"},\"title\":{\"coach\":\"Coach K\",\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_coach_confirmed\",\"provenanceCopy\":\"Confirmed by a coach whose club affiliation was verified when they confirmed it.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"coach_reference\"}},{\"id\":\"pev:assessment:a1:assessment_completed\",\"type\":\"assessment_completed\",\"when\":{\"display\":\"2023-03-20\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"assessment\"}},{\"id\":\"pev:trial:t1:trial_attended\",\"type\":\"trial_attended\",\"when\":{\"display\":\"2023-03-10\",\"precision\":\"day\"},\"title\":{\"org\":\"City Academy\"},\"org\":{\"id\":\"o2\",\"name\":\"City Academy\"},\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null,\"current\":null,\"source\":{\"type\":\"trial\"},\"legacy\":true,\"attendedSessions\":null}],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"evidence\":{\"fullMatches\":1,\"clips\":0,\"assessments\":1,\"references\":1,\"lastEvidenceDays\":4,\"note\":\"n\"},\"references\":[],\"achievements\":[],\"assessments\":[],\"trials\":[],\"availability\":null,\"representation\":null,\"developmentActivity\":null,\"combine\":null,\"shareMode\":null}"
+}
+
+// passport: projectPassport — [neg] a minor's location is stripped from org and public projections (existing redaction policy)
+pub fn neg_a_minor_s_location_is_stripped_from_org_and_public_projections_exist_2_test() {
+  assert json.to_string(passport_rules.project(
+      passport_rules.Full(
+        player: passport_rules.PlayerFacts(
+          id: id.player("px"),
+          name: "P X",
+          age: Some(14),
+          minor: True,
+          position: Some(position.ST),
+          city: Some("Testville"),
+          level: Some(playing_level.Amateur),
+        ),
+        identity: False,
+        prefs: Some(
+          passport_rules.Prefs(
+            bio: None,
+            positions: None,
+            availability: None,
+            available_from: None,
+            public_selections: [],
+            position_history: [],
+          ),
+        ),
+        history: passport_rules.History(
+          rows: [
+            passport_rules.HistoryRow(
+              key: "k1",
+              org_id: Some(id.org("o2")),
+              org_name: Some("City Academy"),
+              role: None,
+              from: Some(passport_rules.When(
+                t: 1_672_531_200_000,
+                precision: passport_rules.Year,
+              )),
+              to: None,
+              current: True,
+              provenance: passport_rules.VerifiedClubConfirmed,
+              source: passport_rules.Source(type_: "signing", id: "s"),
+            ),
+          ],
+          folded: [],
+        ),
+        status: passport_rules.Status(
+          current_club: Some(passport_rules.CurrentClub(
+            org_id: Some(id.org("o2")),
+            org_name: Some("City Academy"),
+            role: None,
+            since: Some("2023"),
+            provenance: passport_rules.VerifiedClubConfirmed,
+          )),
+          positions: None,
+          availability: None,
+          available_from: None,
+          representation: None,
+          identity: False,
+          conflicts: [],
+        ),
+        timeline: [
+          passport_rules.Event(
+            id: "pev:reference:r1:reference_received",
+            type_: "reference_received",
+            when: passport_rules.When(
+              t: 1_680_307_200_000,
+              precision: passport_rules.Day,
+            ),
+            title: [
+              #("coach", passport_rules.Text("Coach K")),
+              #("org", passport_rules.Text("City Academy")),
+            ],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedCoachConfirmed,
+            visibility: passport_rules.Recruitment,
+            source: passport_rules.Source(type_: "coach_reference", id: "r1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:assessment:a1:assessment_completed",
+            type_: "assessment_completed",
+            when: passport_rules.When(
+              t: 1_679_270_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            source: passport_rules.Source(type_: "assessment", id: "a1"),
+            public_eligible: False,
+            current: None,
+            trial: None,
+          ),
+          passport_rules.Event(
+            id: "pev:trial:t1:trial_attended",
+            type_: "trial_attended",
+            when: passport_rules.When(
+              t: 1_678_406_400_000,
+              precision: passport_rules.Day,
+            ),
+            title: [#("org", passport_rules.Text("City Academy"))],
+            org: Some(passport_rules.EventOrg(
+              id: Some(id.org("o2")),
+              name: Some("City Academy"),
+            )),
+            provenance: passport_rules.VerifiedClubConfirmed,
+            visibility: passport_rules.RecruitmentOwnOrg,
+            public_eligible: True,
+            source: passport_rules.Source(type_: "trial", id: "t1"),
+            trial: Some(passport_rules.TrialMark(
+              legacy: True,
+              attended_sessions: None,
+            )),
+            current: None,
+          ),
+        ],
+        temporal_conflicts: [],
+        evidence_summary: passport_rules.EvidenceSummary(
+          full_matches: 1,
+          clips: 0,
+          assessments: 1,
+          references: 1,
+          last_evidence_days: Some(4),
+          note: "n",
+        ),
+        references: [],
+        achievements: [],
+        development_summary: #(0, 0),
+        trials_summary: #(1, 0),
+        completeness: passport_rules.Completeness(
+          coverage: "limited",
+          gaps: [
+            passport_rules.Gap(
+              id: "gap.full_match_recent",
+              version: 1,
+              category: "match_evidence",
+            ),
+            passport_rules.Gap(
+              id: "gap.training_evidence",
+              version: 2,
+              category: "training",
+            ),
+            passport_rules.Gap(
+              id: "gap.coach_reference",
+              version: 1,
+              category: "references",
+            ),
+            passport_rules.Gap(
+              id: "gap.current_club_confirmed",
+              version: 1,
+              category: "club_history",
+            ),
+            passport_rules.Gap(
+              id: "gap.assessment_recent",
+              version: 1,
+              category: "assessments",
+            ),
+            passport_rules.Gap(
+              id: "gap.position_declared",
+              version: 1,
+              category: "position",
+            ),
+            passport_rules.Gap(
+              id: "gap.availability_set",
+              version: 1,
+              category: "availability",
+            ),
+            passport_rules.Gap(
+              id: "gap.identity_confirmed",
+              version: 1,
+              category: "identity",
+            ),
+            passport_rules.Gap(
+              id: "gap.career_history",
+              version: 1,
+              category: "career",
+            ),
+          ],
+          satisfied: 0,
+          total: 9,
+        ),
+        sharing_active: 0,
+        assessments: [],
+        trials: [],
+        development_activity: None,
+        combine: None,
+        box_share_recruitment: False,
+        revision_evidence: [],
+        revision_careers: [],
+        revision_combine: [],
+      ),
+      passport_rules.PublicViewer,
+      passport_rules.Opts(org_id: None, share_mode: None),
+    ))
+    == "{\"passportVersion\":1,\"passportRevision\":\"pr_b814e6a8268f0765\",\"player\":{\"id\":\"px\",\"name\":\"P X\",\"age\":14,\"position\":\"ST\",\"location\":null},\"identity\":null,\"status\":{\"currentClub\":{\"orgId\":\"o2\",\"orgName\":\"City Academy\",\"role\":null,\"since\":\"2023\",\"provenance\":\"verified_club_confirmed\",\"assurance\":null}},\"note\":\"A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.\",\"viewer\":\"public\",\"timeline\":[],\"clubHistory\":[{\"orgName\":\"City Academy\",\"role\":null,\"from\":\"2023\",\"to\":null,\"current\":true,\"provenance\":\"verified_club_confirmed\",\"provenanceCopy\":\"Confirmed by an authorised administrator of the named organisation.\",\"assurance\":null}],\"achievements\":[],\"evidence\":{\"summaryOnly\":true,\"fullMatches\":1,\"clips\":0,\"lastEvidenceDays\":4}}"
+}
+
+// passport: sha256 — hash-at-rest is deterministic per secret
+pub fn hash_at_rest_is_deterministic_per_secret_test() {
+  assert passport_rules.sha256("isT40TKb5cyIdrKvMPF-Zd_w5F4l9V_M")
+    == "8787521015ec3eee6930151cd5208122e014c01db9e6e56505dc079024e8f274"
+}
+
+// passport: sha256 — hash-at-rest is deterministic per secret
+pub fn hash_at_rest_is_deterministic_per_secret_2_test() {
+  assert passport_rules.sha256("Y-TotYUuenJObE3mFbBUalzLzTUVQQ6C")
+    == "c78432250ceca1ab209712d9c85b35893f3782abac890d07a3f98d8d29297dd4"
+}
+
+// passport: shareProblem — share validation codes are exact (all collapse to 404 at the route)
+pub fn share_validation_codes_are_exact_all_collapse_to_404_at_the_route_test() {
+  assert passport_rules.share_problem(None, 1_794_744_000_000, False)
+    == Some(passport_rules.ShareUnknown)
+}
+
+// passport: shareProblem — share validation codes are exact (all collapse to 404 at the route)
+pub fn share_validation_codes_are_exact_all_collapse_to_404_at_the_route_2_test() {
+  assert passport_rules.share_problem(
+      Some(#(Some(1), None)),
+      1_794_744_000_000,
+      False,
+    )
+    == Some(passport_rules.ShareRevoked)
+}
+
+// passport: shareProblem — share validation codes are exact (all collapse to 404 at the route)
+pub fn share_validation_codes_are_exact_all_collapse_to_404_at_the_route_3_test() {
+  assert passport_rules.share_problem(Some(#(None, Some(5))), 10, False)
+    == Some(passport_rules.ShareExpired)
+}
+
+// passport: shareProblem — share validation codes are exact (all collapse to 404 at the route)
+pub fn share_validation_codes_are_exact_all_collapse_to_404_at_the_route_4_test() {
+  assert passport_rules.share_problem(
+      Some(#(None, None)),
+      1_794_744_000_000,
+      True,
+    )
+    == Some(passport_rules.SubjectRemoved)
+}
+
+// passport: shareProblem — share validation codes are exact (all collapse to 404 at the route)
+pub fn share_validation_codes_are_exact_all_collapse_to_404_at_the_route_5_test() {
+  assert passport_rules.share_problem(
+      Some(#(None, Some(1_794_744_001_000))),
+      1_794_744_000_000,
+      False,
+    )
+    == None
+}

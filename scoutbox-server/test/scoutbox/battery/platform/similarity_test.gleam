@@ -1,0 +1,624 @@
+//// Checks of the rules from the rules suites of platform/api, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/battery/base
+import scoutbox/discovery/similarity
+import scoutbox/vocab/foot
+import scoutbox/vocab/position
+
+// api: similarityScore — a profile is 100 like itself
+pub fn a_profile_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the Pressing forward archetype is 100 like itself
+pub fn the_pressing_forward_archetype_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the Deep-lying playmaker archetype is 100 like itself
+pub fn the_deep_lying_playmaker_archetype_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.CM),
+        foot: Some(foot.Left),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(72),
+        appearances: Some(30),
+        goals: Some(3),
+        assists: Some(10),
+      ),
+      similarity.Profile(
+        position: Some(position.CM),
+        foot: Some(foot.Left),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(72),
+        appearances: Some(30),
+        goals: Some(3),
+        assists: Some(10),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the Ball-playing centre-back archetype is 100 like itself
+pub fn the_ball_playing_centre_back_archetype_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.CB),
+        foot: Some(foot.Right),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(190),
+        weight_kg: Some(84),
+        appearances: Some(30),
+        goals: Some(2),
+        assists: Some(1),
+      ),
+      similarity.Profile(
+        position: Some(position.CB),
+        foot: Some(foot.Right),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(190),
+        weight_kg: Some(84),
+        appearances: Some(30),
+        goals: Some(2),
+        assists: Some(1),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the Direct winger archetype is 100 like itself
+pub fn the_direct_winger_archetype_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.RW),
+        foot: Some(foot.Left),
+        birth_date: base.day("2003-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(71),
+        appearances: Some(30),
+        goals: Some(10),
+        assists: Some(11),
+      ),
+      similarity.Profile(
+        position: Some(position.RW),
+        foot: Some(foot.Left),
+        birth_date: base.day("2003-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(71),
+        appearances: Some(30),
+        goals: Some(10),
+        assists: Some(11),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the Sweeper keeper archetype is 100 like itself
+pub fn the_sweeper_keeper_archetype_is_100_like_itself_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.GK),
+        foot: Some(foot.Right),
+        birth_date: base.day("2000-01-01"),
+        height_cm: Some(192),
+        weight_kg: Some(87),
+        appearances: Some(30),
+        goals: Some(0),
+        assists: Some(0),
+      ),
+      similarity.Profile(
+        position: Some(position.GK),
+        foot: Some(foot.Right),
+        birth_date: base.day("2000-01-01"),
+        height_cm: Some(192),
+        weight_kg: Some(87),
+        appearances: Some(30),
+        goals: Some(0),
+        assists: Some(0),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — the same position group earns 18 of the 35
+pub fn the_same_position_group_earns_18_of_the_35_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.CF),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 83
+}
+
+// api: similarityScore — another group earns none of them
+pub fn another_group_earns_none_of_them_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.CB),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 65
+}
+
+// api: similarityScore — two unknown positions count as the same position
+pub fn two_unknown_positions_count_as_the_same_position_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: None,
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: None,
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — [neg] and an unknown one is in no group
+pub fn neg_and_an_unknown_one_is_in_no_group_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: None,
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 65
+}
+
+// api: similarityScore — the other foot loses 10
+pub fn the_other_foot_loses_10_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Left),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 90
+}
+
+// api: similarityScore — each year apart costs 3 of the 15
+pub fn each_year_apart_costs_3_of_the_15_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2000-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 94
+}
+
+// api: similarityScore — and the age part never goes below 0
+pub fn and_the_age_part_never_goes_below_0_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("1990-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 85
+}
+
+// api: similarityScore — output per 90 minutes apart costs 25 for each goal or assist a game
+pub fn output_per_90_minutes_apart_costs_25_for_each_goal_or_assist_a_game_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(3),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 88
+}
+
+// api: similarityScore — no stats and no appearances both read as no output
+pub fn no_stats_and_no_appearances_both_read_as_no_output_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: None,
+        goals: None,
+        assists: None,
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(0),
+        goals: Some(0),
+        assists: Some(0),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — an unknown height and weight read as 180 cm and 75 kg
+pub fn an_unknown_height_and_weight_read_as_180_cm_and_75_kg_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: None,
+        weight_kg: None,
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(180),
+        weight_kg: Some(75),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — build: half a point a cm, a third a kg
+pub fn build_half_a_point_a_cm_a_third_a_kg_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(191),
+        weight_kg: Some(86),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 95
+}
+
+// api: similarityScore — and the total is rounded, a half up (99.5 is 100)
+pub fn and_the_total_is_rounded_a_half_up_99_5_is_100_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(186),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 100
+}
+
+// api: similarityScore — and to the nearest whole point (97.67 is 98)
+pub fn and_to_the_nearest_whole_point_97_67_is_98_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(189),
+        weight_kg: Some(81),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 98
+}
+
+// api: similarityScore — nothing alike is 0
+pub fn nothing_alike_is_0_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.GK),
+        foot: Some(foot.Left),
+        birth_date: base.day("1980-01-01"),
+        height_cm: Some(150),
+        weight_kg: Some(80),
+        appearances: Some(1),
+        goals: Some(9),
+        assists: None,
+      ),
+      1_794_744_000_000,
+    )
+    == 0
+}
+
+// api: similarityScore — the score is symmetric
+pub fn the_score_is_symmetric_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      similarity.Profile(
+        position: Some(position.CM),
+        foot: Some(foot.Left),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(72),
+        appearances: Some(30),
+        goals: Some(3),
+        assists: Some(10),
+      ),
+      1_794_744_000_000,
+    )
+    == 37
+}
+
+// api: similarityScore — the score is symmetric
+pub fn the_score_is_symmetric_2_test() {
+  assert similarity.score(
+      similarity.Profile(
+        position: Some(position.CM),
+        foot: Some(foot.Left),
+        birth_date: base.day("2001-01-01"),
+        height_cm: Some(177),
+        weight_kg: Some(72),
+        appearances: Some(30),
+        goals: Some(3),
+        assists: Some(10),
+      ),
+      similarity.Profile(
+        position: Some(position.ST),
+        foot: Some(foot.Right),
+        birth_date: base.day("2002-01-01"),
+        height_cm: Some(185),
+        weight_kg: Some(80),
+        appearances: Some(30),
+        goals: Some(18),
+        assists: Some(5),
+      ),
+      1_794_744_000_000,
+    )
+    == 37
+}

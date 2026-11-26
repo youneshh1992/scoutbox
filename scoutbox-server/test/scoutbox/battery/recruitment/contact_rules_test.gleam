@@ -1,0 +1,778 @@
+//// Checks of the rules from the rules suites of recruitment/contacts, recruitment/contactsPersistence, first generated
+//// from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import gleam/result
+import scoutbox/battery/base
+import scoutbox/recruitment/contact_rules
+import scoutbox/rows/id
+import scoutbox/rows/recruitment_contacts
+import scoutbox/vocab/contact_mode
+import scoutbox/vocab/party
+
+// contacts: validateContactContent — markup is stripped rather than refused — the words survive, the tags do not
+pub fn markup_is_stripped_rather_than_refused_the_words_survive_the_tags_do_not_test() {
+  assert base.contact_content(
+      Some("\"<b>Hi</b>\""),
+      Some(
+        "\"<script>alert(1)</script>Hello <img src=x onerror=alert(1)> javascript:alert(1)\"",
+      ),
+    )
+    == Ok(contact_rules.Content(
+      subject: Some("Hi"),
+      body: "alert(1)Hello  javascript:alert(1)",
+    ))
+}
+
+// contacts: validateContactContent — [neg] an empty message is refused
+pub fn neg_an_empty_message_is_refused_test() {
+  assert base.contact_content(None, Some("\"\""))
+    == Error(base.ByRule(
+      "{\"error\":\"CONTACT_CONTENT_INVALID\",\"message\":\"Write the message the player or guardian will read.\"}",
+    ))
+}
+
+// contacts: validateContactContent — [neg] so is whitespace
+pub fn neg_so_is_whitespace_test() {
+  assert base.contact_content(None, Some("\"   \\n \""))
+    == Error(base.ByRule(
+      "{\"error\":\"CONTACT_CONTENT_INVALID\",\"message\":\"Write the message the player or guardian will read.\"}",
+    ))
+}
+
+// contacts: validateContactContent — [neg] so is a number
+pub fn neg_so_is_a_number_test() {
+  assert base.contact_content(None, Some("42"))
+    == Error(base.ByShape("CONTACT_CONTENT_INVALID"))
+}
+
+// contacts: validateContactContent — [neg] so is an object with a hostile toString
+pub fn neg_so_is_an_object_with_a_hostile_tostring_test() {
+  assert base.contact_content(None, Some("{\"toString\":1}"))
+    == Error(base.ByShape("CONTACT_CONTENT_INVALID"))
+}
+
+// contacts: validateContactContent — [neg] a body far over the limit is refused by name
+pub fn neg_a_body_far_over_the_limit_is_refused_by_name_test() {
+  assert base.contact_content(
+      None,
+      Some(
+        "\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"",
+      ),
+    )
+    == Error(base.ByRule(
+      "{\"error\":\"CONTACT_CONTENT_TOO_LONG\",\"message\":\"Keep the message under 2000 characters.\"}",
+    ))
+}
+
+// contacts: validateContactContent — a body slightly over is cut to the limit
+pub fn a_body_slightly_over_is_cut_to_the_limit_test() {
+  assert base.contact_content(
+      None,
+      Some(
+        "\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"",
+      ),
+    )
+    == Ok(contact_rules.Content(
+      subject: None,
+      body: "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    ))
+}
+
+// contacts: validateContactContent — Unicode is NFC-normalised, lone surrogates and control characters are dropped
+pub fn unicode_is_nfc_normalised_lone_surrogates_and_control_characters_are_dro_test() {
+  assert base.contact_content(
+      None,
+      Some("\"café \\ud800 hello\\u0000\\u0007 world\""),
+    )
+    == Ok(contact_rules.Content(subject: None, body: "café  hello world"))
+}
+
+// contacts: plainShared — plainShared: absent is empty, non-text is null
+pub fn plainshared_absent_is_empty_non_text_is_null_test() {
+  assert contact_rules.plain_shared("", 10) == ""
+}
+
+// contacts: validateContactReply — [neg] a reply that is not text is refused
+pub fn neg_a_reply_that_is_not_text_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_reply(Some(base.body("{\"toString\":1}")), True),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_RESPONSE_INVALID",
+      "A reply must be text, and only a contact can carry one.",
+      "{}",
+    ))
+}
+
+// contacts: validateContactReply — [neg] a reply on a non-contact request is refused
+pub fn neg_a_reply_on_a_non_contact_request_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_reply(Some(base.body("\"hi\"")), False),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_RESPONSE_INVALID",
+      "A reply must be text, and only a contact can carry one.",
+      "{}",
+    ))
+}
+
+// contacts: validateContactReply — a reply is cleaned like every other shared text
+pub fn a_reply_is_cleaned_like_every_other_shared_text_test() {
+  assert result.map_error(
+      contact_rules.validate_reply(Some(base.body("\"  <b>ok</b> \"")), True),
+      base.contact_refusal,
+    )
+    == Ok(Some("ok"))
+}
+
+// contacts: validateContactReply — no reply is null, not an empty string
+pub fn no_reply_is_null_not_an_empty_string_test() {
+  assert result.map_error(
+      contact_rules.validate_reply(Some(base.body("\"\"")), True),
+      base.contact_refusal,
+    )
+    == Ok(None)
+}
+
+// contacts: validateContactReply — no reply is null, not an empty string
+pub fn no_reply_is_null_not_an_empty_string_2_test() {
+  assert result.map_error(
+      contact_rules.validate_reply(None, True),
+      base.contact_refusal,
+    )
+    == Ok(None)
+}
+
+// contacts: validateExternalRecord — a phone call an hour ago records
+pub fn a_phone_call_an_hour_ago_records_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1799996400000")),
+        Some("spoke"),
+        Some("player"),
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Ok(contact_rules.External(
+      channel: recruitment_contacts.Phone,
+      occurred_at: 1_799_996_400_000,
+      summary: Some("spoke"),
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] in_app is not an external channel
+pub fn neg_in_app_is_not_an_external_channel_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"in_app\"")),
+        Some(base.body("1800000000000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_CHANNEL_INVALID",
+      "Channel must be one of phone, in_person, email_external, agent, other.",
+      "{\"allowed\":[\"phone\",\"in_person\",\"email_external\",\"agent\",\"other\"]}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] channel "constructor" is refused
+pub fn neg_channel_constructor_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"constructor\"")),
+        Some(base.body("1800000000000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_CHANNEL_INVALID",
+      "Channel must be one of phone, in_person, email_external, agent, other.",
+      "{\"allowed\":[\"phone\",\"in_person\",\"email_external\",\"agent\",\"other\"]}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] channel "__proto__" is refused
+pub fn neg_channel_proto_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"__proto__\"")),
+        Some(base.body("1800000000000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_CHANNEL_INVALID",
+      "Channel must be one of phone, in_person, email_external, agent, other.",
+      "{\"allowed\":[\"phone\",\"in_person\",\"email_external\",\"agent\",\"other\"]}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] channel "toString" is refused
+pub fn neg_channel_tostring_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"toString\"")),
+        Some(base.body("1800000000000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_CHANNEL_INVALID",
+      "Channel must be one of phone, in_person, email_external, agent, other.",
+      "{\"allowed\":[\"phone\",\"in_person\",\"email_external\",\"agent\",\"other\"]}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] channel "nope" is refused
+pub fn neg_channel_nope_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"nope\"")),
+        Some(base.body("1800000000000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_CHANNEL_INVALID",
+      "Channel must be one of phone, in_person, email_external, agent, other.",
+      "{\"allowed\":[\"phone\",\"in_person\",\"email_external\",\"agent\",\"other\"]}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] a contact an hour in the future is refused — "planned to call" is not contact
+pub fn neg_a_contact_an_hour_in_the_future_is_refused_planned_to_call_is_not_co_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1800003600000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_OCCURRED_AT_INVALID",
+      "A contact cannot be recorded before it has happened.",
+      "{}",
+    ))
+}
+
+// contacts: validateExternalRecord — five minutes ahead is clock skew and is accepted
+pub fn five_minutes_ahead_is_clock_skew_and_is_accepted_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1800000300000")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Ok(contact_rules.External(
+      channel: recruitment_contacts.Phone,
+      occurred_at: 1_800_000_300_000,
+      summary: None,
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] a contact older than 180 days is refused as evidence
+pub fn neg_a_contact_older_than_180_days_is_refused_as_evidence_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1784447999999")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_OCCURRED_AT_INVALID",
+      "A contact this old cannot be recorded as recruitment evidence.",
+      "{}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] a non-date is refused
+pub fn neg_a_non_date_is_refused_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("\"yesterday\"")),
+        None,
+        None,
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_OCCURRED_AT_INVALID",
+      "occurredAt must be a date and time: ISO 8601 with an explicit offset or Z, or a millisecond timestamp.",
+      "{}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] recording direct contact with a minor is refused, not corrected
+pub fn neg_recording_direct_contact_with_a_minor_is_refused_not_corrected_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1800000000000")),
+        None,
+        Some("player"),
+        1_800_000_000_000,
+        party.Guardian,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_RECIPIENT_MISMATCH",
+      "This player is under the age of majority: a recorded contact must be with the guardian.",
+      "{}",
+    ))
+}
+
+// contacts: validateExternalRecord — [neg] a prototype key is not a recipient type
+pub fn neg_a_prototype_key_is_not_a_recipient_type_test() {
+  assert result.map_error(
+      contact_rules.validate_external(
+        Some(base.body("\"phone\"")),
+        Some(base.body("1800000000000")),
+        None,
+        Some("__proto__"),
+        1_800_000_000_000,
+        party.Player,
+      ),
+      base.contact_refusal,
+    )
+    == Error(#(
+      "CONTACT_RECIPIENT_MISMATCH",
+      "This player is an adult: the recorded contact is with the player.",
+      "{}",
+    ))
+}
+
+// contacts: cooldownFor — a delivered, unanswered contact an hour old blocks a second one until the window ends
+pub fn a_delivered_unanswered_contact_an_hour_old_blocks_a_second_one_until_the_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o"),
+            player_id: id.player("p"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.Delivered,
+            delivered_at: Some(1_799_996_400_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == Some(1_800_255_600_000)
+}
+
+// contacts: cooldownFor — an answered contact does not block
+pub fn an_answered_contact_does_not_block_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o"),
+            player_id: id.player("p"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.Responded,
+            delivered_at: Some(1_799_996_400_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == None
+}
+
+// contacts: cooldownFor — a failed attempt does not block a retry
+pub fn a_failed_attempt_does_not_block_a_retry_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o"),
+            player_id: id.player("p"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.StatusFailed,
+            delivered_at: Some(1_799_996_400_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == None
+}
+
+// contacts: cooldownFor — another player's contact does not block
+pub fn another_player_s_contact_does_not_block_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o"),
+            player_id: id.player("q"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.Delivered,
+            delivered_at: Some(1_799_996_400_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == None
+}
+
+// contacts: cooldownFor — another organisation's contact does not block
+pub fn another_organisation_s_contact_does_not_block_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o2"),
+            player_id: id.player("p"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.Delivered,
+            delivered_at: Some(1_799_996_400_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == None
+}
+
+// contacts: cooldownFor — and the window ends exactly when it says
+pub fn and_the_window_ends_exactly_when_it_says_test() {
+  assert contact_rules.cooldown_until(
+      [
+        contact_rules.Contact(
+          ..base.contact(),
+          row: recruitment_contacts.Row(
+            ..base.contact().row,
+            id: id.contact("c1"),
+            org_id: id.org("o"),
+            player_id: id.player("p"),
+            channel: recruitment_contacts.InApp,
+            status: recruitment_contacts.Delivered,
+            delivered_at: Some(1_799_740_800_000),
+          ),
+        ),
+      ],
+      id.org("o"),
+      id.player("p"),
+      1_800_000_000_000,
+      None,
+    )
+    == None
+}
+
+// contacts: contactIntegrity — a sound record has no problems
+pub fn a_sound_record_has_no_problems_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("c"),
+          org_id: id.org("o"),
+          case_id: id.recruitment_case("k"),
+          player_id: id.player("p"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(5),
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: None,
+          recipient_guardian_id: None,
+          recipient_minor: None,
+        ),
+      ),
+      None,
+      None,
+    )
+    == []
+}
+
+// contacts: contactIntegrity — [neg] a delivered contact with no recipient is reported
+pub fn neg_a_delivered_contact_with_no_recipient_is_reported_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("c"),
+          org_id: id.org("o"),
+          case_id: id.recruitment_case("k"),
+          player_id: id.player("p"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(5),
+          occurred_at: None,
+        ),
+      ),
+      None,
+      None,
+    )
+    == ["recipient_missing"]
+}
+
+// contacts: contactIntegrity — [neg] a record in the wrong organisation is reported
+pub fn neg_a_record_in_the_wrong_organisation_is_reported_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("c"),
+          org_id: id.org("o"),
+          case_id: id.recruitment_case("k"),
+          player_id: id.player("p"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(5),
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: None,
+          recipient_guardian_id: None,
+          recipient_minor: None,
+        ),
+      ),
+      Some(id.org("other")),
+      None,
+    )
+    == ["org_mismatch"]
+}
+
+// contacts: contactIntegrity — [neg] and in the wrong case
+pub fn neg_and_in_the_wrong_case_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("c"),
+          org_id: id.org("o"),
+          case_id: id.recruitment_case("k"),
+          player_id: id.player("p"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(5),
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: None,
+          recipient_guardian_id: None,
+          recipient_minor: None,
+        ),
+      ),
+      None,
+      Some(id.recruitment_case("other")),
+    )
+    == ["case_mismatch"]
+}
+
+// contacts: contactIntegrity — [neg] a recorded contact with no occurrence time is reported
+pub fn neg_a_recorded_contact_with_no_occurrence_time_is_reported_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("c"),
+          org_id: id.org("o"),
+          case_id: id.recruitment_case("k"),
+          player_id: id.player("p"),
+          status: recruitment_contacts.Recorded,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(5),
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: None,
+          recipient_guardian_id: None,
+          recipient_minor: None,
+        ),
+      ),
+      None,
+      None,
+    )
+    == ["timestamp_malformed"]
+}
+
+// contactsPersistence: contactIntegrity — the integrity check names a problem on every one of the 2 corrupt rows
+pub fn the_integrity_check_names_a_problem_on_every_one_of_the_2_corrupt_rows_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("rct-norecip"),
+          org_id: id.org("org-x"),
+          case_id: id.recruitment_case("case-x"),
+          player_id: id.player("pl-x"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(2001),
+          occurred_at: None,
+        ),
+      ),
+      Some(id.org("org-x")),
+      Some(id.recruitment_case("case-x")),
+    )
+    == ["recipient_missing"]
+}
+
+// contactsPersistence: contactIntegrity — the integrity check names a problem on every one of the 2 corrupt rows
+pub fn the_integrity_check_names_a_problem_on_every_one_of_the_2_corrupt_rows_2_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("rct-impossible"),
+          org_id: id.org("org-x"),
+          case_id: id.recruitment_case("case-x"),
+          player_id: id.player("pl-x"),
+          status: recruitment_contacts.Responded,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: None,
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: Some(id.player("pl-x")),
+          recipient_guardian_id: None,
+          recipient_minor: Some(False),
+        ),
+      ),
+      Some(id.org("org-x")),
+      Some(id.recruitment_case("case-x")),
+    )
+    == ["timestamp_malformed"]
+}
+
+// contactsPersistence: contactIntegrity — [neg] a row whose player disagrees with its case is structurally sound — the case check, not the shape check, is where that is caught
+pub fn neg_a_row_whose_player_disagrees_with_its_case_is_structurally_sound_the_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("rct-wrongplayer"),
+          org_id: id.org("org-x"),
+          case_id: id.recruitment_case("case-x"),
+          player_id: id.player("pl-other"),
+          status: recruitment_contacts.Delivered,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: Some(2001),
+          occurred_at: None,
+          recipient_type: Some(party.Player),
+          recipient_player_id: Some(id.player("pl-x")),
+          recipient_guardian_id: None,
+          recipient_minor: Some(False),
+        ),
+      ),
+      Some(id.org("org-x")),
+      Some(id.recruitment_case("case-x")),
+    )
+    == []
+}
+
+// contactsPersistence: contactIntegrity — a sound draft with an unknown history event is not corrupt — the event is simply not a milestone
+pub fn a_sound_draft_with_an_unknown_history_event_is_not_corrupt_the_event_is_test() {
+  assert contact_rules.integrity(
+      contact_rules.Contact(
+        ..base.contact(),
+        row: recruitment_contacts.Row(
+          ..base.contact().row,
+          id: id.contact("rct-unknownevent"),
+          org_id: id.org("org-x"),
+          case_id: id.recruitment_case("case-x"),
+          player_id: id.player("pl-x"),
+          status: recruitment_contacts.Draft,
+          channel: recruitment_contacts.InApp,
+          contact_mode: contact_mode.PlayerOnly,
+          delivered_at: None,
+          occurred_at: None,
+        ),
+      ),
+      None,
+      None,
+    )
+    == []
+}

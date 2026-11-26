@@ -1,0 +1,71 @@
+-- 0036_groups: Group workspaces (members, invites, shared templates, programmes) and group grants (recipients) become typed tables
+
+CREATE TABLE groups (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 100 AND length(name) > 0),
+  created_at                               INTEGER NOT NULL
+) STRICT;
+CREATE TABLE group_members (
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  admin                                    INTEGER NOT NULL CHECK (admin IN (0,1)),
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (group_id, org_id)
+) STRICT;
+CREATE INDEX group_members_org ON group_members (org_id, group_id);
+CREATE TABLE group_pending_invites (
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  invited_by_org_id                        TEXT NOT NULL CHECK (length(invited_by_org_id) > 0 AND length(invited_by_org_id) <= 80),
+  invited_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (invited_by_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (group_id, org_id)
+) STRICT;
+CREATE INDEX group_pending_invites_org ON group_pending_invites (org_id);
+CREATE TABLE group_shared_templates (
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  template_id                              TEXT NOT NULL CHECK (length(template_id) > 0 AND length(template_id) <= 80),
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+  PRIMARY KEY (group_id, template_id)
+) STRICT;
+CREATE TABLE group_programmes (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) <= 80 AND length(group_id) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 100 AND length(name) > 0),
+  region                                   TEXT CHECK (region IS NULL OR length(region) <= 80 AND length(region) > 0),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX group_programmes_group ON group_programmes (group_id);
+CREATE TABLE group_grants (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) <= 80 AND length(group_id) > 0),
+  from_org_id                              TEXT NOT NULL CHECK (length(from_org_id) <= 80 AND length(from_org_id) > 0),
+  from_org_name                            TEXT NOT NULL CHECK (length(from_org_name) <= 200),
+  resource_kind                            TEXT NOT NULL CHECK (resource_kind IN ('shortlist','case','assessment')),
+  resource_id                              TEXT NOT NULL CHECK (length(resource_id) <= 80 AND length(resource_id) > 0),
+  expires_at                               INTEGER NOT NULL,
+  revoked_at                               INTEGER,
+  revoke_reason                            TEXT CHECK (revoke_reason IS NULL OR revoke_reason IN ('group_departure','revoked_by_owner')),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE RESTRICT,
+  FOREIGN KEY (from_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (resource_kind <> 'shortlist' OR resource_id = '*'),
+  CHECK ((revoked_at IS NULL) = (revoke_reason IS NULL))
+) STRICT;
+CREATE INDEX group_grants_from_org ON group_grants (from_org_id);
+CREATE INDEX group_grants_group ON group_grants (group_id);
+CREATE TABLE group_grant_recipients (
+  grant_id                                 TEXT NOT NULL CHECK (length(grant_id) > 0 AND length(grant_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  FOREIGN KEY (grant_id) REFERENCES group_grants(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (grant_id, ord),
+  UNIQUE (grant_id, org_id)
+) STRICT;
+CREATE INDEX group_grant_recipients_org ON group_grant_recipients (org_id);

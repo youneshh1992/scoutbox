@@ -1,0 +1,126 @@
+//// Checks of the rules from the rules suites of agents/crossApp, first generated from the TypeScript server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/option.{None, Some}
+import scoutbox/recruitment/contact_rules
+import scoutbox/rows/id
+import scoutbox/vocab/contact_mode
+import scoutbox/vocab/party
+
+// crossApp: contactRouting — H-p3 "both" routes to the player AND the agent, player first
+pub fn h_p3_both_routes_to_the_player_and_the_agent_player_first_test() {
+  assert contact_rules.routing(
+      False,
+      contact_mode.Both,
+      Ok(contact_rules.RoutedAgent(
+        id.org_user("usr-ana"),
+        id.agreement("rep-1"),
+      )),
+    )
+    == contact_rules.Routing(
+      mode: contact_mode.Both,
+      agent: Some(contact_rules.RoutedAgent(
+        id.org_user("usr-ana"),
+        id.agreement("rep-1"),
+      )),
+      agent_refusal: None,
+    )
+}
+
+// crossApp: contactRouting — H-p4 "player_only" routes to the player alone even where an agent would be permitted
+pub fn h_p4_player_only_routes_to_the_player_alone_even_where_an_agent_would_be_test() {
+  assert contact_rules.routing(
+      False,
+      contact_mode.PlayerOnly,
+      Ok(contact_rules.RoutedAgent(
+        id.org_user("usr-ana"),
+        id.agreement("rep-1"),
+      )),
+    )
+    == contact_rules.Routing(
+      mode: contact_mode.PlayerOnly,
+      agent: None,
+      agent_refusal: None,
+    )
+}
+
+// crossApp: contactRouting — H-p5 asking for the agent and being refused falls back to the player and NAMES the rule — the player is always a valid route, so the contact does not fail
+pub fn h_p5_asking_for_the_agent_and_being_refused_falls_back_to_the_player_and_test() {
+  assert contact_rules.routing(
+      False,
+      contact_mode.Both,
+      Error("DISCLOSURE_WITHHELD"),
+    )
+    == contact_rules.Routing(
+      mode: contact_mode.PlayerOnly,
+      agent: None,
+      agent_refusal: Some("DISCLOSURE_WITHHELD"),
+    )
+}
+
+// crossApp: contactRouting — H-p6 a minor's route stays the guardian's and no agent is substituted for a guardian (Z)
+pub fn h_p6_a_minor_s_route_stays_the_guardian_s_and_no_agent_is_substituted_fo_test() {
+  assert contact_rules.routing(
+      True,
+      contact_mode.Both,
+      Ok(contact_rules.RoutedAgent(
+        id.org_user("usr-ana"),
+        id.agreement("rep-1"),
+      )),
+    )
+    == contact_rules.Routing(
+      mode: contact_mode.PlayerOnly,
+      agent: None,
+      agent_refusal: Some("MINOR_PATHWAY_DISABLED"),
+    )
+}
+
+// crossApp: contactTargetSnapshot — H-p10 the snapshot records WHO was validly routed, as roles and ids
+pub fn h_p10_the_snapshot_records_who_was_validly_routed_as_roles_and_ids_test() {
+  assert contact_rules.snapshot(
+      contact_rules.Routing(
+        mode: contact_mode.Both,
+        agent: Some(contact_rules.RoutedAgent(
+          id.org_user("usr-ana"),
+          id.agreement("rep-1"),
+        )),
+        agent_refusal: None,
+      ),
+      party.Player,
+      1_789_776_000_000,
+    )
+    == contact_rules.Snapshot(
+      at: 1_789_776_000_000,
+      mode: contact_mode.Both,
+      player: True,
+      guardian: False,
+      agent: Some(contact_rules.RoutedAgent(
+        id.org_user("usr-ana"),
+        id.agreement("rep-1"),
+      )),
+    )
+  assert contact_rules.routing_honest
+    == "Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then."
+}
+
+// crossApp: contactTargetSnapshot — H-p11 a guardian route is recorded as a guardian route
+pub fn h_p11_a_guardian_route_is_recorded_as_a_guardian_route_test() {
+  assert contact_rules.snapshot(
+      contact_rules.Routing(
+        mode: contact_mode.PlayerOnly,
+        agent: None,
+        agent_refusal: Some("MINOR_PATHWAY_DISABLED"),
+      ),
+      party.Guardian,
+      1_789_776_000_000,
+    )
+    == contact_rules.Snapshot(
+      at: 1_789_776_000_000,
+      mode: contact_mode.PlayerOnly,
+      player: True,
+      guardian: True,
+      agent: None,
+    )
+  assert contact_rules.routing_honest
+    == "Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then."
+}

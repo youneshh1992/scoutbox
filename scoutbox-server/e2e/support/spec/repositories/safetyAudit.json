@@ -1,0 +1,105 @@
+{
+  "$source": "repositories/safetyAudit.ts",
+  "LEDGER_DETAIL": {
+    "box_assignment_cancelled": [
+      "assignmentId"
+    ],
+    "box_assignment_created": [
+      "drillId",
+      "target"
+    ],
+    "box_challenge_published": [
+      "challengeId",
+      "drillId"
+    ],
+    "box_clip_saved": [
+      "sessionId",
+      "mediaId"
+    ],
+    "box_prefs_changed": [
+      "by",
+      "share",
+      "retainClips"
+    ],
+    "box_result_invalidated": [
+      "sessionId",
+      "disputeId",
+      "outcome"
+    ],
+    "box_result_restored": [
+      "sessionId",
+      "reason"
+    ],
+    "combine_attempt_completed": [
+      "attemptId",
+      "protocol",
+      "state"
+    ],
+    "combine_request_completed": [
+      "requestId"
+    ],
+    "combine_request_created": [
+      "requestId",
+      "protocols"
+    ],
+    "level_review": [
+      "from",
+      "to",
+      "reason"
+    ],
+    "open_trial_posted": [
+      "trialId"
+    ],
+    "passport_recruitment_view": [
+      "via"
+    ],
+    "passport_share_created": [
+      "mode",
+      "shareId"
+    ],
+    "passport_share_revoked": [
+      "shareId",
+      "by"
+    ],
+    "verification_decision": [
+      "claimId",
+      "action"
+    ],
+    "verification_root_approved": [
+      "request"
+    ]
+  },
+  "OPS_DETAIL": {
+    "staff_bootstrapped": [
+      "orgId",
+      "userId",
+      "by"
+    ],
+    "audit_export": [
+      "orgId",
+      "by"
+    ],
+    "backup_created": [
+      "dir",
+      "files",
+      "queuedForRemoval"
+    ],
+    "backup_refused": [
+      "dir",
+      "error",
+      "conflictCount"
+    ],
+    "backup_failed": [
+      "dir",
+      "error"
+    ],
+    "delivery_failed": [
+      "dispatchId",
+      "channel"
+    ],
+    "webhook_failed": [
+      "deliveryId",
+      "endpointId"
+    ]
+  }
+}

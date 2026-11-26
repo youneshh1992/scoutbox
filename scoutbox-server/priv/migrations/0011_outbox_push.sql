@@ -1,0 +1,35 @@
+-- 0011_outbox_push: the mail outbox, the push log and the device push tokens become typed tables (vocabulary CHECKs; one row per device token)
+
+CREATE TABLE outbox (
+  seq                 INTEGER PRIMARY KEY,
+  id                  TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
+  created_at          INTEGER NOT NULL,
+  to_address          TEXT NOT NULL CHECK (to_address IS NULL OR length(to_address) BETWEEN 1 AND 320),
+  subject             TEXT CHECK (subject IS NULL OR length(subject) BETWEEN 0 AND 300),
+  text                TEXT NOT NULL CHECK (text IS NULL OR length(text) BETWEEN 0 AND 10000),
+  transport           TEXT NOT NULL CHECK (transport IN ('sendgrid', 'dev-outbox', 'local-fake')),
+  delivered           INTEGER,
+  channel             TEXT CHECK (channel IS NULL OR channel = 'email'),
+  provider_message_id TEXT CHECK (provider_message_id IS NULL OR length(provider_message_id) BETWEEN 1 AND 80),
+  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL AND transport IN ('sendgrid', 'dev-outbox'))
+      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL AND transport = 'local-fake' AND length(text) <= 300))
+) STRICT;
+CREATE TABLE push_log (
+  seq           INTEGER PRIMARY KEY,
+  id            TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  created_at    INTEGER NOT NULL,
+  audience_kind TEXT NOT NULL CHECK (audience_kind IN ('player', 'guardian', 'org_user')),
+  audience_id   TEXT NOT NULL CHECK (audience_id IS NULL OR length(audience_id) BETWEEN 1 AND 80),
+  title         TEXT NOT NULL CHECK (title IS NULL OR length(title) BETWEEN 1 AND 100),
+  body          TEXT NOT NULL CHECK (body IS NULL OR length(body) BETWEEN 0 AND 4000),
+  transport     TEXT NOT NULL CHECK (transport IN ('expo', 'dev-log'))
+) STRICT;
+CREATE TABLE push_tokens (
+  seq           INTEGER PRIMARY KEY,
+  ref_kind      TEXT NOT NULL CHECK (ref_kind IN ('player', 'guardian')),
+  ref_id        TEXT NOT NULL CHECK (ref_id IS NULL OR length(ref_id) BETWEEN 1 AND 80),
+  token         TEXT NOT NULL UNIQUE CHECK (token IS NULL OR length(token) BETWEEN 1 AND 200),
+  registered_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX push_tokens_ref ON push_tokens (ref_kind, ref_id);

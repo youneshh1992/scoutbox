@@ -1,0 +1,4 @@
+{
+  "$source": "domains/agents/integration/integration.mjs",
+  "HANDOFF_TTL_MS": 2592000000
+}

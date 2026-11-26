@@ -1,0 +1,47 @@
+//// Checks of the rules from the rules suites of platform/productionHardening, first generated from the TypeScript
+//// server's
+//// scripts/rules/ (one test per recorded call). They are ordinary tests now: change them with the rule.
+
+import gleam/json
+import gleam/option.{None, Some}
+import scoutbox/battery/base
+import scoutbox/platform/rev
+
+// productionHardening: expectedRevOf — expectedRev is read
+pub fn expectedrev_is_read_test() {
+  assert rev.expected(base.body("{\"expectedRev\":3}")) == Ok(rev.Expected(3))
+}
+
+// productionHardening: expectedRevOf — expectedVersion is accepted as the same thing
+pub fn expectedversion_is_accepted_as_the_same_thing_test() {
+  assert rev.expected(base.body("{\"expectedVersion\":4}"))
+    == Ok(rev.Expected(4))
+}
+
+// productionHardening: expectedRevOf — an absent token means "unchanged behaviour without a rev token", not rev 0
+pub fn an_absent_token_means_unchanged_behaviour_without_a_rev_token_not_rev_0_test() {
+  assert rev.expected(base.body("{}")) == Ok(rev.Unguarded)
+}
+
+// productionHardening: expectedRevOf — [neg] an empty string is absent, not zero
+pub fn neg_an_empty_string_is_absent_not_zero_test() {
+  assert rev.expected(base.body("{\"expectedRev\":\"\"}")) == Ok(rev.Unguarded)
+}
+
+// productionHardening: revMeta — the metadata names who touched it last
+pub fn the_metadata_names_who_touched_it_last_test() {
+  assert json.to_string(
+      json.object(
+        rev.meta(rev.Rev(rev: 2, at: Some(1000), by_name: Some("Maria Keane"))),
+      ),
+    )
+    == "{\"rev\":2,\"revAt\":1000,\"revBy\":\"Maria Keane\"}"
+}
+
+// productionHardening: revMeta — a system write bumps without attributing itself to a person
+pub fn a_system_write_bumps_without_attributing_itself_to_a_person_test() {
+  assert json.to_string(
+      json.object(rev.meta(rev.Rev(rev: 3, at: Some(2000), by_name: None))),
+    )
+    == "{\"rev\":3,\"revAt\":2000,\"revBy\":null}"
+}

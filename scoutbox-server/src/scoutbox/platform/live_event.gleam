@@ -1,0 +1,922 @@
+//// The live events (domains/platform/eventRegistry.mjs), apart from the hub (`platform/live`) so that an effect
+//// can carry one: `rows/id` imports the store, which imports the effects, so ids here are text. Build an event
+//// from typed ids with `messaging/live_routes` (`live_routes.messages(channel_id)`), never from text.
+
+import gleam/json.{type Json}
+import gleam/option.{type Option}
+import scoutbox/vocab/audience.{type Audience}
+
+/// An event, by its name in the event registry (e2e/support/spec/platform/eventRegistry.json). Its fields are the
+/// registry's payload keys and nothing else; `test/scoutbox/live_test.gleam` proves they agree.
+pub type Event {
+  /// The player catalogue changed: one player's record (`Some`, by the subject rule), or who may see whom (`None`,
+  /// every stream). A catalogue ping carries no data: the refetch it triggers is authorisation-checked.
+  Players(player_id: Option(String))
+  /// The organisation catalogue changed. Every stream.
+  Orgs
+  /// A club published an opportunity. Every stream.
+  Opportunities
+  /// A grassroots open day was posted, removed or answered. Every stream.
+  OpenTrials
+  /// A club published a campaign. Every stream.
+  Campaigns
+  /// A friendly was posted or answered. Every stream.
+  Friendlies
+  /// A Discovery Ledger row was appended: its type, and its player (by the subject rule; a row naming no player
+  /// reaches every stream). Never the club.
+  Ledger(type_: String, player_id: Option(String))
+  /// A request reached the player's Inbox. By the subject rule.
+  Inbox(player_id: String)
+  /// The player (or their guardian) answered a request. By the subject rule.
+  Requests(player_id: String)
+  /// A player's Passport evidence was filed, corrected or corroborated. By the subject rule.
+  Evidence(player_id: String)
+  /// A Box Cam session, a Box Challenge or a Combine attempt changed the player's development evidence. By the
+  /// subject rule.
+  PlayerDevelopmentEvidenceChanged(player_id: String)
+  /// A Box Cam session's video analysis started, was refused or observed the player (each its own registry entry).
+  /// Private to the player, by the subject rule, and ids only: an observation is something a player did at home, and
+  /// a measurement in a payload ends up somewhere it was never gated for. There is no per-frame event.
+  BoxCam(change: BoxCamChange, player_id: String, session_id: String)
+  /// A compliance policy version was published. Every stream.
+  PolicyVersionPublished
+  /// A Development Hub plan changed (each change is its own registry entry), for one organisation that may read it.
+  /// Ids only.
+  Development(change: DevelopmentChange, org_id: String, plan_id: String)
+  /// A Room's contact changed (each change is its own registry entry). Private to the club.
+  ContactChanged(
+    change: ContactChange,
+    org_id: String,
+    room_id: String,
+    contact_id: String,
+  )
+  /// A club's contact was routed to the player's agent too. Private to the club; the agent is named by id only.
+  ContactAgentRouted(org_id: String, contact_id: String, agent_user_id: String)
+  /// A thread changed: a message, or a read receipt.
+  Messages(channel_id: String)
+  /// Someone is typing in a thread. Never replayed.
+  Typing(channel_id: String, side: TypingSide)
+  /// A notice reached an audience's feed.
+  Notify(audience_kind: Audience, audience_id: String)
+  /// An agent profile was created. Private to the agency.
+  AgentProfileCreated(org_id: String, user_id: String)
+  /// An agent's verification facet changed state. Private to the agency.
+  AgentVerificationStateChanged(
+    org_id: String,
+    user_id: String,
+    facet: String,
+    state: String,
+  )
+  /// A member joined the agency. Private to the agency.
+  AgencyAffiliationCreated(org_id: String, user_id: String)
+  /// A member's membership ended. Private to the agency.
+  AgencyAffiliationEnded(org_id: String, user_id: String)
+  /// A representation relationship changed (each change is its own registry entry). Private to the agency.
+  Representation(
+    change: RepresentationChange,
+    org_id: String,
+    agreement_id: String,
+    agent_user_id: String,
+  )
+  /// A regulatory review item was opened. Private to the agency.
+  RegulatoryReviewRequested(org_id: String, review_id: String, kind: String)
+  /// An Offer on a Room changed (each change is its own registry entry). Private to the club.
+  OfferChanged(
+    change: OfferChange,
+    org_id: String,
+    room_id: String,
+    offer_id: String,
+  )
+  /// A signing package on a Room changed (each change is its own registry entry). Private to the club.
+  SigningChanged(
+    change: SigningChange,
+    org_id: String,
+    room_id: String,
+    package_id: String,
+  )
+  /// A recipient answered an Offer. Private to the club.
+  OfferResponded(
+    org_id: String,
+    room_id: String,
+    offer_id: String,
+    status: Option(String),
+  )
+  /// A scout submitted an assessment. Private to the club.
+  AssessmentSubmitted(org_id: String, assessment_id: String)
+  /// A club published feedback to a player. The registry calls it private to a club, but it names no `orgId`, so
+  /// (as in the TypeScript server) the subject rule delivers it: the player, their guardian, every club that sees them.
+  Feedback(player_id: String)
+  /// An application to a club's opportunity was made or answered. Delivered like `Feedback`.
+  Applications(player_id: String)
+  /// A Dynamic Watchlist changed (each change is its own registry entry). Ids only: the club re-reads it under its
+  /// own authorisation. Private to the club.
+  WatchlistChanged(
+    change: WatchlistChange,
+    org_id: String,
+    watchlist_id: String,
+  )
+  /// A Room was opened from matching or a watchlist. Private to the club.
+  MatchingRoomCreated(org_id: String, room_id: String)
+  /// A Room's case moved between lifecycle states. Private to the club.
+  RecruitmentCaseMoved(
+    org_id: String,
+    room_id: String,
+    from: String,
+    to: String,
+  )
+  /// A Room was filed away (archived, closed or withdrawn). Ids only: Second Look reconciles from the decision row.
+  /// Private to the club.
+  RecruitmentRoomArchived(org_id: String, room_id: String)
+  /// A club reopened an archived Room from a Second Look item. Private to the club.
+  RoomReopenedFromSecondLook(org_id: String, room_id: String, item_id: String)
+  /// A formal decision was recorded on a Room, first or superseding. Private to the club.
+  RoomDecisionChanged(
+    change: DecisionChange,
+    org_id: String,
+    room_id: String,
+    decision_id: String,
+  )
+  /// A club sent a trial invitation from a Room. Private to the club.
+  TrialInvited(org_id: String, room_id: String, request_id: String)
+  /// The recipient accepted a trial invitation. Private to the club.
+  TrialAccepted(
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+    request_id: String,
+  )
+  /// The recipient declined a trial invitation. Private to the club.
+  TrialDeclined(org_id: String, room_id: String, request_id: String)
+  /// A trial's schedule or end changed (each change is its own registry entry). Private to the club.
+  TrialChanged(
+    change: TrialChange,
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+  )
+  /// A trial session's record changed (attendance, evidence). Private to the club.
+  TrialSessionChanged(
+    change: TrialSessionChange,
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+    session_id: String,
+  )
+  /// A club invited a transaction workspace on a Room. Private to the club.
+  TransactionHandoffInvited(org_id: String, room_id: String, handoff_id: String)
+  /// A club withdrew its transaction handoff. Private to the club.
+  TransactionHandoffWithdrawn(
+    org_id: String,
+    room_id: String,
+    handoff_id: String,
+  )
+  /// An agent shared an opportunity with a client. Private to the agency.
+  AgentOpportunityShared(
+    org_id: String,
+    agreement_id: String,
+    agent_user_id: String,
+  )
+  /// A compliance context was evaluated. Private to the agency.
+  ConflictEvaluated(org_id: String, ctx_id: String, outcome: String)
+  /// A transaction workspace was opened. Private to the agency.
+  AgentTransactionCreated(org_id: String, tx_id: String)
+  /// A transaction's compliance answer changed. Private to the agency.
+  AgentTransactionComplianceUpdated(
+    org_id: String,
+    tx_id: String,
+    outcome: String,
+  )
+  /// A transaction moved status. Private to the agency.
+  AgentTransactionStatusChanged(org_id: String, tx_id: String, status: String)
+  /// A party was named, removed or confirmed itself. Private to the agency.
+  AgentTransactionPartyChanged(
+    org_id: String,
+    tx_id: String,
+    party_role: String,
+  )
+  /// A document was filed in a transaction. Private to the agency.
+  AgentTransactionDocumentAdded(org_id: String, tx_id: String, doc_id: String)
+  /// A club linked a conversation. Private to the agency.
+  AgentTransactionMessageLinked(org_id: String, tx_id: String)
+  /// The agent put a transaction on hold, cancelled or closed it. Private to the agency.
+  AgentTransactionHeld(org_id: String, tx_id: String, status: String)
+  AgentTransactionCancelled(org_id: String, tx_id: String, status: String)
+  AgentTransactionClosed(org_id: String, tx_id: String, status: String)
+  /// A named reviewer took a review item. Private to the agency.
+  RegulatoryReviewStarted(org_id: String, review_id: String)
+  /// A named reviewer decided a review item. Private to the agency.
+  RegulatoryReviewResolved(org_id: String, review_id: String, outcome: String)
+  /// An agent's authorisation changed by attributed review. Private to the agency.
+  AgentAuthorisationStateChanged(org_id: String, user_id: String, state: String)
+  /// A party was asked for, or answered, a regulatory consent. Private to the agency.
+  RegulatoryConsentChanged(
+    change: ConsentChange,
+    org_id: String,
+    consent_id: String,
+    ctx_id: String,
+  )
+}
+
+/// What the video analysis of a Box Cam session did.
+pub type BoxCamChange {
+  CvSessionStarted
+  /// A reason code carries no observation content, and the player needs to know why.
+  CvRefused(reason: String)
+  Observed
+}
+
+/// What changed in a plan, with the ids the registry's payload adds after the plan's.
+pub type DevelopmentChange {
+  PlanCreated
+  PlanUpdated
+  PlanCompleted
+  GoalCreated(goal_id: String)
+  GoalUpdated(goal_id: String)
+  ActionCompleted(action_id: String)
+  EvidenceLinked(goal_id: Option(String), action_id: Option(String))
+  ReviewSubmitted(review_id: String)
+}
+
+pub type ContactChange {
+  ContactCreated
+  ContactSent
+  ContactFailed
+  ContactExternalRecorded
+  ContactResponded
+}
+
+pub type ConsentChange {
+  ConsentRequested
+  ConsentGranted
+  ConsentDeclined
+  ConsentRevoked
+}
+
+pub type WatchlistChange {
+  WatchlistCreated
+  WatchlistUpdated
+  WatchlistMembershipChanged
+  WatchlistArchived
+}
+
+pub type OfferChange {
+  OfferDraftCreated
+  OfferDraftUpdated
+  OfferIssued
+  OfferSuperseded
+  OfferWithdrawn
+}
+
+/// What a signing act did, with the ids the registry's payload adds after the package's.
+pub type SigningChange {
+  SigningCreated(offer_id: String)
+  SigningReady(revision_id: String)
+  SigningPartyCompleted(revision_id: String, party_type: String)
+  SigningCompleted(signing_id: String)
+  SigningCancelled
+  SigningVoided
+  SigningSuperseded(revision_id: String, supersedes: String)
+}
+
+pub type DecisionChange {
+  DecisionFinalized
+  DecisionSuperseded
+}
+
+pub type TrialChange {
+  TrialScheduled
+  TrialRescheduled
+  TrialCancelled
+  TrialCompleted
+}
+
+pub type TrialSessionChange {
+  TrialAttendanceRecorded
+  TrialEvidenceLinked
+}
+
+pub type RepresentationChange {
+  RepresentationRequested
+  RepresentationConfirmed
+  RepresentationRejected
+  RepresentationTerminated
+  RepresentationDisputed
+  RepresentationDisclosureChanged
+}
+
+pub type TypingSide {
+  OrgTyping
+  CounterpartyTyping
+}
+
+/// Every name in the TypeScript server's event registry, in its order: what `/capabilities` counts as registered.
+/// Each name an `Event` has is one of these (`name`). `test/scoutbox/live_test.gleam` proves the list equals the
+/// registry's names.
+pub const registered = [
+  "players",
+  "orgs",
+  "opportunities",
+  "openTrials",
+  "campaigns",
+  "friendlies",
+  "ledger",
+  "messages",
+  "typing",
+  "inbox",
+  "notify",
+  "requests",
+  "applications",
+  "feedback",
+  "evidence",
+  "recruitment_room_archived",
+  "assessment_submitted",
+  "recruitment_case_moved",
+  "room_decision_finalized",
+  "room_decision_superseded",
+  "transaction_handoff_invited",
+  "transaction_handoff_withdrawn",
+  "recruitment_room_reopened_from_second_look",
+  "watchlist_created",
+  "watchlist_updated",
+  "watchlist_membership_changed",
+  "watchlist_archived",
+  "matching_room_created",
+  "development_plan_created",
+  "development_plan_updated",
+  "development_plan_completed",
+  "development_goal_created",
+  "development_goal_updated",
+  "development_action_completed",
+  "development_evidence_linked",
+  "development_review_submitted",
+  "trial_invited",
+  "trial_accepted",
+  "trial_declined",
+  "trial_scheduled",
+  "trial_rescheduled",
+  "trial_cancelled",
+  "trial_attendance_recorded",
+  "trial_completed",
+  "trial_evidence_linked",
+  "contact_created",
+  "contact_sent",
+  "contact_failed",
+  "contact_external_recorded",
+  "contact_responded",
+  "offer_draft_created",
+  "offer_draft_updated",
+  "offer_issued",
+  "offer_superseded",
+  "offer_withdrawn",
+  "offer_responded",
+  "signing_created",
+  "signing_ready",
+  "signing_party_completed",
+  "signing_completed",
+  "signing_cancelled",
+  "signing_voided",
+  "signing_superseded",
+  "player_development_evidence_changed",
+  "box_cam_cv_session_started",
+  "box_cam_cv_refused",
+  "box_cam_observed",
+  "agent_profile_created",
+  "agent_verification_state_changed",
+  "agency_affiliation_created",
+  "agency_affiliation_ended",
+  "representation_requested",
+  "representation_confirmed",
+  "representation_rejected",
+  "representation_terminated",
+  "representation_disputed",
+  "representation_disclosure_changed",
+  "contact_agent_routed",
+  "agent_opportunity_shared",
+  "regulatory_review_requested",
+  "regulatory_review_started",
+  "regulatory_review_resolved",
+  "conflict_evaluated",
+  "regulatory_consent_requested",
+  "regulatory_consent_granted",
+  "regulatory_consent_declined",
+  "regulatory_consent_revoked",
+  "agent_authorisation_state_changed",
+  "agent_transaction_created",
+  "agent_transaction_party_changed",
+  "agent_transaction_compliance_updated",
+  "agent_transaction_status_changed",
+  "agent_transaction_document_added",
+  "agent_transaction_message_linked",
+  "agent_transaction_held",
+  "agent_transaction_cancelled",
+  "agent_transaction_closed",
+  "policy_version_published",
+]
+
+pub fn name(event: Event) -> String {
+  case event {
+    Players(..) -> "players"
+    Orgs -> "orgs"
+    Opportunities -> "opportunities"
+    OpenTrials -> "openTrials"
+    Campaigns -> "campaigns"
+    Friendlies -> "friendlies"
+    Ledger(..) -> "ledger"
+    Inbox(..) -> "inbox"
+    Requests(..) -> "requests"
+    Evidence(..) -> "evidence"
+    PlayerDevelopmentEvidenceChanged(..) ->
+      "player_development_evidence_changed"
+    BoxCam(change:, ..) ->
+      case change {
+        CvSessionStarted -> "box_cam_cv_session_started"
+        CvRefused(..) -> "box_cam_cv_refused"
+        Observed -> "box_cam_observed"
+      }
+    PolicyVersionPublished -> "policy_version_published"
+    Development(change:, ..) ->
+      case change {
+        PlanCreated -> "development_plan_created"
+        PlanUpdated -> "development_plan_updated"
+        PlanCompleted -> "development_plan_completed"
+        GoalCreated(..) -> "development_goal_created"
+        GoalUpdated(..) -> "development_goal_updated"
+        ActionCompleted(..) -> "development_action_completed"
+        EvidenceLinked(..) -> "development_evidence_linked"
+        ReviewSubmitted(..) -> "development_review_submitted"
+      }
+    ContactChanged(change:, ..) ->
+      case change {
+        ContactCreated -> "contact_created"
+        ContactSent -> "contact_sent"
+        ContactFailed -> "contact_failed"
+        ContactExternalRecorded -> "contact_external_recorded"
+        ContactResponded -> "contact_responded"
+      }
+    ContactAgentRouted(..) -> "contact_agent_routed"
+    Messages(..) -> "messages"
+    Typing(..) -> "typing"
+    Notify(..) -> "notify"
+    AgentProfileCreated(..) -> "agent_profile_created"
+    AgentVerificationStateChanged(..) -> "agent_verification_state_changed"
+    AgencyAffiliationCreated(..) -> "agency_affiliation_created"
+    AgencyAffiliationEnded(..) -> "agency_affiliation_ended"
+    Representation(change:, ..) ->
+      case change {
+        RepresentationRequested -> "representation_requested"
+        RepresentationConfirmed -> "representation_confirmed"
+        RepresentationRejected -> "representation_rejected"
+        RepresentationTerminated -> "representation_terminated"
+        RepresentationDisputed -> "representation_disputed"
+        RepresentationDisclosureChanged -> "representation_disclosure_changed"
+      }
+    RegulatoryReviewRequested(..) -> "regulatory_review_requested"
+    OfferChanged(change:, ..) ->
+      case change {
+        OfferDraftCreated -> "offer_draft_created"
+        OfferDraftUpdated -> "offer_draft_updated"
+        OfferIssued -> "offer_issued"
+        OfferSuperseded -> "offer_superseded"
+        OfferWithdrawn -> "offer_withdrawn"
+      }
+    OfferResponded(..) -> "offer_responded"
+    SigningChanged(change:, ..) ->
+      case change {
+        SigningCreated(..) -> "signing_created"
+        SigningReady(..) -> "signing_ready"
+        SigningPartyCompleted(..) -> "signing_party_completed"
+        SigningCompleted(..) -> "signing_completed"
+        SigningCancelled -> "signing_cancelled"
+        SigningVoided -> "signing_voided"
+        SigningSuperseded(..) -> "signing_superseded"
+      }
+    AssessmentSubmitted(..) -> "assessment_submitted"
+    Feedback(..) -> "feedback"
+    Applications(..) -> "applications"
+    WatchlistChanged(change:, ..) ->
+      case change {
+        WatchlistCreated -> "watchlist_created"
+        WatchlistUpdated -> "watchlist_updated"
+        WatchlistMembershipChanged -> "watchlist_membership_changed"
+        WatchlistArchived -> "watchlist_archived"
+      }
+    MatchingRoomCreated(..) -> "matching_room_created"
+    RecruitmentCaseMoved(..) -> "recruitment_case_moved"
+    RecruitmentRoomArchived(..) -> "recruitment_room_archived"
+    RoomReopenedFromSecondLook(..) ->
+      "recruitment_room_reopened_from_second_look"
+    RoomDecisionChanged(change:, ..) ->
+      case change {
+        DecisionFinalized -> "room_decision_finalized"
+        DecisionSuperseded -> "room_decision_superseded"
+      }
+    TrialInvited(..) -> "trial_invited"
+    TrialAccepted(..) -> "trial_accepted"
+    TrialDeclined(..) -> "trial_declined"
+    TrialChanged(change:, ..) ->
+      case change {
+        TrialScheduled -> "trial_scheduled"
+        TrialRescheduled -> "trial_rescheduled"
+        TrialCancelled -> "trial_cancelled"
+        TrialCompleted -> "trial_completed"
+      }
+    TrialSessionChanged(change:, ..) ->
+      case change {
+        TrialAttendanceRecorded -> "trial_attendance_recorded"
+        TrialEvidenceLinked -> "trial_evidence_linked"
+      }
+    TransactionHandoffInvited(..) -> "transaction_handoff_invited"
+    TransactionHandoffWithdrawn(..) -> "transaction_handoff_withdrawn"
+    AgentOpportunityShared(..) -> "agent_opportunity_shared"
+    ConflictEvaluated(..) -> "conflict_evaluated"
+    AgentTransactionCreated(..) -> "agent_transaction_created"
+    AgentTransactionComplianceUpdated(..) ->
+      "agent_transaction_compliance_updated"
+    AgentTransactionStatusChanged(..) -> "agent_transaction_status_changed"
+    AgentTransactionPartyChanged(..) -> "agent_transaction_party_changed"
+    AgentTransactionDocumentAdded(..) -> "agent_transaction_document_added"
+    AgentTransactionMessageLinked(..) -> "agent_transaction_message_linked"
+    AgentTransactionHeld(..) -> "agent_transaction_held"
+    AgentTransactionCancelled(..) -> "agent_transaction_cancelled"
+    AgentTransactionClosed(..) -> "agent_transaction_closed"
+    RegulatoryReviewStarted(..) -> "regulatory_review_started"
+    RegulatoryReviewResolved(..) -> "regulatory_review_resolved"
+    AgentAuthorisationStateChanged(..) -> "agent_authorisation_state_changed"
+    RegulatoryConsentChanged(change:, ..) ->
+      case change {
+        ConsentRequested -> "regulatory_consent_requested"
+        ConsentGranted -> "regulatory_consent_granted"
+        ConsentDeclined -> "regulatory_consent_declined"
+        ConsentRevoked -> "regulatory_consent_revoked"
+      }
+  }
+}
+
+/// The agency an event is private to, when the registry's payload names one (`orgId`).
+pub fn org_of(event: Event) -> Result(String, Nil) {
+  case event {
+    AgentProfileCreated(org_id:, ..)
+    | AgentVerificationStateChanged(org_id:, ..)
+    | AgencyAffiliationCreated(org_id:, ..)
+    | AgencyAffiliationEnded(org_id:, ..)
+    | Representation(org_id:, ..)
+    | RegulatoryReviewRequested(org_id:, ..)
+    | OfferChanged(org_id:, ..)
+    | OfferResponded(org_id:, ..)
+    | SigningChanged(org_id:, ..)
+    | AssessmentSubmitted(org_id:, ..)
+    | WatchlistChanged(org_id:, ..)
+    | MatchingRoomCreated(org_id:, ..)
+    | RecruitmentCaseMoved(org_id:, ..)
+    | RecruitmentRoomArchived(org_id:, ..)
+    | RoomReopenedFromSecondLook(org_id:, ..)
+    | RoomDecisionChanged(org_id:, ..)
+    | TrialInvited(org_id:, ..)
+    | TrialAccepted(org_id:, ..)
+    | TrialDeclined(org_id:, ..)
+    | TrialChanged(org_id:, ..)
+    | TrialSessionChanged(org_id:, ..)
+    | TransactionHandoffInvited(org_id:, ..)
+    | TransactionHandoffWithdrawn(org_id:, ..)
+    | AgentOpportunityShared(org_id:, ..)
+    | ConflictEvaluated(org_id:, ..)
+    | AgentTransactionCreated(org_id:, ..)
+    | AgentTransactionComplianceUpdated(org_id:, ..)
+    | AgentTransactionStatusChanged(org_id:, ..)
+    | AgentTransactionPartyChanged(org_id:, ..)
+    | AgentTransactionDocumentAdded(org_id:, ..)
+    | AgentTransactionMessageLinked(org_id:, ..)
+    | AgentTransactionHeld(org_id:, ..)
+    | AgentTransactionCancelled(org_id:, ..)
+    | AgentTransactionClosed(org_id:, ..)
+    | RegulatoryReviewStarted(org_id:, ..)
+    | RegulatoryReviewResolved(org_id:, ..)
+    | AgentAuthorisationStateChanged(org_id:, ..)
+    | RegulatoryConsentChanged(org_id:, ..)
+    | Development(org_id:, ..)
+    | ContactChanged(org_id:, ..)
+    | ContactAgentRouted(org_id:, ..) -> Ok(org_id)
+    Messages(..)
+    | Typing(..)
+    | Notify(..)
+    | Feedback(..)
+    | Applications(..)
+    | Players(..)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies
+    | Ledger(..)
+    | Inbox(..)
+    | Requests(..)
+    | Evidence(..)
+    | PlayerDevelopmentEvidenceChanged(..)
+    | BoxCam(..)
+    | PolicyVersionPublished -> Error(Nil)
+  }
+}
+
+/// The player an event is about, when it names one and no organisation: the subject rule delivers it.
+pub fn subject_of(event: Event) -> Result(String, Nil) {
+  case event {
+    Players(player_id: option.Some(p))
+    | Ledger(player_id: option.Some(p), ..)
+    | Feedback(player_id: p)
+    | Applications(player_id: p)
+    | Inbox(player_id: p)
+    | Requests(player_id: p)
+    | Evidence(player_id: p)
+    | PlayerDevelopmentEvidenceChanged(player_id: p)
+    | BoxCam(player_id: p, ..) -> Ok(p)
+    _ -> Error(Nil)
+  }
+}
+
+/// Who the registry says an event is for (eventAudience.mjs). Only an event naming neither an organisation nor a
+/// player is routed by it.
+pub type EventAudience {
+  PublicSafe
+  OrgPrivate
+  PlayerPrivate
+}
+
+pub fn audience(event: Event) -> EventAudience {
+  case event {
+    Players(..)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies
+    | Ledger(..)
+    | PolicyVersionPublished -> PublicSafe
+    Notify(..)
+    | Inbox(..)
+    | PlayerDevelopmentEvidenceChanged(..)
+    | BoxCam(..) -> PlayerPrivate
+    _ -> OrgPrivate
+  }
+}
+
+/// The registry's payload, in its key order.
+pub fn payload(event: Event) -> List(#(String, Json)) {
+  case event {
+    Players(player_id: option.Some(p)) -> [#("playerId", json.string(p))]
+    Players(player_id: option.None)
+    | Orgs
+    | Opportunities
+    | OpenTrials
+    | Campaigns
+    | Friendlies -> []
+    Ledger(type_:, player_id:) -> [
+      #("type", json.string(type_)),
+      #("playerId", json.nullable(player_id, json.string)),
+    ]
+    Inbox(player_id:)
+    | Requests(player_id:)
+    | Evidence(player_id:)
+    | PlayerDevelopmentEvidenceChanged(player_id:) -> [
+      #("playerId", json.string(player_id)),
+    ]
+    BoxCam(change: CvRefused(reason:), player_id:, session_id:) -> [
+      #("playerId", json.string(player_id)),
+      #("sessionId", json.string(session_id)),
+      #("reason", json.string(reason)),
+    ]
+    BoxCam(player_id:, session_id:, ..) -> [
+      #("playerId", json.string(player_id)),
+      #("sessionId", json.string(session_id)),
+    ]
+    PolicyVersionPublished -> []
+    Development(change:, org_id:, plan_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("planId", json.string(plan_id)),
+      ..case change {
+        PlanCreated | PlanUpdated | PlanCompleted -> []
+        GoalCreated(goal_id:) | GoalUpdated(goal_id:) -> [
+          #("goalId", json.string(goal_id)),
+        ]
+        ActionCompleted(action_id:) -> [#("actionId", json.string(action_id))]
+        EvidenceLinked(goal_id:, action_id:) -> [
+          #("goalId", json.nullable(goal_id, json.string)),
+          #("actionId", json.nullable(action_id, json.string)),
+        ]
+        ReviewSubmitted(review_id:) -> [#("reviewId", json.string(review_id))]
+      }
+    ]
+    ContactChanged(org_id:, room_id:, contact_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("contactId", json.string(contact_id)),
+    ]
+    ContactAgentRouted(org_id:, contact_id:, agent_user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("contactId", json.string(contact_id)),
+      #("agentUserId", json.string(agent_user_id)),
+    ]
+    Messages(channel_id:) -> [#("channelId", json.string(channel_id))]
+    Typing(channel_id:, side:) -> [
+      #("channelId", json.string(channel_id)),
+      #(
+        "side",
+        json.string(case side {
+          OrgTyping -> "org"
+          CounterpartyTyping -> "counterparty"
+        }),
+      ),
+    ]
+    Notify(audience_kind:, audience_id:) -> [
+      #("audienceKind", audience.to_json(audience_kind)),
+      #("audienceId", json.string(audience_id)),
+    ]
+    AgentProfileCreated(org_id:, user_id:)
+    | AgencyAffiliationCreated(org_id:, user_id:)
+    | AgencyAffiliationEnded(org_id:, user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+    ]
+    AgentVerificationStateChanged(org_id:, user_id:, facet:, state:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+      #("facet", json.string(facet)),
+      #("state", json.string(state)),
+    ]
+    Representation(org_id:, agreement_id:, agent_user_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("agreementId", json.string(agreement_id)),
+      #("agentUserId", json.string(agent_user_id)),
+    ]
+    RegulatoryReviewRequested(org_id:, review_id:, kind:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+      #("kind", json.string(kind)),
+    ]
+    OfferChanged(org_id:, room_id:, offer_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("offerId", json.string(offer_id)),
+    ]
+    SigningChanged(change:, org_id:, room_id:, package_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("signingPackageId", json.string(package_id)),
+      ..case change {
+        SigningCreated(offer_id:) -> [#("offerId", json.string(offer_id))]
+        SigningReady(revision_id:) -> [
+          #("revisionId", json.string(revision_id)),
+        ]
+        SigningPartyCompleted(revision_id:, party_type:) -> [
+          #("revisionId", json.string(revision_id)),
+          #("partyType", json.string(party_type)),
+        ]
+        SigningCompleted(signing_id:) -> [
+          #("signingId", json.string(signing_id)),
+        ]
+        SigningCancelled | SigningVoided -> []
+        SigningSuperseded(revision_id:, supersedes:) -> [
+          #("revisionId", json.string(revision_id)),
+          #("supersedes", json.string(supersedes)),
+        ]
+      }
+    ]
+    OfferResponded(org_id:, room_id:, offer_id:, status:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("offerId", json.string(offer_id)),
+      #("status", json.nullable(status, json.string)),
+    ]
+    AssessmentSubmitted(org_id:, assessment_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("assessmentId", json.string(assessment_id)),
+    ]
+    Feedback(player_id:) -> [#("playerId", json.string(player_id))]
+    Applications(player_id:) -> [#("playerId", json.string(player_id))]
+    WatchlistChanged(org_id:, watchlist_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("watchlistId", json.string(watchlist_id)),
+    ]
+    MatchingRoomCreated(org_id:, room_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+    ]
+    RecruitmentCaseMoved(org_id:, room_id:, from:, to:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("from", json.string(from)),
+      #("to", json.string(to)),
+    ]
+    RecruitmentRoomArchived(org_id:, room_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+    ]
+    RoomReopenedFromSecondLook(org_id:, room_id:, item_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("itemId", json.string(item_id)),
+    ]
+    RoomDecisionChanged(org_id:, room_id:, decision_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("decisionId", json.string(decision_id)),
+    ]
+    TrialInvited(org_id:, room_id:, request_id:)
+    | TrialDeclined(org_id:, room_id:, request_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("requestId", json.string(request_id)),
+    ]
+    TrialAccepted(org_id:, room_id:, trial_id:, request_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+      #("requestId", json.string(request_id)),
+    ]
+    TrialChanged(org_id:, room_id:, trial_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+    ]
+    TrialSessionChanged(org_id:, room_id:, trial_id:, session_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+      #("sessionId", json.string(session_id)),
+    ]
+    TransactionHandoffInvited(org_id:, room_id:, handoff_id:)
+    | TransactionHandoffWithdrawn(org_id:, room_id:, handoff_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("handoffId", json.string(handoff_id)),
+    ]
+    AgentOpportunityShared(org_id:, agreement_id:, agent_user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("agreementId", json.string(agreement_id)),
+      #("agentUserId", json.string(agent_user_id)),
+    ]
+    ConflictEvaluated(org_id:, ctx_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("ctxId", json.string(ctx_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    AgentTransactionCreated(org_id:, tx_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+    ]
+    AgentTransactionComplianceUpdated(org_id:, tx_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    AgentTransactionStatusChanged(org_id:, tx_id:, status:)
+    | AgentTransactionHeld(org_id:, tx_id:, status:)
+    | AgentTransactionCancelled(org_id:, tx_id:, status:)
+    | AgentTransactionClosed(org_id:, tx_id:, status:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("status", json.string(status)),
+    ]
+    AgentTransactionPartyChanged(org_id:, tx_id:, party_role:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("partyRole", json.string(party_role)),
+    ]
+    AgentTransactionDocumentAdded(org_id:, tx_id:, doc_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("docId", json.string(doc_id)),
+    ]
+    AgentTransactionMessageLinked(org_id:, tx_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+    ]
+    RegulatoryReviewStarted(org_id:, review_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+    ]
+    AgentAuthorisationStateChanged(org_id:, user_id:, state:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+      #("state", json.string(state)),
+    ]
+    RegulatoryReviewResolved(org_id:, review_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    RegulatoryConsentChanged(org_id:, consent_id:, ctx_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("consentId", json.string(consent_id)),
+      #("ctxId", json.string(ctx_id)),
+    ]
+  }
+}
+
+/// Whether a reconnect replays it: everything but typing. The registry's `replayPolicy` says some events are never
+/// replayed, but the TypeScript server's log ignores it, and so does this one (docs/known-issues.md).
+pub fn replays(event: Event) -> Bool {
+  case event {
+    Typing(..) -> False
+    _ -> True
+  }
+}
