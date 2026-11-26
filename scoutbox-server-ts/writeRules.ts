@@ -108,7 +108,7 @@ function callSite(): string {
   return (own ?? lines.find((l) => !/(writeRules|store|database)\.(mjs|ts)/.test(l)) ?? '')
     .trim()
     .replace(/^at /, '')
-    .replace(/\(?file:\/\/\S*?scoutbox-server\//, '')
+    .replace(/\(?file:\/\/\S*?scoutbox-server-ts\//, '')
     .replace(/\)$/, '');
 }
 

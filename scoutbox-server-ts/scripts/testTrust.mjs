@@ -1,5 +1,5 @@
 // Minimal test harness for the trust + safeguarding domain logic.
-// Run with: npm test  (from scoutbox-server/)
+// Run with: npm test  (from scoutbox-server-ts/)
 
 import assert from 'node:assert/strict';
 import {

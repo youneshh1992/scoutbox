@@ -1,6 +1,6 @@
 // Unit tests for the identity hardening: the single lead-role rule, reverse-
 // proxy trust parsing and its effect on req.ip, and the capability/boot
-// reporting of both. Run with: npm test (from scoutbox-server/).
+// reporting of both. Run with: npm test (from scoutbox-server-ts/).
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
 import fs from 'node:fs';

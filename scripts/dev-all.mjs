@@ -8,7 +8,7 @@
 // The launcher validates prerequisites, refuses to double-start, starts the
 // backend first, waits for CONTENT-verified readiness (not just an open
 // port), prints the URL sheet, and stops only its own children on Ctrl-C.
-// It never touches scoutbox-server/data beyond what the server itself does.
+// It never touches scoutbox-server-ts/data beyond what the server itself does.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,7 +23,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const APPS = [
   {
     name: 'backend',
-    dir: 'scoutbox-server',
+    dir: 'scoutbox-server-ts',
     port: 4000,
     cmd: 'node',
     args: ['server.mjs'],

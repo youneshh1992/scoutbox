@@ -105,7 +105,7 @@ else {
 }
 
 const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server'),
+  cwd: path.join(ROOT, 'scoutbox-server-ts'),
   env: {
     ...process.env,
     PORT: String(API_PORT),

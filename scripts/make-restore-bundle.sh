@@ -63,7 +63,7 @@ cat <<EOF
   git log --oneline -5                                  # tip should be $(git rev-parse --short HEAD)
 
   Then reinstall dependencies (they are deliberately not in the bundle):
-  (cd scoutbox-server && npm install) && (cd scoutbox-club && npm install) \\
+  (cd scoutbox-server-ts && npm install) && (cd scoutbox-club && npm install) \\
     && (cd scoutbox-grassroots && npm install) && (cd scoutbox-admin && npm install) \\
     && (cd scoutbox-player && npm install) && (cd e2e && npm install)
 ───────────────────────────────────────────────────────────────────────────

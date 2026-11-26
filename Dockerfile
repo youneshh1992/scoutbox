@@ -47,9 +47,9 @@ RUN VITE_API_URL="" npx vite build --base=/console/
 FROM node:22-slim
 WORKDIR /srv
 ENV NODE_ENV=production
-COPY scoutbox-server/package*.json ./
+COPY scoutbox-server-ts/package*.json ./
 RUN npm ci --omit=dev
-COPY scoutbox-server/ ./
+COPY scoutbox-server-ts/ ./
 # The server imports the role rules from /shared, beside /srv as in the repository.
 COPY shared/ /shared/
 COPY --from=build-club /build/scoutbox-club/dist ./public/club

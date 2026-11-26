@@ -6,8 +6,8 @@
 **/.env
 **/.env.*
 !**/.env.example
-scoutbox-server/data
-scoutbox-server/public
+scoutbox-server-ts/data
+scoutbox-server-ts/public
 .git
 .claude
 e2e

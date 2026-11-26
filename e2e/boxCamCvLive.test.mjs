@@ -28,7 +28,7 @@ import { chromium } from 'playwright-core';
 import { writeY4m, fakeCameraArgs } from './fakeCamera.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SERVER_ROOT = path.join(ROOT, 'scoutbox-server');
+const SERVER_ROOT = path.join(ROOT, 'scoutbox-server-ts');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const API_PORT = 4122;
 const API = `http://localhost:${API_PORT}`;

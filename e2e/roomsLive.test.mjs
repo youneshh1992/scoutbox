@@ -46,7 +46,7 @@ execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --ou
 });
 
 const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server'),
+  cwd: path.join(ROOT, 'scoutbox-server-ts'),
   env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1', BOX_CAM_TEST_PROVIDER: '1' },
   stdio: 'ignore',
 });

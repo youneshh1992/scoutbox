@@ -7,11 +7,11 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTRACT, runtimeSupport } from '../scoutbox-server/runtime.mjs';
+import { CONTRACT, runtimeSupport } from '../scoutbox-server-ts/runtime.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // '.' is the repository root: Biome and the lefthook pre-commit hook, which its `prepare` script installs.
-const APPS = ['.', 'scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
+const APPS = ['.', 'scoutbox-server-ts', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
 // scoutbox-grassroots/node_modules and scoutbox-agent/node_modules are symlinks to scoutbox-club's — no install.
 
 let failed = false;
@@ -21,7 +21,7 @@ const fail = (m) => {
 };
 const okay = (m) => console.log(`✓ ${m}`);
 
-// Node version: the server's own runtime contract (scoutbox-server/runtime.mjs),
+// Node version: the server's own runtime contract (scoutbox-server-ts/runtime.mjs),
 // so this check can never drift from what the server accepts at boot.
 const runtime = runtimeSupport();
 if (runtime.ok) okay(`node ${process.versions.node} (${CONTRACT})`);

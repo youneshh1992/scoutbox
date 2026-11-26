@@ -7,7 +7,7 @@
     "dev": "node scripts/dev-all.mjs",
     "dev:all": "node scripts/dev-all.mjs --with-admin",
     "reseed": "node scripts/reseed.mjs",
-    "test:server": "cd scoutbox-server && npm test && npm run e2e",
+    "test:server": "cd scoutbox-server-ts && npm test && npm run e2e",
     "format": "biome format --write .",
     "format:check": "biome ci .",
     "prepare": "lefthook install && git config blame.ignoreRevsFile .git-blame-ignore-revs"

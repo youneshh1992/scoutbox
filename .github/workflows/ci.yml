@@ -25,14 +25,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: scoutbox-server
+        working-directory: scoutbox-server-ts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: scoutbox-server/package-lock.json
+          cache-dependency-path: scoutbox-server-ts/package-lock.json
       - run: npm ci
       - name: Domain boundaries (imports through public modules, downward only, no cycles)
         run: npm run check:boundaries
