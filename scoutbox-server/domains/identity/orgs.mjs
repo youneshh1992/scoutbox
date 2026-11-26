@@ -4,7 +4,7 @@ import express from 'express';
 import { filled } from '../platform/schemas.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { hashPassword, verifyPassword } from '../../adapters.mjs';
-import { isLeadRole } from '../../roles.ts';
+import { isLeadRole } from '../../../shared/roles.ts';
 import { totpValid } from './totp.mjs';
 import { identityInput, PASSWORD_MIN } from './schemas.mjs';
 

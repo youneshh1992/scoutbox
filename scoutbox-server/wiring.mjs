@@ -45,7 +45,7 @@ import { TRUST_SCORE_POLICY_VERSION } from './domains/passport/public.mjs';
 import { createSourceChanges } from './domains/platform/sourceChanges.mjs';
 import { createRateLimiter, installRateLimitInspection } from './domains/platform/rateLimit.mjs';
 import { demoSeedEnabled, devLoginsEnabled } from './domains/platform/capabilities.mjs';
-import { isLeadRole } from './roles.ts';
+import { isLeadRole } from '../shared/roles.ts';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { assertEventRegistry } from './domains/platform/eventRegistry.mjs';
 import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';

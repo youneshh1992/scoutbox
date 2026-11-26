@@ -25,9 +25,11 @@ export const isLeadUser = (user: { role?: string | null } | null | undefined): b
  * recruitment case). That's the lead tier plus staff whose role names a finance
  * function, e.g. "Finance Officer" or "Club Treasurer".
  *
- * The web portals import this file too (`scoutbox-club/src/nav.ts`), so the sidebar
- * shows Finance to exactly the roles the server lets in. Keep this file free of
- * imports and Node APIs, and its TypeScript to what both compilers accept.
+ * The web portals import this file (`scoutbox-club/src/nav.ts`), so the sidebar
+ * shows Finance to exactly the roles the server lets in. The Gleam server can't
+ * import it and keeps the same rule in `src/scoutbox/identity/roles.gleam`: change
+ * both together. Keep this file free of imports and Node APIs, and its TypeScript
+ * to what both compilers accept.
  */
 export const FINANCE_ROLE_PATTERN = /finance|treasurer/i;
 

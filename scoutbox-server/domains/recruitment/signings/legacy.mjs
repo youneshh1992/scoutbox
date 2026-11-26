@@ -1,7 +1,7 @@
 // The legacy signing route and the club's signings list. The route writes through `recordCompletedSigning`, and
 // refuses when an accepted Offer or a signing package means the workflow owns the outcome.
 import { visibleToOrg } from '../../../domain.ts';
-import { isLeadRole } from '../../../roles.ts';
+import { isLeadRole } from '../../../../shared/roles.ts';
 import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import * as v from 'valibot';
