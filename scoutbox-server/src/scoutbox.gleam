@@ -8,6 +8,7 @@ import gleam/result
 import gleam/string
 import scoutbox/agents/agent_sweep
 import scoutbox/agents/dev_reviewers
+import scoutbox/agents/reviewer_bootstrap
 import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/discovery/match_facts
 import scoutbox/identity/erasure
@@ -99,6 +100,11 @@ fn boot() -> Result(Nil, String) {
     demo: config.seed_demo,
     blobs: config.blobs,
   ))
+  // Before the dev seed, which seeds only an empty table: with the bootstrap set, a development server has only it.
+  use _ <- result.try(
+    reviewer_bootstrap.ensure(store, clock.now_ms(), config.reviewer_bootstrap)
+    |> result.map_error(fn(e) { "bootstrap reviewer: " <> e }),
+  )
   use _ <- result.try(
     dev_reviewers.seed(store, clock.now_ms(), dev_logins: config.dev_logins)
     |> result.map_error(fn(e) { "dev reviewers: " <> string.inspect(e) }),

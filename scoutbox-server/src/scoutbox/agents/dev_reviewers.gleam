@@ -7,12 +7,10 @@
 
 import gleam/dynamic/decode
 import gleam/list
-import gleam/option.{None, Some}
 import gleam/result
+import scoutbox/agents/reviewer_bootstrap
 import scoutbox/platform/store.{type Fail, type Store, type UnitError}
 import scoutbox/rows/id
-import scoutbox/rows/ts_reviewer_history as reviewer_event_row
-import scoutbox/rows/ts_reviewers as reviewer_row
 import scoutbox/vocab/reviewer_role
 
 /// A dev reviewer: id, name, role, secret, and the stored hash of that secret.
@@ -79,44 +77,13 @@ pub fn seed(
 }
 
 fn create(tx: store.Tx, r: DevReviewer, now: Int) -> Result(Nil, Fail(e)) {
-  let reviewer_id = id.reviewer(r.id)
-  use _ <- result.try(reviewer_row.insert(
+  reviewer_bootstrap.insert_system(
     tx,
-    reviewer_row.Row(
-      id: reviewer_id,
-      name: r.name,
-      role: r.role,
-      status: reviewer_row.Active,
-      secret_hash: r.secret_hash,
-      created_at: now,
-      created_by_kind: reviewer_row.System,
-      created_by_id: None,
-      created_by_name: Some("dev seed"),
-      created_by_role: None,
-      revoked_at: None,
-      revoked_by_id: None,
-      revoked_by_name: None,
-      rev: 1,
-      rev_at: Some(now),
-      rev_by_name: None,
-      rev_by_id: None,
-    ),
-  ))
-  use event_id <- result.try(id.next_reviewer_event(tx))
-  reviewer_event_row.insert(
-    tx,
-    reviewer_event_row.Row(
-      id: event_id,
-      reviewer_id:,
-      ord: 0,
-      at: now,
-      by_kind: reviewer_event_row.System,
-      by_id: None,
-      by_name: Some("dev seed"),
-      by_role: None,
-      action: reviewer_event_row.ReviewerCreated,
-      detail_role: Some(r.role),
-      detail_reason: None,
-    ),
+    id.reviewer(r.id),
+    r.name,
+    r.role,
+    r.secret_hash,
+    "dev seed",
+    now,
   )
 }

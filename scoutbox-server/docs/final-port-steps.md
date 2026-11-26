@@ -180,13 +180,13 @@ the volume and the secrets (`ADMIN_KEY`, `MEDIA_SECRET`, `SENDGRID_API_KEY`, `EX
 `SCOUTBOX_SEED_DEMO`), and name the four `R2_*` settings. CI builds the image and boots it (step 8).
 
 Every setting registered in the TypeScript server's `domains/platform/capabilities.mjs` has its counterpart in
-`platform/config.gleam`. Three it read elsewhere don't:
+`platform/config.gleam`. Of the four it read elsewhere:
 
 - `SCOUTBOX_RATE_LIMIT_PROVIDER`: it only ever accepted `memory`, which is all this server has.
-- `TS_REVIEWER_BOOTSTRAP_ID`, `_SECRET` and `_NAME`: **not ported yet.** They created a Trust & Safety reviewer
-  at boot. Here a reviewer is created only by another reviewer (`POST /ts/reviewers`), and the dev reviewers are
-  seeded only when dev logins are on, so a production database not seeded with the demo world has no way to get
-  its first compliance reviewer. Port it before a real production deploy.
+- `TS_REVIEWER_BOOTSTRAP_ID`, `_SECRET` and `_NAME`: ported after the rest (`agents/reviewer_bootstrap`, proved by
+  `platform/sessionsAndPorts` R). Only a reviewer can create another, so it is how a production database not seeded
+  with the demo world gets its first Trust & Safety admin. Settings `POST /ts/reviewers` would refuse now refuse to
+  start (README, "Known differences").
 
 Until step 11.2 the apps still send uploads the TypeScript way, so an image deployed before then serves portals
 whose upload screens fail.

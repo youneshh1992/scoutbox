@@ -12,6 +12,8 @@
 //      scripts/testPlatformHelpers.mjs.)
 //   P  production configuration is proved in productionHardening.mjs §48; here a
 //      real production boot is refused without its own admin key, or with a proxy setting it can't read.
+//   R  a production deploy's first Trust & Safety reviewer comes from TS_REVIEWER_BOOTSTRAP_*, created once and
+//      never replaced; a half-set or invalid bootstrap refuses to start in any mode.
 //   X  the client address that per-address budgets key on: the socket's, unless SCOUTBOX_TRUST_PROXY names the
 //      proxies whose X-Forwarded-For to believe.
 import { spawn } from 'node:child_process';
@@ -471,6 +473,122 @@ section('P — production refuses to start without its own admin key');
   );
   ok(p6.up, 'P8 a list of trusted proxies starts the production server');
   if (p6.up) await stop(p6);
+}
+
+// ================================================================ R — the first Trust & Safety reviewer
+section('R — a production deploy gets its first Trust & Safety reviewer from TS_REVIEWER_BOOTSTRAP_*');
+{
+  const PROD = {
+    NODE_ENV: 'production',
+    MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef',
+    ADMIN_KEY: 'sweep-production-admin-key-0123',
+  };
+  const BOOT = {
+    TS_REVIEWER_BOOTSTRAP_ID: 'tsr-root',
+    TS_REVIEWER_BOOTSTRAP_SECRET: 'root-reviewer-secret-0123',
+    TS_REVIEWER_BOOTSTRAP_NAME: 'Root Reviewer',
+  };
+  const at = (port) => async (method, url, body, token) => {
+    const r = await fetch(`http://localhost:${port}${url}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let b = null;
+    try {
+      b = await r.json();
+    } catch {
+      /* none */
+    }
+    return { status: r.status, body: b };
+  };
+  const dir = mkdtempSync(path.join(tmpdir(), 'sbx-reviewer-boot-'));
+
+  const R1_PORT = await freePort();
+  const r1 = await boot({ ...PROD, ...BOOT }, dir, R1_PORT);
+  ok(r1.up, 'R1 a production server with the bootstrap settings starts');
+  if (r1.up) {
+    const call = at(R1_PORT);
+    const root = await call('POST', '/auth/reviewer/login', {
+      reviewerId: 'tsr-root',
+      secret: BOOT.TS_REVIEWER_BOOTSTRAP_SECRET,
+    });
+    ok(
+      root.status === 200 &&
+        root.body.reviewer.id === 'tsr-root' &&
+        root.body.reviewer.name === 'Root Reviewer' &&
+        root.body.reviewer.role === 'trust_safety_admin' &&
+        root.body.reviewer.status === 'active',
+      `R2 the bootstrap reviewer signs in as an active Trust & Safety admin (${root.status})`,
+    );
+    const dev = await call('POST', '/auth/reviewer/login', {
+      reviewerId: 'tsr-dev-admin',
+      secret: 'dev-reviewer-admin',
+    });
+    neg(dev.status === 401, `R3 the dev reviewers are not seeded in production (${dev.status})`);
+    if (root.status === 200) {
+      const made = await call(
+        'POST',
+        '/ts/reviewers',
+        { id: 'tsr-second', name: 'Second Reviewer', role: 'trust_safety_reviewer', secret: 'second-reviewer-secret' },
+        root.body.token,
+      );
+      ok(made.status === 201, `R4 the bootstrap reviewer can create the next reviewer (${made.status})`);
+    }
+    await stop(r1);
+  }
+
+  const R5_PORT = await freePort();
+  const r5 = await boot(
+    {
+      ...PROD,
+      ...BOOT,
+      TS_REVIEWER_BOOTSTRAP_SECRET: 'a-different-secret-0123',
+      TS_REVIEWER_BOOTSTRAP_NAME: 'Renamed',
+    },
+    dir,
+    R5_PORT,
+  );
+  ok(r5.up, 'R5 the same deploy restarts with the settings still set');
+  if (r5.up) {
+    const call = at(R5_PORT);
+    const kept = await call('POST', '/auth/reviewer/login', {
+      reviewerId: 'tsr-root',
+      secret: BOOT.TS_REVIEWER_BOOTSTRAP_SECRET,
+    });
+    const changed = await call('POST', '/auth/reviewer/login', {
+      reviewerId: 'tsr-root',
+      secret: 'a-different-secret-0123',
+    });
+    neg(
+      kept.status === 200 && kept.body.reviewer.name === 'Root Reviewer' && changed.status === 401,
+      `R6 an existing reviewer is never replaced from the settings: its secret and name stay (${kept.status}, ${changed.status})`,
+    );
+    await stop(r5);
+  }
+
+  const refused = [
+    ['R7', 'an id without a secret', { TS_REVIEWER_BOOTSTRAP_ID: 'tsr-root' }],
+    ['R8', 'a secret without an id', { TS_REVIEWER_BOOTSTRAP_SECRET: 'root-reviewer-secret-0123' }],
+    ['R9', 'an id that is not 3 to 40 letters, digits or dashes', { ...BOOT, TS_REVIEWER_BOOTSTRAP_ID: 'tsr root' }],
+    ['R10', 'a secret shorter than 12 characters', { ...BOOT, TS_REVIEWER_BOOTSTRAP_SECRET: 'short' }],
+    ['R11', 'a name longer than 80 characters', { ...BOOT, TS_REVIEWER_BOOTSTRAP_NAME: 'n'.repeat(81) }],
+  ];
+  for (const [code, what, env] of refused) {
+    const s = await boot({ ...PROD, ...env }, mkdtempSync(path.join(tmpdir(), 'sbx-reviewer-bad-')), await freePort());
+    neg(!s.up && /TS_REVIEWER_BOOTSTRAP/.test(s.log()), `${code} ${what} refuses to start, naming the setting`);
+    if (s.up) await stop(s);
+  }
+  const devBad = await boot(
+    { TS_REVIEWER_BOOTSTRAP_ID: 'tsr-root' },
+    mkdtempSync(path.join(tmpdir(), 'sbx-reviewer-bad-')),
+    await freePort(),
+  );
+  neg(
+    !devBad.up && /TS_REVIEWER_BOOTSTRAP/.test(devBad.log()),
+    'R12 a half-set bootstrap refuses to start in development too',
+  );
+  if (devBad.up) await stop(devBad);
 }
 
 // ================================================================ X — the client address

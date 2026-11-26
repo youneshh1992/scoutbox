@@ -50,8 +50,10 @@ Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `PUBLIC_DIR
 retry ladders in milliseconds), `MEDIA_SECRET` (signs media links; in development a random key per boot,
 required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's),
 `ALLOW_LOCAL_WEBHOOKS=1` (a webhook may go to a loopback address), `SENDGRID_API_KEY` and `MAIL_FROM` (mail through
-SendGrid, from `noreply@scoutbox.app` by default; unset, the outbox is the delivery) and `EXPO_ACCESS_TOKEN` (push
-through Expo, one call per registered device token; unset, the push log is the delivery).
+SendGrid, from `noreply@scoutbox.app` by default; unset, the outbox is the delivery), `EXPO_ACCESS_TOKEN` (push
+through Expo, one call per registered device token; unset, the push log is the delivery), the four `R2_*` settings
+(uploaded files in Cloudflare R2; none set, on disk under `DATA_DIR/media`) and `TS_REVIEWER_BOOTSTRAP_ID`, `_SECRET`
+and `_NAME` (the Trust & Safety admin a deployment starts with, created at boot if no reviewer has that id).
 
 ## Layout
 
@@ -149,6 +151,10 @@ now. Behaviour that stays out of scope (video analysis) says `Out of scope:`.
   gone, and a stored file is served on a short-lived storage link (`file: {mime, url}`) instead of base64.
 
 - An unknown route answers `{ "error": "NOT_FOUND" }` instead of Express's HTML page.
+
+- A `TS_REVIEWER_BOOTSTRAP_*` setting that `POST /ts/reviewers` would refuse (an id that isn't 3 to 40 letters,
+  digits or dashes, a name over 80 characters, a secret outside 12 to 200), or an id without a secret, refuses to
+  start in any mode. The TypeScript server cut the id and the name to fit and took any secret.
 - Of several unknown fields in one body, the first in key order is named; the TypeScript server names the first
   in the order sent.
 - Ids are minted inside the unit, so a refused act does not use one up.

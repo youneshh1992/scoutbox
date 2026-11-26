@@ -7,6 +7,7 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp
 import gleam/result
 import gleam/string
 import scoutbox/messaging/transport
@@ -80,7 +81,16 @@ pub type Config {
     /// R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY: uploaded files in Cloudflare R2. None
     /// set, they are kept on this instance's disk under DATA_DIR/media.
     blobs: blobs.Blobs,
+    /// TS_REVIEWER_BOOTSTRAP_ID, _SECRET and _NAME: the Trust & Safety admin a deployment starts with, created at
+    /// boot in any mode if no reviewer has that id. Only a reviewer can create another, so without it a production
+    /// database not seeded with the demo world has none.
+    reviewer_bootstrap: Option(ReviewerBootstrap),
   )
+}
+
+/// The first Trust & Safety reviewer, checked as `POST /ts/reviewers` checks a new one.
+pub type ReviewerBootstrap {
+  ReviewerBootstrap(id: String, name: String, secret: String)
 }
 
 pub type TestRegistry {
@@ -159,6 +169,7 @@ pub fn load() -> Result(Config, String) {
   }
   let data_dir = envoy.get("DATA_DIR") |> result.unwrap("data")
   use blobs <- result.try(blobs_from(envoy.get, data_dir, media_key))
+  use reviewer_bootstrap <- result.try(reviewer_bootstrap_from(envoy.get))
   Ok(Config(
     port:,
     data_dir:,
@@ -212,7 +223,54 @@ pub fn load() -> Result(Config, String) {
     mail: transport.mail_from_env(envoy.get),
     push: transport.push_from_env(envoy.get),
     blobs:,
+    reviewer_bootstrap:,
   ))
+}
+
+/// None when neither the id nor the secret is set. Set, both are needed and must be what `POST /ts/reviewers`
+/// accepts (the name defaults to the id); anything else is a mistake in any mode, refused rather than trimmed to fit.
+pub fn reviewer_bootstrap_from(
+  get: fn(String) -> Result(String, Nil),
+) -> Result(Option(ReviewerBootstrap), String) {
+  let setting = fn(name) {
+    case get(name) {
+      Ok(value) if value != "" -> Some(value)
+      _ -> None
+    }
+  }
+  let invalid = fn(why) { Error("TS_REVIEWER_BOOTSTRAP_" <> why) }
+  let assert Ok(id_pattern) =
+    regexp.from_string("^[a-zA-Z0-9][a-zA-Z0-9-]{2,39}$")
+  case
+    setting("TS_REVIEWER_BOOTSTRAP_ID"),
+    setting("TS_REVIEWER_BOOTSTRAP_SECRET"),
+    setting("TS_REVIEWER_BOOTSTRAP_NAME")
+  {
+    None, None, None -> Ok(None)
+    None, None, Some(_) ->
+      invalid("NAME is set without TS_REVIEWER_BOOTSTRAP_ID and _SECRET.")
+    Some(_), None, _ ->
+      invalid("ID is set without TS_REVIEWER_BOOTSTRAP_SECRET.")
+    None, Some(_), _ ->
+      invalid("SECRET is set without TS_REVIEWER_BOOTSTRAP_ID.")
+    Some(reviewer_id), Some(secret), name -> {
+      let name = option.unwrap(name, reviewer_id) |> string.trim
+      let secret_length = input.utf16_length(secret)
+      case
+        regexp.check(id_pattern, reviewer_id),
+        input.utf16_length(name),
+        secret_length
+      {
+        False, _, _ -> invalid("ID must be 3 to 40 letters, digits or dashes.")
+        _, n, _ if n == 0 || n > 80 ->
+          invalid("NAME must be 1 to 80 characters.")
+        _, _, n if n < 12 || n > 200 ->
+          invalid("SECRET must be 12 to 200 characters.")
+        True, _, _ ->
+          Ok(Some(ReviewerBootstrap(id: reviewer_id, name:, secret:)))
+      }
+    }
+  }
 }
 
 const r2_settings = [

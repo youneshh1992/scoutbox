@@ -22,7 +22,10 @@ services:
         generateValue: true
       # A first production boot starts with no people or clubs. For a hosted
       # demo, add SCOUTBOX_SEED_DEMO=1 before the first deploy, then give the
-      # demo clubs passwords with POST /admin/clubs/:id/credentials.
+      # demo clubs passwords with POST /admin/clubs/:id/credentials. Without the
+      # demo world, set TS_REVIEWER_BOOTSTRAP_ID, _SECRET (12+ characters) and
+      # _NAME for the first Trust & Safety reviewer, created at boot if no
+      # reviewer has that id and never changed from the settings after.
       # Optional live providers, set in the dashboard to switch the adapters:
       # SENDGRID_API_KEY, EXPO_ACCESS_TOKEN, and the four R2 settings (R2_ACCOUNT_ID,
       # R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) for uploads in Cloudflare R2;
