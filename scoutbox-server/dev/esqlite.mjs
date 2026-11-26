@@ -23,13 +23,29 @@ const SHA256 = '578c49543b81d1fb91f62adf7459ec2924abf86c98a1b0c9900f89674b664959
 
 // esqlite's own flags (its rebar.config.script), so the SQLite inside is the one the Hex package builds.
 const SQLITE_FLAGS = [
-  '-Os', '-DSQLITE_DQS=0', '-DSQLITE_THREADSAFE=1', '-DSQLITE_DEFAULT_MEMSTATUS=0', '-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1',
-  '-DSQLITE_LIKE_DOESNT_MATCH_BLOBS', '-DSQLITE_MAX_EXPR_DEPTH=0', '-DSQLITE_OMIT_DEPRECATED',
-  '-DSQLITE_OMIT_PROGRESS_CALLBACK', '-DSQLITE_USE_ALLOCA', '-DSQLITE_OMIT_AUTOINIT', '-DSQLITE_USE_URI',
-  '-DSQLITE_ENABLE_FTS3', '-DSQLITE_ENABLE_FTS3_PARENTHESIS', '-DSQLITE_ENABLE_FTS4', '-DSQLITE_ENABLE_FTS5',
-  '-DSQLITE_ENABLE_MATH_FUNCTIONS', '-DSQLITE_ENABLE_JSON1', '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_GEOPOLY',
+  '-Os',
+  '-DSQLITE_DQS=0',
+  '-DSQLITE_THREADSAFE=1',
+  '-DSQLITE_DEFAULT_MEMSTATUS=0',
+  '-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1',
+  '-DSQLITE_LIKE_DOESNT_MATCH_BLOBS',
+  '-DSQLITE_MAX_EXPR_DEPTH=0',
+  '-DSQLITE_OMIT_DEPRECATED',
+  '-DSQLITE_OMIT_PROGRESS_CALLBACK',
+  '-DSQLITE_USE_ALLOCA',
+  '-DSQLITE_OMIT_AUTOINIT',
+  '-DSQLITE_USE_URI',
+  '-DSQLITE_ENABLE_FTS3',
+  '-DSQLITE_ENABLE_FTS3_PARENTHESIS',
+  '-DSQLITE_ENABLE_FTS4',
+  '-DSQLITE_ENABLE_FTS5',
+  '-DSQLITE_ENABLE_MATH_FUNCTIONS',
+  '-DSQLITE_ENABLE_JSON1',
+  '-DSQLITE_ENABLE_RTREE',
+  '-DSQLITE_ENABLE_GEOPOLY',
 ];
-const LINK_FLAGS = os.platform() === 'darwin' ? ['-dynamiclib', '-undefined', 'dynamic_lookup'] : ['-shared', '-std=c11', '-lm'];
+const LINK_FLAGS =
+  os.platform() === 'darwin' ? ['-dynamiclib', '-undefined', 'dynamic_lookup'] : ['-shared', '-std=c11', '-lm'];
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const VENDOR = path.resolve(HERE, '../vendor');
@@ -41,11 +57,14 @@ const NIF = path.join(OUT, 'priv', 'esqlite3_nif.so');
 
 const stamp = crypto
   .createHash('sha256')
-  .update([VERSION, fs.readFileSync(PATCH, 'utf8'), ...SQLITE_FLAGS, ...LINK_FLAGS, os.platform(), os.arch()].join('\n'))
+  .update(
+    [VERSION, fs.readFileSync(PATCH, 'utf8'), ...SQLITE_FLAGS, ...LINK_FLAGS, os.platform(), os.arch()].join('\n'),
+  )
   .digest('hex');
 if (fs.existsSync(NIF) && fs.existsSync(STAMP) && fs.readFileSync(STAMP, 'utf8') === stamp) process.exit(0);
 
-const run = (cmd, args, cwd = OUT) => execFileSync(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' });
+const run = (cmd, args, cwd = OUT) =>
+  execFileSync(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' });
 const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 if (!fs.existsSync(TARBALL) || sha256(TARBALL) !== SHA256) {
@@ -75,12 +94,20 @@ fs.writeFileSync(
 );
 
 const erts = run('erl', [
-  '-noshell', '-eval',
+  '-noshell',
+  '-eval',
   'io:format("~s", [filename:join([code:root_dir(), "erts-" ++ erlang:system_info(version), "include"])]), halt().',
 ]);
 run('cc', [
-  ...LINK_FLAGS, '-fPIC', `-I${erts}`, '-Ic_src/sqlite3', ...SQLITE_FLAGS,
-  '-o', NIF, 'c_src/esqlite3_nif.c', 'c_src/sqlite3/sqlite3.c',
+  ...LINK_FLAGS,
+  '-fPIC',
+  `-I${erts}`,
+  '-Ic_src/sqlite3',
+  ...SQLITE_FLAGS,
+  '-o',
+  NIF,
+  'c_src/esqlite3_nif.c',
+  'c_src/sqlite3/sqlite3.c',
 ]);
 // Gleam doesn't copy a dependency's priv/ again over an earlier build of it, so a stale NIF (the Hex copy's, or
 // one from an older patch) would load and leave the new functions unloaded.

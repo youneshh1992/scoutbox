@@ -353,7 +353,13 @@ const start = (OID, body, token, h = at(T0)) => j('POST', `/org/offers/${OID}/si
 const sGet = (SID, token, h = at(T0)) => j('GET', `/org/signings/${SID}`, undefined, token, h);
 const sDoc = (SID, token, q = '', h = at(T0)) => j('GET', `/org/signings/${SID}/document${q}`, undefined, token, h);
 const attach = async (SID, buf, expectedRev, token, h = at(T0), filename = 'contract.pdf', label = 'Contract') =>
-  j('POST', `/org/signings/${SID}/document`, { uploadId: await doc(buf, token), filename, label, expectedRev }, token, h);
+  j(
+    'POST',
+    `/org/signings/${SID}/document`,
+    { uploadId: await doc(buf, token), filename, label, expectedRev },
+    token,
+    h,
+  );
 const ready = (SID, body, token, h = at(T0)) => j('POST', `/org/signings/${SID}/ready`, body, token, h);
 const clubSign = (SID, body, token, h = at(T0)) =>
   j('POST', `/org/signings/${SID}/parties/club/complete`, body, token, h);
@@ -466,8 +472,7 @@ const B = await presented(maria.token, 'pl-carvalho');
   await relogin();
   ok(!!evidenceId && !!blobKey, `B5 the vault row for B was located and its digest replaced with B's (${evidenceId})`);
   neg(
-    expect(await sDoc(B.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') &&
-      !(await sDoc(B.SID, maria.token)).body.file,
+    expect(await sDoc(B.SID, maria.token), 500, 'SIGNING_STATE_UNKNOWN') && !(await sDoc(B.SID, maria.token)).body.file,
     'B6 the club cannot fetch the document: the vault no longer agrees with the digest confirmed, nothing is served',
   );
   neg(expect(await pDoc(B.SID, P['pl-carvalho'].token), 500, 'SIGNING_STATE_UNKNOWN'), 'B7 nor can the player');

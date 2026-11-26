@@ -47,7 +47,11 @@ const normal = (v) =>
   Array.isArray(v)
     ? v.map(normal)
     : v && typeof v === 'object'
-      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, normal(v[k])]))
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, normal(v[k])]),
+        )
       : v;
 const show = (v) => (v === undefined ? '(nothing)' : JSON.stringify(v));
 
@@ -116,7 +120,9 @@ for (const file of recorded.sort()) {
   for (const k of removed.slice(0, SHOWN)) console.log(`  gone: ${k}`);
   if (removed.length > SHOWN) console.log(`  … and ${removed.length - SHOWN} more gone`);
 }
-console.log(changedTotal ? 'bless: review the changes above, then commit them with the code' : 'bless: no answer changed');
+console.log(
+  changedTotal ? 'bless: review the changes above, then commit them with the code' : 'bless: no answer changed',
+);
 
 /**
  * One case per line: a top-level list has one element per line; a top-level object has one key per line, and a

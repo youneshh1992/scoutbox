@@ -106,5 +106,7 @@ if (!isMainThread) {
     }
   fs.writeFileSync(OUT, `${JSON.stringify({ aliases, zones: tables })}\n`);
   const transitions = Object.values(tables).reduce((n, t) => n + t.length, 0);
-  console.log(`wrote ${path.relative(process.cwd(), OUT)}: ${zones.length} zones, ${transitions} offsets, ${checked} instants checked`);
+  console.log(
+    `wrote ${path.relative(process.cwd(), OUT)}: ${zones.length} zones, ${transitions} offsets, ${checked} instants checked`,
+  );
 }

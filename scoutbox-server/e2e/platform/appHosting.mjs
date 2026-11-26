@@ -54,7 +54,8 @@ const get = async (pathname, init = {}) => {
 };
 
 // Stand-in builds: the club portal and the agent portal. The admin console and Grassroots aren't built.
-const CLUB_INDEX = '<!doctype html><title>club</title><script type="module" src="/app/assets/index-abc123.js"></script>';
+const CLUB_INDEX =
+  '<!doctype html><title>club</title><script type="module" src="/app/assets/index-abc123.js"></script>';
 const CLUB_JS = 'console.log("club");';
 const AGENT_INDEX = '<!doctype html><title>agent</title>';
 const write = (rel, text) => {
@@ -133,7 +134,10 @@ section('D the API');
 r = await get('/healthz');
 ok(r.status === 200 && r.headers.get('x-scoutbox-schema') !== null, 'an API route still answers beside the portals');
 r = await get('/org/agent/relationships');
-neg(r.status === 401 && JSON.parse(r.text).error === 'ORG_AUTH_REQUIRED', 'an API path naming a portal is still the API');
+neg(
+  r.status === 401 && JSON.parse(r.text).error === 'ORG_AUTH_REQUIRED',
+  'an API path naming a portal is still the API',
+);
 r = await get('/no-such-route');
 neg(r.status === 404 && JSON.parse(r.text).error === 'NOT_FOUND', 'an unknown path is still the API’s 404');
 

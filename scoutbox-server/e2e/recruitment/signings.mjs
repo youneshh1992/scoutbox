@@ -636,7 +636,13 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   const patch = (body) => j('PATCH', `/org/signings/${K.SID}`, body, maria.token, at(T0));
   neg(
     refusedAs(
-      await j('POST', `/org/signings/${K.SID}/document`, await docBody({ filename: { name: 'a.pdf' } }), maria.token, at(T0)),
+      await j(
+        'POST',
+        `/org/signings/${K.SID}/document`,
+        await docBody({ filename: { name: 'a.pdf' } }),
+        maria.token,
+        at(T0),
+      ),
       'SIGNING_INPUT_INVALID',
       'filename',
       'not_text',
@@ -656,7 +662,13 @@ section('G — documents: the exact bytes, their digest, who may read them and w
   );
   neg(
     refusedAs(
-      await j('POST', `/org/signings/${K.SID}/document`, await docBody({ sha256: 'f'.repeat(64) }), maria.token, at(T0)),
+      await j(
+        'POST',
+        `/org/signings/${K.SID}/document`,
+        await docBody({ sha256: 'f'.repeat(64) }),
+        maria.token,
+        at(T0),
+      ),
       'SIGNING_INPUT_INVALID',
       'sha256',
       'unknown_field',

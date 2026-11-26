@@ -36,7 +36,10 @@ const queue = BATTERIES.filter(
 ).sort((a, b) => (times[b] ?? 0) - (times[a] ?? 0));
 
 // The patched esqlite first (nothing to do when it is current): the build links its NIF.
-const esqlite = spawnSync(process.execPath, [path.join(SERVER_DIR, 'dev/esqlite.mjs')], { cwd: SERVER_DIR, encoding: 'utf8' });
+const esqlite = spawnSync(process.execPath, [path.join(SERVER_DIR, 'dev/esqlite.mjs')], {
+  cwd: SERVER_DIR,
+  encoding: 'utf8',
+});
 if (esqlite.status !== 0) {
   console.error(esqlite.stdout, esqlite.stderr);
   console.error('e2e: the patched esqlite did not build');

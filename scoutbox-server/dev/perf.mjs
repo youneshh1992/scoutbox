@@ -53,46 +53,107 @@ function populate(file, now) {
   const b = (v) => (v ? 1 : 0);
   for (const o of pop.orgs)
     ins('orgs', {
-      id: o.id, name: o.name, type: o.type, level: o.level, plan: o.plan, country: o.country, city: o.location.city,
-      lat: o.location.lat, lng: o.location.lng, verified: b(o.verified),
-      safeguarding_contract_signed: b(o.safeguardingContractSigned), trusted_partner: 0, created_at: now,
+      id: o.id,
+      name: o.name,
+      type: o.type,
+      level: o.level,
+      plan: o.plan,
+      country: o.country,
+      city: o.location.city,
+      lat: o.location.lat,
+      lng: o.location.lng,
+      verified: b(o.verified),
+      safeguarding_contract_signed: b(o.safeguardingContractSigned),
+      trusted_partner: 0,
+      created_at: now,
     });
   for (const g of pop.guardians)
     ins('guardians', {
-      id: g.id, name: g.name, email: g.email, email_verified: 1, id_verified: 1, disclaimer_accepted: 1, created_at: now,
+      id: g.id,
+      name: g.name,
+      email: g.email,
+      email_verified: 1,
+      id_verified: 1,
+      disclaimer_accepted: 1,
+      created_at: now,
     });
   for (const p of pop.players) {
     const complete = !!(p.position && p.foot && p.heightCm && p.weightKg && p.stats);
     const signal = Math.min(99, 30 + (p.identityVerified ? 10 : 0) + 5 + 2 + (complete ? 5 : 0));
     ins('players', {
-      id: p.id, name: p.name, birth_date: p.dob, country: p.country, city: p.city, position: p.position, foot: p.foot,
-      height_cm: p.heightCm, weight_kg: p.weightKg, academy_plus: b(p.academyPlus), availability: p.availability,
-      contract_status: p.contractStatus, level: p.level, identity_verified: b(p.identityVerified),
-      guardian_id: p.guardianId, lat: p.location.lat, lng: p.location.lng,
-      stats_appearances: p.stats.appearances, stats_goals: p.stats.goals, stats_assists: p.stats.assists,
-      stats_pace_kmh: p.stats.paceKmh, stats_pass_completion_pct: p.stats.passCompletionPct,
-      stats_duel_success_pct: p.stats.duelSuccessPct, profile_signal: signal, created_at: p.createdAt,
+      id: p.id,
+      name: p.name,
+      birth_date: p.dob,
+      country: p.country,
+      city: p.city,
+      position: p.position,
+      foot: p.foot,
+      height_cm: p.heightCm,
+      weight_kg: p.weightKg,
+      academy_plus: b(p.academyPlus),
+      availability: p.availability,
+      contract_status: p.contractStatus,
+      level: p.level,
+      identity_verified: b(p.identityVerified),
+      guardian_id: p.guardianId,
+      lat: p.location.lat,
+      lng: p.location.lng,
+      stats_appearances: p.stats.appearances,
+      stats_goals: p.stats.goals,
+      stats_assists: p.stats.assists,
+      stats_pace_kmh: p.stats.paceKmh,
+      stats_pass_completion_pct: p.stats.passCompletionPct,
+      stats_duel_success_pct: p.stats.duelSuccessPct,
+      profile_signal: signal,
+      created_at: p.createdAt,
     });
     if (p.guardianId) ins('guardian_children', { guardian_id: p.guardianId, player_id: p.id, role: 'primary' });
     const a = p.attendance[0];
     ins('player_attendance', {
-      id: a.id, player_id: p.id, position: 0, fixture: a.fixture, venue: a.venue, match_date: a.date,
-      lat: a.gps.lat, lng: a.gps.lng, verified: 1,
+      id: a.id,
+      player_id: p.id,
+      position: 0,
+      fixture: a.fixture,
+      venue: a.venue,
+      match_date: a.date,
+      lat: a.gps.lat,
+      lng: a.gps.lng,
+      verified: 1,
     });
     const m = p.media[0];
     ins('player_media', {
-      id: m.id, player_id: p.id, position: 0, title: m.title, kind: m.kind, uploaded_at: m.uploadedAt, url: m.url,
+      id: m.id,
+      player_id: p.id,
+      position: 0,
+      title: m.title,
+      kind: m.kind,
+      uploaded_at: m.uploadedAt,
+      url: m.url,
       views: m.views,
     });
     ins('player_timeline', { player_id: p.id, position: 0, year: '2024', event: 'Joined' });
     ins('player_badges', { player_id: p.id, position: 0, badge: 'Fresh Start' });
-    ins('player_season_history', { player_id: p.id, position: 0, season: '2024/25', appearances: 20, goals: 3, assists: 2 });
+    ins('player_season_history', {
+      player_id: p.id,
+      position: 0,
+      season: '2024/25',
+      appearances: 20,
+      goals: 3,
+      assists: 2,
+    });
     p.activityLog.forEach((t, i) => ins('player_activity_log', { player_id: p.id, position: i, occurred_at: t }));
   }
   for (let k = 0; k < REPORTS; k++)
     ins('reports', {
-      id: `rep-perf-${k}`, created_at: now - k, by_kind: 'player', by_id: `pl-${3 * k + 1}`, target_kind: 'club',
-      target_org_id: `org-${k % pop.orgs.length}`, reason: 'Synthetic.', urgent: 0, status: 'pending_review',
+      id: `rep-perf-${k}`,
+      created_at: now - k,
+      by_kind: 'player',
+      by_id: `pl-${3 * k + 1}`,
+      target_kind: 'club',
+      target_org_id: `org-${k % pop.orgs.length}`,
+      reason: 'Synthetic.',
+      urgent: 0,
+      status: 'pending_review',
     });
   db.exec('COMMIT');
   db.close();
@@ -153,18 +214,34 @@ for (const [name, server] of Object.entries(servers)) {
     results.push({ server: name, ...(await measure('org player view, one at a time', SEQUENTIAL, 1, view)) });
     results.push({
       server: name,
-      ...(await measure(`org player view, ${CONCURRENT.clients} clients`, CONCURRENT.requests, CONCURRENT.clients, view)),
+      ...(await measure(
+        `org player view, ${CONCURRENT.clients} clients`,
+        CONCURRENT.requests,
+        CONCURRENT.clients,
+        view,
+      )),
     });
-    const directory = (i) => fetch(`${base}/org/players?limit=20&position=${['GK', 'CB', 'CM', 'ST', 'LW'][i % 5]}`, { headers: auth });
+    const directory = (i) =>
+      fetch(`${base}/org/players?limit=20&position=${['GK', 'CB', 'CM', 'ST', 'LW'][i % 5]}`, { headers: auth });
     results.push({ server: name, ...(await measure('directory page of 20, one at a time', SEQUENTIAL, 1, directory)) });
     results.push({
       server: name,
-      ...(await measure(`directory page of 20, ${CONCURRENT.clients} clients`, CONCURRENT.requests, CONCURRENT.clients, directory)),
+      ...(await measure(
+        `directory page of 20, ${CONCURRENT.clients} clients`,
+        CONCURRENT.requests,
+        CONCURRENT.clients,
+        directory,
+      )),
     });
     results.push({ server: name, ...(await measure('report resolution, one at a time', SEQUENTIAL, 1, resolve)) });
     results.push({
       server: name,
-      ...(await measure(`report resolution, ${CONCURRENT.clients} clients`, REPORTS - SEQUENTIAL - 50, CONCURRENT.clients, resolve)),
+      ...(await measure(
+        `report resolution, ${CONCURRENT.clients} clients`,
+        REPORTS - SEQUENTIAL - 50,
+        CONCURRENT.clients,
+        resolve,
+      )),
     });
     void pop;
   } finally {

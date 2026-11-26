@@ -21,7 +21,9 @@ const problems = [];
 for (const f of files.filter((f) => !EXEMPT.includes(f) && !RUNNER.includes(f)))
   for (const p of boundaryProblems(fs.readFileSync(path.join(HERE, f), 'utf8')))
     problems.push(`${f}:${p.line} ${p.why}: ${p.text}`);
-const batteries = files.filter((f) => !f.startsWith('support/') && !RUNNER.includes(f)).map((f) => f.replace(/\.mjs$/, ''));
+const batteries = files
+  .filter((f) => !f.startsWith('support/') && !RUNNER.includes(f))
+  .map((f) => f.replace(/\.mjs$/, ''));
 for (const b of batteries.filter((b) => !BATTERIES.includes(b)))
   problems.push(`${b}.mjs is a battery that e2e/batteries.mjs doesn't list`);
 for (const b of BATTERIES.filter((b) => !batteries.includes(b)))

@@ -7,7 +7,17 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/package-lock.json", "!**/*.md", "!scoutbox-server-ts/e2e/support/spec", "!box-cam/spec"]
+    "includes": [
+      "**",
+      "!**/package-lock.json",
+      "!**/*.md",
+      "!scoutbox-server-ts/e2e/support/spec",
+      "!box-cam/spec",
+      "!scoutbox-server/e2e/support/spec",
+      "!scoutbox-server/test/fixtures",
+      "!scoutbox-server/priv",
+      "!scoutbox-server/docs/gleam"
+    ]
   },
   "formatter": {
     "enabled": true,

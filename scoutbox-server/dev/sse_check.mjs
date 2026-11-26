@@ -46,7 +46,12 @@ async function boot(server, data, port) {
 }
 const stop = (child) => new Promise((r) => (child.once('exit', r), child.kill('SIGTERM')));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const rssMb = (pid) => Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)]).toString().trim()) / 1024;
+const rssMb = (pid) =>
+  Number(
+    execFileSync('ps', ['-o', 'rss=', '-p', String(pid)])
+      .toString()
+      .trim(),
+  ) / 1024;
 
 /** An open stream: its frames as they arrive (with the time each arrived), until `close()`. */
 function openStream(api, ticket, lastEventId = 0) {
@@ -118,11 +123,17 @@ async function run(name, server) {
 
   console.log(`\n${name}`);
   try {
-    const EASTPORT = (await post('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body.token;
+    const EASTPORT = (
+      await post('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })
+    ).body.token;
     const KOLA = await login('pl-adeyemi');
     const SVEN = await login('pl-svensson');
     const thread = async (playerId, token) => {
-      const r = await post(`/org/players/${playerId}/request`, { type: 'contact', message: 'Synthetic: a word about next season.' }, EASTPORT);
+      const r = await post(
+        `/org/players/${playerId}/request`,
+        { type: 'contact', message: 'Synthetic: a word about next season.' },
+        EASTPORT,
+      );
       await post(`/player/requests/${r.body.requestId}/respond`, { accept: true }, token);
       return (await j('/player/channels', {}, token)).body[0].id;
     };
@@ -138,17 +149,29 @@ async function run(name, server) {
     const org = openStream(API, await ticket(EASTPORT));
     await kola.until((f) => f.event === 'connected');
     await org.until((f) => f.event === 'connected');
-    check(kola.frames[0].event === 'connected' && kola.frames[0].id === null, 'the first frame is `connected`, without an id');
+    check(
+      kola.frames[0].event === 'connected' && kola.frames[0].id === null,
+      'the first frame is `connected`, without an id',
+    );
     await send(svenChan, 'Synthetic: Svensson only.');
     await send(kolaChan, 'Synthetic: Kola, Thursday?');
     await post(`/org/channels/${kolaChan}/typing`, {}, EASTPORT);
     await kola.until((f) => f.event === 'typing');
     await org.until((f) => f.event === 'messages' && f.channelId === kolaChan);
     await sleep(200);
-    check(kola.frames.some((f) => f.event === 'messages' && f.channelId === kolaChan), "a player's stream carries their thread");
+    check(
+      kola.frames.some((f) => f.event === 'messages' && f.channelId === kolaChan),
+      "a player's stream carries their thread",
+    );
     check(!kola.frames.some((f) => f.channelId === svenChan), "and never another player's");
-    check(kola.frames.some((f) => f.event === 'notify' && f.audienceId === 'pl-adeyemi'), 'a notice reaches its audience');
-    check(org.frames.some((f) => f.channelId === svenChan) && org.frames.some((f) => f.channelId === kolaChan), "the club's stream carries both of its threads");
+    check(
+      kola.frames.some((f) => f.event === 'notify' && f.audienceId === 'pl-adeyemi'),
+      'a notice reaches its audience',
+    );
+    check(
+      org.frames.some((f) => f.channelId === svenChan) && org.frames.some((f) => f.channelId === kolaChan),
+      "the club's stream carries both of its threads",
+    );
     const typing = kola.frames.find((f) => f.event === 'typing');
     check(typing?.side === 'org' && typing.id > 0, 'typing is live, with an id');
     const lastSeen = Math.max(...kola.frames.map((f) => f.id ?? 0));
@@ -160,13 +183,22 @@ async function run(name, server) {
     const back = openStream(API, await ticket(KOLA), lastSeen);
     await back.until((f) => f.event === 'caught_up');
     const replayed = back.frames.filter((f) => f.id);
-    check(replayed.length > 0 && replayed.every((f) => f.id > lastSeen), 'a reconnect replays only what came after its cursor');
-    check(replayed.some((f) => f.event === 'messages' && f.channelId === kolaChan), 'including the missed message');
+    check(
+      replayed.length > 0 && replayed.every((f) => f.id > lastSeen),
+      'a reconnect replays only what came after its cursor',
+    );
+    check(
+      replayed.some((f) => f.event === 'messages' && f.channelId === kolaChan),
+      'including the missed message',
+    );
     check(!replayed.some((f) => f.event === 'typing'), 'but never typing');
     check(back.frames.at(-1).event === 'caught_up', 'and then says it has caught up');
     back.close();
     const stale = openStream(API, await ticket(KOLA), 9_999_999);
-    check((await stale.until((f) => f.event === 'resync')).event === 'resync', 'a cursor from the future is told to resync');
+    check(
+      (await stale.until((f) => f.event === 'resync')).event === 'resync',
+      'a cursor from the future is told to resync',
+    );
     stale.close();
     const t = await ticket(KOLA);
     await post('/auth/logout', {}, KOLA).catch(() => null);
@@ -174,7 +206,10 @@ async function run(name, server) {
     const status = await Promise.race([after.done, sleep(1000).then(() => 'still open')]);
     after.close();
     const unported = (await post('/auth/logout', {}, KOLA)).status === 404;
-    check(status === 401 || unported, `a signed-out session's ticket is refused (${status}${unported ? '; logout is not ported yet' : ''})`);
+    check(
+      status === 401 || unported,
+      `a signed-out session's ticket is refused (${status}${unported ? '; logout is not ported yet' : ''})`,
+    );
     org.close();
 
     // ---- 2. fan-out

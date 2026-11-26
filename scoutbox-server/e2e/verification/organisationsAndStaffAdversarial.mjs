@@ -96,7 +96,11 @@ const PNG = Buffer.from(
 const evidence = (token, bytes = PNG, mime = 'image/png') =>
   upload(BASE, opener.org(token), { purpose: 'verification_evidence', bytes, mime });
 const applicantEvidence = (requestId, secret) =>
-  upload(BASE, opener.applicant(requestId, secret), { purpose: 'verification_evidence', bytes: PNG, mime: 'image/png' });
+  upload(BASE, opener.applicant(requestId, secret), {
+    purpose: 'verification_evidence',
+    bytes: PNG,
+    mime: 'image/png',
+  });
 async function mailWith(to, re) {
   const r = await j('GET', '/admin/outbox', undefined, null, A);
   const mail = (r.body?.items ?? []).find((m) => m.to === to);

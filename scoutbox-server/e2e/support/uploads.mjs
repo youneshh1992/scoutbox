@@ -51,12 +51,13 @@ export async function upload(api, open, { purpose, bytes, mime }) {
 
 /** Leading bytes that make a file of each evidence type, padded to `size`. */
 export function fileOf(mime, size = 64) {
-  const head = {
-    'application/pdf': Buffer.from('%PDF-1.7\n'),
-    'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    'image/jpeg': Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
-    'image/webp': Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP')]),
-  }[mime] ?? Buffer.alloc(0);
+  const head =
+    {
+      'application/pdf': Buffer.from('%PDF-1.7\n'),
+      'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      'image/jpeg': Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      'image/webp': Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP')]),
+    }[mime] ?? Buffer.alloc(0);
   return Buffer.concat([head, crypto.randomBytes(Math.max(size - head.length, 0))]);
 }
 

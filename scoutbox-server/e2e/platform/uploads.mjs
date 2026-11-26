@@ -99,7 +99,11 @@ ok(
   'with a URL and the headers the PUT must carry: the type, no overwrite and the declared digest',
 );
 const opened = r.body;
-r = await declare(API, asMaria, { purpose: 'verification_evidence', bytes: Buffer.alloc(100), mime: 'application/pdf' });
+r = await declare(API, asMaria, {
+  purpose: 'verification_evidence',
+  bytes: Buffer.alloc(100),
+  mime: 'application/pdf',
+});
 ok(r.status === 201, 'organisation staff declare evidence');
 r = await declare(API, asMaria, { purpose: 'signing_document', bytes: Buffer.alloc(100), mime: 'application/pdf' });
 ok(r.status === 201, 'and signing documents');
@@ -148,7 +152,13 @@ neg(r.status === 400 && r.body.field === 'sha256', 'nor is one in upper case: th
 r = await fetch(`${API}/player/uploads`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${KOLA}` },
-  body: JSON.stringify({ purpose: 'player_clip', size: 10, mime: 'video/mp4', sha256: sha256Hex('x'), playerId: 'pl-osei' }),
+  body: JSON.stringify({
+    purpose: 'player_clip',
+    size: 10,
+    mime: 'video/mp4',
+    sha256: sha256Hex('x'),
+    playerId: 'pl-osei',
+  }),
 });
 neg(r.status === 400 && (await r.json()).field === 'playerId', 'an upload cannot name the player it belongs to');
 
@@ -173,7 +183,11 @@ neg(r.status === 403, "an upload's URL doesn't read the file back");
 section('C limits');
 // Kola has one open upload, and staff two; staff fill theirs to the cap.
 for (let i = 0; i < 8; i++) {
-  r = await declare(API, asMaria, { purpose: 'signing_document', bytes: Buffer.alloc(10 + i), mime: 'application/pdf' });
+  r = await declare(API, asMaria, {
+    purpose: 'signing_document',
+    bytes: Buffer.alloc(10 + i),
+    mime: 'application/pdf',
+  });
   ok(r.status === 201, `open upload ${i + 3} of 10`);
 }
 r = await declare(API, asMaria, { purpose: 'signing_document', bytes: Buffer.alloc(99), mime: 'application/pdf' });
@@ -224,7 +238,11 @@ ok(r.ok && Buffer.from(await r.arrayBuffer()).equals(clip), 'a club that may see
 const attendanceId = (await j('GET', '/player/me', undefined, KOLA)).body.attendance[0].id;
 r = await j('POST', '/player/media', { title: 'Cup final', attendanceId }, KOLA);
 neg(r.status === 400 && r.body.error === 'FILE_REQUIRED_FOR_VERIFIED_CLIP', 'the Verified Clip needs the footage');
-const sealedId = await upload(API, asKola, { purpose: 'player_clip', bytes: clip.subarray(0, 4096), mime: 'video/webm' });
+const sealedId = await upload(API, asKola, {
+  purpose: 'player_clip',
+  bytes: clip.subarray(0, 4096),
+  mime: 'video/webm',
+});
 r = await j('POST', '/player/media', { title: 'Cup final', uploadId: sealedId, attendanceId: 'att-507075353' }, KOLA);
 neg(r.status === 400 && r.body.error === 'ATTENDANCE_NOT_FOUND', "another player's attendance seals nothing");
 r = await j('POST', '/player/media', { title: 'Cup final', uploadId: sealedId, attendanceId }, KOLA);
@@ -284,15 +302,29 @@ const evidenceUpload = await upload(API, opener.org(TOM), {
   bytes: passport,
   mime: 'image/png',
 });
-r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: evidenceUpload, filename: 'id.png' }, TOM);
+r = await j(
+  'POST',
+  `/org/verification/claims/${claim}/evidence`,
+  { uploadId: evidenceUpload, filename: 'id.png' },
+  TOM,
+);
 ok(r.status === 201 && r.body.claim.evidence.length === 1, "Tom's upload becomes evidence on his claim");
 const evidenceId = r.body.claim.evidence[0].id;
-r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: evidenceUpload, filename: 'id.png' }, TOM);
+r = await j(
+  'POST',
+  `/org/verification/claims/${claim}/evidence`,
+  { uploadId: evidenceUpload, filename: 'id.png' },
+  TOM,
+);
 neg(
   r.status === 409 && r.body.error === 'UPLOAD_ALREADY_USED' && r.body.evidenceId === evidenceId,
   'naming it again adds nothing, and names the evidence it became',
 );
-const clipAsEvidence = await upload(API, asKola, { purpose: 'player_clip', bytes: clip.subarray(0, 64), mime: 'video/mp4' });
+const clipAsEvidence = await upload(API, asKola, {
+  purpose: 'player_clip',
+  bytes: clip.subarray(0, 64),
+  mime: 'video/mp4',
+});
 r = await j('POST', `/org/verification/claims/${claim}/evidence`, { uploadId: clipAsEvidence, filename: 'x.mp4' }, TOM);
 neg(r.status === 404, "a player's clip upload is not evidence");
 
@@ -349,7 +381,11 @@ if (process.getuid?.() === 0) {
     password: 'longenough1',
   });
   const stranded = r.body.token;
-  const strandedKey = await upload(API, opener.player(stranded), { purpose: 'player_clip', bytes: clip, mime: 'video/mp4' });
+  const strandedKey = await upload(API, opener.player(stranded), {
+    purpose: 'player_clip',
+    bytes: clip,
+    mime: 'video/mp4',
+  });
   r = await j('POST', '/player/media', { title: 'Stranded clip', uploadId: strandedKey }, stranded);
   ok(r.status === 201, 'fixture: a player with a clip');
   const strandedLink = r.body.media.url;
