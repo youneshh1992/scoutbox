@@ -33,7 +33,7 @@ jobs:
         with:
           otp-version: "29.1.2"
           gleam-version: "1.19.2"
-          rebar3-version: "3"
+          rebar3-version: "3.28.0"
           version-type: strict
       - uses: actions/setup-node@v4
         with:
