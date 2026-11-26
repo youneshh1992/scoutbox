@@ -3,3 +3,6 @@
 
 # Format the whole repository with Biome
 ac173bc841e6de485aefcff20ceb5bd8480dab38
+
+# Format the Gleam server's scripts with Biome
+54d1c69992c63e847c4403892781a55e7d01f613

@@ -1,15 +1,21 @@
 # ScoutBox
 
-A football recruitment platform: a Node/SQLite API (`scoutbox-server/`) shared by the Player app (Expo,
+A football recruitment platform: a Gleam/SQLite API (`scoutbox-server/`) shared by the Player app (Expo,
 `scoutbox-player/`) and four web portals: Pro (`scoutbox-club/`), Grassroots, Agent and the Trust & Safety admin.
-How to run and test everything: [`README.md`](README.md). The Founder is not a programmer: explain product
-consequences in plain terms, and don't ask him storage questions.
+How to run and test everything: [`README.md`](README.md).
+
+The Gleam server is replacing the TypeScript server, which stays in `scoutbox-server-ts/` until the switch-over
+([`scoutbox-server/docs/final-port-steps.md`](scoutbox-server/docs/final-port-steps.md)). The apps still talk to
+the TypeScript server until then. Change it only to keep it running; new server work goes in `scoutbox-server/`.
+`README.md`, `docs/architecture.md` and `scoutbox-server-ts/OPERATIONS.md` still describe the Node server.
+
+The Founder is not a programmer: explain product consequences in plain terms, and don't ask him storage questions.
 
 ## Before you start
 
 - Read [`docs/decisions.md`](docs/decisions.md): the decisions in force and the open questions. Don't re-ask settled ones.
-- Server or storage work: read [`docs/architecture.md`](docs/architecture.md) and
-  [`scoutbox-server/OPERATIONS.md`](scoutbox-server/OPERATIONS.md).
+- Server or storage work: read [`scoutbox-server/CLAUDE.md`](scoutbox-server/CLAUDE.md), which holds the Gleam
+  server's rules, and [`docs/architecture.md`](docs/architecture.md) for the product's.
 - UI work: read [`docs/design.md`](docs/design.md).
 - Changing a domain: read its file in [`docs/product/`](docs/product/).
 
@@ -23,16 +29,16 @@ consequences in plain terms, and don't ask him storage questions.
 
 ## Server rules
 
-- New persistent state goes in tables owned by a domain repository under `scoutbox-server/repositories/`, created
-  by a numbered migration. No in-memory copies of tables, no new milestone-named modules (`m30/…`). New server
-  code goes in `scoutbox-server/domains/<domain>/`.
-- Writes are explicit repository operations, inside `store.unitOfWork(() => …)` when they touch more than one row
-  or domain. Side effects go through `store.afterCommit`. Provider calls happen before the unit. Don't edit
-  in-memory records and rely on the save to find the change.
+The Gleam server's own rules (units, effects, typed ids, input shapes, migrations) are in
+[`scoutbox-server/CLAUDE.md`](scoutbox-server/CLAUDE.md). These hold for any server code:
+
 - Store typed columns, and validate and reject junk input at the route. Don't preserve malformed data.
 - Responses are built from explicit allowlists, never by spreading a stored record. Never log or return a plain
-  token. Secrets have no defaults. Every environment setting is registered in `domains/platform/capabilities.mjs`.
-- One definition per rule: import shared rules (`roles.ts`, `domain.ts`, `temporal.ts`), don't copy them.
+  token. Secrets have no defaults. Every environment setting is read in
+  `scoutbox-server/src/scoutbox/platform/config.gleam`.
+- One definition per rule. The apps import shared rules from `shared/` (`roles.ts`), not from a server tree. The
+  Gleam server can't import them, so it keeps the same rule in one Gleam module that says so
+  (`identity/roles.gleam`).
 - Don't add another copy of an API type or client to an app; write client code so it can move to a shared package.
   `scoutbox-club` and `scoutbox-grassroots` share business logic: a fix in one is a fix in both.
 
@@ -45,13 +51,13 @@ consequences in plain terms, and don't ask him storage questions.
 
 ## Tests
 
-- Every server change ships with a test. Unit suites are `scoutbox-server/scripts/test*.mjs` (`npm test`). The
-  end-to-end batteries in `scoutbox-server/e2e/<domain>/` are the behavioural specification: rewrite an assertion
-  only if it describes old storage, and never delete a behavioural one.
-- Before you finish, run `cd scoutbox-server && npm test` if anything under `scoutbox-server/` changed, plus
-  `npm run e2e` (about a minute) if a route, a repository or a battery changed, and
-  `cd scoutbox-player && npm test` if anything under `scoutbox-player/` changed. Report the results honestly:
-  failures, pre-existing failures and anything not run. Use synthetic data only.
+- Every server change ships with a test. The end-to-end batteries in `scoutbox-server/e2e/<domain>/` are the
+  behavioural specification: change the battery first, then the code, and never delete a behavioural assertion.
+- Before you finish, run `gleam check`, `gleam format --check src test dev`, `gleam test`, `npm run e2e:check`
+  and `npm run e2e` in `scoutbox-server/` if anything under it changed (after a fresh clone, `npm run esqlite`
+  first); `cd scoutbox-server-ts && npm test && npm run e2e` if anything under `scoutbox-server-ts/` or `shared/`
+  changed; and `cd scoutbox-player && npm test` if anything under `scoutbox-player/` changed. Report the results
+  honestly: failures, pre-existing failures and anything not run. Use synthetic data only.
 - CI must be green on `main`. Fix a red step; don't skip it.
 
 ## Reviews

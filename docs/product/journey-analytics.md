@@ -131,7 +131,6 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
 
 - Should a contract's `endDate` lift `under_contract`? This is an open product decision.
 - The analytics metrics `trial_process` and `overdue_trial_reports` ignore room filters.
-- Lead authority comes from a role string typed at login. Fixing it is deferred.
 - Free-text reasons travel in push/email bodies.
 - Minor items recorded, not fixed: lockout keyed by identifier, revise-key replay honesty, unchecked task `linkedResourceId`.
 - Matching has no scheduler: a watchlist's membership (and its transitions and notification) is recorded when it is read.
