@@ -170,34 +170,37 @@ last segment has a `.`) answers `404` rather than `index.html`, so a stale tab's
 files under `assets/` may be cached for good; everything else is `no-cache`. The portals are checked after every API
 route. The server never builds them: step 7's image puts each build in its folder.
 
-## 7. Deployment
+## 7. Deployment [**done**]
 
-The repository's `Dockerfile`, `fly.toml` and `render.yaml` build a Node container. Write a Gleam image that:
+The repository's `Dockerfile` builds the portals as before, then this server: the patched esqlite compiled
+against the image's own ERTS (`dev/esqlite.mjs`) and an Erlang shipment, built on `erlang:29.1.2` with Gleam
+1.19.2 (checksum-pinned) and run on `erlang:29.1.2-slim` from `/srv`. `DATA_DIR` and `PUBLIC_DIR` default to
+`/srv/data` (the same volume) and `/srv/public`. `fly.toml` and `render.yaml` keep the port, the `/healthz` check,
+the volume and the secrets (`ADMIN_KEY`, `MEDIA_SECRET`, `SENDGRID_API_KEY`, `EXPO_ACCESS_TOKEN`,
+`SCOUTBOX_SEED_DEMO`), and name the four `R2_*` settings. CI builds the image and boots it (step 8).
 
-- builds the patched esqlite (`npm run esqlite`) inside the image
-- builds the portals, as the current Dockerfile does
-- uses the same `/srv/data` volume
-- uses the same `/healthz` check
-- uses the same secrets: `ADMIN_KEY`, `MEDIA_SECRET`, `SENDGRID_API_KEY`, `EXPO_ACCESS_TOKEN` and
-  `SCOUTBOX_SEED_DEMO`, plus the R2 bucket and credentials from step 5
+Every setting registered in the TypeScript server's `domains/platform/capabilities.mjs` has its counterpart in
+`platform/config.gleam`. Three it read elsewhere don't:
 
-Check that every setting registered in `domains/platform/capabilities.mjs` has its counterpart in
-`platform/config.gleam`.
+- `SCOUTBOX_RATE_LIMIT_PROVIDER`: it only ever accepted `memory`, which is all this server has.
+- `TS_REVIEWER_BOOTSTRAP_ID`, `_SECRET` and `_NAME`: **not ported yet.** They created a Trust & Safety reviewer
+  at boot. Here a reviewer is created only by another reviewer (`POST /ts/reviewers`), and the dev reviewers are
+  seeded only when dev logins are on, so a production database not seeded with the demo world has no way to get
+  its first compliance reviewer. Port it before a real production deploy.
 
-## 8. CI
+Until step 11.2 the apps still send uploads the TypeScript way, so an image deployed before then serves portals
+whose upload screens fail.
 
-In `.github/workflows/ci.yml`, the "Server" job runs the TypeScript server's boundaries check, `tsc`, unit tests and batteries. Replace it with:
+## 8. CI [**done**]
 
-- `npm run esqlite`
-- `gleam check`
-- `gleam format --check`
-- `gleam test`
-- `npm run e2e:check`
-- `npm run e2e`
+`.github/workflows/ci.yml` has a "Gleam server" job (`npm run esqlite`, `gleam check`, `gleam format --check src
+test dev`, `gleam test`, `npm run e2e:check`, `npm run e2e`) on the image's Erlang and Gleam versions, and an
+"image" job that builds the Dockerfile, boots it as production would on a fresh volume with the demo world, and
+checks `/healthz`, `/app/` and `/console/`. The TypeScript server's job stays until step 11 deletes the server,
+since the apps talk to it until then. The app jobs (club build, player typecheck, tests and web export) stay.
 
-The app jobs (club build, player typecheck, tests and web export) stay. The UI e2e suites in `e2e/`
-were out of scope for the battery port: run them against this server once before the switch, after the apps'
-upload change (step 11.2), since their upload flows send what the TypeScript server takes.
+The UI e2e suites in `e2e/` were out of scope for the battery port: run them against this server once before the
+switch, after the apps' upload change (step 11.2), since their upload flows send what the TypeScript server takes.
 
 ## 9. Move the code the apps share with the server [**done**]
 
