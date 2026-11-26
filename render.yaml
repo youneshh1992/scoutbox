@@ -14,7 +14,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # Production refuses to boot without these two (domains/platform/capabilities.mjs).
+      # Production refuses to boot without these two (scoutbox-server/src/scoutbox/platform/config.gleam).
       # Render generates a random value for each; read ADMIN_KEY in the dashboard.
       - key: ADMIN_KEY
         generateValue: true
@@ -24,4 +24,6 @@ services:
       # demo, add SCOUTBOX_SEED_DEMO=1 before the first deploy, then give the
       # demo clubs passwords with POST /admin/clubs/:id/credentials.
       # Optional live providers, set in the dashboard to switch the adapters:
-      # SENDGRID_API_KEY, EXPO_ACCESS_TOKEN
+      # SENDGRID_API_KEY, EXPO_ACCESS_TOKEN, and the four R2 settings (R2_ACCOUNT_ID,
+      # R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) for uploads in Cloudflare R2;
+      # without them uploaded files are kept on the disk (/srv/data/media).

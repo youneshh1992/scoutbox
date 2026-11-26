@@ -1,13 +1,20 @@
 # Build context for the Dockerfile: sources only. Never ship a developer's
-# installed modules (built for another OS), local data or environment files.
+# installed modules or builds (made for another OS), local data or environment files.
 **/node_modules
 **/dist
 **/dist-*
 **/.env
 **/.env.*
 !**/.env.example
-scoutbox-server-ts/data
-scoutbox-server-ts/public
+scoutbox-server-ts
+scoutbox-server/build
+scoutbox-server/data
+scoutbox-server/public
+scoutbox-server/vendor/esqlite
+scoutbox-server/vendor/esqlite-*.tar
+scoutbox-server/e2e
+scoutbox-server/test
+scoutbox-server/docs
 .git
 .claude
 e2e

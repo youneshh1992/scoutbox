@@ -30,5 +30,7 @@ primary_region = "lhr"
   # Production refuses to boot without ADMIN_KEY (16+ chars) and MEDIA_SECRET (32+ chars).
   # Before the first deploy:
   #   flyctl secrets set ADMIN_KEY=$(openssl rand -hex 24) MEDIA_SECRET=$(openssl rand -hex 32)
-  # Optional: SENDGRID_API_KEY, EXPO_ACCESS_TOKEN. A first boot starts with no people or
+  # Optional: SENDGRID_API_KEY, EXPO_ACCESS_TOKEN. Uploaded files go to Cloudflare R2 when
+  # all four of R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are set,
+  # and to the volume (/srv/data/media) otherwise. A first boot starts with no people or
   # clubs; for a hosted demo also set SCOUTBOX_SEED_DEMO=1 before the first deploy.

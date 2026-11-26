@@ -20,8 +20,66 @@ jobs:
       - name: Every file is Biome-formatted (fix locally with `npm run format`)
         run: npm run format:check
 
+  gleam-server:
+    name: Gleam server — checks, tests + API end-to-end
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: scoutbox-server
+    steps:
+      - uses: actions/checkout@v4
+      # The versions the Dockerfile builds with.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29.1.2"
+          gleam-version: "1.19.2"
+          rebar3-version: "3"
+          version-type: strict
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            scoutbox-server/build/packages
+            scoutbox-server/vendor/esqlite-*.tar
+          key: gleam-${{ runner.os }}-${{ hashFiles('scoutbox-server/manifest.toml', 'scoutbox-server/dev/esqlite.mjs') }}
+      - name: Patched esqlite (dev/esqlite.mjs)
+        run: npm run esqlite
+      - run: gleam check
+      - run: gleam format --check src test dev
+      - run: gleam test
+      - name: Batteries stay inside e2e/, generated code and SQL match the migrations
+        run: npm run e2e:check
+      - name: End-to-end batteries (each boots its own servers on temporary data dirs)
+        run: npm run e2e
+
+  image:
+    name: Container image — builds and answers /healthz
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t scoutbox:ci .
+      - name: Boot it as production would, on a fresh volume, with the demo world
+        run: |
+          docker run -d --name scoutbox -p 4000:4000 \
+            -e ADMIN_KEY="$(openssl rand -hex 24)" -e MEDIA_SECRET="$(openssl rand -hex 32)" \
+            -e SCOUTBOX_SEED_DEMO=1 -v scoutbox-data:/srv/data scoutbox:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4000/healthz; then break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' scoutbox)" != true ]; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4000/healthz
+          echo
+          curl -fsS http://localhost:4000/app/ | grep -q '<div id="root"'
+          curl -fsS http://localhost:4000/console/ | grep -q '<div id="root"'
+      - name: Server log
+        if: always()
+        run: docker logs scoutbox || true
+
   server:
-    name: Server — types, unit tests + API end-to-end
+    name: TypeScript server — types, unit tests + API end-to-end
     runs-on: ubuntu-latest
     defaults:
       run:
