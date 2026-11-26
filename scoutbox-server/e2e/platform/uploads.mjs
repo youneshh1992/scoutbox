@@ -1,4 +1,4 @@
-// Uploads through object storage (final-port-steps.md step 5), against the local store, which refuses what R2 does,
+// Uploads through object storage (docs/final-port-steps.md, step 5), against the local store, which refuses what R2 does,
 // on a freshly seeded server of its own.
 //
 //   A declaring: each audience opens the purposes it may upload; junk is refused by field, not coerced

@@ -1,4 +1,4 @@
-// Uploading a file as a client does (final-port-steps.md step 5): declare it where the caller's audience opens
+// Uploading a file as a client does (docs/final-port-steps.md, step 5): declare it where the caller's audience opens
 // uploads, PUT the bytes to the URL handed back with exactly its headers, and name the `uploadId` to the route
 // that makes a record of it. The same against R2 and the local store, whose URLs are paths on the API.
 import crypto from 'node:crypto';

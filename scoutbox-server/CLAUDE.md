@@ -1,13 +1,14 @@
-# ScoutBox in Gleam
+# The ScoutBox server, in Gleam
 
 The ScoutBox server in Gleam on the BEAM, with SQLite through `sqlight`. It began as a port of the TypeScript server
-(`../scoutbox/scoutbox-server`), which it is replacing (`final-port-steps.md`). This server is the reference now:
-its own e2e batteries (`scoutbox-server/e2e/`) are its behavioural specification, and its blessed fixtures pin its
-rules. Nothing here reads the TypeScript tree. Read `../scoutbox/CLAUDE.md` and `../scoutbox/docs/architecture.md`
-for the product rules; they apply here too.
+(`../scoutbox-server-ts`), which it is replacing (`docs/final-port-steps.md`). This server is the reference now:
+its own e2e batteries (`e2e/`) are its behavioural specification, and its blessed fixtures pin its rules. Nothing
+here reads the TypeScript tree. The repository's [`CLAUDE.md`](../CLAUDE.md) and
+[`docs/architecture.md`](../docs/architecture.md) hold the product rules and the git rules; they apply here too.
+Known defects and accepted limits are in [`docs/known-issues.md`](../docs/known-issues.md).
 
-- `scoutbox-server/`: the Gleam server. How to run it and what is ported: its `README.md`.
-- `.claude/docs/gleam/html/everything.html`: the whole Gleam language tour on one page. Read it when unsure of
+- How to run it and what is ported: [`README.md`](README.md).
+- `docs/gleam/html/everything.html`: the whole Gleam language tour on one page. Read it when unsure of
   syntax or semantics rather than guessing from other languages.
 
 ## Writing Gleam here
@@ -137,7 +138,7 @@ for the product rules; they apply here too.
 
 ## Batteries
 
-`scoutbox-server/e2e/` holds the batteries, the server's behavioural specification, owned here. To change
+`e2e/` holds the batteries, the server's behavioural specification, owned here. To change
 behaviour, change the battery first, then the code. A new battery goes in `e2e/batteries.mjs`. A battery imports only
 Node and `e2e/`, and starts the server only through `e2e/support/server.mjs`; `npm run e2e:check` checks that, and
 that every battery is listed. What the batteries need from the server besides its routes is in

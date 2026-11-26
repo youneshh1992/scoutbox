@@ -144,7 +144,7 @@ now. Behaviour that stays out of scope (video analysis) says `Out of scope:`.
 
 ## Known differences from the TypeScript server
 
-- Files go straight to object storage (final-port-steps.md step 5): a client declares one, PUTs it to a signed URL
+- Files go straight to object storage (docs/final-port-steps.md, step 5): a client declares one, PUTs it to a signed URL
   and names the `uploadId` where it sent a `dataUrl`. The `dataUrl` fields and the chunked `/player/uploads` are
   gone, and a stored file is served on a short-lived storage link (`file: {mime, url}`) instead of base64.
 

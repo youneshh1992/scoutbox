@@ -1,4 +1,4 @@
-//// Uploads (final-port-steps.md step 5.2). A client declares a file (its purpose, size, type and SHA-256) and is
+//// Uploads (docs/final-port-steps.md, step 5.2). A client declares a file (its purpose, size, type and SHA-256) and is
 //// handed a URL to PUT it to in object storage (`platform/blobs`); the bytes never pass through this server. Then
 //// it names the upload (`uploadId`) to the domain route that makes a record of it, in place of the file itself.
 ////

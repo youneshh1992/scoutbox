@@ -1,16 +1,16 @@
 # Final port steps
 
-What has to happen before this server replaces the TypeScript server in `../scoutbox`.
+What has to happen before this server (`scoutbox-server/`) replaces the TypeScript server (`scoutbox-server-ts/`).
 
-The batteries are all untangled, and 55 of them pass unchanged here (`scoutbox-server/LEDGER.md`). Video analysis
-is not part of the port. It is being rebuilt as a separate application, starting from `../scoutbox/box-cam/`. The
-TypeScript engine is kept at the tag `box-cam-ts-final` in `../scoutbox`.
+The batteries are all untangled, and 55 of them passed unchanged here (the retired `LEDGER.md`). Video analysis
+is not part of the port. It is being rebuilt as a separate application, starting from `box-cam/`. The
+TypeScript engine is kept at the tag `box-cam-ts-final`.
 
 Work down the list. Mark each item `[**done**]` when it is done, and commit the mark with that work.
 
 ## 1. Extract Box Cam [**done**]
 
-`../scoutbox/box-cam/` holds what the TypeScript CV engine learned: the architecture, the API ↔ CV contract, the
+`box-cam/` holds what the TypeScript CV engine learned: the architecture, the API ↔ CV contract, the
 domain, the thresholds, the lessons, privacy, the validation plan, and the spec snapshots and fixtures.
 
 **Decided:** frames never pass through this server. The phone uploads them to object storage (R2) with a signed
@@ -39,7 +39,7 @@ exercises the others, so they were left as they are.
 
 ## 4. Stop depending on the TypeScript tree [**done**]
 
-Nothing in this repository reads `../scoutbox` any more:
+Nothing in the Gleam server reads the TypeScript tree any more:
 
 - `priv/migrations/*.sql` and `priv/seed.sql` are edited directly; their generators are gone.
 - The rule fixtures are blessed: `test/scoutbox/blessed.gleam` checks them, and `npm run fixtures:bless` rewrites
@@ -138,14 +138,14 @@ It is not ported to the TypeScript server, so it comes after step 4: the batteri
    left in `media_deletions` (`erasure.retry_removals`), skipping a clip a player still carries (the operator
    page's conflicts). The rows stay: `410` depends on them, and only open ones count towards the cap.
    - The R2 lifecycle rule that catches a PUT landing after the sweep removed its key waits for the bucket: see
-     `docs/known-issues.md`.
+     the repository's `docs/known-issues.md`.
    - Not covered: an evidence file is never removed, because nothing deletes evidence records yet.
 6. **Drop the old routes** [**done**] (the `dataUrl` fields and `/player/uploads` with its chunks), `platform/media` and the
    `upload_sessions` table: the routes and `platform/media` went with 5.2, and migration 0044 drops
    `upload_sessions` and `upload_session_chunks`.
 7. **Batteries** [**done**]. Add one e2e helper, `upload(client, purpose, bytes, fields)`, use it in the batteries that send a
    `dataUrl`, and rewrite `platform/uploads` around the new flow. It is the last TypeScript battery not yet answered
-   here (step 3) and was never copied: start from `../scoutbox/scoutbox-server/e2e/platform/uploads.mjs`, and list
+   here (step 3) and was never copied: start from `scoutbox-server-ts/e2e/platform/uploads.mjs`, and list
    it in `e2e/batteries.mjs`.
 8. **Apps** [**moved to step 11.2**]: they talk to the TypeScript server until the switch, and it takes no uploads,
    so they change with the swap.
@@ -172,7 +172,7 @@ route. The server never builds them: step 7's image puts each build in its folde
 
 ## 7. Deployment
 
-`../scoutbox/Dockerfile`, `fly.toml` and `render.yaml` build a Node container. Write a Gleam image that:
+The repository's `Dockerfile`, `fly.toml` and `render.yaml` build a Node container. Write a Gleam image that:
 
 - builds the patched esqlite (`npm run esqlite`) inside the image
 - builds the portals, as the current Dockerfile does
@@ -186,8 +186,7 @@ Check that every setting registered in `domains/platform/capabilities.mjs` has i
 
 ## 8. CI
 
-This repository has no CI. In `../scoutbox/.github/workflows/ci.yml`, the "Server" job runs the TypeScript
-server's boundaries check, `tsc`, unit tests and batteries. Replace it with:
+In `.github/workflows/ci.yml`, the "Server" job runs the TypeScript server's boundaries check, `tsc`, unit tests and batteries. Replace it with:
 
 - `npm run esqlite`
 - `gleam check`
@@ -196,26 +195,21 @@ server's boundaries check, `tsc`, unit tests and batteries. Replace it with:
 - `npm run e2e:check`
 - `npm run e2e`
 
-The app jobs (club build, player typecheck, tests and web export) stay. The UI e2e suites in `../scoutbox/e2e/`
+The app jobs (club build, player typecheck, tests and web export) stay. The UI e2e suites in `e2e/`
 were out of scope for the battery port: run them against this server once before the switch, after the apps'
 upload change (step 11.2), since their upload flows send what the TypeScript server takes.
 
-## 9. Move the code the apps share with the server
+## 9. Move the code the apps share with the server [**done**]
 
-`scoutbox-club` and `scoutbox-grassroots` import `scoutbox-server/roles.ts`, and the Dockerfile copies it into the
-portal builds. Move it, and any other rule an app imports from the server tree, into a shared package first, so
-that deleting the TypeScript server doesn't break the apps.
+`scoutbox-club` and `scoutbox-grassroots` imported `scoutbox-server/roles.ts`. It is `shared/roles.ts` now, which
+the portals, the Dockerfile's portal stages and the TypeScript server import. This server keeps the same rule in
+`identity/roles.gleam`, and the two must agree. No other app imports from a server tree (the player app's
+`domain/` files are mirrors, not imports).
 
-## 10. Decide where this server lives
+## 10. Decide where this server lives [**done**]
 
-There are two options:
-
-- Replace `../scoutbox/scoutbox-server` with this repository's `scoutbox-server/`. Choose whether to bring its
-  history in with a subtree merge.
-- Keep it as a separate repository, and have `../scoutbox` depend on it for deploys and CI.
-
-This decides which repository's git rules apply (this one commits to `main`; `../scoutbox` works on branches
-through PRs).
+**Decided:** in the ScoutBox repository, at `scoutbox-server/`, its history merged in. The TypeScript server
+moved to `scoutbox-server-ts/` until step 11 deletes it. The repository's git rules apply: branches and PRs.
 
 ## 11. Switch over
 
@@ -226,6 +220,7 @@ through PRs).
    document viewers change to "ask for a URL, PUT, send the `uploadId`" and to reading `file.url`. The bucket
    needs a CORS rule for the web portals.
 3. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
-4. Update `../scoutbox/docs/architecture.md`, `scoutbox-server/OPERATIONS.md`, `README.md` and
-   `../scoutbox/CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in
-   step 4. Here it needs only its git rules from step 10, and any remaining mention of the Node server.
+4. Update `docs/architecture.md`, `scoutbox-server-ts/OPERATIONS.md` (into this server's own), `README.md` and
+   `CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in step 4 and
+   takes its git rules from the repository's since step 10; it needs only any remaining mention of the Node
+   server.

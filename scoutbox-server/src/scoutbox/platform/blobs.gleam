@@ -1,4 +1,4 @@
-//// Object storage for uploaded files (final-port-steps.md step 5). A file's bytes go between the client and storage
+//// Object storage for uploaded files (docs/final-port-steps.md, step 5). A file's bytes go between the client and storage
 //// on a URL this server signs, never through the server. Two backends answer the same protocol, so the demo and
 //// the batteries take the production path:
 ////
