@@ -1069,32 +1069,34 @@ export const mockClient: PlayerClient = {
     return delay(undefined);
   },
 
-  addMedia: (playerId, title, dataUrl, attendanceId) => {
+  addMedia: (playerId, title, file, attendanceId) => {
     const p = getPlayer(playerId);
     moderate(title);
     if (attendanceId) {
       if (!p.attendance.some((a) => a.id === attendanceId))
         throw new ClientError('ATTENDANCE_NOT_FOUND', 'A verified clip must link one of YOUR verified attendances.');
-      if (!dataUrl)
+      if (!file)
         throw new ClientError(
           'FILE_REQUIRED_FOR_VERIFIED_CLIP',
           'Attach the actual footage to claim the Verified Clip seal.',
         );
     }
-    // Demo mode keeps the data URL itself as the playable source.
+    // Demo mode plays the picked file from memory.
+    const id = nid('m');
+    const url = file && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : undefined;
     p.media.push({
-      id: nid('m'),
+      id,
       title,
       kind: 'video',
       uploadedAt: new Date().toISOString(),
       views: 0,
       tags: {},
       verifiedClip: attendanceId ?? null,
-      ...(dataUrl ? { url: dataUrl } : {}),
+      ...(url ? { url } : {}),
     });
     recordActivity(p);
     emit();
-    return delay(undefined);
+    return delay(id);
   },
 
   mediaUrl: (path) => path ?? null,
@@ -1260,10 +1262,19 @@ export const mockClient: PlayerClient = {
     );
   },
 
-  completeDrill: (playerId, drillId, value, videoDataUrl) => {
+  completeDrill: (playerId, drillId, value, mediaId) => {
     const p = getPlayer(playerId);
     const d = DRILL_DEFS.find((x) => x.id === drillId);
     if (!d) throw new ClientError('DRILL_NOT_FOUND', 'No such drill');
+    if (mediaId) {
+      const clip = p.media.find((m) => m.id === mediaId);
+      if (!clip) throw new ClientError('MEDIA_NOT_FOUND', 'No such clip');
+      if (!clip.url)
+        throw new ClientError(
+          'FILE_REQUIRED_FOR_VERIFIED_RESULT',
+          'Name a clip with its footage to verify the result.',
+        );
+    }
     p.drills = p.drills ?? [];
     if (!p.drills.includes(drillId)) p.drills.push(drillId);
     if (value !== undefined && value !== null && !Number.isNaN(value)) {
@@ -1275,7 +1286,7 @@ export const mockClient: PlayerClient = {
         metric: d.metric,
         unit: d.unit,
         value,
-        verified: !!videoDataUrl,
+        verified: !!mediaId,
         ts: Date.now(),
       });
     }

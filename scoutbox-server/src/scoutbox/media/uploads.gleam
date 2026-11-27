@@ -45,7 +45,8 @@ fn owner_columns(owner: Owner) -> #(row.OwnerKind, String) {
   }
 }
 
-/// What a purpose accepts. `sniffed`: its leading bytes must be the type declared.
+/// What a purpose accepts. `sniffed`: its leading bytes must be the type declared. The apps keep the same limits
+/// in `shared/upload.ts` (`UPLOAD_LIMITS`), to refuse a file before sending it; the two must agree.
 pub type Policy {
   Policy(max_bytes: Int, mimes: List(String), sniffed: Bool)
 }

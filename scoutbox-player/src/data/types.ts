@@ -368,9 +368,15 @@ export interface PlayerClient {
   /** `message` is an optional short reply carried with the answer to a contact request. */
   respond(playerId: string, requestId: string, accept: boolean, chosenSlot?: string, message?: string): Promise<void>;
   setAcademyPlus(playerId: string, enabled: boolean): Promise<void>;
-  /** dataUrl carries the actual video file when provided (web picker);
-   *  attendanceId links footage to a verified attendance → Verified Clip seal. */
-  addMedia(playerId: string, title: string, dataUrl?: string, attendanceId?: string): Promise<void>;
+  /** A clip, with its file when one is given (uploaded to storage first); attendanceId links footage to a
+   *  verified attendance → Verified Clip seal. Resolves to the clip's id. */
+  addMedia(
+    playerId: string,
+    title: string,
+    file?: Blob,
+    attendanceId?: string,
+    onProgress?: (fraction: number) => void,
+  ): Promise<string>;
   /** Resolve a media path to a playable URL (absolute in live mode). */
   mediaUrl(path: string | null | undefined): string | null;
   getChannels(playerId: string): Promise<Channel[]>;
@@ -395,8 +401,9 @@ export interface PlayerClient {
   addTimeline(playerId: string, year: string, event: string): Promise<void>;
   updateStats(playerId: string, stats: Record<string, number>, season?: string): Promise<void>;
   getDrills(playerId: string): Promise<Drill[]>;
-  /** value = the drill's measured metric; videoDataUrl marks it combine-VERIFIED. */
-  completeDrill(playerId: string, drillId: string, value?: number, videoDataUrl?: string): Promise<void>;
+  /** value = the drill's measured metric; naming one of the player's clips with footage (mediaId) marks it
+   *  combine-VERIFIED. */
+  completeDrill(playerId: string, drillId: string, value?: number, mediaId?: string): Promise<void>;
   agingUpComplete(playerId: string): Promise<void>;
   getPrefs(playerId: string): Promise<NotificationPrefs | null>;
   setPrefs(playerId: string, prefs: Partial<NotificationPrefs>): Promise<void>;

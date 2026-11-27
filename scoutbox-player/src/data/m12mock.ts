@@ -12,7 +12,6 @@ import type {
   SafetyPack,
   SquadInvite,
   FollowUpView,
-  UploadSession,
   EvidenceRec,
   FamilyOffer,
   FamilyOfferHistory,
@@ -306,7 +305,6 @@ const FOLLOWUPS: FollowUpView[] = [
     report: { registrationStatus: 'registered', matchesPlayed: 4, progression: 'Regular U23 starter' },
   },
 ];
-const UPLOADS = new Map<string, UploadSession>();
 
 function pack(t: FamilyTrial, forGuardian: boolean): SafetyPack {
   return {
@@ -603,43 +601,6 @@ export const m12mock: PlayerM12 = {
   },
   setFootballCategory: async () => delay(undefined),
   setCaptions: async () => delay(undefined),
-  startUpload: async (_pid, input) => {
-    const chunkSize = 512 * 1024;
-    const up: UploadSession = {
-      id: id('upl'),
-      chunkSize,
-      totalChunks: Math.ceil(input.size / chunkSize),
-      received: [],
-      status: 'open',
-      finalisedMediaId: null,
-    };
-    UPLOADS.set(up.id, up);
-    return delay(up);
-  },
-  putChunk: async (_pid, uid, index) => {
-    const up = UPLOADS.get(uid)!;
-    if (!up.received.includes(index)) up.received.push(index);
-    return delay({
-      received: up.received.length,
-      totalChunks: up.totalChunks,
-      complete: up.received.length === up.totalChunks,
-    });
-  },
-  finaliseUpload: async (_pid, uid) => {
-    const up = UPLOADS.get(uid)!;
-    if (up.received.length < up.totalChunks)
-      throw new Error(
-        `Chunks missing (${up.totalChunks - up.received.length}) — upload them, then finalise again. Nothing was lost.`,
-      );
-    up.status = 'finalised';
-    up.finalisedMediaId = id('media');
-    return delay({ mediaId: up.finalisedMediaId });
-  },
-  abortUpload: async (_pid, uid) => {
-    const up = UPLOADS.get(uid);
-    if (up) up.status = 'aborted';
-    return delay(undefined);
-  },
 
   gPassport: (_gid, cid) => delay(passport(cid === 'pl-guni' ? 'pl-guni' : 'pl-adeyemi')),
   gAddEvidence: async (_gid, cid, input) => {
@@ -724,7 +685,7 @@ export const m12mock: PlayerM12 = {
         bytes: 9,
         filename: 'outline.pdf',
       },
-      file: { mime: 'application/pdf', base64: 'JVBERi0xLjQK' },
+      file: { mime: 'application/pdf', url: 'data:application/pdf;base64,JVBERi0xLjQK' },
     }),
   // The demo never presents a signing: nothing is signed in a demo, and the section stays quiet.
   getJourneys: () => delay([]),

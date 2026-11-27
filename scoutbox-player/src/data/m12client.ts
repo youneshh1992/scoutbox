@@ -178,14 +178,6 @@ export interface FollowUpView {
   outcomeState: string;
   report: { registrationStatus: string; matchesPlayed: number | null; progression: string | null } | null;
 }
-export interface UploadSession {
-  id: string;
-  chunkSize: number;
-  totalChunks: number;
-  received: number[];
-  status: string;
-  finalisedMediaId: string | null;
-}
 
 // The recipient's view of the canonical Offer: the ISSUED revisions
 // exactly as the club issued them, the recipient message, the expiry, the
@@ -260,7 +252,8 @@ export interface OfferAnswerResult {
 }
 export interface OfferDocumentFile {
   document: { id: string; label: string | null; mime: string | null; bytes: number | null; filename: string | null };
-  file: { mime: string; base64: string } | null;
+  /** A short-lived storage link to the file. */
+  file: { mime: string; url: string } | null;
 }
 
 // The recipient's view of a signing package: the presented revisions
@@ -333,7 +326,8 @@ export interface FamilySigningHistory {
 }
 export interface SigningDocumentFile {
   document: FamilySigningDocument;
-  file: { mime: string; base64: string } | null;
+  /** A short-lived storage link to the file. */
+  file: { mime: string; url: string } | null;
 }
 export interface SigningCompleteResult {
   signing: FamilySigning;
@@ -415,19 +409,6 @@ export interface PlayerM12 {
   ): Promise<void>;
   setFootballCategory(playerId: string, category: string | null): Promise<void>;
   setCaptions(playerId: string, mediaId: string, vtt: string): Promise<void>;
-  // Resumable uploads. No success is reported before finalisation.
-  startUpload(
-    playerId: string,
-    input: { size: number; mime: string; title: string; sha256?: string },
-  ): Promise<UploadSession>;
-  putChunk(
-    playerId: string,
-    uploadId: string,
-    index: number,
-    base64: string,
-  ): Promise<{ received: number; totalChunks: number; complete: boolean }>;
-  finaliseUpload(playerId: string, uploadId: string): Promise<{ mediaId: string }>;
-  abortUpload(playerId: string, uploadId: string): Promise<void>;
 
   // Guardian surface — child ids are always explicit, ownership checked server-side.
   gPassport(guardianId: string, childId: string): Promise<PassportView>;
@@ -549,13 +530,6 @@ const live: PlayerM12 = {
     post(`/player/followups/${fid}/respond`, pid, { agree, note, experienceRating }),
   setFootballCategory: (pid, category) => post('/player/football-category', pid, { category }),
   setCaptions: (pid, mid, vtt) => post(`/player/media/${mid}/captions`, pid, { vtt }),
-  startUpload: async (pid, input) => (await post('/player/uploads', pid, input)).upload,
-  putChunk: (pid, uid, index, base64) => post(`/player/uploads/${uid}/chunks/${index}`, pid, { data: base64 }, 'PUT'),
-  finaliseUpload: async (pid, uid) => {
-    const r = await post(`/player/uploads/${uid}/finalise`, pid);
-    return { mediaId: r.media.id };
-  },
-  abortUpload: (pid, uid) => post(`/player/uploads/${uid}/abort`, pid),
 
   gPassport: (gid, cid) => req(`/guardian/children/${cid}/passport`, gid),
   gAddEvidence: (gid, cid, input) => post(`/guardian/children/${cid}/evidence`, gid, input),

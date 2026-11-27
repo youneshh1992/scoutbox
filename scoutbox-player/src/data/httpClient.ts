@@ -24,6 +24,7 @@ import type {
   SeasonWrap,
 } from './types';
 import { ClientError } from './types';
+import { type OpenedUpload, uploadFile } from '../../../shared/upload';
 import type {
   Availability,
   ContractStatus,
@@ -177,13 +178,25 @@ export const httpClient: PlayerClient = {
   setAcademyPlus: (playerId, enabled) =>
     request<void>('/player/academyplus', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
 
-  addMedia: (playerId, title, dataUrl, attendanceId) =>
-    request<void>('/player/media', playerId, {
+  addMedia: async (playerId, title, file, attendanceId, onProgress) => {
+    const uploadId = file
+      ? await uploadFile(
+          (declaration) =>
+            request<OpenedUpload>('/player/uploads', playerId, { method: 'POST', body: JSON.stringify(declaration) }),
+          'player_clip',
+          file,
+          { apiBase: API_URL, mime: 'video/mp4', onProgress },
+        )
+      : undefined;
+    const made = await request<{ media: { id: string } }>('/player/media', playerId, {
       method: 'POST',
-      body: JSON.stringify({ title, kind: 'video', dataUrl, attendanceId }),
-    }),
+      body: JSON.stringify({ title, kind: 'video', uploadId, attendanceId }),
+    });
+    return made.media.id;
+  },
 
-  mediaUrl: (path) => (path ? (path.startsWith('data:') ? path : `${API_URL}${path}`) : null),
+  // A path on the API (the local store's links) is made absolute; a data: or storage URL is already.
+  mediaUrl: (path) => (path ? (/^[a-z][a-z0-9+.-]*:/i.test(path) ? path : `${API_URL}${path}`) : null),
 
   getChannels: (playerId) => request<Channel[]>('/player/channels', playerId),
 
@@ -231,10 +244,10 @@ export const httpClient: PlayerClient = {
 
   getDrills: (playerId) => request<Drill[]>('/player/drills', playerId),
 
-  completeDrill: (playerId, drillId, value, videoDataUrl) =>
+  completeDrill: (playerId, drillId, value, mediaId) =>
     request<void>(`/player/drills/${drillId}/complete`, playerId, {
       method: 'POST',
-      body: JSON.stringify({ value, videoDataUrl }),
+      body: JSON.stringify({ value, mediaId }),
     }),
 
   agingUpComplete: (playerId) => request<void>('/player/aging-up/complete', playerId, { method: 'POST' }),

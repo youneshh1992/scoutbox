@@ -13,6 +13,7 @@ import { useFocusEffect } from 'expo-router';
 import { Linking, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { m12, type FamilyOffer, type FamilyOfferRevision, type OfferStatus } from '../data/m12client';
+import { client } from '../data/client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { fmtDayTime, humanDate } from '../time';
@@ -131,7 +132,8 @@ export function OfferSection({ actor, view = 'all' }: { actor: Actor; view?: Off
           : await m12.gOfferDocument(actor.id, o.id, docId);
       if (f.file) {
         try {
-          await Linking.openURL(`data:${f.file.mime};base64,${f.file.base64}`);
+          const url = client.mediaUrl(f.file.url);
+          if (url) await Linking.openURL(url);
         } catch {
           /* not openable here */
         }

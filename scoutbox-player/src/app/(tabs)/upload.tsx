@@ -10,11 +10,15 @@ import { useColors, useStyles, type Palette } from '../../theme';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from '../../components/ui';
 import { pt } from '../../i18n';
 import { PageHeader } from '../../components/PageChrome';
-import { CampaignsSection, ResumableUploadCard } from '../../components/M12Sections';
+import { CampaignsSection, LargeUploadCard } from '../../components/M12Sections';
+import { UPLOAD_LIMITS } from '../../../../shared/upload';
 
-// Web file picker → data URL (capped ~12MB). Native uses the camera roll in
-// production; this prototype records title-only entries off-web.
-function pickVideoFile(): Promise<{ dataUrl: string; name: string } | null> {
+// Web file picker. Native uses the camera roll in production; this prototype
+// records title-only entries off-web.
+const CLIP_MAX_BYTES = UPLOAD_LIMITS.player_clip.maxBytes;
+const CLIP_MAX_MB = Math.round(CLIP_MAX_BYTES / (1024 * 1024));
+
+function pickVideoFile(): Promise<{ file: File | null; name: string } | null> {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return Promise.resolve(null);
   return new Promise((resolve) => {
     const input = document.createElement('input');
@@ -23,14 +27,11 @@ function pickVideoFile(): Promise<{ dataUrl: string; name: string } | null> {
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return resolve(null);
-      if (file.size > 12 * 1024 * 1024) {
-        resolve({ dataUrl: '', name: `TOO_LARGE:${file.name}` });
+      if (file.size > CLIP_MAX_BYTES) {
+        resolve({ file: null, name: `TOO_LARGE:${file.name}` });
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => resolve({ dataUrl: String(reader.result), name: file.name });
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
+      resolve({ file, name: file.name });
     };
     input.click();
   });
@@ -50,11 +51,11 @@ export default function Upload() {
   const styles = useStyles(makeStyles);
   const { playerId, me, isMinor, refresh } = useSession();
   const [mediaTitle, setMediaTitle] = useState('');
-  const [pickedFile, setPickedFile] = useState<{ dataUrl: string; name: string } | null>(null);
+  const [pickedFile, setPickedFile] = useState<{ file: File | null; name: string } | null>(null);
   const [linkAttendanceId, setLinkAttendanceId] = useState<string | null>(null);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [drillValues, setDrillValues] = useState<Record<string, string>>({});
-  const [drillVideos, setDrillVideos] = useState<Record<string, string>>({});
+  const [drillVideos, setDrillVideos] = useState<Record<string, File | undefined>>({});
   const [statDraft, setStatDraft] = useState<Record<string, string>>({});
   const [seasonDraft, setSeasonDraft] = useState('');
   const [programme, setProgramme] = useState<ProgrammeInfo | null>(null);
@@ -94,7 +95,7 @@ export default function Upload() {
         true,
       );
     if (picked.name.startsWith('TOO_LARGE:'))
-      return say('That file is over the 12MB prototype cap — trim the clip and retry.', true);
+      return say(`That file is over the ${CLIP_MAX_MB}MB cap — trim the clip and retry.`, true);
     setPickedFile(picked);
     if (!mediaTitle.trim()) setMediaTitle(picked.name.replace(/\.[^.]+$/, ''));
     say(`Selected ${picked.name} — add a title and upload.`);
@@ -103,12 +104,7 @@ export default function Upload() {
   const uploadMedia = async () => {
     if (!mediaTitle.trim()) return say('Give the clip a title.', true);
     try {
-      await client.addMedia(
-        playerId,
-        mediaTitle.trim(),
-        pickedFile?.dataUrl || undefined,
-        linkAttendanceId ?? undefined,
-      );
+      await client.addMedia(playerId, mediaTitle.trim(), pickedFile?.file ?? undefined, linkAttendanceId ?? undefined);
       const verified = !!linkAttendanceId && !!pickedFile;
       setMediaTitle('');
       setPickedFile(null);
@@ -377,11 +373,11 @@ export default function Upload() {
                   label={drillVideos[d.id] ? 'Attached' : 'Attach'}
                   onPress={async () => {
                     const picked = await pickVideoFile();
-                    if (picked && !picked.name.startsWith('TOO_LARGE:')) {
-                      setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
+                    if (picked?.file) {
+                      setDrillVideos({ ...drillVideos, [d.id]: picked.file });
                       say('Drill video attached — result will be combine-verified.');
                     } else if (picked) {
-                      say('That file is over the 12MB cap.', true);
+                      say(`That file is over the ${CLIP_MAX_MB}MB cap.`, true);
                     }
                   }}
                 />
@@ -393,9 +389,12 @@ export default function Upload() {
                     const raw = drillValues[d.id];
                     if (!raw) return say('Enter your number first.', true);
                     try {
-                      await client.completeDrill(playerId, d.id, Number(raw), drillVideos[d.id]);
+                      const video = drillVideos[d.id];
+                      // The footage becomes one of the player's clips, which the result names.
+                      const mediaId = video ? await client.addMedia(playerId, `${d.name} — combine`, video) : undefined;
+                      await client.completeDrill(playerId, d.id, Number(raw), mediaId);
                       setDrillValues({ ...drillValues, [d.id]: '' });
-                      setDrillVideos({ ...drillVideos, [d.id]: '' });
+                      setDrillVideos({ ...drillVideos, [d.id]: undefined });
                       setDrills(await client.getDrills(playerId));
                       await refresh();
                       say(
@@ -452,7 +451,7 @@ export default function Upload() {
             mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))}
           />
         ) : null}
-        {playerId ? <ResumableUploadCard playerId={playerId} onDone={refresh} /> : null}
+        {playerId ? <LargeUploadCard playerId={playerId} onDone={refresh} /> : null}
       </ScrollView>
     </SafeAreaView>
   );

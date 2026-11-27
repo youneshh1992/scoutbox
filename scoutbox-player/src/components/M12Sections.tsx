@@ -4,7 +4,7 @@ import { GuidanceNote } from './InformationRows';
 // squad invites + trial safety, and the guardian panel (guardian.tsx).
 // Accessibility: accessibilityLabel/role on controls, status text announced
 // via accessibilityLiveRegion.
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
@@ -32,11 +32,12 @@ import {
   type PassportView,
   type SafetyPack,
   type SquadInvite,
-  type UploadSession,
 } from '../data/m12client';
 import { getDataSaver, getPLang, pFmtDate, pt, setDataSaver, setPLang } from '../i18n';
 import { InvitationCard, InvitationDetail } from './InvitationCard';
 import { humanDate } from '../time';
+import { client } from '../data/client';
+import { UPLOAD_LIMITS } from '../../../shared/upload';
 
 // Presentation casing for status labels; the data value is never changed.
 const cap = (v: string | null | undefined) => (v ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, ' ') : '');
@@ -933,46 +934,17 @@ export function AccessSection({
 }
 
 // ------------------------------------------------ resumable uploads
-export function ResumableUploadCard({ playerId, onDone }: { playerId: string; onDone: () => void }) {
+/** A large video with its upload progress. It is sent in one go, so an interrupted upload starts again. */
+export function LargeUploadCard({ playerId, onDone }: { playerId: string; onDone: () => void }) {
   const colors = useColors();
-  const [session, setSession] = useState<UploadSession | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [status, setStatus] = useState<string>('');
-  const [pending, setPending] = useState<{ file: File; up: UploadSession } | null>(null);
-
-  const pump = useCallback(
-    async (file: File, up: UploadSession, from: number) => {
-      for (let i = from; i < up.totalChunks; i++) {
-        if (getPaused()) {
-          setPending({ file, up });
-          setStatus(`Paused at chunk ${i}/${up.totalChunks} — resume any time, nothing is lost.`);
-          return;
-        }
-        const start = i * up.chunkSize;
-        const blob = file.slice(start, Math.min(start + up.chunkSize, file.size));
-        const b64 = await blobToBase64(blob);
-        await m12.putChunk(playerId, up.id, i, b64);
-        setProgress(Math.round(((i + 1) / up.totalChunks) * 100));
-      }
-      const r = await m12.finaliseUpload(playerId, up.id);
-      setStatus(`Upload finalised — media ${r.mediaId}. (Success is only reported AFTER integrity checks.)`);
-      setSession(null);
-      setPending(null);
-      onDone();
-    },
-    [playerId, onDone],
-  );
-
-  const pausedRef = { current: paused };
-  const getPaused = () => pausedRef.current;
-  pausedRef.current = paused;
 
   if (Platform.OS !== 'web') {
     return (
       <Card>
         <SectionTitle>{pt('uploadLarge')}</SectionTitle>
-        <Muted size={12}>Resumable uploads are verified on web; native file access ships with the store builds.</Muted>
+        <Muted size={12}>Large uploads are on web; native file access ships with the store builds.</Muted>
       </Card>
     );
   }
@@ -980,36 +952,41 @@ export function ResumableUploadCard({ playerId, onDone }: { playerId: string; on
     <Card>
       <SectionTitle>{pt('uploadLarge')}</SectionTitle>
       <Muted size={12}>
-        Chunked with integrity checks: interruptions resume without duplicates, and nothing counts as uploaded until
-        finalisation passes.
+        Sent straight to storage with an integrity check: nothing counts as uploaded until the file arrives intact.
       </Muted>
-      {!session && (
+      {progress === null && (
         // eslint-disable-next-line react/no-unknown-property
         <input
           type="file"
-          accept="video/webm,video/mp4,image/jpeg,image/png"
+          accept={UPLOAD_LIMITS.player_clip.mimes.join(',')}
           aria-label="Choose a large video to upload"
           style={{ marginTop: 8, color: colors.muted }}
           onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
             const file = e.target.files?.[0];
             if (!file) return;
+            if (file.size > UPLOAD_LIMITS.player_clip.maxBytes) {
+              setStatus(
+                `That file is over the ${Math.round(UPLOAD_LIMITS.player_clip.maxBytes / (1024 * 1024))}MB cap.`,
+              );
+              return;
+            }
+            setProgress(0);
+            setStatus('Uploading…');
             try {
-              const up = await m12.startUpload(playerId, {
-                size: file.size,
-                mime: file.type || 'video/webm',
-                title: file.name.slice(0, 60),
-              });
-              setSession(up);
-              setProgress(0);
-              setStatus('Uploading…');
-              void pump(file, up, 0);
+              await client.addMedia(playerId, file.name.slice(0, 60), file, undefined, (f) =>
+                setProgress(Math.round(f * 100)),
+              );
+              setStatus('Uploaded — clubs can watch it now.');
+              onDone();
             } catch (err) {
-              setStatus(err instanceof Error ? err.message : 'Refused');
+              setStatus(err instanceof Error ? `${err.message} Choose the file again to retry.` : 'Refused');
+            } finally {
+              setProgress(null);
             }
           }}
         />
       )}
-      {session && (
+      {progress !== null && (
         <View style={{ marginTop: 8 }}>
           <View
             style={{ height: 8, backgroundColor: colors.panel2, borderRadius: 4 }}
@@ -1017,31 +994,6 @@ export function ResumableUploadCard({ playerId, onDone }: { playerId: string; on
           >
             <View style={{ height: 8, width: `${progress}%`, backgroundColor: colors.accent, borderRadius: 4 }} />
           </View>
-          <Row style={{ marginTop: 6 }}>
-            <Button
-              small
-              label={paused ? 'Resume' : 'Pause'}
-              onPress={() => {
-                const next = !paused;
-                setPaused(next);
-                if (!next && pending) {
-                  setStatus('Resuming…');
-                  void pump(pending.file, pending.up, pending.up.received.length);
-                }
-              }}
-            />
-            <Button
-              small
-              danger
-              label="Abort"
-              onPress={async () => {
-                await m12.abortUpload(playerId, session.id);
-                setSession(null);
-                setPending(null);
-                setStatus('Aborted — partial chunks cleaned up server-side.');
-              }}
-            />
-          </Row>
         </View>
       )}
       {!!status && (
@@ -1051,13 +1003,4 @@ export function ResumableUploadCard({ playerId, onDone }: { playerId: string; on
       )}
     </Card>
   );
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
 }

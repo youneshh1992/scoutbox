@@ -20,6 +20,7 @@ import {
   type SigningPartyType,
   type SigningStatus,
 } from '../data/m12client';
+import { client } from '../data/client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { TimelineItem, Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
@@ -148,7 +149,8 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
       const f = await m12.getSigningDocument(actor.id, s.id, revisionId);
       if (f.file) {
         try {
-          await Linking.openURL(`data:${f.file.mime};base64,${f.file.base64}`);
+          const url = client.mediaUrl(f.file.url);
+          if (url) await Linking.openURL(url);
         } catch {
           /* not openable here */
         }
