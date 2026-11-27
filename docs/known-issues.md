@@ -79,8 +79,7 @@ end of the feature freeze. Server paths are relative to `scoutbox-server/`.
 - **Screens show the server's error message.** About a hundred places in the apps (`notify(e.message)`, and the Rooms
   screens' fallback) put the API's `message` on screen. It is developer English, untranslated, and for routes moved
   to the input schemas it is the generic wording (`reasons is required.`) rather than the hand-written sentence some
-  routes had. The fix is client-side wording from each refusal's `problem`
-  ([`app-layer-architecture-improvements.md`](app-layer-architecture-improvements.md), step 6).
+  routes had. The fix is client-side wording from each refusal's `problem`.
 - **The apps read only the first page of paged lists** (50 items): the player directory, the Film Room, matching,
   watchlists, Nobody Missed and the admin and club lists. Each has a comment where "load more" is needed. The
   player pickers (assessment, case, objective) walk every directory page; a large club needs a search box there.
