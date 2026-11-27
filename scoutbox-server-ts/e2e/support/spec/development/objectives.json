@@ -1,9 +1,0 @@
-{
-  "$source": "domains/development/objectives.mjs",
-  "DRILL_RECORDING": {
-    "equipment": "Any phone camera ≥ 720p",
-    "distance": "Full drill area in frame",
-    "surface": "Flat grass or turf",
-    "camera": "Fixed position, side-on, no zooming during the attempt"
-  }
-}

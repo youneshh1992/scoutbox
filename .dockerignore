@@ -6,7 +6,6 @@
 **/.env
 **/.env.*
 !**/.env.example
-scoutbox-server-ts
 scoutbox-server/build
 scoutbox-server/data
 scoutbox-server/public

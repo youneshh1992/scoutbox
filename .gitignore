@@ -6,8 +6,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 dist-demo/
-scoutbox-server-ts/data/
-scoutbox-server-ts/public/
 e2e/dist/
 .env
 .env.local

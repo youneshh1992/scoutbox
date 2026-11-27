@@ -7,11 +7,10 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTRACT, runtimeSupport } from '../scoutbox-server-ts/runtime.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // '.' is the repository root: Biome and the lefthook pre-commit hook, which its `prepare` script installs.
-const APPS = ['.', 'scoutbox-server-ts', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
+const APPS = ['.', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
 // scoutbox-grassroots/node_modules and scoutbox-agent/node_modules are symlinks to scoutbox-club's — no install.
 
 let failed = false;
@@ -21,11 +20,35 @@ const fail = (m) => {
 };
 const okay = (m) => console.log(`✓ ${m}`);
 
-// Node version: the server's own runtime contract (scoutbox-server-ts/runtime.mjs),
-// so this check can never drift from what the server accepts at boot.
-const runtime = runtimeSupport();
-if (runtime.ok) okay(`node ${process.versions.node} (${CONTRACT})`);
-else fail(`${runtime.reason} Install a supported Node.js (https://nodejs.org).`);
+// Node runs the apps' tooling and the server's scripts: the version scoutbox-server/package.json asks for.
+const [major, minor] = process.versions.node.split('.').map(Number);
+if (major > 22 || (major === 22 && minor >= 18)) okay(`node ${process.versions.node}`);
+else fail(`node ${process.versions.node} is too old: install Node.js 22.18 or later (https://nodejs.org).`);
+
+// The server: Gleam on Erlang/OTP, and the patched SQLite driver it is built against.
+const version = (cmd) => {
+  try {
+    return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return null;
+  }
+};
+const gleam = version('gleam --version');
+const otp = version(`erl -noshell -eval 'io:format("~s", [erlang:system_info(otp_release)]), halt().'`);
+if (gleam) okay(gleam);
+else fail('gleam not found: install Gleam (https://gleam.run/getting-started/installing/).');
+if (otp) okay(`Erlang/OTP ${otp}`);
+else fail('erl not found: install Erlang/OTP, which Gleam runs on.');
+if (gleam && otp) {
+  try {
+    execSync('npm run --silent esqlite', { cwd: path.join(ROOT, 'scoutbox-server'), stdio: 'inherit' });
+    okay('scoutbox-server: patched esqlite built');
+  } catch {
+    fail('scoutbox-server: npm run esqlite failed — see output above');
+  }
+}
 
 for (const rel of APPS) {
   const app = rel === '.' ? 'repo tools (formatter, git hooks)' : rel;

@@ -1,9 +1,0 @@
-{
-  "$source": "domains/recruitment/analytics/cohorts.mjs",
-  "EVIDENCE_REASON_CODES": [
-    "insufficient_full_match",
-    "insufficient_recent_evidence",
-    "reference_missing",
-    "combine_missing"
-  ]
-}

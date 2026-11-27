@@ -7,3 +7,4 @@ node_modules
 /vendor/esqlite/
 /vendor/esqlite-*.tar
 /public
+/data.bak-*

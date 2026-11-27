@@ -234,7 +234,12 @@ moved to `scoutbox-server-ts/` until step 11 deletes it. The repository's git ru
      `verified`. It takes `mediaId` now, one of the player's own clips with its file; the app uploads the drill's
      video as a clip first.
    - The bucket's CORS rule waits for the bucket: see `docs/known-issues.md`.
-3. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
+3. **Swap the server in** [**done**]. `scoutbox-server-ts/` and its CI job are deleted. `npm run setup` checks Gleam
+   and Erlang and builds the patched esqlite, `npm run dev` starts this server (`gleam run`), `npm run reseed`
+   archives its `data/`, and `npm run test:server` runs its tests and batteries. There is no production data to
+   re-seed. The browser suites in `e2e/` start this server (`e2e/apiServer.mjs`); the Box Cam ones are deleted.
+   Run against it, every suite that failed did so at the step it failed on the TypeScript server, or later
+   (`docs/known-issues.md`).
 4. Update `docs/architecture.md`, `scoutbox-server-ts/OPERATIONS.md` (into this server's own), `README.md` and
    `CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in step 4 and
    takes its git rules from the repository's since step 10; it needs only any remaining mention of the Node

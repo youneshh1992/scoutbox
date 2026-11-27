@@ -8,7 +8,7 @@
 // The launcher validates prerequisites, refuses to double-start, starts the
 // backend first, waits for CONTENT-verified readiness (not just an open
 // port), prints the URL sheet, and stops only its own children on Ctrl-C.
-// It never touches scoutbox-server-ts/data beyond what the server itself does.
+// It never touches scoutbox-server/data beyond what the server itself does.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,10 +23,11 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const APPS = [
   {
     name: 'backend',
-    dir: 'scoutbox-server-ts',
+    dir: 'scoutbox-server',
     port: 4000,
-    cmd: 'node',
-    args: ['server.mjs'],
+    // Compiles first when the source changed, so the first start after a pull takes a while.
+    cmd: 'gleam',
+    args: ['run'],
     url: 'http://localhost:4000',
     label: 'API — /health to check',
     ready: async () => {
@@ -95,8 +96,15 @@ const APPS = [
 
 // ---------- prerequisites: deps installed, ports free
 let bad = false;
+if (!fs.existsSync(path.join(ROOT, 'scoutbox-server', 'vendor', 'esqlite'))) {
+  console.error(
+    '✗ scoutbox-server/vendor/esqlite missing — run `npm run setup` first (builds the patched SQLite driver).',
+  );
+  bad = true;
+}
 for (const app of APPS) {
-  if (app.name !== 'grassroots' && app.name !== 'agent' && !fs.existsSync(path.join(ROOT, app.dir, 'node_modules'))) {
+  if (app.name === 'backend' || app.name === 'grassroots' || app.name === 'agent') continue;
+  if (!fs.existsSync(path.join(ROOT, app.dir, 'node_modules'))) {
     console.error(`✗ ${app.dir}/node_modules missing — run \`npm run setup\` first (installs from the lockfiles).`);
     bad = true;
   }
@@ -190,7 +198,7 @@ async function waitReady(app, timeoutMs) {
 
 try {
   start(APPS[0]); // backend first — everything else talks to it
-  const backendInfo = await waitReady(APPS[0], 30_000);
+  const backendInfo = await waitReady(APPS[0], 300_000);
   for (const app of APPS.slice(1)) start(app);
   const notes = [backendInfo];
   for (const app of APPS.slice(1)) notes.push(await waitReady(app, app.name === 'player' ? 120_000 : 60_000));

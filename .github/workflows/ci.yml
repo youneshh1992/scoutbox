@@ -78,29 +78,6 @@ jobs:
         if: always()
         run: docker logs scoutbox || true
 
-  server:
-    name: TypeScript server — types, unit tests + API end-to-end
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: scoutbox-server-ts
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: scoutbox-server-ts/package-lock.json
-      - run: npm ci
-      - name: Domain boundaries (imports through public modules, downward only, no cycles)
-        run: npm run check:boundaries
-      - name: Types (tsc over the TypeScript modules)
-        run: npm run typecheck
-      - name: Domain unit tests
-        run: npm test
-      - name: End-to-end batteries (scripts/runE2E.mjs; each boots its own servers on temporary data dirs)
-        run: npm run e2e
-
   club:
     name: Club app — typecheck + build
     runs-on: ubuntu-latest
