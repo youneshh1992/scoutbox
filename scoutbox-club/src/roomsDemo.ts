@@ -4231,7 +4231,10 @@ export const demoRooms: RoomsApi = {
     const d = kind === 'executed' ? rev.executedDocument : rev.document;
     if (!d)
       throw offerApiErr(404, 'SIGNING_DOCUMENT_NOT_FOUND', 'No document with that reference is available to you.');
-    return delay({ document: d, file: { mime: d.mime ?? 'application/pdf', base64: btoa('%PDF-1.4 demo') } });
+    return delay({
+      document: d,
+      file: { mime: d.mime ?? 'application/pdf', url: `data:application/pdf;base64,${btoa('%PDF-1.4 demo')}` },
+    });
   },
   updateSigningDraft: async (_s, id, input) => {
     const p = signingOr404(id);
@@ -4254,11 +4257,11 @@ export const demoRooms: RoomsApi = {
     const rev = currentSigningRevision(p);
     rev.document = {
       id: nid('sgd'),
-      label: input.label ?? input.filename,
-      filename: input.filename,
-      mime: 'application/pdf',
-      bytes: input.dataUrl.length,
-      sha256: demoDigest(input.dataUrl),
+      label: input.label ?? input.file.name,
+      filename: input.file.name,
+      mime: input.file.type || 'application/pdf',
+      bytes: input.file.size,
+      sha256: demoDigest(`${input.file.name}:${input.file.size}`),
     };
     signingHist(p, 'signing_document_attached', Date.now());
     bumpSigning(p);
@@ -4270,11 +4273,11 @@ export const demoRooms: RoomsApi = {
     const rev = currentSigningRevision(p);
     rev.executedDocument = {
       id: nid('sgx'),
-      label: input.filename,
-      filename: input.filename,
-      mime: 'application/pdf',
-      bytes: input.dataUrl.length,
-      sha256: demoDigest(input.dataUrl),
+      label: input.file.name,
+      filename: input.file.name,
+      mime: input.file.type || 'application/pdf',
+      bytes: input.file.size,
+      sha256: demoDigest(`${input.file.name}:${input.file.size}`),
     };
     bumpSigning(p);
     return delay({ signing: signingView(p) });

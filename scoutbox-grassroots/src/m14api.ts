@@ -176,7 +176,7 @@ export interface M14Api {
   addEvidence(
     s: Session,
     claimId: string,
-    input: { dataUrl?: string; filename?: string; note?: string },
+    input: { uploadId?: string; filename?: string; note?: string },
   ): Promise<{ claim: SubjectClaim }>;
   submitClaim(s: Session, claimId: string): Promise<{ claim: SubjectClaim }>;
   sendWorkEmail(s: Session, email: string): Promise<{ sent: boolean; note: string }>;
@@ -219,7 +219,7 @@ export interface M14Api {
       identifier?: string;
       holderName?: string;
       expiry?: string;
-      dataUrl?: string;
+      uploadId?: string;
       filename?: string;
     },
   ): Promise<{ claim: { id: string; status: string; display: string }; note: string }>;

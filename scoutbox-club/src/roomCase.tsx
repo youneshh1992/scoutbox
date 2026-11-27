@@ -7,7 +7,8 @@
 // read back, the timeline is the server's journey history.
 import { useCallback, useEffect, useState, type DependencyList } from 'react';
 import { Icon } from '../../design-system/icons';
-import { ApiError, api, type Session, type Channel } from './api';
+import { API_URL, ApiError, api, type Session, type Channel } from './api';
+import { fileHref } from '../../shared/upload.ts';
 import {
   rooms,
   ROOM_TASK_STATES,
@@ -487,7 +488,7 @@ export function DocumentsPanel({ session, room, notify, openSub }: CasePanelProp
     setBusy(true);
     try {
       const d = await rooms.signingDocument(session, pkg.id, kind);
-      if (d.file) window.open(`data:${d.file.mime};base64,${d.file.base64}`, '_blank', 'noopener');
+      if (d.file) window.open(fileHref(d.file.url, API_URL), '_blank', 'noopener');
       notify(t('rm.docsOpened'));
     } catch (e) {
       notify(errText(e), true);

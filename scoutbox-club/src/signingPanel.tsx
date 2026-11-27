@@ -13,7 +13,8 @@
 // What never appears here: a "sign for the player" control, a legal claim,
 // a fee, a negotiation, the recruitment decision's rationale.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, type Session } from './api';
+import { API_URL, ApiError, type Session } from './api';
+import { fileHref } from '../../shared/upload.ts';
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 import {
   rooms,
@@ -62,13 +63,6 @@ export function signingErrMessage(e: unknown): string {
   return t('sg.err.generic');
 }
 
-const readAsDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
-  });
 const shortDigest = (sha: string | null) => (sha ? `${sha.slice(0, 12)}…${sha.slice(-6)}` : '—');
 
 export function SigningWorkflow({ session, room, notify, reload }: Props) {
@@ -167,15 +161,9 @@ export function SigningWorkflow({ session, room, notify, reload }: Props) {
       const input = kind === 'document' ? fileRef.current : executedRef.current;
       const file = input?.files?.[0];
       if (!file) return t('sg.pickFile');
-      const dataUrl = await readAsDataUrl(file);
       if (kind === 'document')
-        await rooms.attachSigningDocument(session, pkg.id, {
-          dataUrl,
-          filename: file.name,
-          label: file.name,
-          expectedRev: pkg.rev,
-        });
-      else await rooms.attachExecutedDocument(session, pkg.id, { dataUrl, filename: file.name, expectedRev: pkg.rev });
+        await rooms.attachSigningDocument(session, pkg.id, { file, label: file.name, expectedRev: pkg.rev });
+      else await rooms.attachExecutedDocument(session, pkg.id, { file, expectedRev: pkg.rev });
       if (input) input.value = '';
       return kind === 'document' ? t('sg.attached') : t('sg.executedAttached');
     });
@@ -265,7 +253,7 @@ export function SigningWorkflow({ session, room, notify, reload }: Props) {
     run(async () => {
       if (!pkg) return t('sg.notDone');
       const d = await rooms.signingDocument(session, pkg.id, kind);
-      if (d.file) window.open(`data:${d.file.mime};base64,${d.file.base64}`, '_blank', 'noopener');
+      if (d.file) window.open(fileHref(d.file.url, API_URL), '_blank', 'noopener');
       return t('sg.opened');
     });
 

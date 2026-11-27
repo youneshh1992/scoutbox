@@ -46,8 +46,10 @@ export const UPLOAD_LIMITS: Record<UploadPurpose, { maxBytes: number; mimes: rea
 /** Storage refused the PUT (an expired URL, a dropped connection). Declaring again starts over. */
 export class UploadFailed extends Error {
   readonly code = 'UPLOAD_FAILED';
-  constructor(readonly status: number) {
+  readonly status: number;
+  constructor(status: number) {
     super(status === 0 ? 'The upload was interrupted.' : `Storage refused the upload (${status}).`);
+    this.status = status;
   }
 }
 
@@ -58,6 +60,14 @@ export interface UploadOptions {
   mime?: string;
   /** Called with the fraction sent, 0 to 1, where the platform can report it. */
   onProgress?: (fraction: number) => void;
+}
+
+/**
+ * Where a response's `file.url` (a short-lived storage link) opens. The local store's links are paths on the API,
+ * so they are resolved against it; a storage URL is already absolute.
+ */
+export function fileHref(url: string, apiBase?: string): string {
+  return new URL(url, apiBase || globalThis.location?.origin).toString();
 }
 
 /** SHA-256 of the bytes, as lowercase hex. */

@@ -19,6 +19,7 @@
 // server-side on every read, and a score of 100 grants exactly what a score of
 // 0 grants. Rooms are never sorted or ranked by it.
 import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
+import { type OpenedUpload, uploadFile } from '../../shared/upload.ts';
 import type { RecruitmentPassport } from './m15api';
 import { demoRooms } from './roomsDemo';
 
@@ -1178,7 +1179,8 @@ export interface SigningHistoryItem {
 }
 export interface SigningDocumentFile {
   document: SigningDocumentView;
-  file: { mime: string; base64: string } | null;
+  /** A short-lived storage link to the file (`fileHref` opens it). */
+  file: { mime: string; url: string } | null;
 }
 export interface SigningActInput {
   expectedRev: number;
@@ -1284,12 +1286,12 @@ export interface RoomsApi {
   attachSigningDocument(
     s: Session,
     signingId: string,
-    input: { dataUrl: string; filename: string; label?: string | null; expectedRev: number },
+    input: { file: File; label?: string | null; expectedRev: number },
   ): Promise<{ signing: SigningClubView }>;
   attachExecutedDocument(
     s: Session,
     signingId: string,
-    input: { dataUrl: string; filename: string; expectedRev: number },
+    input: { file: File; expectedRev: number },
   ): Promise<{ signing: SigningClubView }>;
   presentSigning(
     s: Session,
@@ -1604,6 +1606,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Sends a signing document to storage: the `uploadId` to name to the route that attaches it. */
+const uploadSigningDocument = (s: Session, file: File) =>
+  uploadFile(
+    (declaration) =>
+      req<OpenedUpload>('/org/uploads', { method: 'POST', headers: H(s), body: JSON.stringify(declaration) }),
+    'signing_document',
+    file,
+    { apiBase: API_URL, mime: 'application/pdf' },
+  );
+
 const qs = (params: Record<string, string | number | undefined | null>) => {
   const out = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') out.set(k, String(v));
@@ -1647,10 +1659,22 @@ export const httpRooms: RoomsApi = {
     req(`/org/signings/${id}/document${kind === 'executed' ? '?kind=executed' : ''}`, { headers: H(s) }),
   updateSigningDraft: (s, id, input) =>
     req(`/org/signings/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
-  attachSigningDocument: (s, id, input) =>
-    req(`/org/signings/${id}/document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  attachExecutedDocument: (s, id, input) =>
-    req(`/org/signings/${id}/executed-document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  attachSigningDocument: async (s, id, { file, label, expectedRev }) => {
+    const uploadId = await uploadSigningDocument(s, file);
+    return req(`/org/signings/${id}/document`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify({ uploadId, filename: file.name, label, expectedRev }),
+    });
+  },
+  attachExecutedDocument: async (s, id, { file, expectedRev }) => {
+    const uploadId = await uploadSigningDocument(s, file);
+    return req(`/org/signings/${id}/executed-document`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify({ uploadId, filename: file.name, expectedRev }),
+    });
+  },
   presentSigning: (s, id, input) =>
     req(`/org/signings/${id}/ready`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   completeClubParty: (s, id, input) =>
