@@ -1,8 +1,7 @@
 # Known issues
 
 Known defects and limits that are not fixed yet. Remove an entry when it's fixed. Items marked *feature* wait for the
-end of the feature freeze. Server paths are relative to `scoutbox-server/`, the Gleam server; the TypeScript server in
-`scoutbox-server-ts/` is being retired, and nothing here is fixed there.
+end of the feature freeze. Server paths are relative to `scoutbox-server/`.
 
 ## Configuration
 
@@ -584,6 +583,29 @@ instrumentation in front of CORS, the HTTP baseline and the fault layer.
 ## Tests
 
 The UI suites in the repository's `e2e/`:
+
+- **28 of the 39 live browser suites fail** (`e2e/*Live.test.mjs`, which start the server through
+  `e2e/apiServer.mjs`). Found 2026-11-27 at the switch-over (`scoutbox-server/docs/final-port-steps.md`, step 11.3),
+  run against this server and, before the switch, against the TypeScript server at `c9c30d5a`: each fails at the
+  same step on both, or later here. Most wait for a selector, label or layout the apps no longer have; some may be
+  app or server defects. Triage each against the app before changing it, and never delete a behavioural check.
+  Where each stops:
+  - selectors the apps no longer have: `liveIntegration` (`.list-row` in Messages), `agentOnboarding`
+    (`[data-testid="team-rows"] .list-row`), `agentTransaction` (the sidebar's Language `select`), `authScreens` and
+    `scroll` (`.auth-card`), `categoriesBrand` (`account-cat-appearance`), `passport` (`[aria-label="Football
+    Passport"]`), `sessionRegressions` ("Switch org"), `sidebarCollapse` (`button.nav-section` "Recruitment"),
+    `suitabilityCoverage` ("Travel time/route estimates unavailable"), `visualQuality` (an element its
+    `getComputedStyle` expects);
+  - words and layout: `agentCompliance` A4 (the policy result disclaimer), `caseNav` "no label below 13px",
+    `matchingWatchlists` W3 (the preferred count), `navLive` N1 (the four sections), `oneLineRoots` and
+    `playerInbox` (a message body on the list), `playerProfile` (the summary line), `trial` A7b (the slot's time
+    and venue), `trustScore` T1 (the mandatory disclaimer), `offer` B5b ("Accepted — signing pending"),
+    `offerHardening` S2b ("◷ Expired");
+  - behaviour: `conflictsPreferences` J3 (sidebar navigation bypassed the unsaved-changes guard), `developmentHub` H3
+    (linked evidence on the goal), `directorDashboard` D9 (a sidebar entry it shouldn't offer), `recruitmentJourney`
+    G6 (Kola ends the representation), `recruitmentJourneyHardening` L7d (her bell lists no openable rows),
+    `secondLook` M5 (a new brief is a draft at version 1), `verification` (agency representation of a minor answers
+    404, not a refusal).
 
 - **`e2e/navConfig.test.mjs` fails** (also on `c436154`): the club and Grassroots nav still list the removed
   "representation" destination.

@@ -15,9 +15,13 @@ node e2e/uiSpotcheck.test.mjs  # feature surfaces incl. pairing + email gates
 node e2e/trustScoreDemoSpotcheck.test.mjs   # Trust Score story across all four bundles
 ```
 
-The `*Live.test.mjs` suites are different: each spawns its own backend on its
-own port, builds its own bundles and drives several apps at once, so they need
-no demo host. `trustScoreLive.test.mjs` covers the Trust Profile journeys.
+The `*Live.test.mjs` suites are different: each starts its own Gleam server
+(`apiServer.mjs`, which builds it first; run `npm run setup` once) on its own
+port and a temporary data directory, builds its own bundles and drives several
+apps at once, so they need no demo host. Run one with
+`NODE_PATH=e2e/node_modules node e2e/<name>Live.test.mjs`. Several are out of
+date with the apps: `../docs/known-issues.md` lists where each stops.
+`trustScoreLive.test.mjs` covers the Trust Profile journeys.
 
 Requires a Chromium binary; set `CHROMIUM` if it is not at
 `/opt/pw-browsers/chromium`, and `playwright-core` available (any of the app

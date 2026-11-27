@@ -7,7 +7,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md).
 ## How it works
 
 ### Lifecycle and stages
-- The lifecycle has exactly 18 states (`ROOM_STATUSES`, `domains/recruitment/rooms/shared.mjs`): watching, under_review, contact_planned, contacted, shortlisted, priority, trial_requested, trial_scheduled, trial_completed, offer_consideration, offer_made, offer_accepted, offer_declined, signed, on_hold, withdrawn, archived, closed. There is no 19th state, no `awaiting_*` state and no journey store. `applyStatus` is the one status writer.
+- The lifecycle has exactly 18 states (`vocab/room_status`): watching, under_review, contact_planned, contacted, shortlisted, priority, trial_requested, trial_scheduled, trial_completed, offer_consideration, offer_made, offer_accepted, offer_declined, signed, on_hold, withdrawn, archived, closed. There is no 19th state, no `awaiting_*` state and no journey store. `applyStatus` is the one status writer.
 - Journey stages are derived on every read and never stored:
   - review = under_review / shortlisted / priority
   - contact = contact_planned / contacted
@@ -39,7 +39,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md).
   - A new case inherits nothing. `caseId` is never re-pointed.
 
 ### Current-resource selection
-One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used by every projection, the Offer summary and the notification targets. Within a tier, the newest record wins (by the tier's instant), ties broken by id descending.
+One copy of each rule, in `recruitment/journey_model`, used by every projection, the Offer summary and the notification targets. Within a tier, the newest record wins (by the tier's instant), ties broken by id descending.
 - Contact: delivered, then responded/recorded, then draft, then failed. Cancelled is never current.
 - Trial: live, then completed, then cancelled, then legacy_accepted.
 - Assessment: submitted, then draft.

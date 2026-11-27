@@ -20,8 +20,8 @@ Product docs:
 - [`navigation.md`](product/navigation.md): app navigation, information architecture, terminology
 - [`platform.md`](product/platform.md): errors, boot, dates and time zones, capabilities, sessions, codes, notifications, deployment
 
-Elsewhere: [`../scoutbox-server/OPERATIONS.md`](../scoutbox-server/OPERATIONS.md) (running the server, environment
-variables, backups, adapters), [`../design-system/README.md`](../design-system/README.md) (shared tokens and
+Elsewhere: [`../scoutbox-server/README.md`](../scoutbox-server/README.md) (running the server, its settings,
+backups and operations), [`../design-system/README.md`](../design-system/README.md) (shared tokens and
 components), [`../e2e/README.md`](../e2e/README.md) (end-to-end tests and demo builds).
 
 ## Keeping the docs useful

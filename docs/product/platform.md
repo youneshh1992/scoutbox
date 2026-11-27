@@ -1,30 +1,30 @@
 # Platform contracts
 
-Cross-cutting server contracts: errors, boot, dates and time zones, capabilities and environment, sessions, one-time codes, notifications, rate limits and deployment. Developer setup is in [`../../scoutbox-server/OPERATIONS.md`](../../scoutbox-server/OPERATIONS.md).
+Cross-cutting server contracts: errors, boot, dates and time zones, capabilities and environment, sessions, one-time codes, notifications, rate limits and deployment. Developer setup is in [`../../scoutbox-server/README.md`](../../scoutbox-server/README.md).
 
 Founder decisions for this area are in [`../decisions.md`](../decisions.md); the storage principles are in [`../architecture.md`](../architecture.md).
 
 ## How it works
 
 ### Error contract
-- Domain error codes map to HTTP status through one null-prototype table in `scoutbox-server/domains/recruitment/lifecycle/errors.mjs` (`httpStatusFor`, `sendDomainError`, `publicErrorBody`). There is **no default branch**: an unmapped code returns `null`, the route answers 500 `LIFECYCLE_INTERNAL` and logs the code by name. New domain codes must be added to the table.
+- Domain error codes map to HTTP status through one table in `scoutbox-server/src/scoutbox/recruitment/domain_errors.gleam`. There is **no default branch**: an unmapped code returns `null`, the route answers 500 `LIFECYCLE_INTERNAL` and logs the code by name. New domain codes must be added to the table.
 - Bands: 400 bad request; 403 role may never do this; 404 concealment; 409 case moved (reload); 422 evidence record absent; 429 contact cooldown (`retryAt`); 500 our build or data.
 - Hidden, foreign and non-existent cases return **byte-identical** 404 bodies. Existence checks come before role checks, so a 403 only reaches someone who can already see the room.
 - Every 500 returns a fixed body with only the code; internal detail goes to the log only. A corruption error such as `CASE_HISTORY_CORRUPT` is checked *after* concealment, so it never confirms that a case exists.
 - `ROOM_VERSION_CONFLICT` (409) body is exactly `expectedRev, currentRev, updatedBy` (a display name, never a user id), `updatedAt`.
 - A protected characteristic can never be a reason (`ROOM_REASON_PROHIBITED`, shared with Rooms).
-- Malformed body types (an object or number where text is expected) get 400 `FIELD_INVALID` naming the field, and nothing is stored. A rejection from an async handler goes to the error middleware (`domains/platform/asyncErrors.mjs`) and must never crash the process.
+- Malformed body types (an object or number where text is expected) get 400 `FIELD_INVALID` naming the field, and nothing is stored. A crash in a route becomes a 500 in the router's one `rescue` and never takes the server down.
 
 ### Production boot contract
-- Boot order: `server.mjs` checks the runtime and loads `wiring.mjs`, which opens the store, `attachDataLayer` (the table migrations, then every repository; a first installation imports the seed once), `integrityReport` (reports, **never repairs**), then every module `register*()`, then `app.listen` as the last statement. There is no top-level await in between, so no request reaches a module before all modules have registered.
-- Every domain is a table created by its numbered migration before any module registers. Nothing creates a collection in memory: no `db.x ??=` anywhere (`e2e/platform/storeGuarantees.mjs` enforces it).
-- Containers of user data default to empty. Product configuration is not stored: the billing plans (not Development Hub plans) and the archetypes are constants in `catalogue.mjs`, so no restore can empty them or silently move the Grassroots attribution window from 12 to 18 months; changing a plan is a release. The demo reputation rows are empty in production; never fabricate track records.
+- Boot order: the configuration is read and checked, the store opens and applies the migrations (a first installation loads the seed once), the sweeps start, and only then does the server listen, so no request arrives before the data is ready.
+- Every domain's tables are created by its numbered migration before the server listens. Nothing holds a table in memory (`e2e/platform/storeGuarantees.mjs` checks the store's guarantees).
+- Containers of user data default to empty. Product configuration is not stored: the billing plans (not Development Hub plans) and the archetypes are constants (`platform/operator`), so no restore can empty them or silently move the Grassroots attribution window from 12 to 18 months; changing a plan is a release. The demo reputation rows are empty in production; never fabricate track records.
 - Restarting must not mutate any collection, and missing rows are never inferred.
 
 ### Production configuration
-- `NODE_ENV=production` refuses to boot (fatal) on any of: `MEDIA_SECRET_MISSING`, `ADMIN_KEY_UNSAFE` (unset, `scoutbox-admin`, or <16 characters), `TEST_PROVIDER_IN_PRODUCTION` (`BOX_CAM_TEST_PROVIDER=1`), `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION` (`SCOUTBOX_FAULTS`), `TEST_CLOCK_IN_PRODUCTION` (`SCOUTBOX_TEST_CLOCK`), `TEST_IDP_IN_PRODUCTION`, `DEV_LOGIN_IN_PRODUCTION` (`ALLOW_DEV_LOGINS` set), `TRUST_WEIGHTS_INVALID`. (`domains/platform/capabilities.mjs`)
+- `NODE_ENV=production` refuses to boot (fatal) on any of: `MEDIA_SECRET_MISSING`, `ADMIN_KEY_UNSAFE` (unset, `scoutbox-admin`, or <16 characters), `TEST_PROVIDER_IN_PRODUCTION` (`BOX_CAM_TEST_PROVIDER=1`), `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION` (`SCOUTBOX_FAULTS`), `TEST_CLOCK_IN_PRODUCTION` (`SCOUTBOX_TEST_CLOCK`), `TEST_IDP_IN_PRODUCTION`, `DEV_LOGIN_IN_PRODUCTION` (`ALLOW_DEV_LOGINS` set), `TRUST_WEIGHTS_INVALID`. (`config.problems` in `platform/config.gleam`)
 - A production first boot has no people or clubs, only the product catalogues; `SCOUTBOX_SEED_DEMO=1` opts into the demo world (decided 3 Nov).
-- Seeded passwordless dev logins, credential-less org logins and the test identity provider exist in development only, with no production override (`devLoginsEnabled` in `domains/platform/capabilities.mjs`). Pro and Grassroots club credentials come from T&S (`POST /admin/clubs/:id/credentials`). (decided 3 Nov)
+- Seeded passwordless dev logins, credential-less org logins and the test identity provider exist in development only, with no production override (`dev_logins` in `platform/config.gleam`). Pro and Grassroots club credentials come from T&S (`POST /admin/clubs/:id/credentials`). (decided 3 Nov)
 - Sessions expire after `SESSION_TTL_DAYS` (default 30), checked on requests, stream connect and signed media. Sign-out revokes the token (`POST /auth/logout`); any 401 or `session_expired` returns the app to login, across tabs.
 - Connected mode is the default. Demo mode only with `VITE_DEMO=1` / `EXPO_PUBLIC_DEMO=1`; a missing variable never selects mock data, and an outage shows a connection error.
 - Mail and push switch to real providers by environment variable: `SENDGRID_API_KEY` (+`MAIL_FROM`) and `EXPO_ACCESS_TOKEN`. Unset, they fall back to dev transports visible in the admin console. A phone receives the push notices of the account that last signed in on it (a device token belongs to one player or guardian; staff have no push and are notified in their portal and by e-mail). ID verification (instant dev attestation), billing (local ledger) and media storage (local disk) have no real provider yet; production refuses `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET` (`PROVIDER_NOT_IMPLEMENTED`) rather than pretend (decided 3 Nov).
@@ -66,7 +66,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
 - Quiet hours (`HH:MM`) and the minors' school-hours mute are evaluated in `notificationPrefs.timezone`, else Europe/London.
 
 ### Write sites
-- `room.status` has one writer, `applyStatus()` in `domains/recruitment/rooms/rooms.mjs`; `case.stage` is derived from it and never written directly on a Room (`STAGE_NOT_SETTABLE_ON_ROOM`).
+- `room.status` has one writer, `cases.move` in `recruitment/cases.gleam`; `case.stage` is derived from it and never written directly on a Room (`STAGE_NOT_SETTABLE_ON_ROOM`).
 - Signings have one writer, `recordCompletedSigning` (package completion and the legacy route `POST /org/players/:id/signing`). No lifecycle transition may create a signing, because a signing bills the club.
 - An idempotent replay still checks permission first. Tables keyed by external data are null-prototype.
 
@@ -79,7 +79,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
 - Paging: a list that grows without limit pages "continue from here" — `?limit=` (1–100, default 50) and
   `?cursor=` (the previous page's `nextCursor`) give `{ items, nextCursor }`; `nextCursor` is null on the last page.
   A bad limit or cursor is refused (400 `PAGE_LIMIT_INVALID` / `PAGE_CURSOR_INVALID`), never clamped. One helper:
-  `scoutbox-server/domains/platform/paging.mjs`. The apps read only the first page; a "load more" is not built yet
+  `scoutbox-server/src/scoutbox/platform/paging.gleam`. The apps read only the first page; a "load more" is not built yet
   (decided 4 Nov 2026).
 
 - Sessions: the bearer token is returned once and stored only as SHA-256. No file, log,
@@ -161,7 +161,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
 
 ## Rate limits and test-only providers
 
-- Rate limits live in `RATE_LIMIT_POLICY` (`domains/platform/rateLimit.mjs`).
+- Rate limits live in one table, `policy` in `platform/limits.gleam`.
 - Agents: the synthetic licence register (`AGENT_VERIFICATION_TEST_PROVIDER`, which verifies any `TEST-VERIFIED-*` reference) is test-only, so an agent cannot self-verify in production.
 - Matching-analytics: Combine CV verification stays disabled until real-world validation. Metrics that need a real detector are reported as unsupported, never estimated.
 

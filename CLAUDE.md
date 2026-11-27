@@ -4,11 +4,6 @@ A football recruitment platform: a Gleam/SQLite API (`scoutbox-server/`) shared 
 `scoutbox-player/`) and four web portals: Pro (`scoutbox-club/`), Grassroots, Agent and the Trust & Safety admin.
 How to run and test everything: [`README.md`](README.md).
 
-The Gleam server is replacing the TypeScript server, which stays in `scoutbox-server-ts/` until the switch-over
-([`scoutbox-server/docs/final-port-steps.md`](scoutbox-server/docs/final-port-steps.md)). The apps still talk to
-the TypeScript server until then. Change it only to keep it running; new server work goes in `scoutbox-server/`.
-`README.md`, `docs/architecture.md` and `scoutbox-server-ts/OPERATIONS.md` still describe the Node server.
-
 The Founder is not a programmer: explain product consequences in plain terms, and don't ask him storage questions.
 
 ## Before you start
@@ -55,8 +50,8 @@ The Gleam server's own rules (units, effects, typed ids, input shapes, migration
   behavioural specification: change the battery first, then the code, and never delete a behavioural assertion.
 - Before you finish, run `gleam check`, `gleam format --check src test dev`, `gleam test`, `npm run e2e:check`
   and `npm run e2e` in `scoutbox-server/` if anything under it changed (after a fresh clone, `npm run esqlite`
-  first); `cd scoutbox-server-ts && npm test && npm run e2e` if anything under `scoutbox-server-ts/` or `shared/`
-  changed; and `cd scoutbox-player && npm test` if anything under `scoutbox-player/` changed. Report the results
+  first, or `npm run setup` at the root); `npx tsc --noEmit` in `scoutbox-club`, `scoutbox-grassroots` and
+  `scoutbox-player` if anything under `shared/` changed; and `cd scoutbox-player && npm test` if anything under `scoutbox-player/` changed. Report the results
   honestly: failures, pre-existing failures and anything not run. Use synthetic data only.
 - CI must be green on `main`. Fix a red step; don't skip it.
 

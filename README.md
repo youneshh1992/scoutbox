@@ -5,7 +5,7 @@ grassroots clubs and agents discover and recruit them, with safeguarding for und
 
 | Folder | What it is | Run (from the folder) | Port |
 |---|---|---|---|
-| `scoutbox-server/` | The API all apps share (Node, Express, SQLite at `data/scoutbox.db`) | `npm start` | 4000 (`/health`) |
+| `scoutbox-server/` | The API all apps share (Gleam on Erlang/OTP, SQLite at `data/scoutbox.db`) | `gleam run` | 4000 (`/health`) |
 | `scoutbox-player/` | Player app (Expo / React Native; web, iOS, Android) | `npx expo start --web` | 8081 |
 | `scoutbox-club/` | **ScoutBox Pro**: the professional club portal (React, Vite) | `npm run dev` | 5173 |
 | `scoutbox-grassroots/` | **ScoutBox Grassroots**: the portal for amateur and semi-pro clubs | `npm run dev` | 5175 |
@@ -17,10 +17,11 @@ grassroots clubs and agents discover and recruit them, with safeguarding for und
 
 ## Running it locally
 
-Node ≥22.18 on the 22 line, or ≥24. The server uses `node:sqlite`, and runs its TypeScript with Node's type stripping.
+Node 22.18 or later for the apps and scripts, and [Gleam](https://gleam.run/getting-started/installing/) 1.19 with
+Erlang/OTP 29 for the server. `npm run setup` checks all three.
 
 ```bash
-npm run setup      # once: installs every app from its lockfile
+npm run setup      # once: installs every app from its lockfile and builds the server's patched SQLite driver
 npm run dev        # server + Player + Pro + Grassroots + Agent (dev:all adds the T&S console)
 npm run reseed     # with the server stopped: archive the database so the next start seeds fresh
 ```
@@ -33,7 +34,8 @@ The seed's people and clubs (Kola, Amara, Eastport FC, Harbour City FC, Hackney 
 are passwordless development logins, refused in production. To try a phone on the same Wi-Fi, start the Player with
 `EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:4000 npx expo start` and scan the QR code with Expo Go.
 
-Running the server, its environment variables and the data-layer rules: [`scoutbox-server/OPERATIONS.md`](scoutbox-server/OPERATIONS.md).
+Running the server and its settings: [`scoutbox-server/README.md`](scoutbox-server/README.md). The data-layer rules:
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Formatting
 
@@ -44,13 +46,16 @@ commits are listed in `.git-blame-ignore-revs`, so `git blame` skips them.
 ## Tests
 
 ```bash
-cd scoutbox-server && npm test                   # server unit suites
-cd scoutbox-player && npm test                   # Player (Jest, jest-expo)
-npm run test:server                              # server unit suites + connected end-to-end
+cd scoutbox-server && gleam test               # server unit tests and blessed fixtures
 cd scoutbox-server && npm run e2e                # end-to-end batteries (each starts its own servers on temporary data dirs)
+npm run test:server                              # both
+cd scoutbox-player && npm test                   # Player (Jest, jest-expo)
+NODE_PATH=e2e/node_modules node e2e/<suite>Live.test.mjs   # a browser suite against its own server and builds
 ```
 
-CI (`.github/workflows/ci.yml`) runs the server suites and end-to-end batteries, and type-checks and builds every app.
+CI (`.github/workflows/ci.yml`) runs the server's checks, tests and batteries, builds and boots the container image,
+and type-checks and builds every app. The browser suites in `e2e/` are run by hand; several are out of date with
+the apps (`docs/known-issues.md`).
 
 ## Demo builds
 

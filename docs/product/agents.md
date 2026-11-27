@@ -11,7 +11,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 **Actors and tiers** (`domains/agents/core/` agents, `domains/agents/compliance/` compliance)
 - The agency is a tenant; the regulated actor is the licensed individual, whose `agentProfiles` record survives leaving. (DR-2)
 - `tiers[]` ⊂ `licensed_agent, agency_admin, analyst, assistant, finance`. First member of an empty agency becomes admin; thereafter only admins add members; no self-promotion, no removing the last admin. Ending membership revokes sessions at once; attributions stay.
-- Only `licensed_agent`: own profile, verification, own clients, request/terminate, player lookup, opportunities, compliance contexts, transactions. Other tiers see a client summary only if the client enabled `shareWithAgencyStaff` (default off), never data. Only `agency_admin` writes team/settings and reads the audit. (`domains/agents/core/shared.mjs` PERMISSIONS)
+- Only `licensed_agent`: own profile, verification, own clients, request/terminate, player lookup, opportunities, compliance contexts, transactions. Other tiers see a client summary only if the client enabled `shareWithAgencyStaff` (default off), never data. Only `agency_admin` writes team/settings and reads the audit. (`agents/agent_rules.gleam` PERMISSIONS)
 - Session labels (`user.role`, `isLead`, typed job title) grant nothing. Agent login refused for non-agency orgs. No agent surface in Grassroots. (DR-43)
 
 **Action classes**: regulated (licensed, verified, in scope, policy pass; never proxied), administrative (by tier), client (never by an agent), shared-workflow, compliance (T&S or engine). Agents never write Passport, Trust, assessments, decisions, Rooms or development plans.
@@ -52,7 +52,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 - England timing (`ENG-5.1`: 1 September of the academic year the minor turns 16) is never generalised; FIFA timing is unresolved (`timingEncoded:false`).
 - Before any pathway opens: ACTIVE rules with resolvable timing under dual control, a deliberate flag flip, guardian-first consent, individual minors accreditation checked against a real register, safeguarding review and age-oracle audit.
 
-**Policy engine** (`domains/agents/compliance/policy.mjs`, `policyVersions.mjs`)
+**Policy engine** (`agents/approach_policy`, `agents/policy_routes`)
 - Policy is data; no jurisdiction conditionals in routes or clients. Only published versions inside their effective window are read. A rule's parameters are typed against the engine's vocabulary (`RULE_PARAMS`): publishing an unknown parameter, or one of the wrong type, is refused.
 - `ruleStatus` (separate from `textStatus`): `ACTIVE` decides; `SUSPENDED`/`PENDING_IMPLEMENTATION` → `NO_ACTIVE_RULE_DECIDES` (never permission); `PARTIALLY_SUSPENDED`/`UNDER_LEGAL_REVIEW`/`UNKNOWN` → review; `JURISDICTION_OVERRIDE` names both rule ids.
 - The set is always INT plus each named member association; anything unencoded → `JURISDICTION_UNSUPPORTED`/`POLICY_NOT_ENCODED`.
@@ -60,7 +60,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 - `evaluatePolicy` returns structured flags and reasons (rule id, status, version); callers never re-derive.
 - Publication: one T&S admin proposes (10/day), a *different* one approves (`POLICY_DUAL_CONTROL_REQUIRED`). Existing verdicts never change; open contexts get `reEvaluationPending`. A consent naming only a superseded version is stale.
 
-**Conflict engine** (`domains/agents/compliance/conflict.mjs`)
+**Conflict engine** (`agents/conflict`)
 - Pure, deterministic, with an `inputHash`. Outcomes: `CLEAR` (never called "compliant"); `PERMITTED_WITH_CONSENT` (alias; the long name `PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED` is stored); `PROHIBITED_CONFLICT` (no consent or reviewer cures it); `MANUAL_REGULATORY_REVIEW_REQUIRED`; `INSUFFICIENT_DATA`. Severity is monotonic.
 - England: one party → `CLEAR`; individual + engaging → consent from both; individual + releasing → prohibited; engaging + releasing → `COMBINATION_NOT_PERMITTED`; permitted with consents on record → `CLEAR`.
 - Connected agents (same agency by default, DR-20) count as one; reasons judge only the evaluated agent.
@@ -86,7 +86,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 ## Football agents: transactions and integration with recruitment
 
 ### Transaction: what it is
-- A transaction (`agent_transactions` and its child tables, ids `atx-`; `repositories/agentTransactions.mjs`) is a permissioned, auditable multi-party workspace (Player, Agent, Engaging Club, Releasing Club). ScoutBox is not a legal actor: it never negotiates, proposes, accepts, signs, judges validity or overrides a compliance prohibition, and every state screen says so.
+- A transaction (`agent_transactions` and its child tables, ids `atx-`; `agents/transaction_store`) is a permissioned, auditable multi-party workspace (Player, Agent, Engaging Club, Releasing Club). ScoutBox is not a legal actor: it never negotiates, proposes, accepts, signs, judges validity or overrides a compliance prohibition, and every state screen says so.
 - Transaction ≠ recruitment case ≠ Offer ≠ signing. No status or type names an offer (`"offer"` type is refused); the transaction module never writes recruitment cases, offers or `db.signings`.
 - Types: the four conflict-engine `CONTEXT_TYPES` imported, not copied: `employment_contract`, `transfer`, `loan`, `other_services`.
 - No fee, commission, salary, escrow or payment field anywhere. "Terms" are versioned working-particular summaries scoped to a party, never amounts; recording one is not an offer.
@@ -97,7 +97,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 - On account removal the transaction keeps its shape and tombstones the person (labels emptied, their documents dropped, representations withdrawn).
 - Lists: the agent's, a club's and Trust & Safety's transaction lists page newest first by cursor (`?limit=&cursor=` → `{ items, nextCursor }`, a junk limit, cursor or status filter is a 400); the agent's `counts` cover every transaction, not the page. The player's list is not paged. The apps read the first page.
 
-### State machine (domains/agents/transactions/transaction.mjs)
+### State machine (`agents/transaction_rules`)
 - Ten states; terminal are CANCELLED, CLOSED, ARCHIVED. `CLOSED` deliberately not `COMPLETED`, so it can't read as a signed transfer. READY means "ScoutBox's encoded rules currently permit", never legally valid.
 - Actor (licensed agent) transitions: DRAFT→PARTIES_CONFIRMED|CANCELLED; PARTIES_CONFIRMED→CANCELLED; COMPLIANCE_PENDING/BLOCKED→ACTIVE|CANCELLED (ACTIVE then refused by compliance with the real reason); READY→ACTIVE|ON_HOLD|CANCELLED; ACTIVE→ON_HOLD|CLOSED|CANCELLED; ON_HOLD→ACTIVE|CLOSED|CANCELLED; CANCELLED/CLOSED→ARCHIVED.
 - Compliance transitions: PARTIES_CONFIRMED→READY|PENDING|BLOCKED; PENDING→READY|BLOCKED|PARTIES_CONFIRMED; BLOCKED→READY|PENDING|PARTIES_CONFIRMED; READY and ACTIVE→PENDING|BLOCKED. DRAFT, ON_HOLD and terminal states are never moved by compliance. No actor reaches READY/PENDING/BLOCKED; compliance never cancels, closes, archives or activates.

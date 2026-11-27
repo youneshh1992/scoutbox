@@ -1,29 +1,10 @@
-# scoutbox-server (Gleam)
+# scoutbox-server
 
-A Gleam port of four slices of the ScoutBox server: organisation staff (sign-in, sessions, invitations, MFA), the
-safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger), players and
-guardians (sign-up, the player record, the directory, guardians and their children), verification (claims and
-their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
-references), message threads (answering a request opens one), and notifications with their preferences, push, the
-delivery centre, webhooks and support tickets, live sync over server-sent events (`/events`, for thread messages,
-typing and notices), signed media links, password sign-in for organisations, guardian sign-up, the session
-lifetime (`SESSION_TTL_DAYS`) and the production boot refusals, and Recruitment Rooms (with the Trust Score, club
-evidence, missing-evidence suggestions and Combine requests they read), the recruitment case's journey, lifecycle
-actions and formal decision, Offers, the agent core (profiles and verification facets, agency membership,
-representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
-items it opens), the organisation audit and a player's erasure, an agent's transaction workspace (its parties and their own confirmation,
-representation bindings, status moves, terms, documents, notes, links, timelines, the club's, player's and Trust &
-Safety lanes, and the readiness an Offer reads), the Conflict & Compliance Engine (reviewer sign-in, the dev reviewers seeded into an empty table, and
-administration, the agent's own compliance contexts and their conflict evaluation, regulatory consents, facet
-rechecks, the compliance overview, the review lifecycle and every kind of decision, dual-control policy versions,
-and the Trust & Safety audit and metrics), Trials (the invitation, acceptance,
-schedule and its revisions, attendance, completion, cancellation, Box Cam evidence by reference, the trial day, the
-calendar export and the mandatory report), structured assessments (with template versions and the feedback a club
-publishes to a player), video segments and playlists, the Football Passport (every viewer's projection, preferences,
-career entries, achievements, corrections and share links; its Box Cam sections are a player's with none), and
-Second Look and Nobody Missed (Recruitment Briefs, Evaluation Coverage, and the stored match facts they query),
-Explainable Matching and Dynamic Watchlists (one match engine, which Nobody Missed shares), and the club's insight: exposure, the review queue, calibration sessions, the decision review and coverage planning. It
-answers every battery in `e2e/batteries.mjs` unchanged.
+The ScoutBox API, shared by the Player app and the four web portals: Gleam on the BEAM, with SQLite through
+`sqlight`, all data in one file (`DATA_DIR/scoutbox.db`). Its batteries in `e2e/` (listed in `e2e/batteries.mjs`)
+are its behavioural specification. The product's rules are in [`../docs/architecture.md`](../docs/architecture.md),
+the rules for its code in [`CLAUDE.md`](CLAUDE.md), and its accepted limits in
+[`../docs/known-issues.md`](../docs/known-issues.md).
 
 ```sh
 npm run esqlite        # once after cloning (Gleam can't resolve the project without it): the patched esqlite
@@ -61,7 +42,7 @@ and `_NAME` (the Trust & Safety admin a deployment starts with, created at boot 
   (`dev/scoutbox/codegen.gleam`). A row module has the `Row` type, its decoder, `columns`, `width`, `qualified`,
   `insert` and `new(…)`; a CHECK vocabulary is an enum. A domain record is usually the generated `Row`, with what
   is derived from it as functions. Don't edit them: change the migration and run `npm run codegen`.
-- `src/scoutbox/platform/`: the store (unit of work, readers, effects), `input` (refusals in the TypeScript
+- `src/scoutbox/platform/`: the store (unit of work, readers, effects), `input` (the shared refusal
   format), `sql` (fragments that carry their arguments), `temporal` (days, instants and their refusals, read once
   where they arrive: a `Day` is always a real one), `zones` (a `Zone` is always one the offsets table knows, from
   `priv/zone_offsets.json`), `distance`, `keyset` and `paging`/`pages`, `http`, `ids`, migrations, limits, config.
@@ -78,8 +59,7 @@ and `_NAME` (the Trust & Safety admin a deployment starts with, created at boot 
   done, and runs a statement's next batch on the dirty scheduler while its batches meet a step slower than a
   millisecond. Stock esqlite runs every row's `step` on the dirty schedulers, which made reads several times slower
   than Node and stopped them scaling; building a large result in one dirty call stopped large reads scaling too. An upgrade is a new pin and checksum in `dev/esqlite.mjs` and the patch reapplied.
-- `priv/migrations/`: the tables, one numbered SQL file each (first recorded from the TypeScript server's
-  migrations), edited directly. `priv/seed.sql`: the demo world, edited directly.
+- `priv/migrations/`: the tables, one numbered SQL file each, edited directly. `priv/seed.sql`: the demo world, edited directly.
 - `test/fixtures/`: inputs and their blessed answers (`test/scoutbox/blessed.gleam`), one case per line, except
   `scrypt_cases`, `distance_cases` and `proxy_cases`, which pin outside facts and are kept as they are.
 - `dev/`: the generator (`scoutbox_dev.gleam`), `bless.mjs`, `esqlite.mjs`, `zone_offsets.mjs` (the zone offsets
@@ -130,7 +110,7 @@ Every route below is exercised by a battery, except where marked.
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
 | Player | `GET /player/me`, `/player/export`, `GET`/`PATCH /player/box-cam/prefs`, `POST /player/box-cam/sessions/:id/cv/begin`, `/frames`, `/finalize`, `/cancel` and `/player/box-cam/cv/ready-check` (the `production_cv` stub: its checks, then `503 provider_unavailable`; the Ready Check reports the provider unavailable), `GET /admin/box-cam/cv/results/:id`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (its file named by an upload), `/stats` (a `season` files into the history), `/badges`, `/prefs`, `/location`, `/drills/:id/complete` (a result with video is verified; the video isn't kept), `/aging-up/complete`; `GET /player/feed`, `/player/cv`, `/player/drills`; `POST /guardian/children/:id/first-team-seeker` |
-| Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`, `/guardian/export`, `GET`/`POST /guardian/prefs`; `DELETE /guardian/children/:id`; `POST /guardian/verify-id` (the development attestation, as in the TypeScript server), `/guardian/disclaimer`, `/guardian/children/:id/pairing-code`, `/guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
+| Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`, `/guardian/export`, `GET`/`POST /guardian/prefs`; `DELETE /guardian/children/:id`; `POST /guardian/verify-id` (the development attestation), `/guardian/disclaimer`, `/guardian/children/:id/pairing-code`, `/guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications` (each row with its `target`: the Room tab, the agent's client, or the recipient's request, Trial, Offer or current signing package it leads to); `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
 | Integrations | `GET`/`POST /org/webhooks` (and their delivery, signed, by the minute sweep), `POST …/:id/rotate`, `…/:id/deactivate`, `GET …/:id/deliveries`; `GET`/`POST /org/imports`, `GET …/template`, `…/:id`, `POST …/:id/commit`, `…/:id/reverse`, `GET /admin/imports`; `GET /org/prospects`, `/org/identity-reviews`, `POST …/:id/resolve`; `GET`/`POST /org/api-keys`, `POST …/:id/revoke`, `GET /api/v1/export/prospects`, `/shortlist`; `GET /org/connectors` |
@@ -144,41 +124,35 @@ Every route below is exercised by a battery, except where marked.
 Behaviour not ported yet would say `Not ported yet:` in the code (`grep -rn "Not ported yet:" src`); nothing does
 now. Behaviour that stays out of scope (video analysis) says `Out of scope:`.
 
-## Known differences from the TypeScript server
+## Operations
 
-- Files go straight to object storage (docs/final-port-steps.md, step 5): a client declares one, PUTs it to a signed URL
-  and names the `uploadId` where it sent a `dataUrl`. The `dataUrl` fields and the chunked `/player/uploads` are
-  gone, and a stored file is served on a short-lived storage link (`file: {mime, url}`) instead of base64.
+There is no live deployment and no production data: a data directory in a bad state is deleted and booted again.
 
-- An unknown route answers `{ "error": "NOT_FOUND" }` instead of Express's HTML page.
-
-- A `TS_REVIEWER_BOOTSTRAP_*` setting that `POST /ts/reviewers` would refuse (an id that isn't 3 to 40 letters,
-  digits or dashes, a name over 80 characters, a secret outside 12 to 200), or an id without a secret, refuses to
-  start in any mode. The TypeScript server cut the id and the name to fit and took any secret.
-- Of several unknown fields in one body, the first in key order is named; the TypeScript server names the first
-  in the order sent.
-- Ids are minted inside the unit, so a refused act does not use one up.
-- A delivery callback's signature is checked over the body as it arrived; the TypeScript server checks it over
-  the parsed body serialised again, which is the same text for a compact JSON body.
-- Two delivery sweeps can overlap here (the minute sweep and `POST /admin/delivery/sweep`); each send re-reads
-  its dispatch in its own unit, so a dispatch is never sent twice.
-- Distances agree with domain.ts to the last bit except within about 1e-12 km of the 50 km radius or a rounding
-  edge, where macOS's `cos` and V8's `x ** 2` differ in the last place (`test/scoutbox/distance_test.gleam`).
-- A foot criterion (matching, watchlists, Nobody Missed) lowers ASCII only (SQLite's `lower()`); the TypeScript server's `lower_js` lowers
-  as JavaScript does. Every stored foot is ASCII.
-- Second Look's changes, and its queue, break ties of time and kind by code point; the TypeScript server uses
-  `localeCompare`, which orders punctuation and case differently. Only items changed in the same millisecond can
-  differ.
-- An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
-- Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
-  the first in the order sent.
-- A signing's success-fee invoice is written in the completion's unit; the TypeScript server issues it after
-  COMMIT. Either way a completion that rolls back issues none.
-- A forwarded address is read as an address only in standard notation. proxy-addr also reads IPv4 written as one
-  number or in hex or octal parts (`2130706433` is 127.0.0.1), so a trusted-proxy list could match such an entry
-  there and not here. Proxies write standard notation.
-- `/capabilities` counts a notice a preference muted once its unit commits; the TypeScript server counts it at the
-  mute, so a muted notice in a unit that then fails is counted there and not here.
-- A notification type with no category is delivered and listed in `/capabilities`'s `unknownTypes` in every mode,
-  in code point order. The TypeScript server refuses one outside production, and lists them in the order first
-  seen.
+- **Running.** Gleam 1.19 on Erlang/OTP 29 (the image's versions), and Node 22.18 or later for the scripts. At the
+  repository root, `npm run setup` checks them and builds the patched esqlite, and `npm run dev` starts this server
+  (`gleam run`) with the apps.
+- **Data directory.** `DATA_DIR` (default `./data`) holds `scoutbox.db`, `media/` (the local store's files, when no
+  R2 bucket is set) and `backups/`. Tests use throwaway directories. `npm run reseed` at the root, with the server
+  stopped, moves it aside so the next start seeds afresh.
+- **First boot.** A database's first boot applies the migrations and, outside production, loads the demo world
+  (`priv/seed.sql`); in production it starts empty. `SCOUTBOX_SEED_DEMO=1` or `0` decides either way. Later boots
+  apply only migrations not yet recorded, and never seed over the data. `NODE_ENV=production` also refuses the
+  passwordless demo sign-ins, and an unsafe setting (`config.problems`) refuses to start.
+- **Health.** `GET /health` (what `npm run dev` waits for: the engine, whether dev sign-ins are on, counts),
+  `GET /healthz` (liveness, which the container platforms check), `GET /readyz` (the store answers a read), and
+  `GET /capabilities` (what is configured, never a value).
+- **Backups.** `POST /admin/backup` (with `x-admin-key`) writes `DATA_DIR/backups/<timestamp>/`: a consistent copy
+  of the database, the local store's files except those queued for removal, and a manifest of every file's SHA-256,
+  written last. `GET /admin/backups` lists them and `POST /admin/backup/verify` checks one again. To restore, copy a
+  backup into a new, empty `DATA_DIR` and boot it. With R2 the files stay in the bucket, so a backup holds the
+  database alone. Secrets are only ever in the environment, never in a backup.
+- **Mail, push and delivery in development.** Without `SENDGRID_API_KEY` mail goes to the outbox
+  (`GET /admin/outbox`), and without `EXPO_ACCESS_TOKEN` pushes go to the push log (`GET /admin/push-log`). The
+  delivery centre uses a local fake provider; `POST /admin/delivery/sweep` forces a pass.
+- **Logs.** One JSON line per request, `{t, id, m, p, s, ms}`: the path, never headers, query or body. The id is an
+  inbound `X-Request-Id`, or one minted here, and is sent back. `SCOUTBOX_QUIET_LOGS=1` silences them.
+- **Background work** is stored state, swept every minute (every half second with `SCOUTBOX_FAST_SWEEPS=1`):
+  deliveries, webhooks, follow-ups, expiries, reminders, match facts due a refresh, expired uploads and queued media
+  removals. `POST /admin/sweep` runs the scheduled work now.
+- **Rate limits** are counted per process (`platform/limits`). Behind a proxy, set `SCOUTBOX_TRUST_PROXY`, or every
+  client shares one address.

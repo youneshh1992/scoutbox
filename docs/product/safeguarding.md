@@ -33,7 +33,7 @@ These are the product's first principles for under-18s. Everything below refines
 
 **Who receives contact, trials and offers (the recipient rule)**
 - One function, `resolveContactRecipient`, serves Contact, Trial and Offer. It returns the adult player, or the verified guardian for a minor, or a refusal: `CONTACT_GUARDIAN_REQUIRED`, `CONTACT_RECIPIENT_UNAVAILABLE` or `CONTACT_BLOCKED`. Guardian routing and the trial and contact rules are reused, never duplicated.
-- A valid guardian route is a guardian record that exists, lists the child, and has passed the identity and disclaimer checks. If more than one guardian qualifies, the child's primary `guardianId` is chosen (`domains/recruitment/lifecycle/contact.mjs`).
+- A valid guardian route is a guardian record that exists, lists the child, and has passed the identity and disclaimer checks. If more than one guardian qualifies, the child's primary `guardianId` is chosen (`recruitment/recipients`).
 - An offer's recipient is worked out when the offer is issued, and again each time the recipient reads or answers it.
 
 **Offers to minors: the pathway is closed (fail closed)**

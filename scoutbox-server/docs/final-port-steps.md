@@ -240,7 +240,7 @@ moved to `scoutbox-server-ts/` until step 11 deletes it. The repository's git ru
    re-seed. The browser suites in `e2e/` start this server (`e2e/apiServer.mjs`); the Box Cam ones are deleted.
    Run against it, every suite that failed did so at the step it failed on the TypeScript server, or later
    (`docs/known-issues.md`).
-4. Update `docs/architecture.md`, `scoutbox-server-ts/OPERATIONS.md` (into this server's own), `README.md` and
-   `CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in step 4 and
-   takes its git rules from the repository's since step 10; it needs only any remaining mention of the Node
-   server.
+4. **Update the docs** [**done**]. `docs/architecture.md` describes this server; the TypeScript server's
+   `OPERATIONS.md` became the Operations section of `scoutbox-server/README.md`; the root `README.md`, both
+   `CLAUDE.md` files, `e2e/README.md` and the product docs name this server's modules. Only history still names the
+   TypeScript server (`docs/decisions.md`, the accepted limits in `docs/known-issues.md`).

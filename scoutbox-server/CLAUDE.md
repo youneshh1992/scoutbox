@@ -1,13 +1,11 @@
 # The ScoutBox server, in Gleam
 
-The ScoutBox server in Gleam on the BEAM, with SQLite through `sqlight`. It began as a port of the TypeScript server
-(`../scoutbox-server-ts`), which it is replacing (`docs/final-port-steps.md`). This server is the reference now:
-its own e2e batteries (`e2e/`) are its behavioural specification, and its blessed fixtures pin its rules. Nothing
-here reads the TypeScript tree. The repository's [`CLAUDE.md`](../CLAUDE.md) and
+The ScoutBox server in Gleam on the BEAM, with SQLite through `sqlight`. Its e2e batteries (`e2e/`) are its
+behavioural specification, and its blessed fixtures pin its rules. The repository's [`CLAUDE.md`](../CLAUDE.md) and
 [`docs/architecture.md`](../docs/architecture.md) hold the product rules and the git rules; they apply here too.
 Known defects and accepted limits are in [`docs/known-issues.md`](../docs/known-issues.md).
 
-- How to run it and what is ported: [`README.md`](README.md).
+- How to run and operate it, and its routes: [`README.md`](README.md).
 - `docs/gleam/html/everything.html`: the whole Gleam language tour on one page. Read it when unsure of
   syntax or semantics rather than guessing from other languages.
 
@@ -102,8 +100,8 @@ Known defects and accepted limits are in [`docs/known-issues.md`](../docs/known-
 - A matrix fixture over a vocabulary (the lifecycle validator, contacts, the transaction state machine) keys each
   answer by its input's name and blesses its axes too, so a new status or action gains its rows at the next bless and
   shows in the diff.
-- `test/scoutbox/battery/` holds tests first generated from the TypeScript rules suites' recorded calls. They are
-  ordinary tests now: change them with the rule.
+- `test/scoutbox/battery/` holds rule tests first generated from recorded calls. They are ordinary tests: change
+  them with the rule.
 
 ## Server rules (enforced by types where possible)
 
