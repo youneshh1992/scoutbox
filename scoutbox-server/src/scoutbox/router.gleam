@@ -1707,7 +1707,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["cv"] -> only(req, Get, fn() { record_reads.cv(player) })
         ["drills"] -> only(req, Get, fn() { record_reads.drills(player) })
         ["drills", did, "complete"] ->
-          only(req, Post, fn() { record.complete_drill(ctx, req, player, did) })
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            record.complete_drill(ctx, req, player, did)
+          })
         ["media"] ->
           only(req, Post, fn() {
             use req <- contract.rerun_on_stale(req)

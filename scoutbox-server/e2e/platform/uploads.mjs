@@ -5,7 +5,8 @@
 //   B storage: the URL takes exactly the declared bytes with exactly its headers, once
 //   C limits: an owner holds at most ten open uploads
 //   D clips: an upload named to /player/media becomes a clip with its file, once; the Verified Clip needs one; the
-//     media link redirects to storage for whoever may see the clip; erasure removes the file
+//     media link redirects to storage for whoever may see the clip; a drill result naming such a clip is verified;
+//     erasure removes the file
 //   E evidence: an upload named as evidence once; again, the evidence it became is named
 //   F clean-up: the sweep expires uploads past their time and removes their files, once; a file a record uses stays;
 //     a clip file erasure couldn't remove stays queued, unserved, until a sweep removes it
@@ -259,6 +260,32 @@ r = await fetch(`${API}/media/${made.id}/captions`, { headers: { authorization: 
 ok(r.status === 200 && (r.headers.get('content-type') ?? '').includes('text/vtt'), 'the club reads it as text/vtt');
 r = await fetch(`${API}/media/${made.id}/captions`);
 neg(r.status === 401, 'anonymously, not at all');
+
+// A drill result is verified by naming a clip of the player's own that carries its footage.
+const drill = (body, token = KOLA) => j('POST', '/player/drills/drill-sprint-ladder/complete', body, token);
+const resultOf = (res, value) => res.body?.drillResults?.find((x) => x.value === value);
+r = await drill({ value: 4.41, mediaId: made.id });
+ok(
+  r.status === 200 && resultOf(r, 4.41)?.verified === true,
+  "a drill result naming one of the player's clips is verified",
+);
+r = await drill({ value: 4.42 });
+ok(r.status === 200 && resultOf(r, 4.42)?.verified === false, 'without one it is recorded unverified');
+const titleOnly = (await j('POST', '/player/media', { title: 'Title only' }, KOLA)).body.media.id;
+r = await drill({ value: 4.43, mediaId: titleOnly });
+neg(
+  r.status === 400 && r.body.error === 'FILE_REQUIRED_FOR_VERIFIED_RESULT',
+  'a clip without its footage verifies nothing',
+);
+r = await drill({ value: 4.44, mediaId: made.id }, CARVALHO);
+neg(r.status === 404 && r.body.error === 'MEDIA_NOT_FOUND', "another player's clip verifies nothing");
+r = await drill({ value: 4.45, videoDataUrl: 'data:video/mp4;base64,AAAA' });
+neg(r.status === 400 && r.body.problem === 'unknown_field', 'a video sent inline is refused');
+r = await j('GET', '/player/me', undefined, KOLA);
+neg(
+  ![4.43, 4.44, 4.45].some((v) => r.body.drillResults.some((x) => x.value === v)),
+  'and a refused result is not recorded',
+);
 
 // A deleted player's clip files go with the account, and an upload never named expires.
 r = await j('POST', '/auth/player/signup', {

@@ -5,6 +5,7 @@
 //// A child's settings are the guardian's: the routes that change one refuse a minor with GUARDIAN_MANAGED, and
 //// the guardian sets them from `/guardian/children/:id`.
 
+import gleam/dynamic/decode
 import gleam/float
 import gleam/json
 import gleam/list
@@ -75,6 +76,7 @@ fn quiet_act(
 ) -> Response {
   case store.unit(ctx.store, work) {
     Ok(p) -> http.json(200, view(p))
+    Error(store.Lost(what)) -> http.stale(what)
     Error(failure) -> http.internal(failure)
   }
 }
@@ -1137,13 +1139,11 @@ pub fn location(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
 }
 
 type DrillDone {
-  DrillDone(value: Option(Float), video: Option(String))
+  DrillDone(value: Option(Float), clip: Option(id.MediaId))
 }
 
-/// `POST /player/drills/:id/complete`: the drill is done, and a measured result is kept, verified when it came
-/// with video.
-///
-/// TypeScript doesn't keep the video either.
+/// `POST /player/drills/:id/complete`: the drill is done, and a measured result is kept, verified when it names
+/// a clip of the player's own that carries its footage (`mediaId`). The result doesn't keep the clip.
 pub fn complete_drill(
   ctx: Ctx,
   req: Request,
@@ -1158,18 +1158,17 @@ pub fn complete_drill(
           "value",
           input.nullish(input.number_at_least(0)),
         )
-        use video <- input.field(
-          "videoDataUrl",
-          input.nullish(input.text(100_000_000)),
-        )
-        input.done(DrillDone(value:, video:))
+        use clip <- input.field("mediaId", input.nullish(input.text(80)))
+        input.done(DrillDone(value:, clip: option.map(clip, id.media)))
       }
       use body <- http.body(req, shape, [#("value", "BAD_VALUE")])
+      use <- drill_clip_or_refuse(p.player, body.clip)
       let me = p.player.row.id
       let now = clock.now_ms()
       act(
         ctx,
         fn(tx) {
+          use _ <- result.try(drill_clip_stands(tx, me, body.clip))
           use _ <- result.try(case list.contains(p.player.drills, drill.id) {
             True -> Ok(Nil)
             False -> players.record_drill(tx, me, drill.id)
@@ -1190,7 +1189,7 @@ pub fn complete_drill(
                   metric: drill.metric,
                   unit: Some(drill.unit),
                   value:,
-                  verified: body.video != None,
+                  verified: body.clip != None,
                   recorded_at: now,
                 ),
               )
@@ -1208,6 +1207,51 @@ pub fn complete_drill(
           ])
         },
       )
+    }
+  }
+}
+
+/// A clip named to verify a drill result is one of the player's own, with its file.
+fn drill_clip_or_refuse(
+  player: Player,
+  clip: Option(id.MediaId),
+  next: fn() -> Response,
+) -> Response {
+  case clip {
+    None -> next()
+    Some(mid) ->
+      case list.find(player.media, fn(m) { m.clip.id == mid }) {
+        Error(Nil) -> http.error(404, "MEDIA_NOT_FOUND")
+        Ok(m) if m.clip.blob_key == None ->
+          http.error_message(
+            400,
+            "FILE_REQUIRED_FOR_VERIFIED_RESULT",
+            "Name a clip with its footage to verify the result.",
+          )
+        Ok(_) -> next()
+      }
+  }
+}
+
+/// Inside the unit: the clip checked before it is still there (erasure may have removed it since).
+fn drill_clip_stands(
+  tx: Tx,
+  player_id: id.PlayerId,
+  clip: Option(id.MediaId),
+) -> Result(Nil, store.Fail(Nil)) {
+  case clip {
+    None -> Ok(Nil)
+    Some(mid) -> {
+      use found <- result.try(store.one(
+        store.reading(tx),
+        "SELECT 1 FROM player_media WHERE id = ? AND player_id = ? AND blob_key IS NOT NULL",
+        [id.media_sql(mid), id.player_sql(player_id)],
+        decode.at([0], decode.int),
+      ))
+      case found {
+        Ok(_) -> Ok(Nil)
+        Error(Nil) -> store.stale("drill clip")
+      }
     }
   }
 }
