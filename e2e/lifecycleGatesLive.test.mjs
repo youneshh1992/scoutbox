@@ -24,7 +24,7 @@
 // and `!== 200` was true either way. Every assertion below names the status it
 // expects and the error code that must come with it.
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -32,7 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 // The server's own status set, so the label check below cannot drift from it.
-import { ROOM_STATUSES } from '../scoutbox-server-ts/domains/recruitment/rooms/shared.mjs';
+import { spawnApi } from './apiServer.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -66,8 +66,7 @@ execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-lifecycle`, {
   stdio: 'pipe',
 });
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' },
   stdio: 'ignore',
 });
@@ -534,6 +533,12 @@ say('L7: and shows human labels, not raw lifecycle enums');
 // Stated positively and over the whole set, against the server's own table,
 // so a state added later cannot quietly arrive unlabelled.
 {
+  // The server's own list: the generated vocabulary of a room's status.
+  const vocab = fs.readFileSync(path.join(ROOT, 'scoutbox-server/src/scoutbox/vocab/room_status.gleam'), 'utf8');
+  const ROOM_STATUSES = [...vocab.slice(vocab.indexOf('pub const pairs')).matchAll(/#\("([a-z_]+)",/g)].map(
+    (m) => m[1],
+  );
+  if (ROOM_STATUSES.length < 10) fail('L7b: could not read the room statuses from the server vocabulary');
   const i18nSrc = fs.readFileSync(path.join(ROOT, 'scoutbox-club/src/i18n.ts'), 'utf8');
   const frStart = i18nSrc.indexOf('Aucune décision');
   if (frStart < 0) fail('L7b: could not locate the French dictionary to check it separately');

@@ -26,7 +26,7 @@
 //   W  WIDTHS            1440/1280/1024/768/390/360 on the expired package;
 //                        zero page errors in every context
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -34,6 +34,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
+import { signingDocument } from '../scoutbox-server/e2e/support/uploads.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -116,8 +118,7 @@ else {
   }
 }
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: {
     ...process.env,
     PORT: String(API_PORT),
@@ -357,7 +358,6 @@ async function roomFor(playerId, token) {
   const r = await j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, token);
   return r.body?.room?.roomId ?? r.body?.existingRoomId;
 }
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 /** A presented package by HTTP at a given clock. */
 async function presentedHttp(OID, token, clock = T0, expiresAt = null) {
   const s = await j(
@@ -372,7 +372,12 @@ async function presentedHttp(OID, token, clock = T0, expiresAt = null) {
   const a = await j(
     'POST',
     `/org/signings/${SID}/document`,
-    { dataUrl: dataUrl(PDF), filename: 'contract.pdf', label: 'Contract', expectedRev: s.body.signing.rev },
+    {
+      uploadId: await signingDocument(API, token, PDF),
+      filename: 'contract.pdf',
+      label: 'Contract',
+      expectedRev: s.body.signing.rev,
+    },
     token,
     at(clock),
   );
@@ -580,7 +585,12 @@ const OFFER_B = await acceptedOffer(ROOM_B, LEAD, SVEN, 'Keeper');
   const a = await j(
     'POST',
     `/org/signings/${SID}/document`,
-    { dataUrl: dataUrl(PDF), filename: 'contract.pdf', label: 'Contract', expectedRev: st.body.signing.rev },
+    {
+      uploadId: await signingDocument(API, LEAD, PDF),
+      filename: 'contract.pdf',
+      label: 'Contract',
+      expectedRev: st.body.signing.rev,
+    },
     LEAD,
   );
   ok(st.status === 201 && a.status === 200, 'B1: a draft package for Elias with a document (HTTP)');
@@ -735,7 +745,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
     'POST',
     `/org/signings/${PD.SID}/document`,
     {
-      dataUrl: dataUrl(PDF2),
+      uploadId: await signingDocument(API, LEAD, PDF2),
       filename: 'contract-v2.pdf',
       label: 'Contract (amended)',
       expectedRev: sup.body.signing.rev,
@@ -782,7 +792,7 @@ const kola = await enterPlayer(ctxKola, 'Kola Adeyemi', 'kola', 'text=Your visib
       'POST',
       `/org/signings/${globalThis.__D.SID}/document`,
       {
-        dataUrl: dataUrl(PDF),
+        uploadId: await signingDocument(API, LEAD, PDF),
         filename: 'x.pdf',
         expectedRev: (await j('GET', `/org/signings/${globalThis.__D.SID}`, undefined, LEAD)).body.signing.rev,
       },

@@ -14,13 +14,14 @@
 // Journey never carries a club's private words.
 //
 // Run from e2e/: node playerProfileLive.test.mjs   (KEEP_DIST=1 reuses bundles)
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const API_PORT = 4066;
@@ -75,8 +76,7 @@ else {
     stdio: 'pipe',
   });
 }
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' },
   stdio: 'ignore',
 });

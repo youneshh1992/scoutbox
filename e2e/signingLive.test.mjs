@@ -38,7 +38,7 @@
 // invariants (50 adversarial cases) live in scoutbox-server/e2e/
 // recruitment/signings.mjs; this suite proves the real interfaces drive them.
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -47,6 +47,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -125,8 +126,7 @@ else {
   }
 }
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: {
     ...process.env,
     PORT: String(API_PORT),

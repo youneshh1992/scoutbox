@@ -24,13 +24,14 @@
 //
 // The exhaustive invariants live in scoutbox-server/e2e/discovery/matchingAndWatchlists.mjs. This
 // suite proves the real UI drives them.
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -66,8 +67,7 @@ execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-matching`, {
   stdio: 'pipe',
 });
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1', BOX_CAM_TEST_PROVIDER: '1' },
   stdio: 'ignore',
 });

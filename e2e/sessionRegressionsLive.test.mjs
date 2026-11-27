@@ -23,13 +23,14 @@
 //       shows a dash, never "Invalid Date"
 //   and zero page errors in every context.
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -90,8 +91,7 @@ else {
 }
 
 const startApi = () =>
-  spawn('node', ['server.mjs'], {
-    cwd: path.join(ROOT, 'scoutbox-server-ts'),
+  spawnApi({
     env: {
       ...process.env,
       PORT: String(API_PORT),
@@ -612,24 +612,24 @@ console.log('\n— S10: a date-only day west of Greenwich —');
 // ================================================================== S11 an unreadable timestamp
 console.log('\n— S11: an unreadable timestamp in a history row —');
 {
-  serverProc.kill('SIGTERM');
-  await new Promise((r) => serverProc.once('exit', r));
-  const { openStore } = await import(path.join(ROOT, 'scoutbox-server-ts/store.ts'));
-  const store = openStore(DATA);
-  const snap = store.load();
-  const room = snap.db.recruitmentCases.find((k) => k.id === RS);
-  room.history.push({
+  // The server refuses a timestamp it can't read before storing it, so the damaged row is put into its answers
+  // here: the room's activity, wherever the club reads it.
+  const damaged = {
     id: 'hist-pm12',
     at: 'not-a-time',
-    action: 'room_status_changed',
-    by: { kind: 'org', id: 'legacy', name: 'Legacy import' },
+    type: 'room_status_changed',
+    actor: { kind: 'org', id: 'legacy', name: 'Legacy import' },
     detail: { from: 'watching', to: 'reviewing' },
-  });
-  store.save({ ...snap, db: snap.db });
-  store.close?.();
-  serverProc = startApi();
-  await apiUp();
+  };
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await ctx.route(`**/org/rooms/${RS}**`, async (route) => {
+    const res = await route.fetch();
+    const body = await res.json().catch(() => null);
+    if (Array.isArray(body?.activity?.items)) body.activity.items.push(damaged);
+    else if (Array.isArray(body?.items) && route.request().url().includes('/activity')) body.items.push(damaged);
+    else return route.fulfill({ response: res });
+    await route.fulfill({ response: res, json: body });
+  });
   const pg = await enterOrg(ctx, PORTS.club, 'Eastport FC', 'Maria Keane', 'Head of Recruitment', 'stamp');
   for (const h of [`#/recruitment/rooms/${RS}`, `#/recruitment/rooms/${RS}/activity`, '#/organisation']) {
     await pg.evaluate((x) => {

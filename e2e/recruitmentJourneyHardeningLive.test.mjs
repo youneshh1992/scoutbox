@@ -34,7 +34,7 @@
 //   W   WIDTHS           1440/1280/1024/768/390/360 on a mid-journey Room;
 //                        390/360 on Opportunities; zero page errors everywhere
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -43,6 +43,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
+import { signingDocument } from '../scoutbox-server/e2e/support/uploads.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -111,8 +113,7 @@ else {
   }
 }
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: {
     ...process.env,
     PORT: String(API_PORT),
@@ -315,7 +316,6 @@ async function roomFor(playerId, token) {
   const r = await j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, token);
   return r.body?.room?.roomId ?? r.body?.existingRoomId;
 }
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 /** review → formal progress decision → drafted + issued Offer (no evidence needed for a decision on a review-stage case: the P8 live C recipe). */
 async function toOfferMade(RID, token, terms) {
   await lifecycle(RID, 'startReview', token);
@@ -577,7 +577,12 @@ const stM = await j('POST', `/org/offers/${OM}/signing`, { clientKey: key() }, l
 const aM = await j(
   'POST',
   `/org/signings/${stM.body.signing.id}/document`,
-  { dataUrl: dataUrl(PDF), filename: 'contract.pdf', label: 'Contract', expectedRev: stM.body.signing.rev },
+  {
+    uploadId: await signingDocument(API, lead.token, PDF),
+    filename: 'contract.pdf',
+    label: 'Contract',
+    expectedRev: stM.body.signing.rev,
+  },
   lead.token,
   at(T0),
 );

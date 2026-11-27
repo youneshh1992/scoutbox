@@ -29,7 +29,7 @@
 //   W  WIDTHS         1440/1280/1024/768/390/360 on the Room; 390/360 on the
 //                     player's Opportunities; zero page errors in every context
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -38,6 +38,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { chromium } from 'playwright-core';
+import { spawnApi } from './apiServer.mjs';
+import { signingDocument } from '../scoutbox-server/e2e/support/uploads.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
@@ -107,8 +109,7 @@ else {
   }
 }
 
-const serverProc = spawn('node', ['server.mjs'], {
-  cwd: path.join(ROOT, 'scoutbox-server-ts'),
+const serverProc = spawnApi({
   env: {
     ...process.env,
     PORT: String(API_PORT),
@@ -295,7 +296,6 @@ async function roomFor(playerId, token) {
   const r = await j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, token);
   return r.body?.room?.roomId ?? r.body?.existingRoomId;
 }
-const dataUrl = (buf) => `data:application/pdf;base64,${buf.toString('base64')}`;
 
 // ------------------------------------------------------------ player helpers
 async function enterPlayer(ctx, rowText, who, landing) {
@@ -589,7 +589,12 @@ ok(
 const a1 = await j(
   'POST',
   `/org/signings/${SID}/document`,
-  { dataUrl: dataUrl(PDF), filename: 'contract.pdf', label: 'Contract', expectedRev: st.body.signing.rev },
+  {
+    uploadId: await signingDocument(API, lead.token, PDF),
+    filename: 'contract.pdf',
+    label: 'Contract',
+    expectedRev: st.body.signing.rev,
+  },
   lead.token,
   at(T0),
 );
@@ -783,7 +788,12 @@ const stM = await j('POST', `/org/offers/${cM.body.offer.id}/signing`, { clientK
 const aM = await j(
   'POST',
   `/org/signings/${stM.body.signing.id}/document`,
-  { dataUrl: dataUrl(PDF), filename: 'contract.pdf', label: 'Contract', expectedRev: stM.body.signing.rev },
+  {
+    uploadId: await signingDocument(API, lead.token, PDF),
+    filename: 'contract.pdf',
+    label: 'Contract',
+    expectedRev: stM.body.signing.rev,
+  },
   lead.token,
   at(T0),
 );
