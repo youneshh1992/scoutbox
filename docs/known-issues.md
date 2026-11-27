@@ -335,6 +335,23 @@ in time. `LocalDisk` has the same gap, but it only serves development and the ba
 claimed. Pick the age so it can't remove a used upload's file: either keep used files under a prefix the rule skips,
 or have the rule only apply to keys the sweep has already released.
 
+### The R2 bucket needs a CORS rule before a web app can upload
+
+Found 2026-11-27 while moving the apps to uploads (`scoutbox-server/docs/final-port-steps.md`, step 11.2). Waits for
+the same R2 bucket.
+
+**What it is.** The web portals and the player app's web export PUT files straight to the bucket's signed URLs
+(`shared/upload.ts`), a different origin from the API. A browser asks the bucket first (a CORS preflight), and
+without a rule allowing it, every upload fails before it starts. The native player app sends no preflight. Opening a
+stored file (`file.url`, `/media/<id>`) is a navigation or a `<video>` source, which needs no rule.
+
+**Where it is in the port.** `LocalDisk` serves its URLs from the API's own origin, so development and the
+batteries never meet it.
+
+**Fix.** On the bucket, allow `PUT` from each origin that serves a web app (the deployment's own, and wherever the
+player's web export is hosted), with the request headers `content-type`, `x-amz-checksum-sha256` and
+`if-none-match`.
+
 ## Carried over from the TypeScript server
 
 The port kept these as the TypeScript server behaved, so the batteries could agree with it.

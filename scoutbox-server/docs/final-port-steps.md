@@ -216,12 +216,24 @@ moved to `scoutbox-server-ts/` until step 11 deletes it. The repository's git ru
 
 ## 11. Switch over
 
-1. Review `scoutbox-server/README.md`'s "Known differences from the TypeScript server" once, and confirm that none
-   matters to a user.
-2. **Move the apps to uploads** (from step 5.8), in the same release as the swap: the apps can't talk to both
-   servers. The player upload screen, the club and Grassroots signing panels, claim evidence and the evidence and
-   document viewers change to "ask for a URL, PUT, send the `uploadId`" and to reading `file.url`. The bucket
-   needs a CORS rule for the web portals.
+1. **Review the known differences** [**done**]. None of `README.md`'s "Known differences from the TypeScript server"
+   matters to a user: most change only the wording of a refusal for a malformed request, or an order no app relies
+   on. No app reacts to `too_short`/`blank` or `unknownTypes`. The player app drops its stored session on any code
+   containing `NOT_FOUND`, but only from `/player/me` and `/guardian/me`, which exist here. An unknown route's
+   `NOT_FOUND` would matter only if an app calls a route this server lacks, which the UI e2e run (step 8) catches.
+2. **Move the apps to uploads** [**done**] (from step 5.8), in the same release as the swap: the apps can't talk to
+   both servers. `shared/upload.ts` declares a file, PUTs it to storage and returns the `uploadId`, and `fileHref`
+   opens a `file.url`.
+   - The player app uploads clips, and its large-video card sends one PUT with progress (the chunked client is gone).
+     Its offer and signing documents open by their link. Metro watches `../shared`, with Expo's on-demand
+     filesystem turned off in `app.json` so that the export can read it.
+   - Pro and Grassroots upload signing and executed documents through `/org/uploads`, and open documents by their
+     link. No screen sent claim or licence evidence as a file, so only their types changed. The Agent portal and
+     the admin console handle no files.
+   - Step 5 missed one inline file: `POST /player/drills/:id/complete` took `videoDataUrl`, kept only as
+     `verified`. It takes `mediaId` now, one of the player's own clips with its file; the app uploads the drill's
+     video as a clip first.
+   - The bucket's CORS rule waits for the bucket: see `docs/known-issues.md`.
 3. Swap the server in, delete the TypeScript server and its scripts, and re-seed (there is no production data).
 4. Update `docs/architecture.md`, `scoutbox-server-ts/OPERATIONS.md` (into this server's own), `README.md` and
    `CLAUDE.md`, which all describe the Node server. This server's own `CLAUDE.md` was rewritten in step 4 and
