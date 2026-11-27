@@ -214,7 +214,7 @@ the portals, the Dockerfile's portal stages and the TypeScript server import. Th
 **Decided:** in the ScoutBox repository, at `scoutbox-server/`, its history merged in. The TypeScript server
 moved to `scoutbox-server-ts/` until step 11 deletes it. The repository's git rules apply: branches and PRs.
 
-## 11. Switch over
+## 11. Switch over [**done**]
 
 1. **Review the known differences** [**done**]. None of `README.md`'s "Known differences from the TypeScript server"
    matters to a user: most change only the wording of a refusal for a malformed request, or an order no app relies
