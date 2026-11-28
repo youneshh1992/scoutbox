@@ -18,9 +18,6 @@ The Founder is not a programmer: explain product consequences in plain terms, an
 
 - **There is no production data and no live deployment.** Every database is seed or test data. Rollback means
   re-seed. Don't build rollback tools, compatibility with old dev-build files, or operator procedures.
-- **Feature freeze until Tom lifts it.** The SQLite migration is complete; the freeze stays while the codebase is
-  cleaned up and its architecture tightened. In scope: clean-ups and architecture work, defects, security, tests,
-  and design changes the Founder explicitly asks for.
 
 ## Server rules
 
@@ -47,7 +44,8 @@ The Gleam server's own rules (units, effects, typed ids, input shapes, migration
 ## Tests
 
 - Every server change ships with a test. The end-to-end batteries in `scoutbox-server/e2e/<domain>/` are the
-  behavioural specification: change the battery first, then the code, and never delete a behavioural assertion.
+  behavioural specification: change the battery first, then the code, and don't delete behavioural assertions
+  without approval from the Founder.
 - Before you finish, run `gleam check`, `gleam format --check src test dev`, `gleam test`, `npm run e2e:check`
   and `npm run e2e` in `scoutbox-server/` if anything under it changed (after a fresh clone, `npm run esqlite`
   first, or `npm run setup` at the root); `npx tsc --noEmit` in `scoutbox-club`, `scoutbox-grassroots` and
@@ -71,5 +69,4 @@ data the current build can produce, where a real user could lose or corrupt data
 
 ## Git
 
-`main` is the trunk. Branch from it with a descriptive name, and merge back through a PR with green CI. Push,
-merge, tag or deploy only when explicitly asked, and never force-push.
+`main` is the trunk. Push, merge, tag or deploy only when explicitly asked, and never force-push.
